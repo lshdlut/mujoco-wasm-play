@@ -1,0 +1,10 @@
+# Node / tooling
+node_modules/
+dist/
+coverage/
+tmp/
+*.log
+
+# Local notes (ignored)
+local/
+FORGE_NOTES.local.md

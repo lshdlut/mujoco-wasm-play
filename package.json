@@ -1,0 +1,13 @@
+{
+  "name": "mujoco-wasm-play",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Playground / glue-layer workspace for MuJoCo WASM artifacts.",
+  "license": "MIT",
+  "scripts": {
+    "lint": "echo TBA",
+    "test": "echo TBA",
+    "build": "echo TBA"
+  }
+}
