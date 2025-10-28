@@ -8,3 +8,6 @@ tmp/
 # Local notes (ignored)
 local/
 FORGE_NOTES.local.md
+FORGE_REFERENCE.md
+AGENTS.md
+tmp_*
