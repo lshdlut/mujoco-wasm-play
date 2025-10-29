@@ -10,4 +10,29 @@ local/
 FORGE_NOTES.local.md
 FORGE_REFERENCE.md
 AGENTS.md
+DEV_PLAN_LOCAL.md
 tmp_*
+
+# Local tools and artifacts
+local_tools/
+release_assets/
+
+# Legacy/experimental (not part of canonical play)
+scripts/
+wrappers/
+FORGE_*.md
+
+# Package manager lock (keep local-only)
+package-lock.json
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# TypeScript and bundlers
+*.tsbuildinfo
+.cache/
+.vite/
+.parcel-cache/
