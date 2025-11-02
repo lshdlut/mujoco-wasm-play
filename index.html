@@ -344,6 +344,15 @@
         border-color: var(--color-border-strong);
         box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
       }
+      .control-field input.is-invalid {
+        border-color: rgba(248, 113, 113, 0.65);
+        background: rgba(248, 113, 113, 0.12);
+        color: #fecaca;
+      }
+      .control-field input.is-invalid:focus {
+        box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.35);
+        border-color: rgba(248, 113, 113, 0.85);
+      }
       .control-field input[type="range"] {
         flex: 1;
       }

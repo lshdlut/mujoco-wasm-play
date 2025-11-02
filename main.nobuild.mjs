@@ -70,6 +70,16 @@ function normaliseOptions(options) {
     .filter(Boolean);
 }
 
+function formatNumber(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '';
+  const abs = Math.abs(num);
+  if (abs !== 0 && (abs >= 1e6 || abs < 1e-4)) {
+    return Number(num.toExponential(4)).toString();
+  }
+  return Number(num.toPrecision(6)).toString();
+}
+
 function createControlRow(control, options = {}) {
   const row = document.createElement('div');
   row.className = 'control-row';
@@ -1026,6 +1036,10 @@ function renderEditInput(container, control, mode = 'text') {
   };
   registerControl(control, binding);
 
+  if (control.default !== undefined) {
+    binding.setValue(control.default);
+  }
+
   async function commit() {
     if (binding.skip) return;
     let raw;
@@ -1036,6 +1050,91 @@ function renderEditInput(container, control, mode = 'text') {
       raw = Number.isFinite(numeric) ? numeric : 0;
     }
     await applySpecAction(store, backend, control, raw);
+  }
+
+  input.addEventListener('change', commit);
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commit();
+      input.blur();
+    }
+  });
+}
+
+function renderVectorInput(container, control, expectedLength) {
+  const { row, label, field } = createLabeledRow(control);
+  const inputId = `${sanitiseName(control.item_id)}__vector`;
+  label.setAttribute('for', inputId);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = inputId;
+  input.setAttribute('data-testid', control.item_id);
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  field.append(input);
+  container.append(row);
+
+  const targetLength = Math.max(1, expectedLength | 0);
+  let lastValid = '';
+
+  const binding = {
+    skip: false,
+    getValue: () => input.value.trim(),
+    setValue: (value) => {
+      binding.skip = true;
+      let text = '';
+      if (Array.isArray(value)) {
+        text = value.map(formatNumber).join(' ');
+      } else if (typeof value === 'string') {
+        text = value.trim();
+      } else if (value != null && typeof value === 'object') {
+        try {
+          text = Array.from(value).map(formatNumber).join(' ');
+        } catch {
+          text = '';
+        }
+      }
+      input.value = text;
+      if (text) {
+        lastValid = text;
+        input.classList.remove('is-invalid');
+      }
+      binding.skip = false;
+    },
+  };
+  registerControl(control, binding);
+
+  async function commit() {
+    if (binding.skip) return;
+    const tokens = input.value.trim().split(/\s+/).filter(Boolean);
+    const numbers = tokens.map((token) => Number(token));
+    const isValid =
+      tokens.length === targetLength && numbers.every((num) => Number.isFinite(num));
+    if (isValid) {
+      const formatted = numbers.map(formatNumber);
+      const payload = formatted.join(' ');
+      binding.skip = true;
+      input.value = payload;
+      binding.skip = false;
+      lastValid = payload;
+      input.classList.remove('is-invalid');
+      await applySpecAction(store, backend, control, payload);
+      return;
+    }
+    input.classList.add('is-invalid');
+    if (lastValid) {
+      if (input._invalidTimer) {
+        clearTimeout(input._invalidTimer);
+      }
+      input._invalidTimer = setTimeout(() => {
+        binding.skip = true;
+        input.value = lastValid;
+        binding.skip = false;
+        input.classList.remove('is-invalid');
+      }, 900);
+    }
   }
 
   input.addEventListener('change', commit);
@@ -1091,6 +1190,10 @@ function renderControl(container, control) {
       return renderEditInput(container, control, 'float');
     case 'edit_text':
       return renderEditInput(container, control, 'text');
+    case 'edit_vec3':
+      return renderVectorInput(container, control, 3);
+    case 'edit_rgba':
+      return renderVectorInput(container, control, 4);
     case 'static':
       return renderStatic(container, control);
     case 'separator':
