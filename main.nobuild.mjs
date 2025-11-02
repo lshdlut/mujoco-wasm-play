@@ -787,7 +787,7 @@ function createLabel(text) {
 }
 
 function renderCheckbox(container, control) {
-  const row = createControlRow(control, { full: true });
+  const row = createControlRow(control);
   row.classList.add('bool-row');
   const button = document.createElement('button');
   button.type = 'button';
@@ -819,7 +819,7 @@ function renderCheckbox(container, control) {
 }
 
 function renderButton(container, control, variant = 'secondary') {
-  const row = createControlRow(control, { full: true });
+  const row = createControlRow(control);
   row.classList.add('action-row');
   const button = document.createElement('button');
   button.type = 'button';

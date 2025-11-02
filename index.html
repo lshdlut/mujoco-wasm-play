@@ -73,6 +73,14 @@
         .section-body > * {
           grid-column: span 1;
         }
+        .control-row {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .control-label {
+          text-align: left;
+          justify-self: start;
+          padding-right: 0;
+        }
       }
       .app-header {
         grid-column: 1 / -1;
@@ -107,10 +115,10 @@
         height: 100%;
         overflow-y: auto;
         overflow-x: hidden;
-        padding: 20px 22px;
+        padding: 16px 18px;
         display: flex;
         flex-direction: column;
-        gap: 16px;
+        gap: 12px;
         background: var(--color-panel);
         border-right: 1px solid var(--color-border);
         min-height: 0;
@@ -246,29 +254,61 @@
       .section-body > * {
         grid-column: span 2;
       }
-      .section-body > .pill-row,
+      .section-body > .full,
+      .section-body > .control-static,
+      .section-body > .control-separator,
+      .section-body > .pill-row {
+        grid-column: span 2;
+      }
       .section-body > .bool-row {
         grid-column: span 1;
       }
+      .section-body > .action-row {
+        grid-column: span 1;
+      }
+      .section-body > .action-row.full {
+        grid-column: span 2;
+      }
       .control-row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-        gap: 6px 8px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 12px;
         align-items: center;
+        width: 100%;
       }
       .control-row.full {
         grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
       }
       .control-label {
         font-size: 12px;
         font-weight: 500;
         color: var(--color-text-muted);
+        text-align: right;
+        justify-self: end;
+        padding-right: 4px;
+      }
+      .control-row.full .control-label {
+        text-align: left;
+        justify-self: start;
+        padding-right: 0;
       }
       .control-field {
+        flex: 1 1 100%;
         display: flex;
         align-items: center;
         flex-wrap: wrap;
         gap: 6px;
+        width: 100%;
+        min-width: 0;
+      }
+      .action-row {
+        display: flex;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .action-row button {
+        flex: 1 1 100%;
       }
       .compact-pills {
         display: flex;
@@ -364,6 +404,7 @@
       }
       .bool-row {
         display: flex;
+        width: 100%;
         gap: 8px;
       }
       .bool-button {
