@@ -983,6 +983,72 @@ function renderSlider(container, control) {
   valueLabel.textContent = Number(input.value).toFixed(3);
 }
 
+function renderEditInput(container, control, mode = 'text') {
+  const { row, label, field } = createLabeledRow(control);
+  const inputId = `${sanitiseName(control.item_id)}__edit`;
+  label.setAttribute('for', inputId);
+  const input = document.createElement('input');
+  input.id = inputId;
+  input.setAttribute('data-testid', control.item_id);
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  if (mode === 'int') {
+    input.type = 'number';
+    input.step = '1';
+    input.inputMode = 'numeric';
+  } else if (mode === 'float') {
+    input.type = 'number';
+    input.step = '0.001';
+    input.inputMode = 'decimal';
+  } else {
+    input.type = 'text';
+  }
+  field.append(input);
+  container.append(row);
+
+  const binding = {
+    skip: false,
+    getValue: () => {
+      if (mode === 'text') return input.value;
+      const value = Number(input.value);
+      return Number.isFinite(value) ? value : 0;
+    },
+    setValue: (value) => {
+      binding.skip = true;
+      if (mode === 'text') {
+        input.value = value == null ? '' : String(value);
+      } else {
+        const numeric = Number(value);
+        input.value = Number.isFinite(numeric) ? String(numeric) : '';
+      }
+      binding.skip = false;
+    },
+  };
+  registerControl(control, binding);
+
+  async function commit() {
+    if (binding.skip) return;
+    let raw;
+    if (mode === 'text') {
+      raw = input.value;
+    } else {
+      const numeric = Number(input.value);
+      raw = Number.isFinite(numeric) ? numeric : 0;
+    }
+    await applySpecAction(store, backend, control, raw);
+  }
+
+  input.addEventListener('change', commit);
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commit();
+      input.blur();
+    }
+  });
+}
+
 function renderStatic(container, control) {
   const row = createControlRow(control, { full: true });
   row.classList.add('control-static');
@@ -1019,6 +1085,12 @@ function renderControl(container, control) {
     case 'slider_num':
     case 'slidernum':
       return renderSlider(container, control);
+    case 'edit_int':
+      return renderEditInput(container, control, 'int');
+    case 'edit_float':
+      return renderEditInput(container, control, 'float');
+    case 'edit_text':
+      return renderEditInput(container, control, 'text');
     case 'static':
       return renderStatic(container, control);
     case 'separator':
