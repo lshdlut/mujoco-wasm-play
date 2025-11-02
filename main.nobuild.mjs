@@ -318,6 +318,7 @@ function initRenderer() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
   renderer.setClearColor(0x181d28, 1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -326,7 +327,7 @@ function initRenderer() {
   scene.background = new THREE.Color(0x151a26);
   scene.fog = new THREE.Fog(0x151a26, 12, 48);
 
-  scene.add(new THREE.AmbientLight(0xdfe5ff, 0.85));
+  scene.add(new THREE.AmbientLight(0xdfe5ff, 1.05));
   const hemi = new THREE.HemisphereLight(0xcfd9ff, 0x10131c, 0.55);
   scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 1.35);
@@ -336,6 +337,9 @@ function initRenderer() {
   dir.shadow.mapSize.set(1024, 1024);
   dir.shadow.camera.near = 0.5;
   dir.shadow.camera.far = 40;
+  const lightTarget = new THREE.Object3D();
+  scene.add(lightTarget);
+  dir.target = lightTarget;
   scene.add(dir);
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
@@ -382,6 +386,7 @@ function initRenderer() {
     root,
     grid,
     light: dir,
+    lightTarget,
     hemi,
     meshes: [],
     defaultVopt: null,
@@ -626,10 +631,13 @@ function renderScene(snapshot, state) {
     ctx.renderer.shadowMap.enabled = !!sceneFlags[0];
   }
   if (ctx.light) {
-    ctx.light.intensity = sceneFlags[0] ? 1.15 : 0.6;
+    const baseLight = sceneFlags[0] ? 1.45 : 1.05;
+    ctx.light.intensity = baseLight;
   }
   if (ctx.hemi) {
-    ctx.hemi.intensity = sceneFlags[0] ? 0.75 : 0.5;
+    const fillLight = sceneFlags[0] ? 0.9 : 0.65;
+    ctx.hemi.intensity = fillLight;
+    ctx.hemi.groundColor.set(sceneFlags[0] ? 0x111622 : 0x161b29);
   }
   let hideAllGeometry = false;
   let highlightGeometry = false;
@@ -718,6 +726,20 @@ function renderScene(snapshot, state) {
           console.log('[render] auto align', { radius, center: bounds.center });
         }
       }
+      if (ctx.light) {
+        const radius = Math.max(bounds.radius || 0, 0.6);
+        const focus = new THREE.Vector3(bounds.center[0], bounds.center[1], bounds.center[2]);
+        const lightOffset = new THREE.Vector3(radius * 2.4, -radius * 2.2, radius * 3.2);
+        ctx.light.position.copy(focus.clone().add(lightOffset));
+        if (ctx.lightTarget) {
+          ctx.lightTarget.position.copy(focus);
+          ctx.light.target.updateMatrixWorld();
+        }
+      }
+      if (ctx.hemi) {
+        const radius = Math.max(bounds.radius || 0, 0.6);
+        ctx.hemi.position.set(bounds.center[0], bounds.center[1], bounds.center[2] + radius * 2.8);
+      }
     }
   }
 
@@ -756,42 +778,33 @@ function createLabel(text) {
 
 function renderCheckbox(container, control) {
   const row = createControlRow(control, { full: true });
-  const inputId = `${sanitiseName(control.item_id)}__checkbox`;
-  const label = document.createElement('label');
-  label.className = 'check-button';
-  label.setAttribute('for', inputId);
-
-  const input = document.createElement('input');
-  input.type = 'checkbox';
-  input.id = inputId;
-  input.setAttribute('data-testid', control.item_id);
-
-  const decoration = document.createElement('span');
-  decoration.className = 'check-decoration';
-
-  const text = document.createElement('span');
-  text.className = 'check-text';
-  text.textContent = control.label ?? control.name ?? control.item_id;
-
-  label.append(input, decoration, text);
-  row.append(label);
+  row.classList.add('bool-row');
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'bool-button';
+  button.textContent = control.label ?? control.name ?? control.item_id;
+  button.setAttribute('data-testid', control.item_id);
+  button.setAttribute('aria-pressed', 'false');
+  row.append(button);
   container.append(row);
 
   const binding = {
     skip: false,
-    getValue: () => input.checked,
+    getValue: () => button.classList.contains('is-active'),
     setValue: (value) => {
       binding.skip = true;
-      input.checked = !!value;
-      label.classList.toggle('is-active', !!value);
+      const active = !!value;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
       binding.skip = false;
     },
   };
   registerControl(control, binding);
 
-  input.addEventListener('change', async () => {
+  button.addEventListener('click', async () => {
     if (binding.skip) return;
-    await applySpecAction(store, backend, control, input.checked);
+    const next = !binding.getValue();
+    await applySpecAction(store, backend, control, next);
   });
 }
 
@@ -804,14 +817,25 @@ function renderButton(container, control, variant = 'secondary') {
   button.textContent = labelText;
   button.setAttribute('data-testid', control.item_id);
 
+  let resolvedVariant = variant;
   if (control.item_id === 'simulation.run') {
-    button.classList.add('btn-primary');
+    resolvedVariant = 'primary';
+  } else if (control.item_id.startsWith('simulation.')) {
+    resolvedVariant = 'pill';
   } else if (control.item_id.startsWith('file.')) {
+    resolvedVariant = 'pill';
+  }
+  if (variant === 'pill') {
+    resolvedVariant = 'pill';
+  }
+
+  if (resolvedVariant === 'pill') {
     button.classList.add('btn-pill');
-  } else if (variant === 'secondary') {
-    button.classList.add('btn-secondary');
-  } else {
+    row.classList.add('pill-row');
+  } else if (resolvedVariant === 'primary') {
     button.classList.add('btn-primary');
+  } else {
+    button.classList.add('btn-secondary');
   }
 
   row.append(button);
