@@ -63,6 +63,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     sceneFlags: Array.from({ length: 8 }, () => false),
     labelMode: 0,
     frameMode: 0,
+    assets: null,
   },
   hud: {
     time: 0,
@@ -271,6 +272,10 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (typeof snapshot.frameMode === 'number' && Number.isFinite(snapshot.frameMode)) {
     const rendering = ensureRenderingState(draft);
     rendering.frameMode = Math.max(0, snapshot.frameMode | 0);
+  }
+  if (snapshot.renderAssets) {
+    const rendering = ensureRenderingState(draft);
+    rendering.assets = snapshot.renderAssets;
   }
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const mode = snapshot.cameraMode | 0;
@@ -730,6 +735,7 @@ function resolveSnapshot(state) {
             : [],
         }
       : null,
+    renderAssets: state.renderAssets ?? null,
   };
 }
 
@@ -769,6 +775,7 @@ export async function createBackend(options = {}) {
     gmatid: null,
     matrgba: null,
     contacts: null,
+    renderAssets: null,
   };
   let messageHandler = null;
 
@@ -950,6 +957,12 @@ export async function createBackend(options = {}) {
         }
         applyOptionSnapshot(data);
         notifyListeners();
+        break;
+      case 'render_assets':
+        if (data.assets) {
+          lastSnapshot.renderAssets = data.assets;
+          notifyListeners();
+        }
         break;
       case 'gesture':
         if (data.gesture) {

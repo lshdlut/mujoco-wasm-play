@@ -1,0 +1,771 @@
+// Direct backend that mirrors the Worker protocol but runs MuJoCo on the main thread.
+// Exposes a Worker-like surface (addEventListener/postMessage/terminate) so that the
+// viewer UI can remain agnostic to whether physics runs in a worker or inline.
+
+import { MjSimLite, createLocalModule } from './bridge.mjs';
+import { normalizeVer, getForgeDistBase, getVersionInfo, withCacheTag } from './paths.mjs';
+
+const TICK_INTERVAL_MS = 8;   // matches physics.worker.mjs stepping cadence
+const SNAP_INTERVAL_MS = 16;  // ~60 Hz snapshot stream
+
+function getView(mod, ptr, dtype, len) {
+  if (!mod || !ptr || !len) return null;
+  if (dtype === 'f64') return mod.HEAPF64.subarray((ptr >>> 3), (ptr >>> 3) + (len | 0));
+  if (dtype === 'f32') return new Float32Array(mod.HEAPU8.buffer, ptr | 0, len | 0);
+  if (dtype === 'i32') return new Int32Array(mod.HEAPU8.buffer, ptr | 0, len | 0);
+  return null;
+}
+
+function cloneArray(view, ctor) {
+  if (!view) return null;
+  try {
+    if (ctor === Float64Array) return new Float64Array(view);
+    if (ctor === Float32Array) return new Float32Array(view);
+    if (ctor === Int32Array) return new Int32Array(view);
+  } catch {}
+  return null;
+}
+
+function toEventPayload(data) {
+  return { data };
+}
+
+function safeCStr(mod, ptr) {
+  if (!mod || !ptr) return '';
+  const heap = mod.HEAPU8;
+  let out = '';
+  for (let i = ptr | 0; i < heap.length; i++) {
+    const ch = heap[i];
+    if (!ch) break;
+    out += String.fromCharCode(ch);
+  }
+  return out;
+}
+
+function readErrno(mod) {
+  let eno = 0;
+  let emsg = '';
+  try { if (typeof mod._mjwf_errno_last === 'function') eno = mod._mjwf_errno_last() | 0; } catch {}
+  try {
+    if (typeof mod._mjwf_errmsg_last === 'function') {
+      emsg = safeCStr(mod, mod._mjwf_errmsg_last() | 0);
+    } else if (typeof mod._mjwf_errmsg_last_global === 'function') {
+      emsg = safeCStr(mod, mod._mjwf_errmsg_last_global() | 0);
+    }
+  } catch {}
+  return { eno, emsg };
+}
+
+export function createDirectBackend(options = {}) {
+  return new DirectBackend(options);
+}
+
+class DirectBackend {
+  constructor(options = {}) {
+    const search = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+    this.ver = normalizeVer(options.ver ?? search.get('ver'));
+    this.shimParam = options.shimParam ?? search.get('shim');
+    this.debug = !!options.debug;
+    this.listeners = {
+      message: new Set(),
+      error: new Set(),
+    };
+    this.pending = Promise.resolve();
+    this.mod = null;
+    this.sim = null;
+    this.handle = 0;
+    this.dt = 0.002;
+    this.rate = 1.0;
+    this.running = true;
+    this.pendingCtrl = new Map();
+    this.tickTimer = null;
+    this.snapshotTimer = null;
+    this.lastSimNow = performance.now();
+    this.gesture = { mode: 'idle', phase: 'idle', pointer: null };
+    this.drag = { dx: 0, dy: 0 };
+    this.voptFlags = Array.from({ length: 32 }, () => 0);
+    this.sceneFlags = Array.from({ length: 8 }, () => 0);
+    this.labelMode = 0;
+    this.frameMode = 0;
+    this.cameraMode = 0;
+    this.renderAssets = null;
+    this.lastBounds = { center: [0, 0, 0], radius: 0 };
+    this.alignSeq = 0;
+    this.copySeq = 0;
+  }
+
+  #computeBoundsFromPositions(view, n) {
+    if (!view || !(n > 0)) {
+      return { center: [0, 0, 0], radius: 0 };
+    }
+    let minx = Infinity;
+    let miny = Infinity;
+    let minz = Infinity;
+    let maxx = -Infinity;
+    let maxy = -Infinity;
+    let maxz = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const ix = 3 * i;
+      const x = Number(view[ix + 0]) || 0;
+      const y = Number(view[ix + 1]) || 0;
+      const z = Number(view[ix + 2]) || 0;
+      if (x < minx) minx = x;
+      if (y < miny) miny = y;
+      if (z < minz) minz = z;
+      if (x > maxx) maxx = x;
+      if (y > maxy) maxy = y;
+      if (z > maxz) maxz = z;
+    }
+    if (!Number.isFinite(minx) || !Number.isFinite(maxx)) {
+      return { center: [0, 0, 0], radius: 0 };
+    }
+    const cx = (minx + maxx) / 2;
+    const cy = (miny + maxy) / 2;
+    const cz = (minz + maxz) / 2;
+    const dx = maxx - minx;
+    const dy = maxy - miny;
+    const dz = maxz - minz;
+    let radius = Math.max(dx, dy, dz) / 2;
+    if (!Number.isFinite(radius) || radius <= 0) {
+      radius = Math.max(0.1, Math.max(Math.abs(cx), Math.abs(cy), Math.abs(cz)));
+    }
+    return { center: [cx, cy, cz], radius };
+  }
+
+  #captureBounds() {
+    try {
+      if (!this.sim) return { center: [0, 0, 0], radius: 0 };
+      const ngeom = this.sim.ngeom?.() | 0;
+      if (!(ngeom > 0)) return { center: [0, 0, 0], radius: 0 };
+      const posView = this.sim.geomXposView?.();
+      if (!posView) return { center: [0, 0, 0], radius: 0 };
+      return this.#computeBoundsFromPositions(posView, ngeom);
+    } catch {
+      return { center: [0, 0, 0], radius: 0 };
+    }
+  }
+
+  #captureCopyState(precision) {
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const nq = this.sim?.nq?.() | 0;
+    const nv = this.sim?.nv?.() | 0;
+    const qposView = this.sim?.qposView?.();
+    const qvelView = this.sim?.qvelView?.();
+    const previewLenQ = precision === 'full' ? nq : Math.min(nq, 8);
+    const previewLenV = precision === 'full' ? nv : Math.min(nv, 8);
+    const payload = {
+      kind: 'copyState',
+      seq: ++this.copySeq,
+      precision,
+      nq,
+      nv,
+      timestamp: now,
+      tSim: this.sim?.time?.() || 0,
+      qposPreview: [],
+      qvelPreview: [],
+      complete: false,
+    };
+    if (qposView) {
+      for (let i = 0; i < previewLenQ; i++) {
+        payload.qposPreview.push(Number(qposView[i]) || 0);
+      }
+      if (precision === 'full' && nq <= 128) {
+        payload.qpos = Array.from(qposView);
+        payload.complete = true;
+      }
+    }
+    if (qvelView) {
+      for (let i = 0; i < previewLenV; i++) {
+        payload.qvelPreview.push(Number(qvelView[i]) || 0);
+      }
+      if (precision === 'full' && nv <= 128) {
+        payload.qvel = Array.from(qvelView);
+        payload.complete = payload.complete && nv <= 128;
+      }
+    }
+    return payload;
+  }
+
+  addEventListener(type, handler) {
+    if (this.listeners[type]) this.listeners[type].add(handler);
+  }
+
+  removeEventListener(type, handler) {
+    if (this.listeners[type]) this.listeners[type].delete(handler);
+  }
+
+  postMessage(message) {
+    this.pending = this.pending.then(() => this.#handleCommand(message)).catch((err) => {
+      this.#emitError(err);
+    });
+  }
+
+  terminate() {
+    this.running = false;
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = null;
+    }
+    if (this.snapshotTimer) {
+      clearInterval(this.snapshotTimer);
+      this.snapshotTimer = null;
+    }
+    try {
+      if (this.sim) {
+        this.sim.term?.();
+      } else if (this.mod && this.handle) {
+        try { this.mod.ccall?.('mjwf_free', null, ['number'], [this.handle]); } catch {}
+      }
+    } catch {}
+    this.handle = 0;
+    this.sim = null;
+    this.mod = null;
+    this.renderAssets = null;
+  }
+
+  async #handleCommand(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    switch (msg.cmd) {
+      case 'load': {
+        await this.#handleLoad(msg);
+        break;
+      }
+      case 'reset': {
+        if (this.sim) {
+          const ok = this.sim.reset?.();
+          if (ok) this.#snapshot();
+        }
+        break;
+      }
+      case 'step': {
+        if (this.sim) {
+          try {
+            const n = Math.max(1, Math.min(10000, (msg.n | 0) || 1));
+            this.sim.step?.(n);
+            this.#snapshot();
+          } catch (err) {
+            this.#emitError(err);
+          }
+        }
+        break;
+      }
+      case 'gesture': {
+        const sourceGesture = msg.gesture || {};
+        const mode = typeof msg.mode === 'string' ? msg.mode : sourceGesture.mode;
+        const phase = typeof msg.phase === 'string' ? msg.phase : sourceGesture.phase;
+        const pointerSource = msg.pointer ?? sourceGesture.pointer ?? null;
+        const pointer = pointerSource
+          ? {
+              x: Number(pointerSource.x) || 0,
+              y: Number(pointerSource.y) || 0,
+              dx: Number(pointerSource.dx) || 0,
+              dy: Number(pointerSource.dy) || 0,
+              buttons: Number(pointerSource.buttons ?? 0),
+              pressure: Number(pointerSource.pressure ?? 0),
+            }
+          : null;
+        const dragSource = msg.drag ?? (pointer ? { dx: pointer.dx, dy: pointer.dy } : null);
+        this.gesture = {
+          mode: phase === 'end' ? 'idle' : (mode ?? this.gesture.mode ?? 'idle'),
+          phase: phase ?? this.gesture.phase ?? 'update',
+          pointer,
+        };
+        if (dragSource) {
+          this.drag = {
+            dx: Number(dragSource.dx) || 0,
+            dy: Number(dragSource.dy) || 0,
+          };
+        } else if (this.gesture.phase === 'end') {
+          this.drag = { dx: 0, dy: 0 };
+        }
+        this.#emitMessage({ kind: 'gesture', gesture: this.gesture, drag: this.drag });
+        break;
+      }
+      case 'setVoptFlag': {
+        const idx = Number(msg.index) | 0;
+        const enabled = !!msg.enabled;
+        if (!Array.isArray(this.voptFlags)) this.voptFlags = Array.from({ length: 32 }, () => 0);
+        if (idx >= 0 && idx < this.voptFlags.length) {
+          this.voptFlags[idx] = enabled ? 1 : 0;
+          this.#emitOptions();
+        }
+        break;
+      }
+      case 'setSceneFlag': {
+        const idx = Number(msg.index) | 0;
+        const enabled = !!msg.enabled;
+        if (!Array.isArray(this.sceneFlags)) this.sceneFlags = Array.from({ length: 8 }, () => 0);
+        if (idx >= 0 && idx < this.sceneFlags.length) {
+          this.sceneFlags[idx] = enabled ? 1 : 0;
+          this.#emitOptions();
+        }
+        break;
+      }
+      case 'setLabelMode': {
+        const mode = Number(msg.mode) || 0;
+        this.labelMode = mode | 0;
+        this.#emitOptions();
+        break;
+      }
+      case 'setFrameMode': {
+        const mode = Number(msg.mode) || 0;
+        this.frameMode = mode | 0;
+        this.#emitOptions();
+        break;
+      }
+      case 'setCameraMode': {
+        const mode = Number(msg.mode) || 0;
+        this.cameraMode = mode | 0;
+        this.#emitOptions();
+        break;
+      }
+      case 'align': {
+        const info = this.#captureBounds();
+        this.lastBounds = info;
+        const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        this.#emitMessage({
+          kind: 'align',
+          seq: ++this.alignSeq,
+          center: info.center,
+          radius: info.radius,
+          timestamp: now,
+          source: msg.source || 'backend',
+        });
+        break;
+      }
+      case 'copyState': {
+        const precision = msg.precision === 'full' ? 'full' : 'standard';
+        const payload = this.#captureCopyState(precision);
+        payload.source = msg.source || 'backend';
+        this.#emitMessage(payload);
+        break;
+      }
+      case 'setCtrl': {
+        const idx = msg.index | 0;
+        const value = +msg.value || 0;
+        this.pendingCtrl.set(idx, value);
+        break;
+      }
+      case 'setRate': {
+        const r = +msg.rate;
+        if (Number.isFinite(r) && r > 0) this.rate = Math.max(0.0625, Math.min(16, r));
+        break;
+      }
+      case 'setPaused': {
+        this.running = !msg.paused;
+        break;
+      }
+      case 'applyForce': {
+        if (this.sim && typeof this.sim.applyXfrcByGeom === 'function') {
+          try {
+            this.sim.applyXfrcByGeom(
+              msg.geomIndex | 0,
+              msg.force || [0, 0, 0],
+              msg.torque || [0, 0, 0],
+              msg.point || [0, 0, 0],
+            );
+          } catch (err) {
+            this.#emitError(err);
+          }
+        }
+        break;
+      }
+      case 'snapshot': {
+        this.#snapshot();
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  async #handleLoad(msg) {
+    await this.#ensureModule();
+    if (!this.sim) {
+      throw new Error('Direct backend module not ready');
+    }
+    // Dispose previous state
+    try {
+      if (this.sim && this.sim.h) {
+        this.sim.term?.();
+        this.sim.h = 0;
+      }
+    } catch {}
+
+    let xmlText = String(msg.xmlText || '');
+    if (!xmlText) xmlText = await this.#fallbackXml();
+
+    let loaded = this.#initSimFromXml(xmlText, 'primary');
+    if (!loaded) {
+      const demo = await this.#fallbackXml(true);
+      loaded = this.#initSimFromXml(demo, 'demo');
+    }
+    if (!loaded) {
+      const empty = await this.#fallbackXml(false);
+      loaded = this.#initSimFromXml(empty, 'empty');
+    }
+    if (!loaded) {
+      const info = readErrno(this.mod);
+      this.#emitLog('direct: make_from_xml failed', { errno: info.eno, errmsg: info.emsg });
+      throw new Error('make_from_xml failed');
+    }
+
+    this.handle = this.sim.h | 0;
+    if (!(this.handle > 0)) {
+      const info = readErrno(this.mod);
+      throw new Error(`Direct backend handle invalid (errno=${info.eno} errmsg=${info.emsg})`);
+    }
+
+    this.dt = this.sim.timestep?.() || 0.002;
+    this.rate = typeof msg.rate === 'number' ? msg.rate : 1.0;
+    this.running = true;
+    this.lastSimNow = performance.now();
+
+    const abi = this.#readAbi();
+    this.#emitLog('direct: forge module ready', {
+      hasMake: typeof this.mod?._mjwf_make_from_xml === 'function',
+      hasCcall: typeof this.mod?.ccall === 'function',
+    });
+    this.voptFlags = Array.from({ length: 32 }, () => 0);
+    this.sceneFlags = Array.from({ length: 8 }, () => 0);
+    this.labelMode = 0;
+    this.frameMode = 0;
+    this.cameraMode = 0;
+    this.#emitMessage({ kind: 'ready', abi, dt: this.dt, ngeom: this.sim.ngeom?.() | 0 });
+    this.#emitOptions();
+    this.#emitRenderAssets();
+
+    this.#sendMeta();
+    this.#snapshot();
+
+    this.#startLoops();
+  }
+
+  async #ensureModule() {
+    if (this.mod && this.sim) return;
+    try {
+      this.mod = await this.#loadForgeModule();
+      this.sim = new MjSimLite(this.mod);
+      await this.sim.maybeInstallShimFromQuery?.();
+    } catch (err) {
+      this.#emitError(err);
+      this.mod = createLocalModule();
+      this.sim = new MjSimLite(this.mod);
+    }
+  }
+
+  async #loadForgeModule() {
+    if (this.mod) return this.mod;
+    const distBase = getForgeDistBase(this.ver);
+    let vTag = '';
+    try {
+      const info = await getVersionInfo(distBase);
+      if (info) {
+        const raw = String(info.sha256 || info.git_sha || info.mujoco_git_sha || '');
+        vTag = raw.slice(0, 8);
+      }
+    } catch {}
+    const distUrl = new URL(distBase, location.href);
+    const jsHref = withCacheTag(new URL('mujoco.js', distUrl).href, vTag);
+    const wasmHref = withCacheTag(new URL('mujoco.wasm', distUrl).href, vTag);
+    let loader;
+    try {
+      loader = await import(/* @vite-ignore */ jsHref);
+    } catch (err) {
+      this.#emitLog('direct: forge loader import failed, using local shim', { error: String(err) });
+      const modLocal = createLocalModule();
+      return modLocal;
+    }
+    const loadMuJoCo = loader?.default;
+    if (typeof loadMuJoCo !== 'function') {
+      throw new Error('Forge loader missing default export');
+    }
+    const module = await loadMuJoCo({
+      locateFile: (path) => (path.endsWith('.wasm') ? wasmHref : path),
+    });
+    return module;
+  }
+
+  async #fallbackXml(isDemo) {
+    if (isDemo) {
+      try {
+        const demoUrl = new URL('./demo_box.xml', import.meta.url);
+        const res = await fetch(demoUrl);
+        if (res.ok) return await res.text();
+      } catch {}
+    }
+    const empty = `<?xml version='1.0'?>\n<mujoco model='empty'><option timestep='0.002'/><worldbody/></mujoco>`;
+    return empty;
+  }
+
+  #initSimFromXml(xmlText, stage) {
+    if (!xmlText) return false;
+    try {
+      this.sim.initFromXml(xmlText);
+      return true;
+    } catch (errPrimary) {
+      this.#emitLog(`direct: initFromXml failed (${stage})`, { error: String(errPrimary || '') });
+      try {
+        if (typeof this.sim.initFromXmlStrict === 'function') {
+          this.sim.initFromXmlStrict(xmlText);
+          return true;
+        }
+      } catch (errStrict) {
+        this.#emitLog(`direct: initFromXmlStrict failed (${stage})`, { error: String(errStrict || '') });
+      }
+    }
+    return false;
+  }
+
+  #startLoops() {
+    if (this.tickTimer) clearInterval(this.tickTimer);
+    if (this.snapshotTimer) clearInterval(this.snapshotTimer);
+    this.tickTimer = setInterval(() => this.#tick(), TICK_INTERVAL_MS);
+    this.snapshotTimer = setInterval(() => this.#snapshot(), SNAP_INTERVAL_MS);
+  }
+
+  #tick() {
+    if (!this.mod || !this.sim || !(this.handle > 0) || !this.running) return;
+    try {
+      if (this.pendingCtrl.size) {
+        const ctrlView = this.sim.ctrlView?.();
+        const range = this.sim.actuatorCtrlRangeView?.();
+        if (ctrlView) {
+          for (const [idx, value] of this.pendingCtrl.entries()) {
+            let v = +value || 0;
+            if (range && (2 * idx + 1) < range.length) {
+              const lo = +range[2 * idx];
+              const hi = +range[2 * idx + 1];
+              const valid = Number.isFinite(lo) && Number.isFinite(hi) && (hi - lo) > 1e-12;
+              if (valid) v = Math.max(Math.min(hi, v), lo);
+            }
+            ctrlView[idx | 0] = v;
+          }
+        }
+        this.pendingCtrl.clear();
+      }
+    } catch {}
+
+    const now = performance.now();
+    let acc = Math.min(0.1, (now - this.lastSimNow) / 1000) * this.rate;
+    this.lastSimNow = now;
+    let guard = 0;
+    const dt = this.dt || 0.002;
+    while (acc >= dt && guard < 1000) {
+      try {
+        this.sim.step?.(1);
+      } catch (err) {
+        this.#emitError(err);
+        break;
+      }
+      acc -= dt;
+      guard++;
+    }
+  }
+
+  #snapshot() {
+    if (!this.mod || !this.sim || !(this.handle > 0)) return;
+    try {
+      const ngeom = this.sim.ngeom?.() | 0;
+      if (!(ngeom > 0)) {
+        this.lastBounds = { center: [0, 0, 0], radius: 0 };
+      }
+      let xpos = new Float64Array(0);
+      let xmat = new Float64Array(0);
+      let gsize = null;
+      let gtype = null;
+      let gmatid = null;
+      let matrgba = null;
+      if (ngeom > 0) {
+        const posView = this.sim.geomXposView?.();
+        const matView = this.sim.geomXmatView?.();
+        if (posView) xpos = cloneArray(posView, Float64Array) || new Float64Array(posView);
+        if (matView) xmat = cloneArray(matView, Float64Array) || new Float64Array(matView);
+        if (posView) {
+          this.lastBounds = this.#computeBoundsFromPositions(posView, ngeom);
+        } else {
+          this.lastBounds = { center: [0, 0, 0], radius: 0 };
+        }
+        const sizeView = this.sim.geomSizeView?.();
+        if (sizeView) gsize = cloneArray(sizeView, Float64Array);
+        const typeView = this.sim.geomTypeView?.();
+        if (typeView) gtype = cloneArray(typeView, Int32Array);
+        const matidView = this.sim.geomMatIdView?.();
+        if (matidView) gmatid = cloneArray(matidView, Int32Array);
+        const rgbaView = this.sim.matRgbaView?.();
+        if (rgbaView) matrgba = cloneArray(rgbaView, Float32Array);
+      }
+      let contacts = null;
+      try {
+        const ncon = this.sim.ncon?.() | 0;
+        if (ncon > 0) {
+          const pos = this.sim.contactPosView?.();
+          if (pos) {
+            contacts = { n: ncon, pos: cloneArray(pos, Float64Array) || new Float64Array(pos) };
+            const frame = this.sim.contactFrameView?.();
+            if (frame) contacts.frame = cloneArray(frame, Float64Array) || new Float64Array(frame);
+          }
+        }
+      } catch {}
+      const gesture = this.gesture
+        ? {
+            mode: this.gesture.mode,
+            phase: this.gesture.phase,
+            pointer: this.gesture.pointer
+              ? {
+                  x: Number(this.gesture.pointer.x) || 0,
+                  y: Number(this.gesture.pointer.y) || 0,
+                  dx: Number(this.gesture.pointer.dx) || 0,
+                  dy: Number(this.gesture.pointer.dy) || 0,
+                  buttons: Number(this.gesture.pointer.buttons ?? 0),
+                  pressure: Number(this.gesture.pointer.pressure ?? 0),
+                }
+              : null,
+          }
+        : { mode: 'idle', phase: 'idle', pointer: null };
+      const drag = this.drag
+        ? { dx: Number(this.drag.dx) || 0, dy: Number(this.drag.dy) || 0 }
+        : { dx: 0, dy: 0 };
+      const msg = {
+        kind: 'snapshot',
+        tSim: this.sim.time?.() || 0,
+        ngeom,
+        nq: this.sim.nq?.() | 0,
+        nv: this.sim.nv?.() | 0,
+        xpos,
+        xmat,
+        gesture,
+        drag,
+        voptFlags: Array.isArray(this.voptFlags) ? [...this.voptFlags] : [],
+        sceneFlags: Array.isArray(this.sceneFlags) ? [...this.sceneFlags] : [],
+        labelMode: this.labelMode | 0,
+        frameMode: this.frameMode | 0,
+        cameraMode: this.cameraMode | 0,
+      };
+      if (contacts) msg.contacts = contacts;
+      if (gsize) msg.gsize = gsize;
+      if (gtype) msg.gtype = gtype;
+      if (gmatid) msg.gmatid = gmatid;
+      if (matrgba) msg.matrgba = matrgba;
+      this.#emitMessage(msg);
+    } catch (err) {
+      this.#emitError(err);
+    }
+  }
+
+  #sendMeta() {
+    if (!this.mod || !this.sim || !(this.handle > 0)) return;
+    const ngeom = this.sim.ngeom?.() | 0;
+    const msgActs = { kind: 'meta', actuators: [] };
+    try {
+      const nu = this.sim.nu?.() | 0;
+      if (nu > 0) {
+        const rng = this.sim.actuatorCtrlRangeView?.();
+        const acts = [];
+        for (let i = 0; i < nu; i++) {
+          const name = this.sim.actuatorNameOf?.(i) || `act ${i}`;
+          const rawLo = rng ? (+rng[2 * i]) : NaN;
+          const rawHi = rng ? (+rng[2 * i + 1]) : NaN;
+          const valid = Number.isFinite(rawLo) && Number.isFinite(rawHi) && (rawHi - rawLo) > 1e-12;
+          acts.push({
+            index: i,
+            name,
+            min: valid ? rawLo : -1,
+            max: valid ? rawHi : 1,
+            step: 0.001,
+            value: 0,
+          });
+        }
+        msgActs.actuators = acts;
+      }
+    } catch {}
+    this.#emitMessage(msgActs);
+
+    try {
+      const mod = this.mod;
+      const h = this.handle | 0;
+      const njnt = typeof mod._mjwf_njnt === 'function' ? (mod._mjwf_njnt(h) | 0) : 0;
+      const gbidPtr = typeof mod._mjwf_geom_bodyid_ptr === 'function' ? (mod._mjwf_geom_bodyid_ptr(h) | 0) : 0;
+      const bjadrPtr = typeof mod._mjwf_body_jntadr_ptr === 'function' ? (mod._mjwf_body_jntadr_ptr(h) | 0) : 0;
+      const bjnumPtr = typeof mod._mjwf_body_jntnum_ptr === 'function' ? (mod._mjwf_body_jntnum_ptr(h) | 0) : 0;
+      const jtypePtr = typeof mod._mjwf_jnt_type_ptr === 'function' ? (mod._mjwf_jnt_type_ptr(h) | 0) : 0;
+      const out = { kind: 'meta_joints', ngeom, njnt };
+      if (ngeom > 0 && gbidPtr) out.geom_bodyid = cloneArray(getView(mod, gbidPtr, 'i32', ngeom), Int32Array);
+      const nbody = typeof mod._mjwf_nbody === 'function' ? (mod._mjwf_nbody(h) | 0) : 0;
+      if (nbody > 0 && bjadrPtr) out.body_jntadr = cloneArray(getView(mod, bjadrPtr, 'i32', nbody), Int32Array);
+      if (nbody > 0 && bjnumPtr) out.body_jntnum = cloneArray(getView(mod, bjnumPtr, 'i32', nbody), Int32Array);
+      if (njnt > 0 && jtypePtr) out.jtype = cloneArray(getView(mod, jtypePtr, 'i32', njnt), Int32Array);
+      this.#emitMessage(out);
+    } catch {}
+  }
+
+  #readAbi() {
+    try {
+      if (this.mod && typeof this.mod._mjwf_abi_version === 'function') {
+        return this.mod._mjwf_abi_version() | 0;
+      }
+    } catch {}
+    return 0;
+  }
+
+  #emitLog(message, extra) {
+    const payload = { kind: 'log', message };
+    if (extra !== undefined) payload.extra = extra;
+    this.#emitMessage(payload);
+  }
+
+  #emitOptions() {
+    this.#emitMessage({
+      kind: 'options',
+      voptFlags: Array.isArray(this.voptFlags) ? [...this.voptFlags] : [],
+      sceneFlags: Array.isArray(this.sceneFlags) ? [...this.sceneFlags] : [],
+      labelMode: this.labelMode | 0,
+      frameMode: this.frameMode | 0,
+      cameraMode: this.cameraMode | 0,
+    });
+  }
+
+  #emitMessage(data) {
+    const evt = toEventPayload(data);
+    for (const handler of this.listeners.message) {
+      try { handler(evt); } catch (err) { console.error(err); }
+    }
+  }
+
+  #emitError(err) {
+    const info = readErrno(this.mod || {});
+    const payload = {
+      kind: 'error',
+      message: err && err.message ? err.message : String(err),
+      errno: info.eno,
+      errmsg: info.emsg,
+    };
+    const evt = toEventPayload(payload);
+    for (const handler of this.listeners.message) {
+      try { handler(evt); } catch (e) { if (this.debug) console.error(e); }
+    }
+    const errEvt = { error: err };
+    for (const handler of this.listeners.error) {
+      try { handler(errEvt); } catch (e) { if (this.debug) console.error(e); }
+    }
+    if (this.debug) {
+      console.error(err);
+    }
+  }
+  #emitRenderAssets() {
+    if (!this.sim || !(this.sim.h > 0) || typeof this.sim.collectRenderAssets !== 'function') {
+      return;
+    }
+    try {
+      const assets = this.sim.collectRenderAssets();
+      if (assets) {
+        this.renderAssets = assets;
+        this.#emitMessage({ kind: 'render_assets', assets });
+      }
+    } catch (err) {
+      if (this.debug) {
+        this.#emitLog('direct: render asset capture failed', { error: String(err) });
+      }
+    }
+  }
+}
