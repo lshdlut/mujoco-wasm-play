@@ -1,6 +1,7 @@
 # Node / tooling
 node_modules/
 dist/
+build/
 coverage/
 tmp/
 *.log
@@ -11,3 +12,4 @@ FORGE_NOTES.local.md
 FORGE_REFERENCE.md
 AGENTS.md
 tmp_*
+backups/
