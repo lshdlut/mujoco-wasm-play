@@ -2,106 +2,60 @@ import type { MujocoModule } from '../wasm/loader.js';
 import { heapViewF64 } from '../wasm/loader.js';
 
 export class MjSim {
-  private initFnLegacy?: (path: string) => number;
-  private stepFnLegacy?: (steps: number) => void;
-
-  private haveHandleApi = false;
-  private handlePrefix: 'mjwf' | 'mjw' = 'mjwf';
   private h: number = 0;
 
-  constructor(private mod: MujocoModule) {
-    // Legacy demo API (minimal.c)
-    this.initFnLegacy = mod.cwrap?.('mjw_init', 'number', ['string']);
-    this.stepFnLegacy = mod.cwrap?.('mjw_step_demo', null, ['number']);
-
-    // Detect handle-based API and prefix (mjwf_ preferred, fallback to mjw_)
-    const mkWf = (mod as any)._mjwf_make_from_xml as ((p: string) => number) | undefined;
-    const mkW  = (mod as any)._mjw_make_from_xml as ((p: string) => number) | undefined;
-    if (typeof mkWf === 'function') {
-      this.handlePrefix = 'mjwf';
-      this.haveHandleApi = true;
-    } else if (typeof mkW === 'function' || !!mod.cwrap?.('mjw_make_from_xml','number',['string'])) {
-      this.handlePrefix = 'mjw';
-      this.haveHandleApi = true;
-    }
-  }
+  constructor(private mod: MujocoModule) {}
 
   initFromXml(xmlText: string, path = '/model.xml'): void {
     if (!this.mod.FS) throw new Error('Runtime FS not available');
     const bytes = new TextEncoder().encode(xmlText);
     this.mod.FS.writeFile(path, bytes);
 
-    if (this.haveHandleApi) {
-      const mkName = `${this.handlePrefix}_make_from_xml`;
-      const mk = this.mod.ccall!.bind(this.mod, mkName, 'number', ['string']) as unknown as (p: string) => number;
-      const h = mk(path);
-      if (h <= 0) throw new Error(`${mkName} failed`);
-      this.h = h;
-      return;
+    const mk = (this.mod as any).ccall?.bind(this.mod) ?? null;
+    let h = 0;
+    if (typeof (this.mod as any)._mjwf_make_from_xml === 'function') {
+      try { h = (this.mod as any)._mjwf_make_from_xml(path) | 0; } catch { h = 0; }
     }
-
-    if (!this.initFnLegacy) throw new Error('mjw_init not available');
-    const ok = this.initFnLegacy(path);
-    if (ok !== 1) throw new Error('mjw_init failed');
+    if (!(h > 0) && mk) {
+      try { h = mk('mjwf_make_from_xml','number',['string'],[path]) | 0; } catch { h = 0; }
+    }
+    if (!(h > 0)) throw new Error('mjwf_make_from_xml failed');
+    this.h = h;
   }
 
   step(n: number): void {
-    if (this.haveHandleApi) {
-      const stepName = `${this.handlePrefix}_step`;
-      const r = this.mod.ccall?.(stepName, 'number', ['number', 'number'], [this.h, n]);
-      if (r !== 1) throw new Error(`${stepName} failed`);
-      return;
+    const m: any = this.mod; const h = this.h|0;
+    if (typeof m._mjwf_step === 'function') {
+      const r = m._mjwf_step(h, n|0) | 0; if (r !== 1) throw new Error('mjwf_step failed'); return;
     }
-    if (!this.stepFnLegacy) throw new Error('step function not available');
-    this.stepFnLegacy(n);
+    const r = this.mod.ccall?.('mjwf_step','number',['number','number'],[h, n|0]) as number;
+    if ((r|0) !== 1) throw new Error('mjwf_step failed');
   }
 
   term(): void {
-    if (this.haveHandleApi) {
-      this.mod.ccall?.(`${this.handlePrefix}_free`, null, ['number'], [this.h]);
-      this.h = 0;
-      return;
+    const m: any = this.mod; const h = this.h|0;
+    if (h) {
+      try { if (typeof m._mjwf_free === 'function') m._mjwf_free(h); else this.mod.ccall?.('mjwf_free', null, ['number'], [h]); } catch {}
     }
-    this.mod._mjw_term?.();
+    this.h = 0;
   }
 
   nq(): number {
-    if (this.haveHandleApi) return this.mod.ccall?.(`${this.handlePrefix}_nq`, 'number', ['number'], [this.h]) as number ?? 0;
-    return this.mod._mjw_nq?.() ?? 0;
+    const m: any = this.mod; const h = this.h|0;
+    if (typeof m._mjwf_nq === 'function') return (m._mjwf_nq(h) | 0) || 0;
+    try { return (this.mod.ccall?.('mjwf_nq','number',['number'],[h]) as number|undefined) ?? 0; } catch { return 0; }
   }
 
-  // Optional pointer-based views (available if wrapper exports *_ptr)
+  // Optional pointer-based views (require *_ptr exports)
   qposView(): Float64Array | undefined {
-    const nq = this.nq();
-    if (!nq) return undefined;
-    const ptr = this.haveHandleApi
-      ? (this.mod.ccall?.(`${this.handlePrefix}_qpos_ptr`, 'number', ['number'], [this.h]) as number)
-      : ((this.mod as any)._mjw_qpos_ptr as (() => number) | undefined)?.call(this.mod);
-    if (!ptr) return undefined;
-    return heapViewF64(this.mod, ptr, nq);
+    const m: any = this.mod; const h = this.h|0; const nq = this.nq(); if (!nq) return undefined;
+    let ptr = 0; if (typeof m._mjwf_qpos_ptr === 'function') { try { ptr = m._mjwf_qpos_ptr(h)|0; } catch { ptr = 0; } }
+    if (!ptr) return undefined; return heapViewF64(this.mod, ptr, nq);
   }
 
   qvelView(): Float64Array | undefined {
-    const nv = this.haveHandleApi
-      ? (this.mod.ccall?.(`${this.handlePrefix}_nv`, 'number', ['number'], [this.h]) as number)
-      : ((this.mod as any)._mjw_nv as (() => number) | undefined)?.call(this.mod) ?? 0;
-    if (!nv) return undefined;
-    const ptr = this.haveHandleApi
-      ? (this.mod.ccall?.(`${this.handlePrefix}_qvel_ptr`, 'number', ['number'], [this.h]) as number)
-      : ((this.mod as any)._mjw_qvel_ptr as (() => number) | undefined)?.call(this.mod);
-    if (!ptr) return undefined;
-    return heapViewF64(this.mod, ptr, nv);
-  }
-
-  qpos0Scalar(): number | undefined {
-    const fn = this.mod._mjw_qpos0;
-    if (!fn) return undefined;
-    return fn.call(this.mod) as unknown as number;
-  }
-
-  qvel0Scalar(): number | undefined {
-    const fn = this.mod._mjw_qvel0;
-    if (!fn) return undefined;
-    return fn.call(this.mod) as unknown as number;
+    const m: any = this.mod; const h = this.h|0; let nv = 0; if (typeof m._mjwf_nv === 'function') nv = (m._mjwf_nv(h)|0); if (!nv) return undefined;
+    let ptr = 0; if (typeof m._mjwf_qvel_ptr === 'function') { try { ptr = m._mjwf_qvel_ptr(h)|0; } catch { ptr = 0; } }
+    if (!ptr) return undefined; return heapViewF64(this.mod, ptr, nv);
   }
 }

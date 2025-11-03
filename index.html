@@ -300,6 +300,7 @@
         flex-wrap: wrap;
         gap: 6px;
         width: 100%;
+        max-width: 100%;
         min-width: 0;
       }
       .action-row {
@@ -314,6 +315,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
+        width: 100%;
       }
       .compact-pill {
         display: inline-flex;
@@ -332,7 +334,8 @@
         border-color: var(--color-border-strong);
       }
       .segmented {
-        display: inline-flex;
+        display: flex;
+        width: 100%;
         gap: 4px;
         padding: 4px;
         border-radius: 999px;
@@ -342,6 +345,7 @@
       .segmented-option {
         position: relative;
         display: flex;
+        flex: 1 1 50%;
       }
       .segmented-option input {
         position: absolute;
@@ -352,6 +356,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        width: 100%;
         padding: 6px 14px;
         border-radius: 999px;
         font-size: 12px;
@@ -395,6 +400,8 @@
       }
       .control-field input[type="range"] {
         flex: 1;
+        width: 100%;
+        max-width: 100%;
       }
       .slider-value {
         font-size: 11px;
@@ -541,4 +548,5 @@
     <script type="module" src="./main.nobuild.mjs"></script>
   </body>
 </html>
+
 

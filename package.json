@@ -8,6 +8,15 @@
   "scripts": {
     "lint": "echo TBA",
     "test": "echo TBA",
-    "build": "echo TBA"
+    "build": "echo TBA",
+    "smoke": "node ./local_tools/tmp_smoke.mjs",
+    "spec:lint": "set \"PATH=%cd%\\local_tools\\bin;%PATH%\"&& node scripts/ci/validate_spec.mjs",
+    "test:e2e": "playwright test",
+    "ci": "npm run spec:lint && playwright test --reporter=list --timeout=90000"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.45.0",
+    "ajv": "^8.12.0",
+    "serve": "^14.2.1"
   }
 }
