@@ -896,8 +896,8 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         const hdr = await new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
         // Configure HDR for visible background
         hdr.mapping = THREE.EquirectangularReflectionMapping;
-        if (THREE.SRGBColorSpace) {
-          hdr.colorSpace = THREE.SRGBColorSpace;
+        if (THREE.LinearSRGBColorSpace) {
+          hdr.colorSpace = THREE.LinearSRGBColorSpace;
         }
         hdr.needsUpdate = true;
         // Use PMREM for environment (reflections)
