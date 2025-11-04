@@ -51,6 +51,65 @@ const store = createViewerStore({});
 if (typeof window !== 'undefined') {
   window.__viewerStore = store;
 }
+
+const fallbackModeParam = (searchParams.get('fallback') || 'auto').toLowerCase();
+const fallbackEnabledDefault = fallbackModeParam !== 'off';
+const fallbackPresetParam = (searchParams.get('preset') || 'studio-neutral').toLowerCase();
+
+const FALLBACK_PRESET_ALIASES = {
+  'studio-neutral': 'studio-neutral',
+  studio: 'studio-neutral',
+  neutral: 'studio-neutral',
+  'overcast-field': 'overcast-field',
+  overcast: 'overcast-field',
+  field: 'overcast-field',
+  'sunset-cinematic': 'sunset-cinematic',
+  sunset: 'sunset-cinematic',
+  cinematic: 'sunset-cinematic',
+  'lab-cool': 'lab-cool',
+  lab: 'lab-cool',
+};
+
+const FALLBACK_PRESETS = {
+  'studio-neutral': {
+    background: 0x181d28,
+    exposure: 1.0,
+    ambient: { color: 0xf4f8ff, intensity: 0.22 },
+    hemi: { sky: 0xcfd9ff, ground: 0x1a1f2b, intensity: 0.58 },
+    dir: { color: 0xffffff, intensity: 1.4, position: [6, -8, 8] },
+    shadowBias: -0.0006,
+    envIntensity: 1.0,
+  },
+  'overcast-field': {
+    background: 0x1a1f2c,
+    exposure: 0.95,
+    ambient: { color: 0xe0e7f5, intensity: 0.3 },
+    hemi: { sky: 0xc4d5ef, ground: 0x1a202a, intensity: 0.7 },
+    dir: { color: 0xe6ecff, intensity: 0.8, position: [3, -4, 6] },
+    shadowBias: -0.0005,
+    envIntensity: 0.85,
+  },
+  'sunset-cinematic': {
+    background: 0x1b141a,
+    exposure: 1.1,
+    ambient: { color: 0xf8ecd8, intensity: 0.18 },
+    hemi: { sky: 0xf5c199, ground: 0x1a0f1c, intensity: 0.5 },
+    dir: { color: 0xffb27d, intensity: 1.6, position: [2.5, -5.5, 2.2] },
+    shadowBias: -0.0004,
+    envIntensity: 1.15,
+  },
+  'lab-cool': {
+    background: 0x161c27,
+    exposure: 1.0,
+    ambient: { color: 0xe3f1ff, intensity: 0.25 },
+    hemi: { sky: 0xbdd7ff, ground: 0x14202c, intensity: 0.62 },
+    dir: { color: 0xddeaff, intensity: 1.1, position: [5, -6, 7] },
+    shadowBias: -0.00055,
+    envIntensity: 0.9,
+  },
+};
+
+const fallbackPresetKey = FALLBACK_PRESET_ALIASES[fallbackPresetParam] || 'studio-neutral';
 function applySnapshot(snapshot) {
   latestSnapshot = snapshot;
   store.update((draft) => {
@@ -343,7 +402,7 @@ function initRenderer() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.1;
+  renderer.toneMappingExposure = 1.0;
   renderer.setClearColor(0x181d28, 1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -352,16 +411,18 @@ function initRenderer() {
   scene.background = new THREE.Color(0x151a26);
   scene.fog = new THREE.Fog(0x151a26, 12, 48);
 
-  scene.add(new THREE.AmbientLight(0xdfe5ff, 1.05));
-  const hemi = new THREE.HemisphereLight(0xcfd9ff, 0x10131c, 0.55);
+  const ambient = new THREE.AmbientLight(0xffffff, 0);
+  scene.add(ambient);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x10131c, 0);
   scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 1.35);
+  const dir = new THREE.DirectionalLight(0xffffff, 0);
   dir.position.set(6, -8, 8);
   dir.color.setHSL(0.58, 0.32, 0.92);
   dir.castShadow = true;
-  dir.shadow.mapSize.set(1024, 1024);
+  dir.shadow.mapSize.set(2048, 2048);
   dir.shadow.camera.near = 0.5;
   dir.shadow.camera.far = 40;
+  dir.shadow.bias = -0.0005;
   const lightTarget = new THREE.Object3D();
   scene.add(lightTarget);
   dir.target = lightTarget;
@@ -413,6 +474,7 @@ function initRenderer() {
     light: dir,
     lightTarget,
     hemi,
+    ambient,
     assetSource: null,
     assetCache: {
       meshGeometries: new Map(),
@@ -423,6 +485,11 @@ function initRenderer() {
     copySeq: 0,
     autoAligned: false,
     bounds: null,
+    fallback: {
+      enabled: fallbackEnabledDefault,
+      preset: fallbackPresetKey,
+      mode: fallbackModeParam,
+    },
   });
   renderCtx.cameraTarget.set(0, 0, 0);
   return renderCtx;
@@ -437,6 +504,19 @@ function getDefaultVopt(state) {
 }
 
 function disposeMeshObject(mesh) {
+  try {
+    if (mesh.userData && mesh.userData.fallbackBackface) {
+      const back = mesh.userData.fallbackBackface;
+      if (back.material && typeof back.material.dispose === 'function') {
+        try { back.material.dispose(); } catch {}
+      }
+      if (typeof mesh.remove === 'function') {
+        try { mesh.remove(back); } catch {}
+      }
+      mesh.userData.fallbackBackface = null;
+    }
+  } catch {}
+
   if (!mesh) return;
   const parent = mesh.parent;
   if (parent && typeof parent.remove === 'function') {
@@ -643,6 +723,75 @@ function buildAdapterMeshSnapshot(ctx, assets) {
   };
 }
 
+function hasModelEnvironment(state) {
+  const env = state?.rendering?.environment;
+  if (!env) return false;
+  if (env.hdr || env.texture || env.color) return true;
+  if (Array.isArray(env.sources) && env.sources.length > 0) return true;
+  return false;
+}
+
+function hasModelLights(state) {
+  const lights = state?.rendering?.lights;
+  return Array.isArray(lights) && lights.length > 0;
+}
+
+function hasModelBackground(state) {
+  const bg = state?.rendering?.background;
+  if (!bg) return false;
+  return bg.color != null || !!bg.texture;
+}
+
+function applyFallbackAppearance(ctx, state) {
+  const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: fallbackPresetKey };
+  const preset = FALLBACK_PRESETS[fallback.preset] || FALLBACK_PRESETS[fallbackPresetKey];
+  const renderer = ctx.renderer;
+  if (renderer) {
+    renderer.toneMappingExposure = preset.exposure ?? 1.0;
+  }
+
+  if (!fallback.enabled) {
+    if (!hasModelLights(state)) {
+      if (ctx.ambient) ctx.ambient.intensity = 0;
+      if (ctx.hemi) ctx.hemi.intensity = 0;
+      if (ctx.light) ctx.light.intensity = 0;
+    }
+    return;
+  }
+
+  if (!hasModelBackground(state) && ctx.scene) {
+    ctx.scene.background = new THREE.Color(preset.background ?? 0x171c27);
+  }
+
+  if (!hasModelLights(state)) {
+    if (ctx.ambient) {
+      const ambientCfg = preset.ambient || {};
+      ctx.ambient.color.setHex(ambientCfg.color ?? 0xffffff);
+      ctx.ambient.intensity = ambientCfg.intensity ?? 0.2;
+    }
+    if (ctx.hemi) {
+      const hemiCfg = preset.hemi || {};
+      ctx.hemi.color.setHex(hemiCfg.sky ?? 0xffffff);
+      ctx.hemi.groundColor.setHex(hemiCfg.ground ?? 0x20242f);
+      ctx.hemi.intensity = hemiCfg.intensity ?? 0.5;
+    }
+    if (ctx.light) {
+      const dirCfg = preset.dir || {};
+      ctx.light.color.setHex(dirCfg.color ?? 0xffffff);
+      ctx.light.intensity = dirCfg.intensity ?? 1.2;
+      if (Array.isArray(dirCfg.position) && dirCfg.position.length === 3) {
+        ctx.light.position.set(dirCfg.position[0], dirCfg.position[1], dirCfg.position[2]);
+      }
+      if (ctx.lightTarget && Array.isArray(dirCfg.target) && dirCfg.target.length === 3) {
+        ctx.lightTarget.position.set(dirCfg.target[0], dirCfg.target[1], dirCfg.target[2]);
+      }
+      if (ctx.light.shadow) {
+        ctx.light.shadow.bias = dirCfg.shadowBias ?? preset.shadowBias ?? ctx.light.shadow.bias;
+      }
+    }
+  }
+}
+
 function emitAdapterSceneSnapshot(ctx, snapshot, state) {
   if (!isSnapshotDebugEnabled()) return;
   if (!ctx || !snapshot || typeof window === 'undefined') return;
@@ -699,7 +848,8 @@ function emitAdapterSceneSnapshot(ctx, snapshot, state) {
   }
 }
 
-function createPrimitiveGeometry(gtype, sizeVec) {
+function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
+  const fallbackEnabled = options.fallbackEnabled !== false;
   let geometry;
   let materialOpts = {
     color: 0x6fa0ff,
@@ -743,7 +893,7 @@ function createPrimitiveGeometry(gtype, sizeVec) {
         color: 0x2f343f,
         metalness: 0.1,
         roughness: 0.9,
-        map: getFallbackGroundTexture(),
+        map: fallbackEnabled ? getFallbackGroundTexture() : null,
       };
       postCreate = (mesh) => {
         mesh.rotation.x = -Math.PI / 2;
@@ -894,7 +1044,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec) {
       }
     }
     if (!geometryInfo) {
-      geometryInfo = createPrimitiveGeometry(gtype, sizeVec);
+      geometryInfo = createPrimitiveGeometry(gtype, sizeVec, { fallbackEnabled: ctx.fallback?.enabled !== false });
       geometryInfo.ownGeometry = true;
     }
 
@@ -1098,6 +1248,7 @@ function renderScene(snapshot, state) {
   const ctx = initRenderer();
   const assets = state.rendering?.assets || null;
   syncRendererAssets(ctx, assets);
+  applyFallbackAppearance(ctx, state);
   if (assets && !ctx.assetSummaryLogged) {
     const summary = {
       geoms: assets.geoms?.count ?? 0,
@@ -1880,6 +2031,22 @@ if (typeof window !== 'undefined') {
     window.__viewerRenderer = {
       getStats: () => ({ ...renderStats }),
       getContext: () => renderCtx.initialized ? renderCtx : null,
+      getFallbackState: () => ({
+        enabled: renderCtx.fallback?.enabled ?? fallbackEnabledDefault,
+        preset: renderCtx.fallback?.preset ?? fallbackPresetKey,
+        mode: renderCtx.fallback?.mode ?? fallbackModeParam,
+      }),
+      setFallbackEnabled: (enabled) => {
+        renderCtx.fallback = renderCtx.fallback || {};
+        renderCtx.fallback.enabled = !!enabled;
+      },
+      setFallbackPreset: (preset) => {
+        if (!preset) return;
+        const key = FALLBACK_PRESET_ALIASES[preset.toLowerCase()] || preset.toLowerCase();
+        if (!FALLBACK_PRESETS[key]) return;
+        renderCtx.fallback = renderCtx.fallback || {};
+        renderCtx.fallback.preset = key;
+      },
     };
   } catch {}
 }
