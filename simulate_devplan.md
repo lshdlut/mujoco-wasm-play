@@ -72,3 +72,26 @@ The goals for `mujoco-wasm-play` are to reach feature parity with MuJoCo's deskt
 ## Tracking
 - Maintain task status inline (checkboxes) and annotate PRs with `[render-assets]`, `[scene-binding]`, etc.
 - Revisit this plan after the render asset milestone lands to reprioritise remaining items.
+
+## Texture Pipeline (Next)
+
+Goal: Reconstruct model textures end-to-end using forge 3.3.7 exports; prefer model-provided maps, only fall back when missing.
+
+- Worker: Collect texture/material arrays
+  - Read `_mjwf_tex_*` (data/width/height/nchannel/type/adr/pathadr) via `Module.HEAPU8/HEAP32`.
+  - Confirmed available in forge 3.3.7: `_mjwf_tex_data_ptr`, `_mjwf_tex_height_ptr`, `_mjwf_tex_width_ptr`, `_mjwf_tex_nchannel_ptr`, `_mjwf_tex_type_ptr`, `_mjwf_tex_adr_ptr`, `_mjwf_tex_pathadr_ptr`.
+  - Read material bindings: `_mjwf_mat_texid_ptr`, `_mjwf_mat_texrepeat_ptr`, `_mjwf_mat_texuniform_ptr`.
+  - Ensure geom/material linkage: use existing `_mjwf_geom_matid_ptr`.
+  - Mesh UV: keep `_mjwf_mesh_texcoord*_ptr` (`_ptr/_count`, `_texcoordadr_ptr/_num`) we already expose; validate counts/adr.
+  - Pack under `assets.textures` and include in `render_assets` (transfer buffers).
+
+- Main thread: Build Three.js textures and bind
+  - Create `THREE.DataTexture` per texture: choose `format` by channels (1/2/3/4 → R/RG/RGB/RGBA), `type` (UnsignedByte/Float), `colorSpace = sRGB` for color maps.
+  - Apply repeat/wrap from `mat.texrepeat` (`RepeatWrapping`) and `texuniform` as needed.
+  - On geom build, if `matid>=0 && texid>=0`, set `material.map = textures[texid]`, `needsUpdate=true`.
+  - Keep ground fallback (shadow/PBR) when no model texture.
+
+- Verification
+  - Log `{ ntex, sized, mapped }`, sample a few `texid` from materials.
+  - Visual check: UV seams, orientation; console snapshot of first UV range vs indices length.
+  - Future: add PMREM/HDRI (optional) and simple caching of `DataTexture`.

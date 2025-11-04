@@ -1,0 +1,480 @@
+  const env = state?.rendering?.environment;
+  if (!env) return false;
+  if (env.hdr || env.texture || env.color) return true;
+  if (Array.isArray(env.sources) && env.sources.length > 0) return true;
+  return false;
+}
+
+function hasModelLights(state) {
+  const lights = state?.rendering?.lights;
+  return Array.isArray(lights) && lights.length > 0;
+}
+
+function hasModelBackground(state) {
+  const bg = state?.rendering?.background;
+  if (!bg) return false;
+  return bg.color != null || !!bg.texture;
+}
+
+function applyFallbackAppearance(ctx, state) {
+  const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: fallbackPresetKey };
+  const preset = FALLBACK_PRESETS[fallback.preset] || FALLBACK_PRESETS[fallbackPresetKey];
+  const renderer = ctx.renderer;
+  if (renderer) {
+    renderer.toneMappingExposure = preset.exposure ?? 1.2;
+  }
+
+  if (!fallback.enabled) {
+    if (!hasModelLights(state)) {
+      if (ctx.ambient) ctx.ambient.intensity = 0;
+      if (ctx.hemi) ctx.hemi.intensity = 0;
+      if (ctx.light) ctx.light.intensity = 0;
+    }
+    return;
+  }
+
+  if (!hasModelBackground(state) && ctx.scene) {
+    ctx.scene.background = new THREE.Color(preset.background ?? 0xe7edf5);
+  }
+
+  if (!hasModelLights(state)) {
+    if (ctx.ambient) {
+      const ambientCfg = preset.ambient || {};
+      ctx.ambient.color.setHex(ambientCfg.color ?? 0xffffff);
+      ctx.ambient.intensity = ambientCfg.intensity ?? 0.2;
+    }
+    if (ctx.hemi) {
+      const hemiCfg = preset.hemi || {};
+      ctx.hemi.color.setHex(hemiCfg.sky ?? 0xffffff);
+      ctx.hemi.groundColor.setHex(hemiCfg.ground ?? 0x20242f);
+      ctx.hemi.intensity = hemiCfg.intensity ?? 0.6;
+    }
+    if (ctx.light) {
+      const dirCfg = preset.dir || {};
+      ctx.light.color.setHex(dirCfg.color ?? 0xffffff);
+      ctx.light.intensity = dirCfg.intensity ?? 1.8;
+      if (Array.isArray(dirCfg.position) && dirCfg.position.length === 3) {
+        ctx.light.position.set(dirCfg.position[0], dirCfg.position[1], dirCfg.position[2]);
+      }
+      if (ctx.lightTarget && Array.isArray(dirCfg.target) && dirCfg.target.length === 3) {
+        ctx.lightTarget.position.set(dirCfg.target[0], dirCfg.target[1], dirCfg.target[2]);
+      }
+      if (ctx.light.shadow) {
+        ctx.light.shadow.bias = dirCfg.shadowBias ?? preset.shadowBias ?? ctx.light.shadow.bias;
+      }
+    }
+    if (ctx.fill) {
+      const fillCfg = preset.fill || {};
+      ctx.fill.color.setHex(fillCfg.color ?? 0xcfe3ff);
+      ctx.fill.intensity = fillCfg.intensity ?? 0.3;
+      if (Array.isArray(fillCfg.position) && fillCfg.position.length === 3) {
+        ctx.fill.position.set(fillCfg.position[0], fillCfg.position[1], fillCfg.position[2]);
+      }
+    }
+  }
+}
+
+function emitAdapterSceneSnapshot(ctx, snapshot, state) {
+  if (!isSnapshotDebugEnabled()) return;
+  if (!ctx || !snapshot || typeof window === 'undefined') return;
+  try {
+    const assets = state?.rendering?.assets || null;
+    ctx.snapshotFrameCounter = (ctx.snapshotFrameCounter || 0) + 1;
+    const frameIndex = ctx.snapshotFrameCounter;
+    const shouldSample = frameIndex === 1 || (frameIndex % 60) === 0;
+    const geomTypes = assets?.geoms?.type ?? snapshot.gtype;
+    if (!shouldSample || !geomTypes || !geomTypes.length) {
+      return;
+    }
+    const geomSizes = assets?.geoms?.size ?? snapshot.gsize;
+    const geomMatIds = assets?.geoms?.matid ?? snapshot.gmatid;
+    const geomDataIds = assets?.geoms?.dataid ?? snapshot.gdataid;
+    const materialRgba = assets?.materials?.rgba ?? snapshot.matrgba;
+    const meshData = buildAdapterMeshSnapshot(ctx, assets);
+    const sceneSnap = createSceneSnap({
+      frame: frameIndex,
+      ngeom: snapshot.ngeom,
+      gtype: geomTypes,
+      gsize: geomSizes,
+      gmatid: geomMatIds,
+      matrgba: materialRgba,
+      gdataid: geomDataIds,
+      xpos: snapshot.xpos,
+      xmat: snapshot.xmat,
+      mesh: meshData,
+    });
+    window.__sceneSnaps = window.__sceneSnaps || {};
+    window.__sceneSnaps.adapter = sceneSnap;
+    const simSnap = window.__sceneSnaps.sim;
+    if (simSnap) {
+      const diff = diffSceneSnaps(simSnap, sceneSnap);
+      const now = Date.now();
+      const stateRef = ctx.snapshotLogState || { lastOkTs: 0, lastFailTs: 0 };
+      if (diff.ok) {
+        if (!stateRef.lastOkTs || (now - stateRef.lastOkTs) > 3000) {
+          console.log('[snapshot] adapter OK', { frame: sceneSnap.frame, ngeom: sceneSnap.geoms.length });
+          stateRef.lastOkTs = now;
+        }
+      } else {
+        if (!stateRef.lastFailTs || (now - stateRef.lastFailTs) > 1500) {
+          console.warn('[snapshot] adapter mismatch', diff.differences.slice(0, 4));
+          stateRef.lastFailTs = now;
+        }
+      }
+      ctx.snapshotLogState = stateRef;
+    }
+  } catch (err) {
+    if (debugMode) {
+      console.warn('[snapshot] adapter capture failed', err);
+    }
+  }
+}
+
+function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
+  const fallbackEnabled = options.fallbackEnabled !== false;
+  const preset = options.preset || 'bright-outdoor';
+  let geometry;
+  let materialOpts = {
+    color: 0x6fa0ff,
+    metalness: 0.05,
+    roughness: 0.65,
+  };
+  let postCreate = null;
+  switch (gtype) {
+    case MJ_GEOM.SPHERE:
+    case MJ_GEOM.ELLIPSOID:
+      geometry = new THREE.SphereGeometry(1, 24, 16);
+      if (Array.isArray(sizeVec)) {
+        const ax = Math.max(1e-6, sizeVec[0] || 0);
+        const ay = Math.max(1e-6, (sizeVec[1] ?? sizeVec[0]) || 0);
+        const az = Math.max(1e-6, (sizeVec[2] ?? sizeVec[0]) || 0);
+        geometry.scale(ax, ay, az);
+      }
+      break;
+    case MJ_GEOM.CAPSULE:
+      {
+        const radius = Math.max(1e-6, sizeVec?.[0] || 0.05);
+        const halfLength = Math.max(0, sizeVec?.[1] || 0);
+        geometry = new THREE.CapsuleGeometry(radius, Math.max(0, 2 * halfLength), 16, 12);
+      }
+      break;
+    case MJ_GEOM.CYLINDER:
+      {
+        const radius = Math.max(1e-6, sizeVec?.[0] || 0.05);
+        const halfLength = Math.max(0, sizeVec?.[1] || 0.05);
+        geometry = new THREE.CylinderGeometry(radius, radius, Math.max(1e-6, 2 * halfLength), 24, 1);
+      }
+      break;
+    case MJ_GEOM.PLANE:
+    case MJ_GEOM.HFIELD:
+      {
+        const width = Math.max(1, Math.abs(sizeVec?.[0] || 0) > 1e-6 ? (sizeVec[0] * 2) : 20);
+        const height = Math.max(1, Math.abs(sizeVec?.[1] || 0) > 1e-6 ? (sizeVec[1] * 2) : 20);
+        geometry = new THREE.PlaneGeometry(width, height, 1, 1);
+      }
+      if (fallbackEnabled && preset === 'studio-clean') {
+        materialOpts = { shadow: true, shadowOpacity: options.groundBackfaceOpacity ?? 0.45 };
+      } else {
+        materialOpts = { color: 0xdcdcdc, metalness: 0.0, roughness: 0.8, map: null };
+      }
+      postCreate = (mesh) => {
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.receiveShadow = true;
+        try {
+          const backMat = mesh.material.clone();
+          backMat.side = THREE.BackSide;
+          backMat.transparent = true;
+          backMat.opacity = 0.35;
+          backMat.depthWrite = false;
+          backMat.polygonOffset = true;
+          backMat.polygonOffsetFactor = -1;
+          const backMesh = new THREE.Mesh(mesh.geometry, backMat);
+          backMesh.receiveShadow = false;
+          backMesh.castShadow = false;
+          backMesh.renderOrder = (mesh.renderOrder || 0) + 0.01;
+          mesh.add(backMesh);
+          mesh.userData = mesh.userData || {};
+          mesh.userData.fallbackBackface = backMesh;
+        } catch {}
+      };
+      break;
+    default:
+      {
+        const sx = Math.max(1e-6, sizeVec?.[0] || 0.1);
+        const sy = Math.max(1e-6, sizeVec?.[1] || sx);
+        const sz = Math.max(1e-6, sizeVec?.[2] || sx);
+        geometry = new THREE.BoxGeometry(2 * sx, 2 * sy, 2 * sz);
+      }
+      break;
+  }
+  if (geometry && typeof geometry.computeBoundingBox === 'function') {
+    geometry.computeBoundingBox();
+  }
+  if (geometry && typeof geometry.computeBoundingSphere === 'function') {
+    geometry.computeBoundingSphere();
+  }
+  return { geometry, materialOpts, postCreate };
+}
+
+function createMeshGeometryFromAssets(assets, meshId) {
+  if (!assets || !assets.meshes || !(meshId >= 0)) return null;
+  const { vert, vertadr, vertnum, face, faceadr, facenum, normal, texcoord, texcoordadr, texcoordnum } = assets.meshes;
+  if (!vert || !vertadr || !vertnum) return null;
+  const count = vertnum[meshId] | 0;
+  if (!(count > 0)) return null;
+  const start = (vertadr[meshId] | 0) * 3;
+  const end = start + (count * 3);
+  if (start < 0 || end > vert.length) return null;
+  const positions = vert.slice(start, end);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  if (normal && normal.length >= end) {
+    const normalSlice = normal.slice(start, end);
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normalSlice, 3));
+  }
+
+  if (face && faceadr && facenum) {
+    const triCount = facenum[meshId] | 0;
+    if (triCount > 0) {
+      const faceStart = (faceadr[meshId] | 0) * 3;
+      const faceEnd = faceStart + (triCount * 3);
+      if (faceStart >= 0 && faceEnd <= face.length) {
+        const rawFaces = face.slice(faceStart, faceEnd);
+        let needsUint32 = count > 65535;
+        if (!needsUint32) {
+          for (let i = 0; i < rawFaces.length; i += 1) {
+            if (rawFaces[i] > 65535) {
+              needsUint32 = true;
+              break;
+            }
+          }
+        }
+        const IndexCtor = needsUint32 ? Uint32Array : Uint16Array;
+        const indices = new IndexCtor(rawFaces);
+        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      }
+    }
+  }
+
+  if (texcoord && texcoordadr && texcoordnum) {
+    const tcCount = texcoordnum[meshId] | 0;
+    if (tcCount > 0) {
+      const tcStart = (texcoordadr[meshId] | 0) * 2;
+      const tcEnd = tcStart + (tcCount * 2);
+      if (tcStart >= 0 && tcEnd <= texcoord.length) {
+        const uvSlice = texcoord.slice(tcStart, tcEnd);
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvSlice, 2));
+      }
+    }
+  }
+
+  if (!geometry.getAttribute('normal')) {
+    geometry.computeVertexNormals();
+  }
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function getSharedMeshGeometry(ctx, assets, dataId) {
+  if (!ctx.assetCache || !(ctx.assetCache.meshGeometries instanceof Map)) {
+    ctx.assetCache = {
+      meshGeometries: new Map(),
+    };
+  }
+  const cache = ctx.assetCache.meshGeometries;
+  if (cache.has(dataId)) {
+    return cache.get(dataId);
+  }
+  const geometry = createMeshGeometryFromAssets(assets, dataId);
+  if (geometry) {
+    cache.set(dataId, geometry);
+  }
+  return geometry;
+}
+
+function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec) {
+  if (!ctx.meshes) ctx.meshes = [];
+  let mesh = ctx.meshes[index];
+  const sizeKey = Array.isArray(sizeVec)
+    ? sizeVec.map((v) => (Number.isFinite(v) ? v.toFixed(6) : '0')).join(',')
+    : 'null';
+  const needsRebuild =
+    !mesh ||
+    mesh.userData?.geomType !== gtype ||
+    (gtype === MJ_GEOM.MESH && mesh.userData?.geomDataId !== dataId) ||
+    (gtype !== MJ_GEOM.MESH && mesh.userData?.geomSizeKey !== sizeKey);
+
+  if (needsRebuild) {
+    if (mesh) {
+      disposeMeshObject(mesh);
+    }
+
+    let geometryInfo = null;
+    if (gtype === MJ_GEOM.MESH && assets && dataId >= 0) {
+      const meshGeometry = getSharedMeshGeometry(ctx, assets, dataId);
+      if (!ctx.meshAssetDebugLogged) {
+        const meshData = assets.meshes || {};
+        console.log('[render] mesh asset', {
+          dataId,
+          vertnum: meshData.vertnum?.[dataId] ?? null,
+          facecount: meshData.facenum?.[dataId] ?? null,
+          vertLength: meshData.vert?.length ?? 0,
+          faceLength: meshData.face?.length ?? 0,
+        });
+        ctx.meshAssetDebugLogged = true;
+      }
+      if (meshGeometry) {
+        geometryInfo = {
+          geometry: meshGeometry,
+          materialOpts: {
+            color: 0xffffff,
+            metalness: 0.05,
+            roughness: 0.55,
+          },
+          postCreate: null,
+          ownGeometry: false,
+        };
+      } else if (!ctx.meshAssetMissingLogged) {
+        console.warn('[render] mesh geometry missing', { dataId });
+        ctx.meshAssetMissingLogged = true;
+      }
+    }
+    if (!geometryInfo) {
+      geometryInfo = createPrimitiveGeometry(gtype, sizeVec, (function(){ const fb = (renderCtx && renderCtx.fallback) ? renderCtx.fallback : {}; return { fallbackEnabled: (fb.enabled!==false), preset: (fb.preset || 'bright-outdoor') }; })());
+      geometryInfo.ownGeometry = true;
+    }
+
+    const material = new THREE.MeshStandardMaterial(geometryInfo.materialOpts);
+    material.side = THREE.FrontSide;
+    mesh = new THREE.Mesh(geometryInfo.geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    if (typeof geometryInfo.postCreate === 'function') {
+      try { geometryInfo.postCreate(mesh); } catch {}
+    }
+    mesh.userData = mesh.userData || {};
+    mesh.userData.geomType = gtype;
+    mesh.userData.geomDataId = gtype === MJ_GEOM.MESH ? dataId : -1;
+    mesh.userData.geomSizeKey = gtype === MJ_GEOM.MESH ? null : sizeKey;
+    mesh.userData.ownGeometry = geometryInfo.ownGeometry !== false;
+    ctx.root.add(mesh);
+    ctx.meshes[index] = mesh;
+  }
+
+  return mesh;
+}
+
+function applyMaterialFlags(mesh, index, state) {
+  if (!mesh || !mesh.material) return;
+  const sceneFlags = state.rendering?.sceneFlags || [];
+  mesh.material.wireframe = !!sceneFlags[1];
+  if (mesh.material.emissive && typeof mesh.material.emissive.set === 'function') {
+    mesh.material.emissive.set(sceneFlags[0] ? 0x1a1f2a : 0x000000);
+  } else {
+    mesh.material.emissive = new THREE.Color(sceneFlags[0] ? 0x1a1f2a : 0x000000);
+  }
+}
+
+function shouldHighlightFlag(index, value, defaults) {
+  if (!defaults) return false;
+  const def = defaults[index] ?? false;
+  if (def === value) return false;
+  return true;
+}
+
+function updateMeshFromSnapshot(mesh, i, snapshot, state, assets) {
+  const n = snapshot.ngeom | 0;
+  if (i >= n) {
+    mesh.visible = false;
+    return;
+  }
+  const xpos = snapshot.xpos;
+  const xmat = snapshot.xmat;
+  const sizeView = snapshot.gsize || assets?.geoms?.size || null;
+  const typeView = snapshot.gtype || assets?.geoms?.type || null;
+  const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
+  const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
+  const baseIndex = 3 * i;
+  const pos = [
+    xpos?.[baseIndex + 0] ?? 0,
+    xpos?.[baseIndex + 1] ?? 0,
+    xpos?.[baseIndex + 2] ?? 0,
+  ];
+  mesh.position.set(pos[0], pos[1], pos[2]);
+
+  const matBase = 9 * i;
+  const rot = [
+    xmat?.[matBase + 0] ?? 1,
+    xmat?.[matBase + 1] ?? 0,
+    xmat?.[matBase + 2] ?? 0,
+    xmat?.[matBase + 3] ?? 0,
+    xmat?.[matBase + 4] ?? 1,
+    xmat?.[matBase + 5] ?? 0,
+    xmat?.[matBase + 6] ?? 0,
+    xmat?.[matBase + 7] ?? 0,
+    xmat?.[matBase + 8] ?? 1,
+  ];
+  mesh.quaternion.copy(mat3ToQuat(rot));
+
+  const sizeBase = 3 * i;
+  const sx = sizeView?.[sizeBase + 0] ?? 0.1;
+  const sy = sizeView?.[sizeBase + 1] ?? sx;
+  const sz = sizeView?.[sizeBase + 2] ?? sx;
+  const type = typeView?.[i] ?? MJ_GEOM.BOX;
+  switch (type) {
+    case MJ_GEOM.SPHERE:
+    case MJ_GEOM.ELLIPSOID:
+      mesh.scale.set(1, 1, 1);
+      break;
+    case MJ_GEOM.CAPSULE:
+      mesh.scale.set(1, 1, 1);
+      break;
+    case MJ_GEOM.CYLINDER:
+      mesh.scale.set(1, 1, 1);
+      break;
+    case MJ_GEOM.PLANE:
+    case MJ_GEOM.HFIELD:
+      mesh.scale.set(1, 1, 1);
+      break;
+    case MJ_GEOM.MESH:
+      mesh.scale.set(1, 1, 1);
+      break;
+    default:
+      mesh.scale.set(1, 1, 1);
+      break;
+  }
+
+  if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
+    const matIndex = matIdView?.[i] ?? -1;
+    if (matIndex >= 0) {
+      const rgbaBase = matIndex * 4;
+      const r = matRgbaView?.[rgbaBase + 0] ?? 0.6;
+      const g = matRgbaView?.[rgbaBase + 1] ?? 0.6;
+      const b = matRgbaView?.[rgbaBase + 2] ?? 0.9;
+      const a = matRgbaView?.[rgbaBase + 3] ?? 1;
+      mesh.material.color.setRGB(r, g, b);
+      mesh.material.opacity = a;
+      mesh.material.transparent = a < 0.999;
+    }
+  }
+
+  applyMaterialFlags(mesh, i, state);
+  mesh.visible = true;
+}
+
+function computeGeomRadius(type, sx, sy, sz) {
+  const s1 = Math.abs(sx) || 0;
+  const s2 = Math.abs(sy) || 0;
+  const s3 = Math.abs(sz) || 0;
+  switch (type) {
+    case 2: // sphere
+    case 4: // ellipsoid approximated as sphere
+      return Math.max(s1, 1e-3);
+    case 3: // capsule radius s1, half-height s2
+      return Math.max(s1 + s2, 1e-3);
+    case 5: // cylinder radius s1, half-height s2
+      return Math.max(Math.sqrt(s1 * s1 + s2 * s2), 1e-3);
+    case 6: // box
+      return Math.max(Math.sqrt(s1 * s1 + s2 * s2 + s3 * s3), 1e-3);

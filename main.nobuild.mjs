@@ -69,26 +69,26 @@ const FALLBACK_PRESETS = {
   // Level 1: Bright Real Outdoor（明亮户外）
   'bright-outdoor': {
     background: 0xe7edf5, // 明亮偏蓝
-    exposure: 1.2,
-    ambient: { color: 0xf4f8ff, intensity: 0.25 },
-    hemi: { sky: 0xe9f1ff, ground: 0xbfc2c5, intensity: 0.6 },
-    dir: { color: 0xfff1d6, intensity: 2.0, position: [6, -8, 8] },
-    fill: { color: 0xcfe3ff, intensity: 0.35, position: [-6, 6, 3] },
+    exposure: 1.0,
+    ambient: { color: 0xffffff, intensity: 0.05 },
+    hemi: { sky: 0xe9f1ff, ground: 0xbfc2c5, intensity: 0.2 },
+    dir: { color: 0xfff1d6, intensity: 2.2, position: [6, -8, 8] },
+    fill: { color: 0xcfe3ff, intensity: 0.3, position: [-6, 6, 3] },
     shadowBias: -0.0001,
     envIntensity: 1.3,
-    ground: { style: 'pbr', color: 0xdcdcdc, roughness: 0.8, metalness: 0.0 },
+    ground: { style: 'pbr', color: 0xdcdcdc, roughness: 0.65, metalness: 0.0 },
   },
   // Level 2: Neutral Studio Clean（棚拍回退）
   'studio-clean': {
     background: 0xe0e6ef,
-    exposure: 1.2,
-    ambient: { color: 0xffffff, intensity: 0.2 },
+    exposure: 1.0,
+    ambient: { color: 0xffffff, intensity: 0.05 },
     hemi: { sky: 0xf0f4ff, ground: 0xbdbdbd, intensity: 1.0 },
-    dir: { color: 0xffffff, intensity: 1.5, position: [5, -6, 7] },
-    fill: { color: 0xcfe3ff, intensity: 0.3, position: [-5, 4, 5] },
+    dir: { color: 0xffffff, intensity: 1.8, position: [5, -6, 7] },
+    fill: { color: 0xcfe3ff, intensity: 0.4, position: [-5, 4, 5] },
     shadowBias: -0.0001,
     envIntensity: 1.0,
-    ground: { style: 'shadow', opacity: 0.45 },
+    ground: { style: 'shadow', opacity: 0.5 },
   },
 };
 
@@ -385,7 +385,10 @@ function initRenderer() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 1.0; // 全局基线从 1.0 起
+  if ('physicallyCorrectLights' in renderer) {
+    renderer.physicallyCorrectLights = true;
+  }
   renderer.setClearColor(0x181d28, 1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -405,7 +408,10 @@ function initRenderer() {
   dir.shadow.mapSize.set(2048, 2048);
   dir.shadow.camera.near = 0.5;
   dir.shadow.camera.far = 40;
-  dir.shadow.bias = -0.0005;
+  dir.shadow.bias = -0.0001;
+  if ('normalBias' in dir.shadow) {
+    dir.shadow.normalBias = 0.001;
+  }
   const lightTarget = new THREE.Object3D();
   scene.add(lightTarget);
   dir.target = lightTarget;
@@ -1060,7 +1066,15 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec) {
       geometryInfo.ownGeometry = true;
     }
 
-    const material = new THREE.MeshStandardMaterial(geometryInfo.materialOpts);
+    let material;
+    if (geometryInfo.materialOpts && geometryInfo.materialOpts.shadow) {
+      const op = Number.isFinite(geometryInfo.materialOpts.shadowOpacity)
+        ? geometryInfo.materialOpts.shadowOpacity
+        : 0.5;
+      material = new THREE.ShadowMaterial({ opacity: op });
+    } else {
+      material = new THREE.MeshStandardMaterial(geometryInfo.materialOpts);
+    }
     material.side = THREE.FrontSide;
     mesh = new THREE.Mesh(geometryInfo.geometry, material);
     mesh.castShadow = true;
@@ -1297,9 +1311,11 @@ function renderScene(snapshot, state) {
   const voptFlags = state.rendering?.voptFlags || [];
   const sceneFlags = state.rendering?.sceneFlags || [];
   if (ctx.renderer) {
-    // In fallback presets we want shadows always on; otherwise respect scene flag 0
-    const fb = ctx.fallback || {};
-    ctx.renderer.shadowMap.enabled = (fb.enabled !== false) ? true : !!sceneFlags[0];
+    // Always keep shadow map enabled; presets control intensities, not the global switch
+    ctx.renderer.shadowMap.enabled = true;
+    if (ctx.renderer.shadowMap && typeof THREE !== 'undefined') {
+      ctx.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    }
   }
   if (ctx.light) {
     const baseLight = sceneFlags[0] ? 1.45 : 1.05;
@@ -2072,6 +2088,13 @@ if (typeof window !== 'undefined') {
         preset: renderCtx.fallback?.preset ?? fallbackPresetKey,
         mode: renderCtx.fallback?.mode ?? fallbackModeParam,
       }),
+      getShadows: () => ({ enabled: !!renderCtx.renderer?.shadowMap?.enabled, cast: !!renderCtx.light?.castShadow }),
+      setShadowsEnabled: (on) => {
+        if (renderCtx.renderer && renderCtx.renderer.shadowMap) {
+          renderCtx.renderer.shadowMap.enabled = !!on;
+        }
+        if (renderCtx.light) renderCtx.light.castShadow = !!on;
+      },
       setFallbackEnabled: (enabled) => {
         renderCtx.fallback = renderCtx.fallback || {};
         renderCtx.fallback.enabled = !!enabled;

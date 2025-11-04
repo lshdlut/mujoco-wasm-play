@@ -1,0 +1,2184 @@
+{
+  "source": "local_tools/mujoco/simulate",
+  "left_panel": [
+    {
+      "section_id": "file",
+      "title": "File",
+      "shortcut": [
+        "Alt",
+        "F"
+      ],
+      "default_open": true,
+      "items": [
+        {
+          "item_id": "file.save_xml",
+          "type": "button",
+          "label": "Save xml",
+          "shortcut": null,
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.save_xml = GetSavePath('mjmodel.xml')"
+        },
+        {
+          "item_id": "file.save_mjb",
+          "type": "button",
+          "label": "Save mjb",
+          "shortcut": null,
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.save_mjb = GetSavePath('mjmodel.mjb')"
+        },
+        {
+          "item_id": "file.print_model",
+          "type": "button",
+          "label": "Print model",
+          "shortcut": [
+            "Ctrl",
+            "M"
+          ],
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.print_model = GetSavePath('MJMODEL.TXT')"
+        },
+        {
+          "item_id": "file.print_data",
+          "type": "button",
+          "label": "Print data",
+          "shortcut": [
+            "Ctrl",
+            "D"
+          ],
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.print_data = GetSavePath('MJDATA.TXT')"
+        },
+        {
+          "item_id": "file.quit",
+          "type": "button",
+          "label": "Quit",
+          "shortcut": [
+            "Ctrl",
+            "Q"
+          ],
+          "binding": null,
+          "default": null,
+          "action": "Simulate::exitrequest = 1"
+        },
+        {
+          "item_id": "file.screenshot",
+          "type": "button",
+          "label": "Screenshot",
+          "shortcut": [
+            "Ctrl",
+            "P"
+          ],
+          "binding": null,
+          "default": null,
+          "action": "Simulate::screenshotrequest = true"
+        }
+      ]
+    },
+    {
+      "section_id": "option",
+      "title": "Option",
+      "shortcut": [
+        "Alt",
+        "O"
+      ],
+      "default_open": true,
+      "items": [
+        {
+          "item_id": "option.help",
+          "type": "checkbox",
+          "label": "Help",
+          "shortcut": [
+            "F1"
+          ],
+          "binding": "Simulate::help",
+          "default": 0
+        },
+        {
+          "item_id": "option.info",
+          "type": "checkbox",
+          "label": "Info",
+          "shortcut": [
+            "F2"
+          ],
+          "binding": "Simulate::info",
+          "default": 0
+        },
+        {
+          "item_id": "option.profiler",
+          "type": "checkbox",
+          "label": "Profiler",
+          "shortcut": [
+            "F3"
+          ],
+          "binding": "Simulate::profiler",
+          "default": 0
+        },
+        {
+          "item_id": "option.sensor",
+          "type": "checkbox",
+          "label": "Sensor",
+          "shortcut": [
+            "F4"
+          ],
+          "binding": "Simulate::sensor",
+          "default": 0
+        },
+        {
+          "item_id": "option.pause_update",
+          "type": "checkbox",
+          "label": "Pause update",
+          "shortcut": null,
+          "binding": "Simulate::pause_update",
+          "default": 0
+        },
+        {
+          "item_id": "option.fullscreen",
+          "type": "checkbox",
+          "label": "Fullscreen",
+          "shortcut": [
+            "F5"
+          ],
+          "binding": "Simulate::fullscreen",
+          "default": 0
+        },
+        {
+          "item_id": "option.vsync",
+          "type": "checkbox",
+          "label": "Vertical Sync",
+          "shortcut": null,
+          "binding": "Simulate::vsync",
+          "default": 1
+        },
+        {
+          "item_id": "option.busywait",
+          "type": "checkbox",
+          "label": "Busy Wait",
+          "shortcut": null,
+          "binding": "Simulate::busywait",
+          "default": 0
+        },
+        {
+          "item_id": "option.spacing",
+          "type": "select",
+          "label": "Spacing",
+          "shortcut": null,
+          "binding": "Simulate::spacing",
+          "default": 0,
+          "options": [
+            "Tight",
+            "Wide"
+          ],
+          "applies_to": [
+            "ui0.spacing",
+            "ui1.spacing"
+          ]
+        },
+        {
+          "item_id": "option.color",
+          "type": "select",
+          "label": "Color",
+          "shortcut": null,
+          "binding": "Simulate::color",
+          "default": 0,
+          "options": [
+            "Default",
+            "Orange",
+            "White",
+            "Black"
+          ],
+          "applies_to": [
+            "ui0.color",
+            "ui1.color"
+          ]
+        },
+        {
+          "item_id": "option.font",
+          "type": "select",
+          "label": "Font",
+          "shortcut": null,
+          "binding": "Simulate::font",
+          "default": 0,
+          "options": [
+            "50 %",
+            "100 %",
+            "150 %",
+            "200 %",
+            "250 %",
+            "300 %"
+          ],
+          "applies_to": [
+            "mjr_changeFont"
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "simulation",
+      "title": "Simulation",
+      "shortcut": [
+        "Alt",
+        "S"
+      ],
+      "default_open": true,
+      "items": [
+        {
+          "item_id": "simulation.run",
+          "type": "radio",
+          "label": "Run",
+          "shortcut": null,
+          "binding": "Simulate::run",
+          "default": 1,
+          "options": [
+            "Pause",
+            "Run"
+          ],
+          "side_effects": "Resets scrub index when resuming"
+        },
+        {
+          "item_id": "simulation.reset",
+          "type": "button",
+          "label": "Reset",
+          "shortcut": [
+            "Backspace"
+          ],
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.reset = true"
+        },
+        {
+          "item_id": "simulation.reload",
+          "type": "button",
+          "label": "Reload",
+          "shortcut": [
+            "Ctrl",
+            "L"
+          ],
+          "binding": null,
+          "default": null,
+          "action": "Simulate::uiloadrequest++"
+        },
+        {
+          "item_id": "simulation.align",
+          "type": "button",
+          "label": "Align",
+          "shortcut": [
+            "Ctrl",
+            "A"
+          ],
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.align = true"
+        },
+        {
+          "item_id": "simulation.copy_state",
+          "type": "button",
+          "label": "Copy state",
+          "shortcut": [
+            "Ctrl",
+            "C"
+          ],
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.copy_key = true (Shift = full precision)"
+        },
+        {
+          "item_id": "simulation.key_slider",
+          "type": "slider_int",
+          "label": "Key",
+          "shortcut": null,
+          "binding": "Simulate::key",
+          "default": -1,
+          "range": "[0, m->nkey-1] (populated post-load)"
+        },
+        {
+          "item_id": "simulation.load_key",
+          "type": "button",
+          "label": "Load key",
+          "shortcut": null,
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.load_key = true"
+        },
+        {
+          "item_id": "simulation.save_key",
+          "type": "button",
+          "label": "Save key",
+          "shortcut": null,
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.save_key = true"
+        },
+        {
+          "item_id": "simulation.noise_scale",
+          "type": "slider_float",
+          "label": "Noise scale",
+          "shortcut": null,
+          "binding": "Simulate::ctrl_noise_std",
+          "default": 0.0,
+          "range": "[0,1]"
+        },
+        {
+          "item_id": "simulation.noise_rate",
+          "type": "slider_float",
+          "label": "Noise rate",
+          "shortcut": null,
+          "binding": "Simulate::ctrl_noise_rate",
+          "default": 0.0,
+          "range": "[0,4]"
+        },
+        {
+          "item_id": "simulation.history_separator",
+          "type": "separator",
+          "label": "History"
+        },
+        {
+          "item_id": "simulation.history_scrubber",
+          "type": "slider_int",
+          "label": "History index",
+          "shortcut": null,
+          "binding": "Simulate::scrub_index",
+          "default": 0,
+          "range": "[1-nhistory,0]",
+          "side_effects": "Stops run and loads buffered state"
+        }
+      ]
+    },
+    {
+      "section_id": "watch",
+      "title": "Watch",
+      "shortcut": [
+        "Alt",
+        "W"
+      ],
+      "default_open": false,
+      "items": [
+        {
+          "item_id": "watch.field",
+          "type": "edit_text",
+          "label": "Field",
+          "shortcut": null,
+          "binding": "Simulate::field",
+          "default": "qpos"
+        },
+        {
+          "item_id": "watch.index",
+          "type": "edit_int",
+          "label": "Index",
+          "shortcut": null,
+          "binding": "Simulate::index",
+          "default": 0
+        },
+        {
+          "item_id": "watch.value",
+          "type": "static",
+          "label": "Value",
+          "shortcut": null,
+          "binding": "UpdateWatch",
+          "default": "computed"
+        }
+      ]
+    },
+    {
+      "section_id": "physics",
+      "title": "Physics",
+      "shortcut": [
+        "Alt",
+        "P"
+      ],
+      "default_open": false,
+      "items": [
+        {
+          "item_id": "physics.integrator",
+          "type": "select",
+          "label": "Integrator",
+          "binding": "mjOption::integrator",
+          "default": "model.opt.integrator",
+          "options": [
+            "Euler",
+            "RK4",
+            "implicit",
+            "implicitfast"
+          ]
+        },
+        {
+          "item_id": "physics.cone",
+          "type": "select",
+          "label": "Cone",
+          "binding": "mjOption::cone",
+          "default": "model.opt.cone",
+          "options": [
+            "Pyramidal",
+            "Elliptic"
+          ]
+        },
+        {
+          "item_id": "physics.jacobian",
+          "type": "select",
+          "label": "Jacobian",
+          "binding": "mjOption::jacobian",
+          "default": "model.opt.jacobian",
+          "options": [
+            "Dense",
+            "Sparse",
+            "Auto"
+          ]
+        },
+        {
+          "item_id": "physics.solver",
+          "type": "select",
+          "label": "Solver",
+          "binding": "mjOption::solver",
+          "default": "model.opt.solver",
+          "options": [
+            "PGS",
+            "CG",
+            "Newton"
+          ]
+        },
+        {
+          "item_id": "physics.algorithmic_sep",
+          "type": "separator",
+          "label": "Algorithmic Parameters",
+          "default_state": "closed"
+        },
+        {
+          "item_id": "physics.timestep",
+          "type": "edit_float",
+          "label": "Timestep",
+          "binding": "mjOption::timestep",
+          "default": "model.opt.timestep",
+          "range": "[0,1]"
+        },
+        {
+          "item_id": "physics.iterations",
+          "type": "edit_int",
+          "label": "Iterations",
+          "binding": "mjOption::iterations",
+          "default": "model.opt.iterations",
+          "range": "[0,1000]"
+        },
+        {
+          "item_id": "physics.tolerance",
+          "type": "edit_float",
+          "label": "Tolerance",
+          "binding": "mjOption::tolerance",
+          "default": "model.opt.tolerance",
+          "range": "[0,1]"
+        },
+        {
+          "item_id": "physics.ls_iterations",
+          "type": "edit_int",
+          "label": "LS Iter",
+          "binding": "mjOption::ls_iterations",
+          "default": "model.opt.ls_iterations",
+          "range": "[0,100]"
+        },
+        {
+          "item_id": "physics.ls_tolerance",
+          "type": "edit_float",
+          "label": "LS Tol",
+          "binding": "mjOption::ls_tolerance",
+          "default": "model.opt.ls_tolerance",
+          "range": "[0,0.1]"
+        },
+        {
+          "item_id": "physics.noslip_iterations",
+          "type": "edit_int",
+          "label": "Noslip Iter",
+          "binding": "mjOption::noslip_iterations",
+          "default": "model.opt.noslip_iterations",
+          "range": "[0,1000]"
+        },
+        {
+          "item_id": "physics.noslip_tolerance",
+          "type": "edit_float",
+          "label": "Noslip Tol",
+          "binding": "mjOption::noslip_tolerance",
+          "default": "model.opt.noslip_tolerance",
+          "range": "[0,1]"
+        },
+        {
+          "item_id": "physics.ccd_iterations",
+          "type": "edit_int",
+          "label": "CCD Iter",
+          "binding": "mjOption::ccd_iterations",
+          "default": "model.opt.ccd_iterations",
+          "range": "[0,1000]"
+        },
+        {
+          "item_id": "physics.ccd_tolerance",
+          "type": "edit_float",
+          "label": "CCD Tol",
+          "binding": "mjOption::ccd_tolerance",
+          "default": "model.opt.ccd_tolerance",
+          "range": "[0,1]"
+        },
+        {
+          "item_id": "physics.sdf_iterations",
+          "type": "edit_int",
+          "label": "SDF Iter",
+          "binding": "mjOption::sdf_iterations",
+          "default": "model.opt.sdf_iterations",
+          "range": "[1,20]"
+        },
+        {
+          "item_id": "physics.sdf_init",
+          "type": "edit_int",
+          "label": "SDF Init",
+          "binding": "mjOption::sdf_initpoints",
+          "default": "model.opt.sdf_initpoints",
+          "range": "[1,100]"
+        },
+        {
+          "item_id": "physics.physical_sep",
+          "type": "separator",
+          "label": "Physical Parameters",
+          "default_state": "open"
+        },
+        {
+          "item_id": "physics.gravity",
+          "type": "edit_vec3",
+          "label": "Gravity",
+          "binding": "mjOption::gravity",
+          "default": "model.opt.gravity"
+        },
+        {
+          "item_id": "physics.wind",
+          "type": "edit_vec3",
+          "label": "Wind",
+          "binding": "mjOption::wind",
+          "default": "model.opt.wind"
+        },
+        {
+          "item_id": "physics.magnetic",
+          "type": "edit_vec3",
+          "label": "Magnetic",
+          "binding": "mjOption::magnetic",
+          "default": "model.opt.magnetic"
+        },
+        {
+          "item_id": "physics.density",
+          "type": "edit_float",
+          "label": "Density",
+          "binding": "mjOption::density",
+          "default": "model.opt.density"
+        },
+        {
+          "item_id": "physics.viscosity",
+          "type": "edit_float",
+          "label": "Viscosity",
+          "binding": "mjOption::viscosity",
+          "default": "model.opt.viscosity"
+        },
+        {
+          "item_id": "physics.impratio",
+          "type": "edit_float",
+          "label": "Imp Ratio",
+          "binding": "mjOption::impratio",
+          "default": "model.opt.impratio"
+        },
+        {
+          "item_id": "physics.disable_sep",
+          "type": "separator",
+          "label": "Disable Flags",
+          "default_state": "closed"
+        }
+      ],
+      "dynamic_groups": [
+        {
+          "group_id": "physics.disable_flags",
+          "type": "checkbox_list",
+          "entries": [
+            {
+              "name": "Constraint",
+              "binding": "Simulate::disable[0]",
+              "default": "bit(mjOption::disableflags,0)"
+            },
+            {
+              "name": "Equality",
+              "binding": "Simulate::disable[1]",
+              "default": "bit(mjOption::disableflags,1)"
+            },
+            {
+              "name": "Frictionloss",
+              "binding": "Simulate::disable[2]",
+              "default": "bit(mjOption::disableflags,2)"
+            },
+            {
+              "name": "Limit",
+              "binding": "Simulate::disable[3]",
+              "default": "bit(mjOption::disableflags,3)"
+            },
+            {
+              "name": "Contact",
+              "binding": "Simulate::disable[4]",
+              "default": "bit(mjOption::disableflags,4)"
+            },
+            {
+              "name": "Spring",
+              "binding": "Simulate::disable[5]",
+              "default": "bit(mjOption::disableflags,5)"
+            },
+            {
+              "name": "Damper",
+              "binding": "Simulate::disable[6]",
+              "default": "bit(mjOption::disableflags,6)"
+            },
+            {
+              "name": "Gravity",
+              "binding": "Simulate::disable[7]",
+              "default": "bit(mjOption::disableflags,7)"
+            },
+            {
+              "name": "Clampctrl",
+              "binding": "Simulate::disable[8]",
+              "default": "bit(mjOption::disableflags,8)"
+            },
+            {
+              "name": "Warmstart",
+              "binding": "Simulate::disable[9]",
+              "default": "bit(mjOption::disableflags,9)"
+            },
+            {
+              "name": "Filterparent",
+              "binding": "Simulate::disable[10]",
+              "default": "bit(mjOption::disableflags,10)"
+            },
+            {
+              "name": "Actuation",
+              "binding": "Simulate::disable[11]",
+              "default": "bit(mjOption::disableflags,11)"
+            },
+            {
+              "name": "Refsafe",
+              "binding": "Simulate::disable[12]",
+              "default": "bit(mjOption::disableflags,12)"
+            },
+            {
+              "name": "Sensor",
+              "binding": "Simulate::disable[13]",
+              "default": "bit(mjOption::disableflags,13)"
+            },
+            {
+              "name": "Midphase",
+              "binding": "Simulate::disable[14]",
+              "default": "bit(mjOption::disableflags,14)"
+            },
+            {
+              "name": "Eulerdamp",
+              "binding": "Simulate::disable[15]",
+              "default": "bit(mjOption::disableflags,15)"
+            },
+            {
+              "name": "AutoReset",
+              "binding": "Simulate::disable[16]",
+              "default": "bit(mjOption::disableflags,16)"
+            },
+            {
+              "name": "NativeCCD",
+              "binding": "Simulate::disable[17]",
+              "default": "bit(mjOption::disableflags,17)"
+            },
+            {
+              "name": "Island",
+              "binding": "Simulate::disable[18]",
+              "default": "bit(mjOption::disableflags,18)"
+            }
+          ]
+        },
+        {
+          "group_id": "physics.enable_flags",
+          "type": "checkbox_list",
+          "entries": [
+            {
+              "name": "Override",
+              "binding": "Simulate::enable[0]",
+              "default": "bit(mjOption::enableflags,0)"
+            },
+            {
+              "name": "Energy",
+              "binding": "Simulate::enable[1]",
+              "default": "bit(mjOption::enableflags,1)"
+            },
+            {
+              "name": "Fwdinv",
+              "binding": "Simulate::enable[2]",
+              "default": "bit(mjOption::enableflags,2)"
+            },
+            {
+              "name": "InvDiscrete",
+              "binding": "Simulate::enable[3]",
+              "default": "bit(mjOption::enableflags,3)"
+            },
+            {
+              "name": "MultiCCD",
+              "binding": "Simulate::enable[4]",
+              "default": "bit(mjOption::enableflags,4)"
+            }
+          ]
+        }
+      ],
+      "post_groups": [
+        {
+          "item_id": "physics.override_sep",
+          "type": "separator",
+          "label": "Contact Override"
+        },
+        {
+          "item_id": "physics.o_margin",
+          "type": "edit_float",
+          "label": "Margin",
+          "binding": "mjOption::o_margin",
+          "default": "model.opt.o_margin"
+        },
+        {
+          "item_id": "physics.o_solimp",
+          "type": "edit_vec5",
+          "label": "Sol Imp",
+          "binding": "mjOption::o_solimp",
+          "default": "model.opt.o_solimp"
+        },
+        {
+          "item_id": "physics.o_solref",
+          "type": "edit_vec2",
+          "label": "Sol Ref",
+          "binding": "mjOption::o_solref",
+          "default": "model.opt.o_solref"
+        },
+        {
+          "item_id": "physics.o_friction",
+          "type": "edit_vec5",
+          "label": "Friction",
+          "binding": "mjOption::o_friction",
+          "default": "model.opt.o_friction"
+        },
+        {
+          "item_id": "physics.actuator_sep",
+          "type": "separator",
+          "label": "Actuator Group Enable"
+        },
+        {
+          "item_id": "physics.actuator_group_0",
+          "type": "checkbox",
+          "label": "Act Group 0",
+          "binding": "Simulate::enableactuator[0]",
+          "default": "!(mjOption::disableactuator & (1<<0))"
+        },
+        {
+          "item_id": "physics.actuator_group_1",
+          "type": "checkbox",
+          "label": "Act Group 1",
+          "binding": "Simulate::enableactuator[1]",
+          "default": "!(mjOption::disableactuator & (1<<1))"
+        },
+        {
+          "item_id": "physics.actuator_group_2",
+          "type": "checkbox",
+          "label": "Act Group 2",
+          "binding": "Simulate::enableactuator[2]",
+          "default": "!(mjOption::disableactuator & (1<<2))"
+        },
+        {
+          "item_id": "physics.actuator_group_3",
+          "type": "checkbox",
+          "label": "Act Group 3",
+          "binding": "Simulate::enableactuator[3]",
+          "default": "!(mjOption::disableactuator & (1<<3))"
+        },
+        {
+          "item_id": "physics.actuator_group_4",
+          "type": "checkbox",
+          "label": "Act Group 4",
+          "binding": "Simulate::enableactuator[4]",
+          "default": "!(mjOption::disableactuator & (1<<4))"
+        },
+        {
+          "item_id": "physics.actuator_group_5",
+          "type": "checkbox",
+          "label": "Act Group 5",
+          "binding": "Simulate::enableactuator[5]",
+          "default": "!(mjOption::disableactuator & (1<<5))"
+        }
+      ]
+    },
+    {
+      "section_id": "rendering",
+      "title": "Rendering",
+      "shortcut": [
+        "Alt",
+        "R"
+      ],
+      "default_open": false,
+      "items": [
+        {
+          "item_id": "rendering.camera_mode",
+          "type": "select",
+          "label": "Camera",
+          "binding": "Simulate::camera",
+          "default": 0,
+          "options": "Free, Tracking + fixed cameras"
+        },
+        {
+          "item_id": "rendering.label_mode",
+          "type": "select",
+          "label": "Label",
+          "binding": "mjvOption::label",
+          "default": "opt.label",
+          "options": [
+            "None",
+            "Body",
+            "Joint",
+            "Geom",
+            "Site",
+            "Camera",
+            "Light",
+            "Tendon",
+            "Actuator",
+            "Constraint",
+            "Flex",
+            "Skin",
+            "Selection",
+            "Sel Pnt",
+            "Contact",
+            "Force",
+            "Island"
+          ]
+        },
+        {
+          "item_id": "rendering.frame_mode",
+          "type": "select",
+          "label": "Frame",
+          "binding": "mjvOption::frame",
+          "default": "opt.frame",
+          "options": [
+            "None",
+            "Body",
+            "Geom",
+            "Site",
+            "Camera",
+            "Light",
+            "Contact",
+            "World"
+          ]
+        },
+        {
+          "item_id": "rendering.copy_camera",
+          "type": "button",
+          "label": "Copy camera",
+          "binding": null,
+          "default": null,
+          "action": "CopyCamera()"
+        },
+        {
+          "item_id": "rendering.model_elements",
+          "type": "separator",
+          "label": "Model Elements"
+        }
+      ],
+      "dynamic_groups": [
+        {
+          "group_id": "rendering.model_flags",
+          "type": "checkbox_list",
+          "entries": [
+            {
+              "name": "Convex Hull",
+              "binding": "mjvOption::flags[0]",
+              "default": 0,
+              "shortcut": "H"
+            },
+            {
+              "name": "Texture",
+              "binding": "mjvOption::flags[1]",
+              "default": 1,
+              "shortcut": "X"
+            },
+            {
+              "name": "Joint",
+              "binding": "mjvOption::flags[2]",
+              "default": 0,
+              "shortcut": "J"
+            },
+            {
+              "name": "Camera",
+              "binding": "mjvOption::flags[3]",
+              "default": 0,
+              "shortcut": "Q"
+            },
+            {
+              "name": "Actuator",
+              "binding": "mjvOption::flags[4]",
+              "default": 0,
+              "shortcut": "U"
+            },
+            {
+              "name": "Activation",
+              "binding": "mjvOption::flags[5]",
+              "default": 0,
+              "shortcut": ","
+            },
+            {
+              "name": "Light",
+              "binding": "mjvOption::flags[6]",
+              "default": 0,
+              "shortcut": "Z"
+            },
+            {
+              "name": "Tendon",
+              "binding": "mjvOption::flags[7]",
+              "default": 1,
+              "shortcut": "V"
+            },
+            {
+              "name": "Range Finder",
+              "binding": "mjvOption::flags[8]",
+              "default": 1,
+              "shortcut": "Y"
+            },
+            {
+              "name": "Equality",
+              "binding": "mjvOption::flags[9]",
+              "default": 0,
+              "shortcut": "E"
+            },
+            {
+              "name": "Inertia",
+              "binding": "mjvOption::flags[10]",
+              "default": 0,
+              "shortcut": "I"
+            },
+            {
+              "name": "Scale Inertia",
+              "binding": "mjvOption::flags[11]",
+              "default": 0,
+              "shortcut": "'"
+            },
+            {
+              "name": "Perturb Force",
+              "binding": "mjvOption::flags[12]",
+              "default": 0,
+              "shortcut": "B"
+            },
+            {
+              "name": "Perturb Object",
+              "binding": "mjvOption::flags[13]",
+              "default": 1,
+              "shortcut": "O"
+            },
+            {
+              "name": "Contact Point",
+              "binding": "mjvOption::flags[14]",
+              "default": 0,
+              "shortcut": "C"
+            },
+            {
+              "name": "Island",
+              "binding": "mjvOption::flags[15]",
+              "default": 0,
+              "shortcut": "N"
+            },
+            {
+              "name": "Contact Force",
+              "binding": "mjvOption::flags[16]",
+              "default": 0,
+              "shortcut": "F"
+            },
+            {
+              "name": "Contact Split",
+              "binding": "mjvOption::flags[17]",
+              "default": 0,
+              "shortcut": "P"
+            },
+            {
+              "name": "Transparent",
+              "binding": "mjvOption::flags[18]",
+              "default": 0,
+              "shortcut": "T"
+            },
+            {
+              "name": "Auto Connect",
+              "binding": "mjvOption::flags[19]",
+              "default": 0,
+              "shortcut": "A"
+            },
+            {
+              "name": "Center of Mass",
+              "binding": "mjvOption::flags[20]",
+              "default": 0,
+              "shortcut": "M"
+            },
+            {
+              "name": "Select Point",
+              "binding": "mjvOption::flags[21]",
+              "default": 0,
+              "shortcut": null
+            },
+            {
+              "name": "Static Body",
+              "binding": "mjvOption::flags[22]",
+              "default": 1,
+              "shortcut": "D"
+            },
+            {
+              "name": "Skin",
+              "binding": "mjvOption::flags[23]",
+              "default": 1,
+              "shortcut": ";"
+            },
+            {
+              "name": "Flex Vert",
+              "binding": "mjvOption::flags[24]",
+              "default": 0,
+              "shortcut": null
+            },
+            {
+              "name": "Flex Edge",
+              "binding": "mjvOption::flags[25]",
+              "default": 1,
+              "shortcut": null
+            },
+            {
+              "name": "Flex Face",
+              "binding": "mjvOption::flags[26]",
+              "default": 0,
+              "shortcut": null
+            },
+            {
+              "name": "Flex Skin",
+              "binding": "mjvOption::flags[27]",
+              "default": 1,
+              "shortcut": null
+            },
+            {
+              "name": "Body Tree",
+              "binding": "mjvOption::flags[28]",
+              "default": 0,
+              "shortcut": "`"
+            },
+            {
+              "name": "Mesh Tree",
+              "binding": "mjvOption::flags[29]",
+              "default": 0,
+              "shortcut": "\\"
+            },
+            {
+              "name": "SDF iters",
+              "binding": "mjvOption::flags[30]",
+              "default": 0,
+              "shortcut": null
+            }
+          ]
+        }
+      ],
+      "post_groups": [
+        {
+          "item_id": "rendering.tree_depth",
+          "type": "slider_int",
+          "label": "Tree depth",
+          "binding": "Simulate::opt.bvh_depth",
+          "default": "model.opt.bvh_depth",
+          "range": "[0,20]"
+        },
+        {
+          "item_id": "rendering.flex_layer",
+          "type": "slider_int",
+          "label": "Flex layer",
+          "binding": "Simulate::opt.flex_layer",
+          "default": "model.opt.flex_layer",
+          "range": "[0,10]"
+        },
+        {
+          "item_id": "rendering.opengl_sep",
+          "type": "separator",
+          "label": "OpenGL Effects"
+        }
+      ],
+      "trail_groups": [
+        {
+          "group_id": "rendering.opengl_flags",
+          "type": "checkbox_list",
+          "entries": [
+            {
+              "name": "Shadow",
+              "binding": "mjvScene::flags[0]",
+              "default": 1,
+              "shortcut": "S"
+            },
+            {
+              "name": "Wireframe",
+              "binding": "mjvScene::flags[1]",
+              "default": 0,
+              "shortcut": "W"
+            },
+            {
+              "name": "Reflection",
+              "binding": "mjvScene::flags[2]",
+              "default": 1,
+              "shortcut": "R"
+            },
+            {
+              "name": "Additive",
+              "binding": "mjvScene::flags[3]",
+              "default": 0,
+              "shortcut": "L"
+            },
+            {
+              "name": "Skybox",
+              "binding": "mjvScene::flags[4]",
+              "default": 1,
+              "shortcut": "K"
+            },
+            {
+              "name": "Fog",
+              "binding": "mjvScene::flags[5]",
+              "default": 0,
+              "shortcut": "G"
+            },
+            {
+              "name": "Haze",
+              "binding": "mjvScene::flags[6]",
+              "default": 1,
+              "shortcut": "/"
+            },
+            {
+              "name": "Segment",
+              "binding": "mjvScene::flags[7]",
+              "default": 0,
+              "shortcut": ","
+            },
+            {
+              "name": "Id Color",
+              "binding": "mjvScene::flags[8]",
+              "default": 0,
+              "shortcut": null
+            },
+            {
+              "name": "Cull Face",
+              "binding": "mjvScene::flags[9]",
+              "default": 1,
+              "shortcut": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "visualization",
+      "title": "Visualization",
+      "shortcut": [
+        "Alt",
+        "V"
+      ],
+      "default_open": false,
+      "items": [
+        {
+          "item_id": "visualization.headlight_sep",
+          "type": "separator",
+          "label": "Headlight"
+        },
+        {
+          "item_id": "visualization.headlight_active",
+          "type": "radio",
+          "label": "Active",
+          "binding": "mjVisual::headlight.active",
+          "default": "model.vis.headlight.active",
+          "options": [
+            "Off",
+            "On"
+          ]
+        },
+        {
+          "item_id": "visualization.headlight_ambient",
+          "type": "edit_float",
+          "label": "Ambient",
+          "binding": "mjVisual::headlight.ambient",
+          "default": "model.vis.headlight.ambient"
+        },
+        {
+          "item_id": "visualization.headlight_diffuse",
+          "type": "edit_float",
+          "label": "Diffuse",
+          "binding": "mjVisual::headlight.diffuse",
+          "default": "model.vis.headlight.diffuse"
+        },
+        {
+          "item_id": "visualization.headlight_specular",
+          "type": "edit_float",
+          "label": "Specular",
+          "binding": "mjVisual::headlight.specular",
+          "default": "model.vis.headlight.specular"
+        },
+        {
+          "item_id": "visualization.freecam_sep",
+          "type": "separator",
+          "label": "Free Camera"
+        },
+        {
+          "item_id": "visualization.orthographic",
+          "type": "radio",
+          "label": "Orthographic",
+          "binding": "mjVisual::global.orthographic",
+          "default": "model.vis.global.orthographic",
+          "options": [
+            "No",
+            "Yes"
+          ]
+        },
+        {
+          "item_id": "visualization.fovy",
+          "type": "edit_float",
+          "label": "Field of view",
+          "binding": "mjVisual::global.fovy",
+          "default": "model.vis.global.fovy"
+        },
+        {
+          "item_id": "visualization.center",
+          "type": "edit_vec3",
+          "label": "Center",
+          "binding": "mjStatistic::center",
+          "default": "model.stat.center"
+        },
+        {
+          "item_id": "visualization.azimuth",
+          "type": "edit_float",
+          "label": "Azimuth",
+          "binding": "mjVisual::global.azimuth",
+          "default": "model.vis.global.azimuth"
+        },
+        {
+          "item_id": "visualization.elevation",
+          "type": "edit_float",
+          "label": "Elevation",
+          "binding": "mjVisual::global.elevation",
+          "default": "model.vis.global.elevation"
+        },
+        {
+          "item_id": "visualization.align",
+          "type": "button",
+          "label": "Align",
+          "shortcut": [
+            "Ctrl",
+            "A"
+          ],
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.align = true"
+        },
+        {
+          "item_id": "visualization.global_sep",
+          "type": "separator",
+          "label": "Global"
+        },
+        {
+          "item_id": "visualization.extent",
+          "type": "edit_float",
+          "label": "Extent",
+          "binding": "mjStatistic::extent",
+          "default": "model.stat.extent"
+        },
+        {
+          "item_id": "visualization.inertia",
+          "type": "radio",
+          "label": "Inertia",
+          "binding": "mjVisual::global.ellipsoidinertia",
+          "default": "model.vis.global.ellipsoidinertia",
+          "options": [
+            "Box",
+            "Ellipsoid"
+          ]
+        },
+        {
+          "item_id": "visualization.bvh",
+          "type": "radio",
+          "label": "BVH active",
+          "binding": "mjVisual::global.bvactive",
+          "default": "model.vis.global.bvactive",
+          "options": [
+            "False",
+            "True"
+          ]
+        },
+        {
+          "item_id": "visualization.map_sep",
+          "type": "separator",
+          "label": "Map"
+        },
+        {
+          "item_id": "visualization.map_stiffness",
+          "type": "edit_float",
+          "label": "stiffness",
+          "binding": "mjVisual::map.stiffness",
+          "default": "model.vis.map.stiffness"
+        },
+        {
+          "item_id": "visualization.map_stiffnessrot",
+          "type": "edit_float",
+          "label": "stiffnessrot",
+          "binding": "mjVisual::map.stiffnessrot",
+          "default": "model.vis.map.stiffnessrot"
+        },
+        {
+          "item_id": "visualization.map_force",
+          "type": "edit_float",
+          "label": "force",
+          "binding": "mjVisual::map.force",
+          "default": "model.vis.map.force"
+        },
+        {
+          "item_id": "visualization.map_torque",
+          "type": "edit_float",
+          "label": "torque",
+          "binding": "mjVisual::map.torque",
+          "default": "model.vis.map.torque"
+        },
+        {
+          "item_id": "visualization.map_alpha",
+          "type": "edit_float",
+          "label": "alpha",
+          "binding": "mjVisual::map.alpha",
+          "default": "model.vis.map.alpha"
+        },
+        {
+          "item_id": "visualization.map_fogstart",
+          "type": "edit_float",
+          "label": "fogstart",
+          "binding": "mjVisual::map.fogstart",
+          "default": "model.vis.map.fogstart"
+        },
+        {
+          "item_id": "visualization.map_fogend",
+          "type": "edit_float",
+          "label": "fogend",
+          "binding": "mjVisual::map.fogend",
+          "default": "model.vis.map.fogend"
+        },
+        {
+          "item_id": "visualization.map_znear",
+          "type": "edit_float",
+          "label": "Z near",
+          "binding": "mjVisual::map.znear",
+          "default": "model.vis.map.znear"
+        },
+        {
+          "item_id": "visualization.map_zfar",
+          "type": "edit_float",
+          "label": "zfar",
+          "binding": "mjVisual::map.zfar",
+          "default": "model.vis.map.zfar"
+        },
+        {
+          "item_id": "visualization.map_haze",
+          "type": "edit_float",
+          "label": "haze",
+          "binding": "mjVisual::map.haze",
+          "default": "model.vis.map.haze"
+        },
+        {
+          "item_id": "visualization.map_shadowclip",
+          "type": "edit_float",
+          "label": "shadowclip",
+          "binding": "mjVisual::map.shadowclip",
+          "default": "model.vis.map.shadowclip"
+        },
+        {
+          "item_id": "visualization.map_shadowscale",
+          "type": "edit_float",
+          "label": "shadowscale",
+          "binding": "mjVisual::map.shadowscale",
+          "default": "model.vis.map.shadowscale"
+        },
+        {
+          "item_id": "visualization.scale_sep",
+          "type": "separator",
+          "label": "Scale"
+        },
+        {
+          "item_id": "visualization.scale_meansize",
+          "type": "edit_float",
+          "label": "All (meansize)",
+          "binding": "mjStatistic::meansize",
+          "default": "model.stat.meansize"
+        },
+        {
+          "item_id": "visualization.scale_forcewidth",
+          "type": "edit_float",
+          "label": "Force width",
+          "binding": "mjVisual::scale.forcewidth",
+          "default": "model.vis.scale.forcewidth"
+        },
+        {
+          "item_id": "visualization.scale_contactwidth",
+          "type": "edit_float",
+          "label": "Contact width",
+          "binding": "mjVisual::scale.contactwidth",
+          "default": "model.vis.scale.contactwidth"
+        },
+        {
+          "item_id": "visualization.scale_contactheight",
+          "type": "edit_float",
+          "label": "Contact height",
+          "binding": "mjVisual::scale.contactheight",
+          "default": "model.vis.scale.contactheight"
+        },
+        {
+          "item_id": "visualization.scale_connect",
+          "type": "edit_float",
+          "label": "Connect",
+          "binding": "mjVisual::scale.connect",
+          "default": "model.vis.scale.connect"
+        },
+        {
+          "item_id": "visualization.scale_com",
+          "type": "edit_float",
+          "label": "Com",
+          "binding": "mjVisual::scale.com",
+          "default": "model.vis.scale.com"
+        },
+        {
+          "item_id": "visualization.scale_camera",
+          "type": "edit_float",
+          "label": "Camera",
+          "binding": "mjVisual::scale.camera",
+          "default": "model.vis.scale.camera"
+        },
+        {
+          "item_id": "visualization.scale_light",
+          "type": "edit_float",
+          "label": "Light",
+          "binding": "mjVisual::scale.light",
+          "default": "model.vis.scale.light"
+        },
+        {
+          "item_id": "visualization.scale_selectpoint",
+          "type": "edit_float",
+          "label": "Select point",
+          "binding": "mjVisual::scale.selectpoint",
+          "default": "model.vis.scale.selectpoint"
+        },
+        {
+          "item_id": "visualization.scale_jointlength",
+          "type": "edit_float",
+          "label": "Joint length",
+          "binding": "mjVisual::scale.jointlength",
+          "default": "model.vis.scale.jointlength"
+        },
+        {
+          "item_id": "visualization.scale_jointwidth",
+          "type": "edit_float",
+          "label": "Joint width",
+          "binding": "mjVisual::scale.jointwidth",
+          "default": "model.vis.scale.jointwidth"
+        },
+        {
+          "item_id": "visualization.scale_actuatorlength",
+          "type": "edit_float",
+          "label": "Actuator length",
+          "binding": "mjVisual::scale.actuatorlength",
+          "default": "model.vis.scale.actuatorlength"
+        },
+        {
+          "item_id": "visualization.scale_actuatorwidth",
+          "type": "edit_float",
+          "label": "Actuator width",
+          "binding": "mjVisual::scale.actuatorwidth",
+          "default": "model.vis.scale.actuatorwidth"
+        },
+        {
+          "item_id": "visualization.scale_framelength",
+          "type": "edit_float",
+          "label": "Frame length",
+          "binding": "mjVisual::scale.framelength",
+          "default": "model.vis.scale.framelength"
+        },
+        {
+          "item_id": "visualization.scale_framewidth",
+          "type": "edit_float",
+          "label": "Frame width",
+          "binding": "mjVisual::scale.framewidth",
+          "default": "model.vis.scale.framewidth"
+        },
+        {
+          "item_id": "visualization.scale_constraint",
+          "type": "edit_float",
+          "label": "Constraint",
+          "binding": "mjVisual::scale.constraint",
+          "default": "model.vis.scale.constraint"
+        },
+        {
+          "item_id": "visualization.scale_slidercrank",
+          "type": "edit_float",
+          "label": "Slider-crank",
+          "binding": "mjVisual::scale.slidercrank",
+          "default": "model.vis.scale.slidercrank"
+        },
+        {
+          "item_id": "visualization.rgba_sep",
+          "type": "separator",
+          "label": "RGBA"
+        },
+        {
+          "item_id": "visualization.rgba_fog",
+          "type": "edit_rgba",
+          "label": "fog",
+          "binding": "mjVisual::rgba.fog",
+          "default": "model.vis.rgba.fog"
+        },
+        {
+          "item_id": "visualization.rgba_haze",
+          "type": "edit_rgba",
+          "label": "haze",
+          "binding": "mjVisual::rgba.haze",
+          "default": "model.vis.rgba.haze"
+        },
+        {
+          "item_id": "visualization.rgba_force",
+          "type": "edit_rgba",
+          "label": "force",
+          "binding": "mjVisual::rgba.force",
+          "default": "model.vis.rgba.force"
+        },
+        {
+          "item_id": "visualization.rgba_inertia",
+          "type": "edit_rgba",
+          "label": "inertia",
+          "binding": "mjVisual::rgba.inertia",
+          "default": "model.vis.rgba.inertia"
+        },
+        {
+          "item_id": "visualization.rgba_joint",
+          "type": "edit_rgba",
+          "label": "joint",
+          "binding": "mjVisual::rgba.joint",
+          "default": "model.vis.rgba.joint"
+        },
+        {
+          "item_id": "visualization.rgba_actuator",
+          "type": "edit_rgba",
+          "label": "actuator",
+          "binding": "mjVisual::rgba.actuator",
+          "default": "model.vis.rgba.actuator"
+        },
+        {
+          "item_id": "visualization.rgba_actuatornegative",
+          "type": "edit_rgba",
+          "label": "actuatornegative",
+          "binding": "mjVisual::rgba.actuatornegative",
+          "default": "model.vis.rgba.actuatornegative"
+        },
+        {
+          "item_id": "visualization.rgba_actuatorpositive",
+          "type": "edit_rgba",
+          "label": "actuatorpositive",
+          "binding": "mjVisual::rgba.actuatorpositive",
+          "default": "model.vis.rgba.actuatorpositive"
+        },
+        {
+          "item_id": "visualization.rgba_com",
+          "type": "edit_rgba",
+          "label": "com",
+          "binding": "mjVisual::rgba.com",
+          "default": "model.vis.rgba.com"
+        },
+        {
+          "item_id": "visualization.rgba_camera",
+          "type": "edit_rgba",
+          "label": "camera",
+          "binding": "mjVisual::rgba.camera",
+          "default": "model.vis.rgba.camera"
+        },
+        {
+          "item_id": "visualization.rgba_light",
+          "type": "edit_rgba",
+          "label": "light",
+          "binding": "mjVisual::rgba.light",
+          "default": "model.vis.rgba.light"
+        },
+        {
+          "item_id": "visualization.rgba_selectpoint",
+          "type": "edit_rgba",
+          "label": "selectpoint",
+          "binding": "mjVisual::rgba.selectpoint",
+          "default": "model.vis.rgba.selectpoint"
+        },
+        {
+          "item_id": "visualization.rgba_connect",
+          "type": "edit_rgba",
+          "label": "connect",
+          "binding": "mjVisual::rgba.connect",
+          "default": "model.vis.rgba.connect"
+        },
+        {
+          "item_id": "visualization.rgba_contactpoint",
+          "type": "edit_rgba",
+          "label": "contactpoint",
+          "binding": "mjVisual::rgba.contactpoint",
+          "default": "model.vis.rgba.contactpoint"
+        },
+        {
+          "item_id": "visualization.rgba_contactforce",
+          "type": "edit_rgba",
+          "label": "contactforce",
+          "binding": "mjVisual::rgba.contactforce",
+          "default": "model.vis.rgba.contactforce"
+        },
+        {
+          "item_id": "visualization.rgba_contactfriction",
+          "type": "edit_rgba",
+          "label": "contactfriction",
+          "binding": "mjVisual::rgba.contactfriction",
+          "default": "model.vis.rgba.contactfriction"
+        },
+        {
+          "item_id": "visualization.rgba_contacttorque",
+          "type": "edit_rgba",
+          "label": "contacttorque",
+          "binding": "mjVisual::rgba.contacttorque",
+          "default": "model.vis.rgba.contacttorque"
+        },
+        {
+          "item_id": "visualization.rgba_contactgap",
+          "type": "edit_rgba",
+          "label": "contactgap",
+          "binding": "mjVisual::rgba.contactgap",
+          "default": "model.vis.rgba.contactgap"
+        },
+        {
+          "item_id": "visualization.rgba_rangefinder",
+          "type": "edit_rgba",
+          "label": "rangefinder",
+          "binding": "mjVisual::rgba.rangefinder",
+          "default": "model.vis.rgba.rangefinder"
+        },
+        {
+          "item_id": "visualization.rgba_constraint",
+          "type": "edit_rgba",
+          "label": "constraint",
+          "binding": "mjVisual::rgba.constraint",
+          "default": "model.vis.rgba.constraint"
+        },
+        {
+          "item_id": "visualization.rgba_slidercrank",
+          "type": "edit_rgba",
+          "label": "slidercrank",
+          "binding": "mjVisual::rgba.slidercrank",
+          "default": "model.vis.rgba.slidercrank"
+        },
+        {
+          "item_id": "visualization.rgba_crankbroken",
+          "type": "edit_rgba",
+          "label": "crankbroken",
+          "binding": "mjVisual::rgba.crankbroken",
+          "default": "model.vis.rgba.crankbroken"
+        },
+        {
+          "item_id": "visualization.rgba_frustum",
+          "type": "edit_rgba",
+          "label": "frustum",
+          "binding": "mjVisual::rgba.frustum",
+          "default": "model.vis.rgba.frustum"
+        },
+        {
+          "item_id": "visualization.rgba_bv",
+          "type": "edit_rgba",
+          "label": "bv",
+          "binding": "mjVisual::rgba.bv",
+          "default": "model.vis.rgba.bv"
+        },
+        {
+          "item_id": "visualization.rgba_bvactive",
+          "type": "edit_rgba",
+          "label": "bvactive",
+          "binding": "mjVisual::rgba.bvactive",
+          "default": "model.vis.rgba.bvactive"
+        }
+      ]
+    },
+    {
+      "section_id": "group",
+      "title": "Group enable",
+      "shortcut": [
+        "Alt",
+        "G"
+      ],
+      "default_open": false,
+      "items": [
+        {
+          "item_id": "group.geom_separator",
+          "type": "separator",
+          "label": "Geom groups"
+        },
+        {
+          "item_id": "group.geom0",
+          "type": "checkbox",
+          "label": "Geom 0",
+          "binding": "mjvOption::geomgroup[0]",
+          "default": "model.opt.geomgroup[0]",
+          "shortcut": [
+            "0"
+          ]
+        },
+        {
+          "item_id": "group.geom1",
+          "type": "checkbox",
+          "label": "Geom 1",
+          "binding": "mjvOption::geomgroup[1]",
+          "default": "model.opt.geomgroup[1]",
+          "shortcut": [
+            "1"
+          ]
+        },
+        {
+          "item_id": "group.geom2",
+          "type": "checkbox",
+          "label": "Geom 2",
+          "binding": "mjvOption::geomgroup[2]",
+          "default": "model.opt.geomgroup[2]",
+          "shortcut": [
+            "2"
+          ]
+        },
+        {
+          "item_id": "group.geom3",
+          "type": "checkbox",
+          "label": "Geom 3",
+          "binding": "mjvOption::geomgroup[3]",
+          "default": "model.opt.geomgroup[3]",
+          "shortcut": [
+            "3"
+          ]
+        },
+        {
+          "item_id": "group.geom4",
+          "type": "checkbox",
+          "label": "Geom 4",
+          "binding": "mjvOption::geomgroup[4]",
+          "default": "model.opt.geomgroup[4]",
+          "shortcut": [
+            "4"
+          ]
+        },
+        {
+          "item_id": "group.geom5",
+          "type": "checkbox",
+          "label": "Geom 5",
+          "binding": "mjvOption::geomgroup[5]",
+          "default": "model.opt.geomgroup[5]",
+          "shortcut": [
+            "5"
+          ]
+        },
+        {
+          "item_id": "group.site_separator",
+          "type": "separator",
+          "label": "Site groups"
+        },
+        {
+          "item_id": "group.site0",
+          "type": "checkbox",
+          "label": "Site 0",
+          "binding": "mjvOption::sitegroup[0]",
+          "default": "model.opt.sitegroup[0]",
+          "shortcut": [
+            "Shift",
+            "0"
+          ]
+        },
+        {
+          "item_id": "group.site1",
+          "type": "checkbox",
+          "label": "Site 1",
+          "binding": "mjvOption::sitegroup[1]",
+          "default": "model.opt.sitegroup[1]",
+          "shortcut": [
+            "Shift",
+            "1"
+          ]
+        },
+        {
+          "item_id": "group.site2",
+          "type": "checkbox",
+          "label": "Site 2",
+          "binding": "mjvOption::sitegroup[2]",
+          "default": "model.opt.sitegroup[2]",
+          "shortcut": [
+            "Shift",
+            "2"
+          ]
+        },
+        {
+          "item_id": "group.site3",
+          "type": "checkbox",
+          "label": "Site 3",
+          "binding": "mjvOption::sitegroup[3]",
+          "default": "model.opt.sitegroup[3]",
+          "shortcut": [
+            "Shift",
+            "3"
+          ]
+        },
+        {
+          "item_id": "group.site4",
+          "type": "checkbox",
+          "label": "Site 4",
+          "binding": "mjvOption::sitegroup[4]",
+          "default": "model.opt.sitegroup[4]",
+          "shortcut": [
+            "Shift",
+            "4"
+          ]
+        },
+        {
+          "item_id": "group.site5",
+          "type": "checkbox",
+          "label": "Site 5",
+          "binding": "mjvOption::sitegroup[5]",
+          "default": "model.opt.sitegroup[5]",
+          "shortcut": [
+            "Shift",
+            "5"
+          ]
+        },
+        {
+          "item_id": "group.joint_separator",
+          "type": "separator",
+          "label": "Joint groups"
+        },
+        {
+          "item_id": "group.joint0",
+          "type": "checkbox",
+          "label": "Joint 0",
+          "binding": "mjvOption::jointgroup[0]",
+          "default": "model.opt.jointgroup[0]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.joint1",
+          "type": "checkbox",
+          "label": "Joint 1",
+          "binding": "mjvOption::jointgroup[1]",
+          "default": "model.opt.jointgroup[1]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.joint2",
+          "type": "checkbox",
+          "label": "Joint 2",
+          "binding": "mjvOption::jointgroup[2]",
+          "default": "model.opt.jointgroup[2]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.joint3",
+          "type": "checkbox",
+          "label": "Joint 3",
+          "binding": "mjvOption::jointgroup[3]",
+          "default": "model.opt.jointgroup[3]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.joint4",
+          "type": "checkbox",
+          "label": "Joint 4",
+          "binding": "mjvOption::jointgroup[4]",
+          "default": "model.opt.jointgroup[4]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.joint5",
+          "type": "checkbox",
+          "label": "Joint 5",
+          "binding": "mjvOption::jointgroup[5]",
+          "default": "model.opt.jointgroup[5]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.tendon_separator",
+          "type": "separator",
+          "label": "Tendon groups"
+        },
+        {
+          "item_id": "group.tendon0",
+          "type": "checkbox",
+          "label": "Tendon 0",
+          "binding": "mjvOption::tendongroup[0]",
+          "default": "model.opt.tendongroup[0]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.tendon1",
+          "type": "checkbox",
+          "label": "Tendon 1",
+          "binding": "mjvOption::tendongroup[1]",
+          "default": "model.opt.tendongroup[1]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.tendon2",
+          "type": "checkbox",
+          "label": "Tendon 2",
+          "binding": "mjvOption::tendongroup[2]",
+          "default": "model.opt.tendongroup[2]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.tendon3",
+          "type": "checkbox",
+          "label": "Tendon 3",
+          "binding": "mjvOption::tendongroup[3]",
+          "default": "model.opt.tendongroup[3]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.tendon4",
+          "type": "checkbox",
+          "label": "Tendon 4",
+          "binding": "mjvOption::tendongroup[4]",
+          "default": "model.opt.tendongroup[4]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.tendon5",
+          "type": "checkbox",
+          "label": "Tendon 5",
+          "binding": "mjvOption::tendongroup[5]",
+          "default": "model.opt.tendongroup[5]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.actuator_separator",
+          "type": "separator",
+          "label": "Actuator groups"
+        },
+        {
+          "item_id": "group.actuator0",
+          "type": "checkbox",
+          "label": "Actuator 0",
+          "binding": "mjvOption::actuatorgroup[0]",
+          "default": "model.opt.actuatorgroup[0]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.actuator1",
+          "type": "checkbox",
+          "label": "Actuator 1",
+          "binding": "mjvOption::actuatorgroup[1]",
+          "default": "model.opt.actuatorgroup[1]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.actuator2",
+          "type": "checkbox",
+          "label": "Actuator 2",
+          "binding": "mjvOption::actuatorgroup[2]",
+          "default": "model.opt.actuatorgroup[2]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.actuator3",
+          "type": "checkbox",
+          "label": "Actuator 3",
+          "binding": "mjvOption::actuatorgroup[3]",
+          "default": "model.opt.actuatorgroup[3]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.actuator4",
+          "type": "checkbox",
+          "label": "Actuator 4",
+          "binding": "mjvOption::actuatorgroup[4]",
+          "default": "model.opt.actuatorgroup[4]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.actuator5",
+          "type": "checkbox",
+          "label": "Actuator 5",
+          "binding": "mjvOption::actuatorgroup[5]",
+          "default": "model.opt.actuatorgroup[5]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.flex_separator",
+          "type": "separator",
+          "label": "Flex groups"
+        },
+        {
+          "item_id": "group.flex0",
+          "type": "checkbox",
+          "label": "Flex 0",
+          "binding": "mjvOption::flexgroup[0]",
+          "default": "model.opt.flexgroup[0]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.flex1",
+          "type": "checkbox",
+          "label": "Flex 1",
+          "binding": "mjvOption::flexgroup[1]",
+          "default": "model.opt.flexgroup[1]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.flex2",
+          "type": "checkbox",
+          "label": "Flex 2",
+          "binding": "mjvOption::flexgroup[2]",
+          "default": "model.opt.flexgroup[2]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.flex3",
+          "type": "checkbox",
+          "label": "Flex 3",
+          "binding": "mjvOption::flexgroup[3]",
+          "default": "model.opt.flexgroup[3]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.flex4",
+          "type": "checkbox",
+          "label": "Flex 4",
+          "binding": "mjvOption::flexgroup[4]",
+          "default": "model.opt.flexgroup[4]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.flex5",
+          "type": "checkbox",
+          "label": "Flex 5",
+          "binding": "mjvOption::flexgroup[5]",
+          "default": "model.opt.flexgroup[5]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.skin_separator",
+          "type": "separator",
+          "label": "Skin groups"
+        },
+        {
+          "item_id": "group.skin0",
+          "type": "checkbox",
+          "label": "Skin 0",
+          "binding": "mjvOption::skingroup[0]",
+          "default": "model.opt.skingroup[0]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.skin1",
+          "type": "checkbox",
+          "label": "Skin 1",
+          "binding": "mjvOption::skingroup[1]",
+          "default": "model.opt.skingroup[1]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.skin2",
+          "type": "checkbox",
+          "label": "Skin 2",
+          "binding": "mjvOption::skingroup[2]",
+          "default": "model.opt.skingroup[2]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.skin3",
+          "type": "checkbox",
+          "label": "Skin 3",
+          "binding": "mjvOption::skingroup[3]",
+          "default": "model.opt.skingroup[3]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.skin4",
+          "type": "checkbox",
+          "label": "Skin 4",
+          "binding": "mjvOption::skingroup[4]",
+          "default": "model.opt.skingroup[4]",
+          "shortcut": null
+        },
+        {
+          "item_id": "group.skin5",
+          "type": "checkbox",
+          "label": "Skin 5",
+          "binding": "mjvOption::skingroup[5]",
+          "default": "model.opt.skingroup[5]",
+          "shortcut": null
+        }
+      ]
+    }
+  ],
+  "right_panel": [
+    {
+      "section_id": "joint",
+      "title": "Joint",
+      "shortcut": [
+        "Alt",
+        "J"
+      ],
+      "default_open": false,
+      "templates": [
+        {
+          "type": "slider_float",
+          "label": "Joint DOF",
+          "binding": "Simulate::joint slider",
+          "range": "joint-specific",
+          "notes": "Visible for hinge/slide joints respecting mjvOption::jointgroup"
+        }
+      ],
+      "items": []
+    },
+    {
+      "section_id": "control",
+      "title": "Control",
+      "shortcut": [
+        "Alt",
+        "C"
+      ],
+      "default_open": false,
+      "items": [
+        {
+          "item_id": "control.clear",
+          "type": "button",
+          "label": "Clear all",
+          "binding": null,
+          "default": null,
+          "action": "Simulate::pending_.zero_ctrl = true"
+        }
+      ],
+      "templates": [
+        {
+          "type": "slider_float",
+          "label": "Actuator control",
+          "binding": "Simulate::d_->ctrl",
+          "range": "ctrlrange or [-1,1]",
+          "notes": "Disabled when actuator group toggled off"
+        }
+      ]
+    },
+    {
+      "section_id": "equality",
+      "title": "Equality",
+      "shortcut": [
+        "Alt",
+        "E"
+      ],
+      "default_open": false,
+      "templates": [
+        {
+          "type": "checkbox",
+          "label": "Equality constraint",
+          "binding": "Simulate::d_->eq_active",
+          "notes": "One per equality; label from equality_names_"
+        }
+      ],
+      "items": []
+    }
+  ],
+  "notes": {
+    "layout": "ui0 (left) rect=1, ui1 (right) rect=2; initial sections 0-2 opened",
+    "shortcuts": "Hold right mouse button inside UI to reveal shortcut badges (mjuiState.mousehelp)",
+    "updates": "UiEvent pushes edits directly into mjOption/mjVisual/mjvOption structures"
+  }
+}
