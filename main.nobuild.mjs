@@ -290,6 +290,7 @@ const tempVecD = new THREE.Vector3();
 const tempSpherical = new THREE.Spherical();
 const tempVecE = new THREE.Vector3();
 const GLOBAL_UP = new THREE.Vector3(0, 0, 1);
+let fallbackGroundTexture = null;
 
 function mat3ToQuat(m) {
   const m00 = m[0] ?? 1;
@@ -487,6 +488,49 @@ function syncRendererAssets(ctx, assets) {
 function isSnapshotDebugEnabled() {
   if (typeof window === 'undefined') return false;
   return !!window.PLAY_SNAPSHOT_DEBUG;
+}
+
+function getFallbackGroundTexture() {
+  if (fallbackGroundTexture) return fallbackGroundTexture;
+  if (typeof document === 'undefined') return null;
+  const size = 256;
+  const step = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx2d = canvas.getContext('2d');
+  if (ctx2d) {
+    const colors = ['#2a2f38', '#252a34'];
+    for (let y = 0; y < size; y += step) {
+      for (let x = 0; x < size; x += step) {
+        const idx = ((x + y) / step) & 1;
+        ctx2d.fillStyle = colors[idx];
+        ctx2d.fillRect(x, y, step, step);
+      }
+    }
+    ctx2d.strokeStyle = '#1d212c';
+    ctx2d.lineWidth = 1;
+    for (let y = 0; y <= size; y += step) {
+      ctx2d.beginPath();
+      ctx2d.moveTo(0, y + 0.5);
+      ctx2d.lineTo(size, y + 0.5);
+      ctx2d.stroke();
+    }
+    for (let x = 0; x <= size; x += step) {
+      ctx2d.beginPath();
+      ctx2d.moveTo(x + 0.5, 0);
+      ctx2d.lineTo(x + 0.5, size);
+      ctx2d.stroke();
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(10, 10);
+  texture.anisotropy = 8;
+  texture.encoding = THREE.sRGBEncoding;
+  fallbackGroundTexture = texture;
+  return texture;
 }
 
 function buildAdapterMeshSnapshot(ctx, assets) {
@@ -696,9 +740,10 @@ function createPrimitiveGeometry(gtype, sizeVec) {
         geometry = new THREE.PlaneGeometry(width, height, 1, 1);
       }
       materialOpts = {
-        color: 0x4a5661,
-        metalness: 0.0,
-        roughness: 0.95,
+        color: 0x2f343f,
+        metalness: 0.1,
+        roughness: 0.9,
+        map: getFallbackGroundTexture(),
       };
       postCreate = (mesh) => {
         mesh.rotation.x = -Math.PI / 2;
