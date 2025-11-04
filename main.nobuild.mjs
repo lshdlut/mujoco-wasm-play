@@ -890,15 +890,21 @@ function ensureOutdoorSkyEnv(ctx, preset) {
       try {
         const mod = await import('three/addons/loaders/RGBELoader.js');
         if (!mod || !mod.RGBELoader) return false;
-        const loader = new mod.RGBELoader();
+        const loader = new mod.RGBELoader().setDataType(THREE.FloatType);
         if (typeof console !== 'undefined') console.log('[env] trying HDRI', url);
         ctx.hdriLoading = true;
         const hdr = await new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
         // Configure HDR for visible background
         hdr.mapping = THREE.EquirectangularReflectionMapping;
-        if (THREE.LinearSRGBColorSpace) {
+        const isUByte = hdr.type === THREE.UnsignedByteType;
+        if (THREE.SRGBColorSpace && isUByte) {
+          hdr.colorSpace = THREE.SRGBColorSpace;
+        } else if (THREE.LinearSRGBColorSpace) {
           hdr.colorSpace = THREE.LinearSRGBColorSpace;
         }
+        hdr.minFilter = THREE.LinearFilter;
+        hdr.magFilter = THREE.LinearFilter;
+        hdr.generateMipmaps = false;
         hdr.needsUpdate = true;
         // Use PMREM for environment (reflections)
         const envRT = ctx.pmrem.fromEquirectangular(hdr);
