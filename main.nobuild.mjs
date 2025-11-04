@@ -503,20 +503,7 @@ function getDefaultVopt(state) {
   return renderCtx.defaultVopt;
 }
 
-function disposeMeshObject(mesh) {
-  try {
-    if (mesh.userData && mesh.userData.fallbackBackface) {
-      const back = mesh.userData.fallbackBackface;
-      if (back.material && typeof back.material.dispose === 'function') {
-        try { back.material.dispose(); } catch {}
-      }
-      if (typeof mesh.remove === 'function') {
-        try { mesh.remove(back); } catch {}
-      }
-      mesh.userData.fallbackBackface = null;
-    }
-  } catch {}
-
+function disposeMeshObject(mesh) {\n
   if (!mesh) return;
   const parent = mesh.parent;
   if (parent && typeof parent.remove === 'function') {
@@ -608,11 +595,40 @@ function getFallbackGroundTexture() {
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(10, 10);
   texture.anisotropy = 8;
-  texture.encoding = THREE.sRGBEncoding;
+  if (THREE.SRGBColorSpace) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+  } else {
+    texture.encoding = THREE.sRGBEncoding;
+  }
   fallbackGroundTexture = texture;
   return texture;
 }
 
+function applyBackfaceFade(material, options = {}) {
+  const opacity = Math.max(0, Math.min(1, options.opacity ?? 0.25));
+  const materials = Array.isArray(material) ? material : [material];
+  for (const mat of materials) {
+    if (!mat) continue;
+    mat.userData = mat.userData || {};
+    if (mat.userData.backfaceFadeApplied) continue;
+    mat.userData.backfaceFadeApplied = true;
+    mat.userData.backfaceFadeOpacity = opacity;
+    const previous = typeof mat.onBeforeCompile === 'function' ? mat.onBeforeCompile : null;
+    mat.transparent = true;
+    mat.onBeforeCompile = (shader) => {
+      if (previous) previous(shader);
+      shader.uniforms.backfaceFadeOpacity = { value: opacity };
+      const marker = '\n#include <alphatest_fragment>\n';
+      const fadeChunk = '\n  vec3 viewDir = normalize(-vViewPosition);\n'
+        + '  float ndotv = dot(normalize(geometryNormal), viewDir);\n'
+        + '  float fade = smoothstep(-0.35, 0.05, ndotv);\n'
+        + '  float opacityFactor = mix(backfaceFadeOpacity, 1.0, fade);\n'
+        + '  diffuseColor.a *= opacityFactor;\n';
+      shader.fragmentShader = shader.fragmentShader.replace(marker, marker + fadeChunk);
+    };
+    mat.needsUpdate = true;
+  }
+}
 function buildAdapterMeshSnapshot(ctx, assets) {
   if (assets?.meshes) {
     return {
@@ -850,6 +866,7 @@ function emitAdapterSceneSnapshot(ctx, snapshot, state) {
 
 function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
   const fallbackEnabled = options.fallbackEnabled !== false;
+  const backfaceFadeDefault = options.backfaceFadeOpacity ?? 0.25;
   let geometry;
   let materialOpts = {
     color: 0x6fa0ff,
@@ -857,6 +874,9 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
     roughness: 0.65,
   };
   let postCreate = null;
+  let backfaceFade = fallbackEnabled;
+  let backfaceOpacity = backfaceFadeDefault;
+
   switch (gtype) {
     case MJ_GEOM.SPHERE:
     case MJ_GEOM.ELLIPSOID:
@@ -888,6 +908,8 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
         const width = Math.max(1, Math.abs(sizeVec?.[0] || 0) > 1e-6 ? (sizeVec[0] * 2) : 20);
         const height = Math.max(1, Math.abs(sizeVec?.[1] || 0) > 1e-6 ? (sizeVec[1] * 2) : 20);
         geometry = new THREE.PlaneGeometry(width, height, 1, 1);
+        backfaceFade = true;
+        backfaceOpacity = options.groundBackfaceOpacity ?? 0.12;
       }
       materialOpts = {
         color: 0x2f343f,
@@ -915,71 +937,10 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
   if (geometry && typeof geometry.computeBoundingSphere === 'function') {
     geometry.computeBoundingSphere();
   }
-  return { geometry, materialOpts, postCreate };
+  return { geometry, materialOpts, postCreate, backfaceFade, backfaceOpacity };
 }
 
-function createMeshGeometryFromAssets(assets, meshId) {
-  if (!assets || !assets.meshes || !(meshId >= 0)) return null;
-  const { vert, vertadr, vertnum, face, faceadr, facenum, normal, texcoord, texcoordadr, texcoordnum } = assets.meshes;
-  if (!vert || !vertadr || !vertnum) return null;
-  const count = vertnum[meshId] | 0;
-  if (!(count > 0)) return null;
-  const start = (vertadr[meshId] | 0) * 3;
-  const end = start + (count * 3);
-  if (start < 0 || end > vert.length) return null;
-  const positions = vert.slice(start, end);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-  if (normal && normal.length >= end) {
-    const normalSlice = normal.slice(start, end);
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normalSlice, 3));
-  }
-
-  if (face && faceadr && facenum) {
-    const triCount = facenum[meshId] | 0;
-    if (triCount > 0) {
-      const faceStart = (faceadr[meshId] | 0) * 3;
-      const faceEnd = faceStart + (triCount * 3);
-      if (faceStart >= 0 && faceEnd <= face.length) {
-        const rawFaces = face.slice(faceStart, faceEnd);
-        let needsUint32 = count > 65535;
-        if (!needsUint32) {
-          for (let i = 0; i < rawFaces.length; i += 1) {
-            if (rawFaces[i] > 65535) {
-              needsUint32 = true;
-              break;
-            }
-          }
-        }
-        const IndexCtor = needsUint32 ? Uint32Array : Uint16Array;
-        const indices = new IndexCtor(rawFaces);
-        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-      }
-    }
-  }
-
-  if (texcoord && texcoordadr && texcoordnum) {
-    const tcCount = texcoordnum[meshId] | 0;
-    if (tcCount > 0) {
-      const tcStart = (texcoordadr[meshId] | 0) * 2;
-      const tcEnd = tcStart + (tcCount * 2);
-      if (tcStart >= 0 && tcEnd <= texcoord.length) {
-        const uvSlice = texcoord.slice(tcStart, tcEnd);
-        geometry.setAttribute('uv', new THREE.BufferAttribute(uvSlice, 2));
-      }
-    }
-  }
-
-  if (!geometry.getAttribute('normal')) {
-    geometry.computeVertexNormals();
-  }
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-function getSharedMeshGeometry(ctx, assets, dataId) {
+function getSharedMeshGeometry(ctx, assets, dataId) {function getSharedMeshGeometry(ctx, assets, dataId) {
   if (!ctx.assetCache || !(ctx.assetCache.meshGeometries instanceof Map)) {
     ctx.assetCache = {
       meshGeometries: new Map(),
@@ -1014,6 +975,8 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec) {
     }
 
     let geometryInfo = null;
+    const fallbackConfig = ctx.fallback || {};
+    const fallbackEnabled = fallbackConfig.enabled !== false;
     if (gtype === MJ_GEOM.MESH && assets && dataId >= 0) {
       const meshGeometry = getSharedMeshGeometry(ctx, assets, dataId);
       if (!ctx.meshAssetDebugLogged) {
@@ -1053,6 +1016,9 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec) {
     mesh = new THREE.Mesh(geometryInfo.geometry, material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    if (geometryInfo.backfaceFade && ctx.fallback?.enabled !== false) {
+      applyBackfaceFade(mesh.material, { opacity: geometryInfo.backfaceOpacity });
+    }
     if (typeof geometryInfo.postCreate === 'function') {
       try { geometryInfo.postCreate(mesh); } catch {}
     }
