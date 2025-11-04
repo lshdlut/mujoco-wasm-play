@@ -481,6 +481,8 @@ function initRenderer() {
     copySeq: 0,
     autoAligned: false,
     bounds: null,
+    hdriReady: false,
+    hdriLoading: false,
     fallback: {
       enabled: fallbackEnabledDefault,
       preset: fallbackPresetKey,
@@ -755,7 +757,7 @@ function applyFallbackAppearance(ctx, state) {
     return;
   }
 
-  if (!hasModelBackground(state) && ctx.scene) {
+  if (!hasModelBackground(state) && ctx.scene && !ctx.hdriReady) {
     // Background: Outdoor uses gradient until Sky/HDRI ready; Studio uses gradient
     if (fallback.preset === 'studio-clean') {
       if (!ctx.studioBgTex) {
@@ -780,7 +782,7 @@ function applyFallbackAppearance(ctx, state) {
   }
 
   // Even if model requested a black background, ensure outdoor preset doesn't stay black when no env/sky yet
-  if (ctx.scene && fallback.preset === 'bright-outdoor') {
+  if (ctx.scene && fallback.preset === 'bright-outdoor' && !ctx.hdriReady) {
     const noEnv = !ctx.scene.environment;
     const noSky = !ctx.sky;
     const noHdri = !ctx.hdriBackground;
@@ -912,9 +914,20 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         if (THREE.LinearSRGBColorSpace && envTexture) {
           envTexture.colorSpace = THREE.LinearSRGBColorSpace;
         }
+
+        // For background, convert to cube texture for broader driver compatibility
+        const cubeRT = new THREE.WebGLCubeRenderTarget(1024, {
+          type: hdr.type,
+          colorSpace: THREE.LinearSRGBColorSpace,
+        });
+        cubeRT.fromEquirectangularTexture(ctx.renderer, hdr);
+        const cubeTexture = cubeRT.texture;
+        cubeTexture.colorSpace = THREE.LinearSRGBColorSpace;
+        cubeTexture.needsUpdate = true;
+
         if (ctx.scene) {
           ctx.scene.environment = envTexture;
-          ctx.scene.background = hdr;
+          ctx.scene.background = cubeTexture;
           // Ensure visible intensity (some setups render very dark without this)
           if ('backgroundIntensity' in ctx.scene) {
             const bi = preset?.envIntensity ?? 1.7;
@@ -926,7 +939,9 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         }
         ctx.envRT = envRT;
         ctx.hdriBackground = hdr;
+        ctx.hdriBackgroundCube = cubeRT;
         ctx.envFromHDRI = true;
+        ctx.hdriReady = true;
         const intensity = preset?.envIntensity ?? 1.7;
         if (typeof console !== 'undefined') console.log('[env] HDRI loaded', { url, intensity });
         if (Array.isArray(ctx.meshes)) {
@@ -937,9 +952,11 @@ function ensureOutdoorSkyEnv(ctx, preset) {
           }
         }
         ctx.hdriLoading = false;
+
         return true;
       } catch (e) {
         ctx.hdriLoading = false;
+        ctx.hdriReady = false;
         if (typeof console !== 'undefined') console.warn('[env] HDRI load failed', { url, error: String(e) });
         return false;
       }
@@ -950,6 +967,9 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         if (await tryLoadHDRI(url)) { ctx.envDirty = false; return; }
       }
       ctx.hdriLoading = false;
+      if (!ctx.envFromHDRI) {
+        ctx.hdriReady = false;
+      }
     })();
   }
   if (!ctx.skyInit) {
