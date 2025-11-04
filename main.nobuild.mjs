@@ -139,10 +139,10 @@ const FALLBACK_PRESETS = {
     ambient: { color: 0xffffff, intensity: 0.0 },
     hemi: { sky: 0xe9f1ff, ground: 0xbfc2c5, intensity: 0.1 },
     dir: { color: 0xfff1d6, intensity: 3.0, position: [6, -8, 4] },
-    fill: { color: 0xcfe3ff, intensity: 0.35, position: [-6, 6, 3] },
+    fill: { color: 0xcfe3ff, intensity: 0.55, position: [-6, 6, 3] },
     shadowBias: -0.0001,
-    envIntensity: 1.7,
-    ground: { style: 'pbr', color: 0xd3d3d3, roughness: 0.6, metalness: 0.0 },
+    envIntensity: 1.85,
+    ground: { style: 'pbr', color: 0xded9cf, roughness: 0.45, metalness: 0.12 },
   },
   // B: Studio-Clean-HiKey v2 — bright, clean, no HDRI dependency
   'studio-clean': {
@@ -501,8 +501,14 @@ function initRenderer() {
   scene.add(grid);
   const axes = new THREE.AxesHelper(0.4);
   axes.position.set(0, 0, 0.01);
-  axes.material.depthTest = false;
-  axes.renderOrder = 2;
+  // Allow axes to be occluded by scene geometry; render early to avoid overlaying everything.
+  const axesMaterials = Array.isArray(axes.material) ? axes.material : [axes.material];
+  for (const mat of axesMaterials) {
+    if (!mat) continue;
+    mat.depthTest = true;
+    mat.depthWrite = false;
+  }
+  axes.renderOrder = -1;
   scene.add(axes);
 
   function resizeRenderer() {
@@ -1225,18 +1231,24 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
       if (fallbackEnabled && preset === 'studio-clean') {
         materialOpts = { shadow: true, shadowOpacity: options.groundBackfaceOpacity ?? 0.45 };
       } else {
-        materialOpts = { color: 0xdcdcdc, metalness: 0.0, roughness: 0.8, map: null };
+        materialOpts = { color: 0xded9cf, metalness: 0.12, roughness: 0.45, envMapIntensity: 1.25, map: null };
       }
       postCreate = (mesh) => {
         // In z-up (camera.up = (0,0,1)) world, PlaneGeometry is already XY-facing +Z.
         // Keep it unrotated so it acts as ground at z=0 and receives shadows.
         mesh.rotation.set(0, 0, 0);
         mesh.receiveShadow = true;
+        if (mesh.material) {
+          mesh.material.color.setHex(0xded9cf);
+          mesh.material.metalness = 0.12;
+          mesh.material.roughness = 0.45;
+          mesh.material.envMapIntensity = 1.4;
+        }
         try {
           const backMat = mesh.material.clone();
           backMat.side = THREE.BackSide;
           backMat.transparent = true;
-          backMat.opacity = 0.35;
+          backMat.opacity = 0.25;
           backMat.depthWrite = false;
           backMat.polygonOffset = true;
           backMat.polygonOffsetFactor = -1;
@@ -1650,7 +1662,7 @@ function renderScene(snapshot, state) {
     }
   }
   if (ctx.light) {
-    const baseLight = sceneFlags[0] ? 1.45 : 1.05;
+    const baseLight = sceneFlags[0] ? 2.1 : 1.6;
     ctx.light.intensity = baseLight;
   }
   if (ctx.hemi) {
