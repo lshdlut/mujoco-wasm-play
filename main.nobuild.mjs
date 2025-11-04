@@ -503,7 +503,7 @@ function getDefaultVopt(state) {
   return renderCtx.defaultVopt;
 }
 
-function disposeMeshObject(mesh) {\n
+function disposeMeshObject(mesh) {
   if (!mesh) return;
   const parent = mesh.parent;
   if (parent && typeof parent.remove === 'function') {
