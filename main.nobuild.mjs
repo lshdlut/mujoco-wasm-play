@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 
 import {
   createViewerStore,
@@ -139,10 +139,10 @@ const FALLBACK_PRESETS = {
     ambient: { color: 0xffffff, intensity: 0.0 },
     hemi: { sky: 0xe9f1ff, ground: 0xbfc2c5, intensity: 0.1 },
     dir: { color: 0xfff1d6, intensity: 3.0, position: [6, -8, 4] },
-    fill: { color: 0xcfe3ff, intensity: 0.55, position: [-6, 6, 3] },
+    fill: { color: 0xcfe3ff, intensity: 0.18, position: [-6, 6, 3] },
     shadowBias: -0.0001,
-    envIntensity: 1.85,
-    ground: { style: 'pbr', color: 0xded9cf, roughness: 0.45, metalness: 0.12 },
+    envIntensity: 0.9,
+    ground: { style: 'pbr', color: 0xdbcfc2, roughness: 0.55, metalness: 0.05 },
   },
   // B: Studio-Clean-HiKey v2 — bright, clean, no HDRI dependency
   'studio-clean': {
@@ -453,13 +453,13 @@ function initRenderer() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0; // 全局基线从 1.0 起
+  renderer.toneMappingExposure = 1.1;
   if ('physicallyCorrectLights' in renderer) {
     renderer.physicallyCorrectLights = true;
   }
-    renderer.setClearColor(0x000000, 1);
+  renderer.setClearColor(0x000000, 1);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
 
     const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0x151a26, 12, 48);
@@ -468,16 +468,29 @@ function initRenderer() {
   scene.add(ambient);
   const hemi = new THREE.HemisphereLight(0xffffff, 0x10131c, 0);
   scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 0);
+  const dir = new THREE.DirectionalLight(0xffffff, 2.2);
   dir.position.set(6, -8, 8);
   dir.color.setHSL(0.58, 0.32, 0.92);
   dir.castShadow = true;
   dir.shadow.mapSize.set(4096, 4096);
-  dir.shadow.camera.near = 0.5;
-  dir.shadow.camera.far = 40;
-  dir.shadow.bias = -0.0001;
+  dir.shadow.bias = -0.00008;
+  if ('radius' in dir.shadow) {
+    dir.shadow.radius = 0;
+  }
   if ('normalBias' in dir.shadow) {
-    dir.shadow.normalBias = 0.001;
+    dir.shadow.normalBias = 0.002;
+  }
+  const dirShadowCam = dir.shadow.camera;
+  if (dirShadowCam) {
+    dirShadowCam.left = -6;
+    dirShadowCam.right = 6;
+    dirShadowCam.top = 6;
+    dirShadowCam.bottom = -6;
+    dirShadowCam.near = 0.1;
+    dirShadowCam.far = 40;
+    if (typeof dirShadowCam.updateProjectionMatrix === 'function') {
+      dirShadowCam.updateProjectionMatrix();
+    }
   }
   const lightTarget = new THREE.Object3D();
   scene.add(lightTarget);
@@ -508,7 +521,7 @@ function initRenderer() {
     mat.depthTest = true;
     mat.depthWrite = false;
   }
-  axes.renderOrder = -1;
+  axes.renderOrder = 0;
   scene.add(axes);
 
   function resizeRenderer() {
@@ -1022,7 +1035,7 @@ function ensureOutdoorSkyEnv(ctx, preset) {
           ctx.scene.environment = envTexture;
           ctx.scene.background = hdr;
           if ('backgroundIntensity' in ctx.scene) {
-            const bi = preset?.envIntensity ?? 1.7;
+            const bi = 1.0;
             ctx.scene.backgroundIntensity = bi;
           }
           if ('backgroundBlurriness' in ctx.scene) {
@@ -1231,24 +1244,25 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
       if (fallbackEnabled && preset === 'studio-clean') {
         materialOpts = { shadow: true, shadowOpacity: options.groundBackfaceOpacity ?? 0.45 };
       } else {
-        materialOpts = { color: 0xded9cf, metalness: 0.12, roughness: 0.45, envMapIntensity: 1.25, map: null };
+        materialOpts = { color: 0xdbcfc2, metalness: 0.05, roughness: 0.55, envMapIntensity: 1.15, map: null };
       }
       postCreate = (mesh) => {
         // In z-up (camera.up = (0,0,1)) world, PlaneGeometry is already XY-facing +Z.
         // Keep it unrotated so it acts as ground at z=0 and receives shadows.
         mesh.rotation.set(0, 0, 0);
         mesh.receiveShadow = true;
+        mesh.renderOrder = -2;
         if (mesh.material) {
-          mesh.material.color.setHex(0xded9cf);
-          mesh.material.metalness = 0.12;
-          mesh.material.roughness = 0.45;
-          mesh.material.envMapIntensity = 1.4;
+          mesh.material.color.setHex(0xdbcfc2);
+          mesh.material.metalness = 0.05;
+          mesh.material.roughness = 0.55;
+          mesh.material.envMapIntensity = 1.2;
         }
         try {
           const backMat = mesh.material.clone();
           backMat.side = THREE.BackSide;
           backMat.transparent = true;
-          backMat.opacity = 0.25;
+          backMat.opacity = 0.18;
           backMat.depthWrite = false;
           backMat.polygonOffset = true;
           backMat.polygonOffsetFactor = -1;
@@ -1658,15 +1672,15 @@ function renderScene(snapshot, state) {
     // Always keep shadow map enabled; presets control intensities, not the global switch
     ctx.renderer.shadowMap.enabled = true;
     if (ctx.renderer.shadowMap && typeof THREE !== 'undefined') {
-      ctx.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      ctx.renderer.shadowMap.type = THREE.PCFShadowMap;
     }
   }
   if (ctx.light) {
-    const baseLight = sceneFlags[0] ? 2.1 : 1.6;
+    const baseLight = sceneFlags[0] ? 2.2 : 1.8;
     ctx.light.intensity = baseLight;
   }
   if (ctx.hemi) {
-    const fillLight = sceneFlags[0] ? 0.9 : 0.65;
+    const fillLight = sceneFlags[0] ? 0.45 : 0.3;
     ctx.hemi.intensity = fillLight;
     ctx.hemi.groundColor.set(sceneFlags[0] ? 0x111622 : 0x161b29);
   }
@@ -2978,4 +2992,3 @@ window.addEventListener('resize', resizeCanvas);
 
 // Initialise control values after DOM render.
 updateControls(store.get());
-
