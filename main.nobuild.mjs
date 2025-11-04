@@ -1987,7 +1987,10 @@ if (typeof window !== 'undefined') {
   try {
     window.__viewerStore = store;
     window.__viewerControls = {
-      getBinding: (id) => controlById.get(id)?.binding ?? null,
+      getBinding: (id) => {
+        const control = controlById.get(id);
+        return control && control.binding ? control.binding : null;
+      },
       listIds: (prefix) => {
         const ids = Array.from(controlById.keys()).sort();
         if (!prefix) return ids;
@@ -1996,12 +1999,17 @@ if (typeof window !== 'undefined') {
     };
     window.__viewerRenderer = {
       getStats: () => ({ ...renderStats }),
-      getContext: () => renderCtx.initialized ? renderCtx : null,
-      getFallbackState: () => ({
-        enabled: renderCtx.fallback?.enabled ?? fallbackEnabledDefault,
-        preset: renderCtx.fallback?.preset ?? fallbackPresetKey,
-        mode: renderCtx.fallback?.mode ?? fallbackModeParam,
-      }),
+      getContext: () => (renderCtx.initialized ? renderCtx : null),
+      getFallbackState: () => {
+        const fallbackState = renderCtx.fallback || {};
+        return {
+          enabled: typeof fallbackState.enabled === 'boolean'
+            ? fallbackState.enabled
+            : fallbackEnabledDefault,
+          preset: fallbackState.preset || fallbackPresetKey,
+          mode: fallbackState.mode || fallbackModeParam,
+        };
+      },
       setFallbackEnabled: (enabled) => {
         renderCtx.fallback = renderCtx.fallback || {};
         renderCtx.fallback.enabled = !!enabled;
