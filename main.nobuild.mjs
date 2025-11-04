@@ -1,4 +1,4 @@
-﻿import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
 
 import {
   createViewerStore,
@@ -66,31 +66,33 @@ const FALLBACK_PRESET_ALIASES = {
 };
 
 const FALLBACK_PRESETS = {
-  // Level 1: Bright Real Outdoor（明亮户外）
+  // A: Outdoor-Crisp v2 — strong key, long shadows, cold sky reflections
   'bright-outdoor': {
-    background: 0xe7edf5, // 明亮偏蓝
+    background: 0xe7edf5,
     exposure: 1.0,
-    ambient: { color: 0xffffff, intensity: 0.05 },
-    hemi: { sky: 0xe9f1ff, ground: 0xbfc2c5, intensity: 0.2 },
-    dir: { color: 0xfff1d6, intensity: 2.2, position: [6, -8, 8] },
-    fill: { color: 0xcfe3ff, intensity: 0.3, position: [-6, 6, 3] },
+    ambient: { color: 0xffffff, intensity: 0.0 },
+    hemi: { sky: 0xe9f1ff, ground: 0xbfc2c5, intensity: 0.1 },
+    dir: { color: 0xfff1d6, intensity: 3.0, position: [6, -8, 4] },
+    fill: { color: 0xcfe3ff, intensity: 0.35, position: [-6, 6, 3] },
     shadowBias: -0.0001,
-    envIntensity: 1.3,
-    ground: { style: 'pbr', color: 0xdcdcdc, roughness: 0.65, metalness: 0.0 },
+    envIntensity: 1.7,
+    ground: { style: 'pbr', color: 0xd3d3d3, roughness: 0.6, metalness: 0.0 },
   },
-  // Level 2: Neutral Studio Clean（棚拍回退）
+  // B: Studio-Clean-HiKey v2 — bright, clean, no HDRI dependency
   'studio-clean': {
     background: 0xe0e6ef,
     exposure: 1.0,
-    ambient: { color: 0xffffff, intensity: 0.05 },
-    hemi: { sky: 0xf0f4ff, ground: 0xbdbdbd, intensity: 1.0 },
-    dir: { color: 0xffffff, intensity: 1.8, position: [5, -6, 7] },
-    fill: { color: 0xcfe3ff, intensity: 0.4, position: [-5, 4, 5] },
+    ambient: { color: 0xffffff, intensity: 0.0 },
+    hemi: { sky: 0xeef5ff, ground: 0xb7bcc2, intensity: 0.8 },
+    dir: { color: 0xffffff, intensity: 2.0, position: [5, -6, 4] },
+    fill: { color: 0xcfe3ff, intensity: 0.5, position: [-5, 4, 3] },
     shadowBias: -0.0001,
     envIntensity: 1.0,
     ground: { style: 'shadow', opacity: 0.5 },
   },
 };
+
+
 
 const fallbackPresetKey = FALLBACK_PRESET_ALIASES[fallbackPresetParam] || 'bright-outdoor';
 function applySnapshot(snapshot) {
@@ -405,7 +407,7 @@ function initRenderer() {
   dir.position.set(6, -8, 8);
   dir.color.setHSL(0.58, 0.32, 0.92);
   dir.castShadow = true;
-  dir.shadow.mapSize.set(2048, 2048);
+  dir.shadow.mapSize.set(4096, 4096);
   dir.shadow.camera.near = 0.5;
   dir.shadow.camera.far = 40;
   dir.shadow.bias = -0.0001;
@@ -741,7 +743,7 @@ function applyFallbackAppearance(ctx, state) {
   const preset = FALLBACK_PRESETS[fallback.preset] || FALLBACK_PRESETS[fallbackPresetKey];
   const renderer = ctx.renderer;
   if (renderer) {
-    renderer.toneMappingExposure = preset.exposure ?? 1.2;
+    renderer.toneMappingExposure = preset.exposure ?? 1.0;
   }
 
   if (!fallback.enabled) {
@@ -754,7 +756,19 @@ function applyFallbackAppearance(ctx, state) {
   }
 
   if (!hasModelBackground(state) && ctx.scene) {
-    ctx.scene.background = new THREE.Color(preset.background ?? 0xe7edf5);
+    // Background: Outdoor uses sky (set in ensureOutdoorSkyEnv); Studio uses gradient
+    if (fallback.preset === 'studio-clean') {
+      if (!ctx.studioBgTex) {
+        ctx.studioBgTex = createVerticalGradientTexture(0xeef5ff, 0xd2dae6, 256);
+      }
+      ctx.scene.background = ctx.studioBgTex;
+      if (ctx.scene.environment) {
+        // No HDRI in studio preset by default
+        ctx.scene.environment = null;
+      }
+    } else {
+      ctx.scene.background = new THREE.Color(preset.background ?? 0xe7edf5);
+    }
   }
 
   if (!hasModelLights(state)) {
@@ -790,6 +804,138 @@ function applyFallbackAppearance(ctx, state) {
       if (Array.isArray(fillCfg.position) && fillCfg.position.length === 3) {
         ctx.fill.position.set(fillCfg.position[0], fillCfg.position[1], fillCfg.position[2]);
       }
+    }
+  }
+
+  // Environment handling: prefer model; otherwise Outdoor builds Sky+PMREM; Studio uses no HDRI
+  const hasEnv = hasModelEnvironment(state);
+  if (!hasEnv && fallback.enabled) {
+    if (fallback.preset === 'bright-outdoor') {
+      ensureOutdoorSkyEnv(ctx, preset);
+    } else {
+      // Clear any previous env
+      if (ctx.scene && ctx.scene.environment) ctx.scene.environment = null;
+    }
+  }
+}
+
+// Build a small vertical gradient texture for background
+function createVerticalGradientTexture(topHex, bottomHex, height = 256) {
+  const width = 2;
+  const h = Math.max(8, height | 0);
+  const data = new Uint8Array(width * h * 4);
+  const top = new THREE.Color(topHex);
+  const bot = new THREE.Color(bottomHex);
+  for (let y = 0; y < h; y += 1) {
+    const t = y / (h - 1);
+    const r = bot.r * t + top.r * (1 - t);
+    const g = bot.g * t + top.g * (1 - t);
+    const b = bot.b * t + top.b * (1 - t);
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      data[i + 0] = Math.round(r * 255);
+      data[i + 1] = Math.round(g * 255);
+      data[i + 2] = Math.round(b * 255);
+      data[i + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, width, h);
+  tex.needsUpdate = true;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Ensure Outdoor-Crisp sky + PMREM environment
+function ensureOutdoorSkyEnv(ctx, preset) {
+  if (!ctx || !ctx.renderer || !ctx.scene) return;
+  if (!ctx.pmrem) {
+    ctx.pmrem = new THREE.PMREMGenerator(ctx.renderer);
+  }
+  // Try HDRI first if provided via query (?hdri=url) or known local candidates
+  if (!ctx.envFromHDRI && !hasModelEnvironment(store.get())) {
+    const hdriParam = searchParams.get('hdri');
+    const candidates = [];
+    if (hdriParam) candidates.push(hdriParam);
+    candidates.push('local_tools/assets/env/sky_clear_4k.hdr');
+    candidates.push('dist/assets/env/sky_clear_4k.hdr');
+    const tryLoadHDRI = async (url) => {
+      try {
+        const mod = await import('https://unpkg.com/three@0.161.0/examples/jsm/loaders/RGBELoader.js');
+        if (!mod || !mod.RGBELoader) return false;
+        const loader = new mod.RGBELoader();
+        const hdr = await new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
+        const envRT = ctx.pmrem.fromEquirectangular(hdr);
+        hdr.dispose?.();
+        if (ctx.scene) ctx.scene.environment = envRT.texture;
+        ctx.envRT = envRT;
+        ctx.envFromHDRI = true;
+        const intensity = preset?.envIntensity ?? 1.7;
+        if (Array.isArray(ctx.meshes)) {
+          for (const m of ctx.meshes) {
+            if (m && m.material && 'envMapIntensity' in m.material) {
+              m.material.envMapIntensity = intensity;
+            }
+          }
+        }
+        return true;
+      } catch { return false; }
+    };
+    (async () => {
+      for (const url of candidates) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await tryLoadHDRI(url)) { ctx.envDirty = false; return; }
+      }
+    })();
+  }
+  if (!ctx.skyInit) {
+    ctx.skyInit = true;
+    try {
+      import('https://unpkg.com/three@0.161.0/examples/jsm/objects/Sky.js').then((mod) => {
+        if (!mod || !mod.Sky) return;
+        const sky = new mod.Sky();
+        sky.scale.setScalar(450000);
+        ctx.scene.add(sky);
+        ctx.sky = sky;
+        ctx.sunVec = new THREE.Vector3();
+      }).catch(() => {});
+    } catch {}
+  }
+  if (!ctx.envFromHDRI && ctx.sky && ctx.pmrem) {
+    const sky = ctx.sky;
+    const uniforms = sky.material.uniforms;
+    const cfg = preset || {};
+    uniforms['turbidity'].value = 5.0;
+    uniforms['rayleigh'].value = 2.5;
+    uniforms['mieCoefficient'].value = 0.004;
+    uniforms['mieDirectionalG'].value = 0.8;
+    // Link sun to key light direction
+    if (ctx.light) {
+      const L = ctx.light.position.clone().normalize();
+      ctx.sunVec.copy(L);
+      uniforms['sunPosition'].value.copy(ctx.sunVec);
+    }
+    // Bake environment
+    if (!ctx.envRT || ctx.envDirty) {
+      if (ctx.envRT) { ctx.envRT.dispose(); }
+      ctx.envRT = ctx.pmrem.fromScene(sky);
+      if (ctx.scene) ctx.scene.environment = ctx.envRT.texture;
+      ctx.envDirty = false;
+      // apply env intensity to materials
+      const intensity = cfg.envIntensity ?? 1.3;
+      if (Array.isArray(ctx.meshes)) {
+        for (const m of ctx.meshes) {
+          if (m && m.material && 'envMapIntensity' in m.material) {
+            m.material.envMapIntensity = intensity;
+          }
+        }
+      }
+    }
+    // Prefer visible procedural sky as background
+    if (ctx.scene) {
+      ctx.scene.background = null;
     }
   }
 }
@@ -1391,15 +1537,15 @@ function renderScene(snapshot, state) {
     const r = Math.max(0.1, Number(ctx.bounds.radius) || 1);
     const cam = ctx.light.shadow && ctx.light.shadow.camera ? ctx.light.shadow.camera : null;
     if (cam && typeof cam.left !== 'undefined') {
-      const k = 2.5;
+      const k = 2.2;
       const l = -r * k;
       const rt = r * k;
       cam.left = l;
       cam.right = rt;
-      cam.top = r * 2.0;
-      cam.bottom = -r * 2.0;
-      cam.near = Math.max(0.01, r * 0.05);
-      cam.far = Math.max(40, r * 10);
+      cam.top = r * 1.6;
+      cam.bottom = -r * 1.6;
+      cam.near = Math.max(0.01, r * 0.03);
+      cam.far = Math.max(40, r * 8);
       if (typeof cam.updateProjectionMatrix === 'function') cam.updateProjectionMatrix();
       if (ctx.lightTarget) {
         ctx.lightTarget.position.set(ctx.bounds.center[0], ctx.bounds.center[1], ctx.bounds.center[2]);
@@ -1463,12 +1609,15 @@ function renderScene(snapshot, state) {
       if (ctx.light) {
         const radius = Math.max(bounds.radius || 0, 0.6);
         const focus = new THREE.Vector3(bounds.center[0], bounds.center[1], bounds.center[2]);
-        const lightOffset = new THREE.Vector3(radius * 2.4, -radius * 2.2, radius * 3.2);
+        const horiz = radius * 3.0;
+        const alt = Math.tan(20 * Math.PI / 180) * horiz; // ~20° sun altitude
+        const lightOffset = new THREE.Vector3(horiz, -horiz * 0.9, Math.max(0.6, alt));
         ctx.light.position.copy(focus.clone().add(lightOffset));
         if (ctx.lightTarget) {
           ctx.lightTarget.position.copy(focus);
           ctx.light.target.updateMatrixWorld();
         }
+        ctx.envDirty = true;
       }
       if (ctx.hemi) {
         const radius = Math.max(bounds.radius || 0, 0.6);
@@ -1500,8 +1649,11 @@ function renderScene(snapshot, state) {
     ctx.copySeq = copyState.seq;
   }
   const baseGrid = sceneFlags[2] !== false;
-  const gridVisible =
-    baseGrid && !(copyState && copyState.precision === 'full' && copyState.seq === ctx.copySeq);
+  // In both fallback presets we prefer no grid to avoid visual clutter
+  const fb = ctx.fallback || {};
+  const gridVisible = !fb.enabled && (
+    baseGrid && !(copyState && copyState.precision === 'full' && copyState.seq === ctx.copySeq)
+  );
   ctx.grid.visible = gridVisible;
 }
 function createLabel(text) {
