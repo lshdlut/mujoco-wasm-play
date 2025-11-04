@@ -78,6 +78,50 @@ const fallbackModeParam = (searchParams.get('fallback') || 'auto').toLowerCase()
 const fallbackEnabledDefault = fallbackModeParam !== 'off';
 const fallbackPresetParam = (searchParams.get('preset') || 'studio-neutral').toLowerCase();
 
+// Environment orientation controls (HDRI/PMREM)
+function parseDeg(v, def = 0) {
+  const n = Number.parseFloat(String(v ?? '').trim());
+  return Number.isFinite(n) ? (n * Math.PI) / 180 : def;
+}
+const envRotParam = (searchParams.get('envrot') || '').trim(); // e.g. "90,0,0" (deg)
+const envRotXDeg = searchParams.get('envrotx');
+const envRotYDeg = searchParams.get('envroty');
+const envRotZDeg = searchParams.get('envrotz');
+let envRotX = 0, envRotY = 0, envRotZ = 0;
+if (envRotParam) {
+  const toks = envRotParam.split(/[ ,]+/).map((t) => t.trim()).filter(Boolean);
+  envRotX = parseDeg(toks[0] ?? 0, 0);
+  envRotY = parseDeg(toks[1] ?? 0, 0);
+  envRotZ = parseDeg(toks[2] ?? 0, 0);
+}
+if (envRotXDeg != null) envRotX = parseDeg(envRotXDeg, envRotX);
+if (envRotYDeg != null) envRotY = parseDeg(envRotYDeg, envRotY);
+if (envRotZDeg != null) envRotZ = parseDeg(envRotZDeg, envRotZ);
+
+function applyEnvRotationToScene(scene, THREE_NS, rx, ry, rz) {
+  if (!scene || !THREE_NS) return;
+  try {
+    if (typeof scene.backgroundRotation !== 'undefined') {
+      const val = scene.backgroundRotation;
+      if (val && typeof val.set === 'function') {
+        val.set(rx, ry, rz);
+      } else if (THREE_NS.Euler) {
+        scene.backgroundRotation = new THREE_NS.Euler(rx, ry, rz, 'YXZ');
+      }
+    }
+  } catch {}
+  try {
+    if (typeof scene.environmentRotation !== 'undefined') {
+      const val = scene.environmentRotation;
+      if (val && typeof val.set === 'function') {
+        val.set(rx, ry, rz);
+      } else if (THREE_NS.Euler) {
+        scene.environmentRotation = new THREE_NS.Euler(rx, ry, rz, 'YXZ');
+      }
+    }
+  } catch {}
+}
+
 const FALLBACK_PRESET_ALIASES = {
   'bright-outdoor': 'bright-outdoor',
   bright: 'bright-outdoor',
@@ -913,7 +957,6 @@ function ensureOutdoorSkyEnv(ctx, preset) {
   if (!ctx || !ctx.renderer || !ctx.scene) return;
   if (typeof skyOffParam !== 'undefined' && skyOffParam) {
     try { if (ctx.sky) ctx.sky.visible = false; } catch {}
-    return;
   }
   // Toggle procedural sky visibility based on HDRI usage before early-returns
   try {
@@ -969,9 +1012,9 @@ function ensureOutdoorSkyEnv(ctx, preset) {
           envTexture.colorSpace = THREE.LinearSRGBColorSpace;
         }
         if (ctx.scene) {
+          // Default: background uses equirectangular HDR, environment uses PMREM from HDR
           ctx.scene.environment = envTexture;
           ctx.scene.background = hdr;
-          // Ensure visible intensity (some setups render very dark without this)
           if ('backgroundIntensity' in ctx.scene) {
             const bi = preset?.envIntensity ?? 1.7;
             ctx.scene.backgroundIntensity = bi;
@@ -979,6 +1022,10 @@ function ensureOutdoorSkyEnv(ctx, preset) {
           if ('backgroundBlurriness' in ctx.scene) {
             ctx.scene.backgroundBlurriness = 0.0;
           }
+          // Attempt API-based rotation only (may be a no-op on this Three version)
+          try {
+            applyEnvRotationToScene(ctx.scene, THREE, envRotX, envRotY, envRotZ);
+          } catch {}
         }
         ctx.envRT = envRT;
         ctx.hdriBackground = hdr;
@@ -1025,6 +1072,8 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         const far = (ctx && ctx.camera && ctx.camera.far) ? ctx.camera.far : 100;
         const radius = Math.max(10, Math.min(far * 0.9, 90000));
         sky.scale.setScalar(radius);
+        // Align Sky.js (Y-up) to our Z-up world
+        try { sky.rotation.x = Math.PI / 2; } catch {}
         if (sky.material) {
           sky.material.depthWrite = false;
           sky.material.depthTest = false;
