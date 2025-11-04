@@ -44,6 +44,28 @@ let renderStats = { drawn: 0, hidden: 0 };
 const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
 const debugMode = searchParams.get('debug') === '1';
 const requestedMode = searchParams.get('mode');
+const hideAllGeomParam = (() => { const v1 = (searchParams.get('nogeom') || '').toLowerCase(); const v2 = (searchParams.get('no_geom') || '').toLowerCase(); const v3 = (searchParams.get('no-geom') || '').toLowerCase(); const v4 = (searchParams.get('hideall') || '').toLowerCase(); const v5 = (searchParams.get('hide_all') || '').toLowerCase(); const norm = (v) => (v === '1' || v === 'true' || v === 'yes' || v === 'on'); return norm(v1) || norm(v2) || norm(v3) || norm(v4) || norm(v5); })();
+const hideTypesParam = (searchParams.get('hide') || '').toLowerCase();
+const hiddenTypeTokens = hideTypesParam
+  ? hideTypesParam.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean)
+  : [];
+const hiddenTypeSet = new Set(hiddenTypeTokens);
+const dumpParam = (searchParams.get('dump') || '').toLowerCase();
+const findParam = (searchParams.get('find') || '').toLowerCase();
+const dumpBigParam = dumpParam === 'big' || findParam === 'big';
+const hideBigParam = (() => { const v1=(searchParams.get('hide_big')||'').toLowerCase(); const v2=(searchParams.get('hidebig')||'').toLowerCase(); const norm=(v)=> (v==='1'||v==='true'||v==='yes'||v==='on'); return norm(v1)||norm(v2); })();
+const bigNParam = Number.parseInt((searchParams.get('big_n') || '8'), 10);
+const bigN = Number.isFinite(bigNParam) && bigNParam > 0 ? Math.min(bigNParam, 64) : 8;
+const bigFactorParam = Number.parseFloat((searchParams.get('big_factor') || '8'));
+const bigFactor = Number.isFinite(bigFactorParam) && bigFactorParam > 0 ? bigFactorParam : 8;
+const hideIndexParam = (searchParams.get('hide_index') || '').trim();
+const hiddenIndexSet = new Set(
+  hideIndexParam
+    ? hideIndexParam.split(/[ ,]+/).map((t) => Number.parseInt(t, 10)).filter((n) => Number.isFinite(n) && n >= 0)
+    : []
+);
+// Procedural sky switch
+const skyOffParam = (() => { const v1=(searchParams.get('nosky')||'').toLowerCase(); const v2=(searchParams.get('sky_off')||'').toLowerCase(); const v3=(searchParams.get('sky')||'').toLowerCase(); const norm=(v)=> (v==='1'||v==='true'||v==='yes'||v==='on'); const no=(v)=> (v==='0'||v==='false'||v==='no'||v==='off'); return norm(v1)||norm(v2)||no(v3); })();
 const backendMode = requestedMode === 'worker' || requestedMode === 'direct' ? requestedMode : 'auto';
 const requestedModel = searchParams.get('model');
 const backend = await createBackend({ mode: backendMode, debug: debugMode, model: requestedModel });
@@ -454,6 +476,21 @@ function initRenderer() {
   function animate() {
     requestAnimationFrame(animate);
     if (!renderCtx.initialized) return;
+    // Ensure visible background if an HDRI has been loaded.
+    try {
+      if (renderCtx.hdriReady && renderCtx.hdriBackground && renderCtx.scene) {
+        if (renderCtx.scene.background !== renderCtx.hdriBackground) {
+          renderCtx.scene.background = renderCtx.hdriBackground;
+          if ('backgroundIntensity' in renderCtx.scene) {
+            const fb = renderCtx.fallback || {};
+            renderCtx.scene.backgroundIntensity = fb.envIntensity ?? 1.7;
+          }
+          if ('backgroundBlurriness' in renderCtx.scene) {
+            renderCtx.scene.backgroundBlurriness = 0.0;
+          }
+        }
+      }
+    } catch {}
     renderer.render(scene, camera);
   }
   animate();
@@ -465,6 +502,7 @@ function initRenderer() {
     camera,
     root,
     grid,
+    axes,
     light: dir,
     lightTarget,
     fill,
@@ -873,6 +911,16 @@ function createVerticalGradientTexture(topHex, bottomHex, height = 256) {
 // Ensure Outdoor-Crisp sky + PMREM environment
 function ensureOutdoorSkyEnv(ctx, preset) {
   if (!ctx || !ctx.renderer || !ctx.scene) return;
+  if (typeof skyOffParam !== 'undefined' && skyOffParam) {
+    try { if (ctx.sky) ctx.sky.visible = false; } catch {}
+    return;
+  }
+  // Toggle procedural sky visibility based on HDRI usage before early-returns
+  try {
+    if (ctx.sky) {
+      ctx.sky.visible = !ctx.envFromHDRI;
+    }
+  } catch {}
   // If HDRI already applied (or currently loading), do not re-enter
   if ((ctx.envFromHDRI && ctx.envRT && ctx.scene.environment) || ctx.hdriLoading) {
     return;
@@ -886,7 +934,11 @@ function ensureOutdoorSkyEnv(ctx, preset) {
     const candidates = [];
     if (hdriParam) candidates.push(hdriParam);
     candidates.push('local_tools/assets/env/sky_clear_4k.hdr');
+    candidates.push('local_tools/assets/env/hausdorf_clear_sky_4k.hdr');
+    candidates.push('local_tools/assets/env/autumn_field_puresky_4k.hdr');
     candidates.push('dist/assets/env/sky_clear_4k.hdr');
+    candidates.push('dist/assets/env/hausdorf_clear_sky_4k.hdr');
+    candidates.push('dist/assets/env/autumn_field_puresky_4k.hdr');
     const tryLoadHDRI = async (url) => {
       try {
         const mod = await import('three/addons/loaders/RGBELoader.js');
@@ -968,7 +1020,18 @@ function ensureOutdoorSkyEnv(ctx, preset) {
       import('three/addons/objects/Sky.js').then((mod) => {
         if (!mod || !mod.Sky) return;
         const sky = new mod.Sky();
-        sky.scale.setScalar(450000);
+        sky.name = 'procedural_sky';
+        // Keep sky within camera far plane to ensure visibility
+        const far = (ctx && ctx.camera && ctx.camera.far) ? ctx.camera.far : 100;
+        const radius = Math.max(10, Math.min(far * 0.9, 90000));
+        sky.scale.setScalar(radius);
+        if (sky.material) {
+          sky.material.depthWrite = false;
+          sky.material.depthTest = false;
+          if (typeof THREE.BackSide !== 'undefined') {
+            sky.material.side = THREE.BackSide;
+          }
+        }
         ctx.scene.add(sky);
         ctx.sky = sky;
         ctx.sunVec = new THREE.Vector3();
@@ -1116,7 +1179,9 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
         materialOpts = { color: 0xdcdcdc, metalness: 0.0, roughness: 0.8, map: null };
       }
       postCreate = (mesh) => {
-        mesh.rotation.x = -Math.PI / 2;
+        // In z-up (camera.up = (0,0,1)) world, PlaneGeometry is already XY-facing +Z.
+        // Keep it unrotated so it acts as ground at z=0 and receives shadows.
+        mesh.rotation.set(0, 0, 0);
         mesh.receiveShadow = true;
         try {
           const backMat = mesh.material.clone();
@@ -1544,7 +1609,7 @@ function renderScene(snapshot, state) {
     ctx.hemi.intensity = fillLight;
     ctx.hemi.groundColor.set(sceneFlags[0] ? 0x111622 : 0x161b29);
   }
-  let hideAllGeometry = false;
+  let hideAllGeometry = hideAllGeomParam;
   let highlightGeometry = false;
   if (defaults) {
     for (let idx = 0; idx < Math.min(defaults.length, voptFlags.length); idx += 1) {
@@ -1560,10 +1625,66 @@ function renderScene(snapshot, state) {
     }
   }
   const ngeom = snapshot.ngeom | 0;
-  let drawn = 0;
+  // Views for geometry attributes
   const sizeView = snapshot.gsize || assets?.geoms?.size || null;
   const typeView = snapshot.gtype || assets?.geoms?.type || null;
   const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
+  // Pre-compute approximate radii for geoms to support big-geom diagnostics/hiding
+  const xposForBig = snapshot.xpos || null;
+  const approxRadii = new Array(ngeom);
+  if (ngeom > 0) {
+    for (let i = 0; i < ngeom; i += 1) {
+      const base = 3 * i;
+      const sx = sizeView?.[base + 0] ?? 0.1;
+      const sy = sizeView?.[base + 1] ?? sx;
+      const sz = sizeView?.[base + 2] ?? sx;
+      const t = typeView?.[i] ?? MJ_GEOM.BOX;
+      approxRadii[i] = computeGeomRadius(t, sx, sy, sz);
+    }
+  }
+  let bigMedian = 0;
+  let bigThreshold = 0;
+  if (approxRadii.length > 4) {
+    const tmp = approxRadii.slice().sort((a, b) => (a - b));
+    bigMedian = tmp[Math.floor(tmp.length / 2)] || 0;
+    bigThreshold = (bigMedian || 0) * bigFactor;
+  }
+  if ((debugMode || dumpBigParam) && !renderCtx.bigDumped && ngeom > 0) {
+    try {
+      const items = [];
+      for (let i = 0; i < ngeom; i += 1) {
+        const r = approxRadii[i] || 0;
+        const base = 3 * i;
+        const pos = xposForBig && xposForBig.length >= base + 3
+          ? [xposForBig[base + 0], xposForBig[base + 1], xposForBig[base + 2]]
+          : [0, 0, 0];
+        const t = typeView?.[i] ?? MJ_GEOM.BOX;
+        const typeName = (function(tt){
+          switch (tt|0) {
+            case MJ_GEOM.PLANE: return 'plane';
+            case MJ_GEOM.HFIELD: return 'hfield';
+            case MJ_GEOM.SPHERE: return 'sphere';
+            case MJ_GEOM.CAPSULE: return 'capsule';
+            case MJ_GEOM.ELLIPSOID: return 'ellipsoid';
+            case MJ_GEOM.CYLINDER: return 'cylinder';
+            case MJ_GEOM.BOX: return 'box';
+            case MJ_GEOM.MESH: return 'mesh';
+            default: return 'unknown';
+          }
+        })(t);
+        items.push({ i, typeName, r, pos });
+      }
+      items.sort((a, b) => b.r - a.r);
+      const take = Math.min(bigN, items.length);
+      console.log('[debug] biggest geoms', {
+        median: Number(bigMedian.toFixed(4)),
+        threshold: Number(bigThreshold.toFixed(4)),
+        top: items.slice(0, take).map(it => ({ index: it.i, type: it.typeName, r: Number((it.r||0).toFixed(4)), pos: it.pos.map(v => Number((v||0).toFixed(3))) }))
+      });
+      renderCtx.bigDumped = true;
+    } catch {}
+  }
+  let drawn = 0;
   for (let i = 0; i < ngeom; i += 1) {
     const type = typeView?.[i] ?? MJ_GEOM.BOX;
     const dataId = dataIdView?.[i] ?? -1;
@@ -1587,6 +1708,30 @@ function renderScene(snapshot, state) {
       } else if (mesh.material) {
         mesh.material.emissive = new THREE.Color(0x2b3a7a);
       }
+    }
+    if (!hideAllGeometry && hiddenTypeSet.size > 0) {
+      const typeName = (function(t){
+        switch (t|0) {
+          case MJ_GEOM.PLANE: return 'plane';
+          case MJ_GEOM.HFIELD: return 'hfield';
+          case MJ_GEOM.SPHERE: return 'sphere';
+          case MJ_GEOM.CAPSULE: return 'capsule';
+          case MJ_GEOM.ELLIPSOID: return 'ellipsoid';
+          case MJ_GEOM.CYLINDER: return 'cylinder';
+          case MJ_GEOM.BOX: return 'box';
+          case MJ_GEOM.MESH: return 'mesh';
+          default: return 'unknown';
+        }
+      })(type);
+      if (hiddenTypeSet.has(typeName) || hiddenTypeSet.has('*') || hiddenTypeSet.has('all')) {
+        visible = false;
+      }
+    }
+    if (!hideAllGeometry && hiddenIndexSet.size > 0 && hiddenIndexSet.has(i)) {
+      visible = false;
+    }
+    if (!hideAllGeometry && hideBigParam && approxRadii && Number.isFinite(approxRadii[i]) && approxRadii[i] > bigThreshold && bigThreshold > 0) {
+      visible = false;
     }
     mesh.visible = visible;
     if (visible) drawn += 1;
@@ -1673,6 +1818,12 @@ function renderScene(snapshot, state) {
         ctx.camera.position.copy(focus.clone().add(offset));
         ctx.camera.lookAt(focus);
         ctx.cameraTarget.copy(focus);
+        // Expand far plane to comfortably include scene bounds
+        const desiredFar = Math.max(100, radius * 10);
+        if (ctx.camera.far < desiredFar) {
+          ctx.camera.far = desiredFar;
+          if (typeof ctx.camera.updateProjectionMatrix === 'function') ctx.camera.updateProjectionMatrix();
+        }
         ctx.autoAligned = true;
         if (debugMode) {
           console.log('[render] auto align', { radius, center: bounds.center });
@@ -1726,7 +1877,10 @@ function renderScene(snapshot, state) {
   const gridVisible = !fb.enabled && (
     baseGrid && !(copyState && copyState.precision === 'full' && copyState.seq === ctx.copySeq)
   );
-  ctx.grid.visible = gridVisible;
+  ctx.grid.visible = gridVisible && !hideAllGeometry && !hiddenTypeSet.has('grid');
+  if (ctx.axes) {
+    ctx.axes.visible = !hideAllGeometry && !hiddenTypeSet.has('axes');
+  }
 }
 function createLabel(text) {
   const label = document.createElement('label');
