@@ -872,8 +872,8 @@ function createVerticalGradientTexture(topHex, bottomHex, height = 256) {
 // Ensure Outdoor-Crisp sky + PMREM environment
 function ensureOutdoorSkyEnv(ctx, preset) {
   if (!ctx || !ctx.renderer || !ctx.scene) return;
-  // If HDRI already applied, do not re-enter
-  if (ctx.envFromHDRI && ctx.envRT && ctx.scene.environment) {
+  // If HDRI already applied (or currently loading), do not re-enter
+  if ((ctx.envFromHDRI && ctx.envRT && ctx.scene.environment) || ctx.hdriLoading) {
     return;
   }
   if (!ctx.pmrem) {
@@ -892,19 +892,23 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         if (!mod || !mod.RGBELoader) return false;
         const loader = new mod.RGBELoader();
         if (typeof console !== 'undefined') console.log('[env] trying HDRI', url);
+        ctx.hdriLoading = true;
         const hdr = await new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
-        // Use PMREM for environment (reflections)
-        const envRT = ctx.pmrem.fromEquirectangular(hdr);
-        // Keep the original equirect HDRI as visible background to avoid black sky
+        // Configure HDR for visible background
         hdr.mapping = THREE.EquirectangularReflectionMapping;
-        if (THREE.LinearSRGBColorSpace) {
-          hdr.colorSpace = THREE.LinearSRGBColorSpace;
+        if (THREE.SRGBColorSpace) {
+          hdr.colorSpace = THREE.SRGBColorSpace;
         }
         hdr.needsUpdate = true;
+        // Use PMREM for environment (reflections)
+        const envRT = ctx.pmrem.fromEquirectangular(hdr);
+        const envTexture = envRT.texture;
+        if (THREE.LinearSRGBColorSpace && envTexture) {
+          envTexture.colorSpace = THREE.LinearSRGBColorSpace;
+        }
         if (ctx.scene) {
-          ctx.scene.environment = envRT.texture;
-          // Use PMREM texture also as visible background for reliability across drivers
-          ctx.scene.background = envRT.texture;
+          ctx.scene.environment = envTexture;
+          ctx.scene.background = hdr;
           // Ensure visible intensity (some setups render very dark without this)
           if ('backgroundIntensity' in ctx.scene) {
             const bi = preset?.envIntensity ?? 1.7;
@@ -926,9 +930,10 @@ function ensureOutdoorSkyEnv(ctx, preset) {
             }
           }
         }
-        console.log('[env] trying HDRI', url);
+        ctx.hdriLoading = false;
         return true;
       } catch (e) {
+        ctx.hdriLoading = false;
         if (typeof console !== 'undefined') console.warn('[env] HDRI load failed', { url, error: String(e) });
         return false;
       }
@@ -938,6 +943,7 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         // eslint-disable-next-line no-await-in-loop
         if (await tryLoadHDRI(url)) { ctx.envDirty = false; return; }
       }
+      ctx.hdriLoading = false;
     })();
   }
   if (!ctx.skyInit) {
