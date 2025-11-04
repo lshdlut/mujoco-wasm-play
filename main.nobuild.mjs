@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 
 import {
   createViewerStore,
@@ -383,7 +383,7 @@ function initRenderer() {
   if (renderCtx.initialized) return renderCtx;
   if (!canvas) return renderCtx;
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -779,6 +779,19 @@ function applyFallbackAppearance(ctx, state) {
     }
   }
 
+  // Even if model requested a black background, ensure outdoor preset doesn't stay black when no env/sky yet
+  if (ctx.scene && fallback.preset === 'bright-outdoor') {
+    const noEnv = !ctx.scene.environment;
+    const noSky = !ctx.sky;
+    const noHdri = !ctx.hdriBackground;
+    if (noEnv && noSky && noHdri) {
+      if (!ctx.outdoorBgTex) {
+        ctx.outdoorBgTex = createVerticalGradientTexture(0xe7edf5, 0xcdd5e0, 256);
+      }
+      ctx.scene.background = ctx.outdoorBgTex;
+    }
+  }
+
   if (!hasModelLights(state)) {
     if (ctx.ambient) {
       const ambientCfg = preset.ambient || {};
@@ -874,19 +887,26 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         const mod = await import('three/addons/loaders/RGBELoader.js');
         if (!mod || !mod.RGBELoader) return false;
         const loader = new mod.RGBELoader();
+        if (typeof console !== 'undefined') console.log('[env] trying HDRI', url);
         const hdr = await new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
         // Use PMREM for environment (reflections)
         const envRT = ctx.pmrem.fromEquirectangular(hdr);
         // Keep the original equirect HDRI as visible background to avoid black sky
         hdr.mapping = THREE.EquirectangularReflectionMapping;
+        if (THREE.LinearSRGBColorSpace) {
+          hdr.colorSpace = THREE.LinearSRGBColorSpace;
+        }
+        hdr.needsUpdate = true;
         if (ctx.scene) {
           ctx.scene.environment = envRT.texture;
-          ctx.scene.background = hdr;
+          // Use PMREM texture also as visible background for reliability across drivers
+          ctx.scene.background = envRT.texture;
         }
         ctx.envRT = envRT;
         ctx.hdriBackground = hdr;
         ctx.envFromHDRI = true;
         const intensity = preset?.envIntensity ?? 1.7;
+        if (typeof console !== 'undefined') console.log('[env] HDRI loaded', { url, intensity });
         if (Array.isArray(ctx.meshes)) {
           for (const m of ctx.meshes) {
             if (m && m.material && 'envMapIntensity' in m.material) {
@@ -894,6 +914,7 @@ function ensureOutdoorSkyEnv(ctx, preset) {
             }
           }
         }
+        console.log('[env] trying HDRI', url);
         return true;
       } catch (e) {
         if (typeof console !== 'undefined') console.warn('[env] HDRI load failed', { url, error: String(e) });
