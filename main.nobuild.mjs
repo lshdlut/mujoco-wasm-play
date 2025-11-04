@@ -1,4 +1,4 @@
-import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+﻿import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
 
 import {
   createViewerStore,
@@ -57,59 +57,42 @@ const fallbackEnabledDefault = fallbackModeParam !== 'off';
 const fallbackPresetParam = (searchParams.get('preset') || 'studio-neutral').toLowerCase();
 
 const FALLBACK_PRESET_ALIASES = {
-  'studio-neutral': 'studio-neutral',
-  studio: 'studio-neutral',
-  neutral: 'studio-neutral',
-  'overcast-field': 'overcast-field',
-  overcast: 'overcast-field',
-  field: 'overcast-field',
-  'sunset-cinematic': 'sunset-cinematic',
-  sunset: 'sunset-cinematic',
-  cinematic: 'sunset-cinematic',
-  'lab-cool': 'lab-cool',
-  lab: 'lab-cool',
+  'bright-outdoor': 'bright-outdoor',
+  bright: 'bright-outdoor',
+  outdoor: 'bright-outdoor',
+  'studio-clean': 'studio-clean',
+  clean: 'studio-clean',
+  studio: 'studio-clean',
 };
 
 const FALLBACK_PRESETS = {
-  'studio-neutral': {
-    background: 0x181d28,
-    exposure: 1.0,
-    ambient: { color: 0xf4f8ff, intensity: 0.22 },
-    hemi: { sky: 0xcfd9ff, ground: 0x1a1f2b, intensity: 0.58 },
-    dir: { color: 0xffffff, intensity: 1.4, position: [6, -8, 8] },
-    shadowBias: -0.0006,
+  // Level 1: Bright Real Outdoor（明亮户外）
+  'bright-outdoor': {
+    background: 0xe7edf5, // 明亮偏蓝
+    exposure: 1.2,
+    ambient: { color: 0xf4f8ff, intensity: 0.25 },
+    hemi: { sky: 0xe9f1ff, ground: 0xbfc2c5, intensity: 0.6 },
+    dir: { color: 0xfff1d6, intensity: 2.0, position: [6, -8, 8] },
+    fill: { color: 0xcfe3ff, intensity: 0.35, position: [-6, 6, 3] },
+    shadowBias: -0.0001,
+    envIntensity: 1.3,
+    ground: { style: 'pbr', color: 0xdcdcdc, roughness: 0.8, metalness: 0.0 },
+  },
+  // Level 2: Neutral Studio Clean（棚拍回退）
+  'studio-clean': {
+    background: 0xe0e6ef,
+    exposure: 1.2,
+    ambient: { color: 0xffffff, intensity: 0.2 },
+    hemi: { sky: 0xf0f4ff, ground: 0xbdbdbd, intensity: 1.0 },
+    dir: { color: 0xffffff, intensity: 1.5, position: [5, -6, 7] },
+    fill: { color: 0xcfe3ff, intensity: 0.3, position: [-5, 4, 5] },
+    shadowBias: -0.0001,
     envIntensity: 1.0,
-  },
-  'overcast-field': {
-    background: 0x1a1f2c,
-    exposure: 0.95,
-    ambient: { color: 0xe0e7f5, intensity: 0.3 },
-    hemi: { sky: 0xc4d5ef, ground: 0x1a202a, intensity: 0.7 },
-    dir: { color: 0xe6ecff, intensity: 0.8, position: [3, -4, 6] },
-    shadowBias: -0.0005,
-    envIntensity: 0.85,
-  },
-  'sunset-cinematic': {
-    background: 0x1b141a,
-    exposure: 1.1,
-    ambient: { color: 0xf8ecd8, intensity: 0.18 },
-    hemi: { sky: 0xf5c199, ground: 0x1a0f1c, intensity: 0.5 },
-    dir: { color: 0xffb27d, intensity: 1.6, position: [2.5, -5.5, 2.2] },
-    shadowBias: -0.0004,
-    envIntensity: 1.15,
-  },
-  'lab-cool': {
-    background: 0x161c27,
-    exposure: 1.0,
-    ambient: { color: 0xe3f1ff, intensity: 0.25 },
-    hemi: { sky: 0xbdd7ff, ground: 0x14202c, intensity: 0.62 },
-    dir: { color: 0xddeaff, intensity: 1.1, position: [5, -6, 7] },
-    shadowBias: -0.00055,
-    envIntensity: 0.9,
+    ground: { style: 'shadow', opacity: 0.45 },
   },
 };
 
-const fallbackPresetKey = FALLBACK_PRESET_ALIASES[fallbackPresetParam] || 'studio-neutral';
+const fallbackPresetKey = FALLBACK_PRESET_ALIASES[fallbackPresetParam] || 'bright-outdoor';
 function applySnapshot(snapshot) {
   latestSnapshot = snapshot;
   store.update((draft) => {
@@ -427,6 +410,10 @@ function initRenderer() {
   scene.add(lightTarget);
   dir.target = lightTarget;
   scene.add(dir);
+  const fill = new THREE.DirectionalLight(0xffffff, 0);
+  fill.position.set(-6, 6, 3);
+  fill.castShadow = false;
+  scene.add(fill);
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
   camera.up.set(0, 0, 1);
@@ -473,6 +460,7 @@ function initRenderer() {
     grid,
     light: dir,
     lightTarget,
+    fill,
     hemi,
     ambient,
     assetSource: null,
@@ -747,7 +735,7 @@ function applyFallbackAppearance(ctx, state) {
   const preset = FALLBACK_PRESETS[fallback.preset] || FALLBACK_PRESETS[fallbackPresetKey];
   const renderer = ctx.renderer;
   if (renderer) {
-    renderer.toneMappingExposure = preset.exposure ?? 1.0;
+    renderer.toneMappingExposure = preset.exposure ?? 1.2;
   }
 
   if (!fallback.enabled) {
@@ -760,7 +748,7 @@ function applyFallbackAppearance(ctx, state) {
   }
 
   if (!hasModelBackground(state) && ctx.scene) {
-    ctx.scene.background = new THREE.Color(preset.background ?? 0x171c27);
+    ctx.scene.background = new THREE.Color(preset.background ?? 0xe7edf5);
   }
 
   if (!hasModelLights(state)) {
@@ -773,12 +761,12 @@ function applyFallbackAppearance(ctx, state) {
       const hemiCfg = preset.hemi || {};
       ctx.hemi.color.setHex(hemiCfg.sky ?? 0xffffff);
       ctx.hemi.groundColor.setHex(hemiCfg.ground ?? 0x20242f);
-      ctx.hemi.intensity = hemiCfg.intensity ?? 0.5;
+      ctx.hemi.intensity = hemiCfg.intensity ?? 0.6;
     }
     if (ctx.light) {
       const dirCfg = preset.dir || {};
       ctx.light.color.setHex(dirCfg.color ?? 0xffffff);
-      ctx.light.intensity = dirCfg.intensity ?? 1.2;
+      ctx.light.intensity = dirCfg.intensity ?? 1.8;
       if (Array.isArray(dirCfg.position) && dirCfg.position.length === 3) {
         ctx.light.position.set(dirCfg.position[0], dirCfg.position[1], dirCfg.position[2]);
       }
@@ -787,6 +775,14 @@ function applyFallbackAppearance(ctx, state) {
       }
       if (ctx.light.shadow) {
         ctx.light.shadow.bias = dirCfg.shadowBias ?? preset.shadowBias ?? ctx.light.shadow.bias;
+      }
+    }
+    if (ctx.fill) {
+      const fillCfg = preset.fill || {};
+      ctx.fill.color.setHex(fillCfg.color ?? 0xcfe3ff);
+      ctx.fill.intensity = fillCfg.intensity ?? 0.3;
+      if (Array.isArray(fillCfg.position) && fillCfg.position.length === 3) {
+        ctx.fill.position.set(fillCfg.position[0], fillCfg.position[1], fillCfg.position[2]);
       }
     }
   }
@@ -850,6 +846,7 @@ function emitAdapterSceneSnapshot(ctx, snapshot, state) {
 
 function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
   const fallbackEnabled = options.fallbackEnabled !== false;
+  const preset = options.preset || 'bright-outdoor';
   let geometry;
   let materialOpts = {
     color: 0x6fa0ff,
@@ -889,12 +886,11 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
         const height = Math.max(1, Math.abs(sizeVec?.[1] || 0) > 1e-6 ? (sizeVec[1] * 2) : 20);
         geometry = new THREE.PlaneGeometry(width, height, 1, 1);
       }
-      materialOpts = {
-        color: 0x2f343f,
-        metalness: 0.1,
-        roughness: 0.9,
-        map: fallbackEnabled ? getFallbackGroundTexture() : null,
-      };
+      if (fallbackEnabled && preset === 'studio-clean') {
+        materialOpts = { shadow: true, shadowOpacity: options.groundBackfaceOpacity ?? 0.45 };
+      } else {
+        materialOpts = { color: 0xdcdcdc, metalness: 0.0, roughness: 0.8, map: null };
+      }
       postCreate = (mesh) => {
         mesh.rotation.x = -Math.PI / 2;
         mesh.receiveShadow = true;
@@ -1060,7 +1056,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec) {
       }
     }
     if (!geometryInfo) {
-      geometryInfo = createPrimitiveGeometry(gtype, sizeVec, { fallbackEnabled: ctx.fallback?.enabled !== false });
+      geometryInfo = createPrimitiveGeometry(gtype, sizeVec, (function(){ const fb = (renderCtx && renderCtx.fallback) ? renderCtx.fallback : {}; return { fallbackEnabled: (fb.enabled!==false), preset: (fb.preset || 'bright-outdoor') }; })());
       geometryInfo.ownGeometry = true;
     }
 
