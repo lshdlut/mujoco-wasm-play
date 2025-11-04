@@ -1,4 +1,4 @@
-import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+import * as THREE from 'three';
 
 import {
   createViewerStore,
@@ -863,7 +863,7 @@ function ensureOutdoorSkyEnv(ctx, preset) {
     candidates.push('dist/assets/env/sky_clear_4k.hdr');
     const tryLoadHDRI = async (url) => {
       try {
-        const mod = await import('https://unpkg.com/three@0.161.0/examples/jsm/loaders/RGBELoader.js?module');
+        const mod = await import('three/addons/loaders/RGBELoader.js');
         if (!mod || !mod.RGBELoader) return false;
         const loader = new mod.RGBELoader();
         const hdr = await new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
@@ -896,7 +896,7 @@ function ensureOutdoorSkyEnv(ctx, preset) {
   if (!ctx.skyInit) {
     ctx.skyInit = true;
     try {
-      import('https://unpkg.com/three@0.161.0/examples/jsm/objects/Sky.js?module').then((mod) => {
+      import('three/addons/objects/Sky.js').then((mod) => {
         if (!mod || !mod.Sky) return;
         const sky = new mod.Sky();
         sky.scale.setScalar(450000);
