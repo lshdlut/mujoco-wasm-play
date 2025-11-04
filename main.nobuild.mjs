@@ -756,7 +756,7 @@ function applyFallbackAppearance(ctx, state) {
   }
 
   if (!hasModelBackground(state) && ctx.scene) {
-    // Background: Outdoor uses sky (set in ensureOutdoorSkyEnv); Studio uses gradient
+    // Background: Outdoor uses gradient until Sky/HDRI ready; Studio uses gradient
     if (fallback.preset === 'studio-clean') {
       if (!ctx.studioBgTex) {
         ctx.studioBgTex = createVerticalGradientTexture(0xeef5ff, 0xd2dae6, 256);
@@ -767,7 +767,15 @@ function applyFallbackAppearance(ctx, state) {
         ctx.scene.environment = null;
       }
     } else {
-      ctx.scene.background = new THREE.Color(preset.background ?? 0xe7edf5);
+      // Outdoor: if no env and no sky, show a cool blue gradient to avoid black
+      const noEnv = !ctx.scene.environment;
+      const noSky = !ctx.sky;
+      if (noEnv && noSky) {
+        if (!ctx.outdoorBgTex) {
+          ctx.outdoorBgTex = createVerticalGradientTexture(0xe7edf5, 0xcdd5e0, 256);
+        }
+        ctx.scene.background = ctx.outdoorBgTex;
+      }
     }
   }
 
