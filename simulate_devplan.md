@@ -38,13 +38,13 @@ The goals for `mujoco-wasm-play` are to reach feature parity with MuJoCo's deskt
 ## Workstreams & Next Actions
 
 ### Rendering Asset Capture (P0)
-- [ ] Add mesh/data views to forge wrappers (`mjwf_*`) – vert/face/normal/texcoord arrays, geom→mesh map.
-- [ ] Extend `MjSimLite` with `collectRenderAssets()` returning geometry + material + mesh descriptors.
-- [ ] Emit `render_assets` message from worker/direct backends on successful model load (and on reload).
-- [ ] Persist assets in viewer state for renderer consumption.
+- [x] Add mesh/data views to forge wrappers (`mjwf_*`) – vert/face/normal/texcoord arrays, geom→mesh map.
+- [x] Extend `MjSimLite` with `collectRenderAssets()` returning geometry + material + mesh descriptors.
+- [x] Emit `render_assets` message from worker/direct backends on successful model load (and on reload).
+- [x] Persist assets in viewer state for renderer consumption.
 
 ### Backend Field Routing (P1)
-- [ ] Normalise bindings from `ui_spec.json` into `(target, field, type)` tuples.
+- [x] Normalise bindings from `ui_spec.json` into `(target, field, type)` tuples (see `spec/ui_bindings_index.json`).
 - [ ] Implement backend commands (`setField`, `setFlag`, `setOption`) and connect to `mjModel`, `mjData`, `mjvOption`.
 - [ ] Ensure idempotent updates and snapshot diffs after command execution.
 
@@ -62,6 +62,7 @@ The goals for `mujoco-wasm-play` are to reach feature parity with MuJoCo's deskt
 - [ ] Enforce spec validation in CI (`npm run spec:lint`).
 - [ ] Add Playwright end-to-end smoke that boots viewer, flips key toggles, validates HUD counters.
 - [ ] Document developer workflow (building forge artifacts, running worker/direct modes).
+- [x] Provide CLI snapshot comparer (`node scripts/compare_snaps.mjs <sim> <adapter>`) for offline diff validation.
 
 ## Dependencies & Coordination
 - **Forge wrapper updates**: mesh/scene exports require changes in `mujoco-wasm-forge` (`wrappers/official_app_337`). Coordinate before expecting runtime availability.
@@ -71,4 +72,3 @@ The goals for `mujoco-wasm-play` are to reach feature parity with MuJoCo's deskt
 ## Tracking
 - Maintain task status inline (checkboxes) and annotate PRs with `[render-assets]`, `[scene-binding]`, etc.
 - Revisit this plan after the render asset milestone lands to reprioritise remaining items.
-

@@ -2,18 +2,25 @@
 // Exposes a Worker-like surface (addEventListener/postMessage/terminate) so that the
 // viewer UI can remain agnostic to whether physics runs in a worker or inline.
 
-import { MjSimLite, createLocalModule } from './bridge.mjs';
+import { MjSimLite, createLocalModule, heapViewF64, heapViewF32, heapViewI32, readCString } from './bridge.mjs';
 import { normalizeVer, getForgeDistBase, getVersionInfo, withCacheTag } from './paths.mjs';
+import { createSceneSnap } from './snapshots.mjs';
 
 const TICK_INTERVAL_MS = 8;   // matches physics.worker.mjs stepping cadence
 const SNAP_INTERVAL_MS = 16;  // ~60 Hz snapshot stream
 
 function getView(mod, ptr, dtype, len) {
-  if (!mod || !ptr || !len) return null;
-  if (dtype === 'f64') return mod.HEAPF64.subarray((ptr >>> 3), (ptr >>> 3) + (len | 0));
-  if (dtype === 'f32') return new Float32Array(mod.HEAPU8.buffer, ptr | 0, len | 0);
-  if (dtype === 'i32') return new Int32Array(mod.HEAPU8.buffer, ptr | 0, len | 0);
-  return null;
+  if (!mod || !ptr || !(len > 0)) return null;
+  switch (dtype) {
+    case 'f64':
+      return heapViewF64(mod, ptr, len);
+    case 'f32':
+      return heapViewF32(mod, ptr, len);
+    case 'i32':
+      return heapViewI32(mod, ptr, len);
+    default:
+      return null;
+  }
 }
 
 function cloneArray(view, ctor) {
@@ -31,15 +38,7 @@ function toEventPayload(data) {
 }
 
 function safeCStr(mod, ptr) {
-  if (!mod || !ptr) return '';
-  const heap = mod.HEAPU8;
-  let out = '';
-  for (let i = ptr | 0; i < heap.length; i++) {
-    const ch = heap[i];
-    if (!ch) break;
-    out += String.fromCharCode(ch);
-  }
-  return out;
+  return readCString(mod, ptr);
 }
 
 function readErrno(mod) {
@@ -66,6 +65,8 @@ class DirectBackend {
     this.ver = normalizeVer(options.ver ?? search.get('ver'));
     this.shimParam = options.shimParam ?? search.get('shim');
     this.debug = !!options.debug;
+    this.snapshotDebug =
+      options.snapshotDebug ?? (typeof window !== 'undefined' ? !!window.PLAY_SNAPSHOT_DEBUG : false);
     this.listeners = {
       message: new Set(),
       error: new Set(),
@@ -92,6 +93,7 @@ class DirectBackend {
     this.lastBounds = { center: [0, 0, 0], radius: 0 };
     this.alignSeq = 0;
     this.copySeq = 0;
+    this.snapshotState = this.snapshotDebug ? { frame: 0, lastSim: null } : null;
   }
 
   #computeBoundsFromPositions(view, n) {
@@ -233,7 +235,10 @@ class DirectBackend {
       case 'reset': {
         if (this.sim) {
           const ok = this.sim.reset?.();
-          if (ok) this.#snapshot();
+          if (ok) {
+            this.#snapshot();
+            this.#emitRenderAssets();
+          }
         }
         break;
       }
@@ -392,6 +397,11 @@ class DirectBackend {
       }
     } catch {}
 
+    if (this.snapshotState) {
+      this.snapshotState.frame = 0;
+      this.snapshotState.lastSim = null;
+    }
+
     let xmlText = String(msg.xmlText || '');
     if (!xmlText) xmlText = await this.#fallbackXml();
 
@@ -433,10 +443,10 @@ class DirectBackend {
     this.cameraMode = 0;
     this.#emitMessage({ kind: 'ready', abi, dt: this.dt, ngeom: this.sim.ngeom?.() | 0 });
     this.#emitOptions();
+    this.#snapshot();
     this.#emitRenderAssets();
 
     this.#sendMeta();
-    this.#snapshot();
 
     this.#startLoops();
   }
@@ -575,6 +585,7 @@ class DirectBackend {
       let gsize = null;
       let gtype = null;
       let gmatid = null;
+      let gdataid = null;
       let matrgba = null;
       if (ngeom > 0) {
         const posView = this.sim.geomXposView?.();
@@ -592,10 +603,26 @@ class DirectBackend {
         if (typeView) gtype = cloneArray(typeView, Int32Array);
         const matidView = this.sim.geomMatIdView?.();
         if (matidView) gmatid = cloneArray(matidView, Int32Array);
+        const dataIdView = this.sim.geomDataidView?.();
+        if (dataIdView) gdataid = cloneArray(dataIdView, Int32Array);
         const rgbaView = this.sim.matRgbaView?.();
         if (rgbaView) matrgba = cloneArray(rgbaView, Float32Array);
       }
       let contacts = null;
+      if (this.snapshotState) {
+        this.snapshotState.lastSim = {
+          frame: this.snapshotState.frame,
+          ngeom,
+          gtype,
+          gsize,
+          gmatid,
+          matrgba,
+          gdataid,
+          xpos,
+          xmat,
+        };
+        this.snapshotState.frame += 1;
+      }
       try {
         const ncon = this.sim.ncon?.() | 0;
         if (ncon > 0) {
@@ -642,11 +669,12 @@ class DirectBackend {
         frameMode: this.frameMode | 0,
         cameraMode: this.cameraMode | 0,
       };
-      if (contacts) msg.contacts = contacts;
       if (gsize) msg.gsize = gsize;
       if (gtype) msg.gtype = gtype;
       if (gmatid) msg.gmatid = gmatid;
+      if (gdataid) msg.gdataid = gdataid;
       if (matrgba) msg.matrgba = matrgba;
+      if (contacts) msg.contacts = contacts;
       this.#emitMessage(msg);
     } catch (err) {
       this.#emitError(err);
@@ -761,6 +789,38 @@ class DirectBackend {
       if (assets) {
         this.renderAssets = assets;
         this.#emitMessage({ kind: 'render_assets', assets });
+        if (this.snapshotState?.lastSim) {
+          try {
+            const scene = createSceneSnap({
+              frame: this.snapshotState.lastSim.frame,
+              ngeom: this.snapshotState.lastSim.ngeom,
+              gtype: this.snapshotState.lastSim.gtype,
+              gsize: this.snapshotState.lastSim.gsize,
+              gmatid: this.snapshotState.lastSim.gmatid,
+              matrgba: this.snapshotState.lastSim.matrgba,
+              gdataid: assets.geoms?.dataid ?? this.snapshotState.lastSim.gdataid,
+              xpos: this.snapshotState.lastSim.xpos,
+              xmat: this.snapshotState.lastSim.xmat,
+              mesh: assets.meshes
+                ? {
+                    vertnum: assets.meshes.vertnum,
+                    facenum: assets.meshes.facenum,
+                    vertadr: assets.meshes.vertadr,
+                    faceadr: assets.meshes.faceadr,
+                    vert: assets.meshes.vert,
+                    face: assets.meshes.face,
+                    normal: assets.meshes.normal,
+                    texcoord: assets.meshes.texcoord,
+                  }
+                : null,
+            });
+            this.#emitMessage({ kind: 'scene_snapshot', source: 'sim', frame: scene.frame, snap: scene });
+          } catch (err) {
+            if (this.debug) {
+              this.#emitLog('direct: scene snapshot failed', { error: String(err) });
+            }
+          }
+        }
       }
     } catch (err) {
       if (this.debug) {

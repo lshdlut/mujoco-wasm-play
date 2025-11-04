@@ -1,14 +1,73 @@
 // Minimal browser-only bridge: heap views + MjSimLite (no Node deps)
 
+function resolveHeapBuffer(mod) {
+  if (!mod) return null;
+  if (mod.__heapBuffer instanceof ArrayBuffer) {
+    return mod.__heapBuffer;
+  }
+  try {
+    const mem = mod.wasmExports?.memory;
+    if (mem?.buffer instanceof ArrayBuffer) return mem.buffer;
+  } catch {}
+  if (mod.__localShimState) {
+    try {
+      const heapU8 = mod.HEAPU8;
+      if (heapU8?.buffer instanceof ArrayBuffer) return heapU8.buffer;
+    } catch {}
+    try {
+      const heapF64 = mod.HEAPF64;
+      if (heapF64?.buffer instanceof ArrayBuffer) return heapF64.buffer;
+    } catch {}
+  }
+  return null;
+}
+
+function createHeapTypedArray(mod, ptr, length, Ctor) {
+  const n = length | 0;
+  if (!(n > 0) || !(ptr > 0)) {
+    return new Ctor(0);
+  }
+  const buffer = resolveHeapBuffer(mod);
+  if (!buffer) {
+    return new Ctor(n);
+  }
+  mod.__heapBuffer = buffer;
+  try {
+    return new Ctor(buffer, ptr >>> 0, n);
+  } catch (err) {
+    try {
+      const bytes = Ctor.BYTES_PER_ELEMENT * n;
+      const src = new Uint8Array(buffer, ptr >>> 0, bytes);
+      const copy = new Ctor(n);
+      new Uint8Array(copy.buffer).set(src);
+      return copy;
+    } catch {
+      return new Ctor(n);
+    }
+  }
+}
+
 export function heapViewF64(mod, ptr, length) {
-  const offset = (ptr|0) >> 3;
-  return mod.HEAPF64.subarray(offset, offset + (length|0));
+  return createHeapTypedArray(mod, ptr, length, Float64Array);
 }
 export function heapViewF32(mod, ptr, length) {
-  return new Float32Array(mod.HEAPU8.buffer, ptr|0, length|0);
+  return createHeapTypedArray(mod, ptr, length, Float32Array);
 }
 export function heapViewI32(mod, ptr, length) {
-  return new Int32Array(mod.HEAPU8.buffer, ptr|0, length|0);
+  return createHeapTypedArray(mod, ptr, length, Int32Array);
+}
+export function readCString(mod, ptr) {
+  if (!ptr) return '';
+  const buffer = resolveHeapBuffer(mod);
+  if (!buffer) return '';
+  const u8 = new Uint8Array(buffer);
+  let out = '';
+  for (let i = ptr | 0; i < u8.length; i += 1) {
+    const ch = u8[i];
+    if (!ch) break;
+    out += String.fromCharCode(ch);
+  }
+  return out;
 }
 function cloneTyped(view, Ctor) {
   if (!view) return null;
@@ -46,18 +105,34 @@ export function collectRenderAssetsFromModule(mod, handle) {
     meshes: null,
     extras: {},
   };
+  const diagnostics = {
+    missingFuncs: [],
+    zeroPointers: [],
+  };
+  const ensureFunc = (name) => {
+    const fn = mod?.[name];
+    if (typeof fn !== 'function') {
+      if (!diagnostics.missingFuncs.includes(name)) {
+        diagnostics.missingFuncs.push(name);
+      }
+      return null;
+    }
+    return fn;
+  };
   const ngeom = typeof mod._mjwf_ngeom === 'function' ? (mod._mjwf_ngeom(handle) | 0) : 0;
   if (ngeom > 0) {
-    const sizeView = readView(mod, mod._mjwf_geom_size_ptr, handle, ngeom * 3, heapViewF64);
-    const typeView = readView(mod, mod._mjwf_geom_type_ptr, handle, ngeom, heapViewI32);
-    const matidView = readView(mod, mod._mjwf_geom_matid_ptr, handle, ngeom, heapViewI32);
-    const bodyIdView = readView(mod, mod._mjwf_geom_bodyid_ptr, handle, ngeom, heapViewI32);
+    const sizeView = readView(mod, ensureFunc('_mjwf_geom_size_ptr'), handle, ngeom * 3, heapViewF64);
+    const typeView = readView(mod, ensureFunc('_mjwf_geom_type_ptr'), handle, ngeom, heapViewI32);
+    const matidView = readView(mod, ensureFunc('_mjwf_geom_matid_ptr'), handle, ngeom, heapViewI32);
+    const bodyIdView = readView(mod, ensureFunc('_mjwf_geom_bodyid_ptr'), handle, ngeom, heapViewI32);
+    const dataIdView = readView(mod, ensureFunc('_mjwf_geom_dataid_ptr'), handle, ngeom, heapViewI32);
     assets.geoms = {
       count: ngeom,
       size: cloneTyped(sizeView, Float64Array),
       type: cloneTyped(typeView, Int32Array),
       matid: cloneTyped(matidView, Int32Array),
       bodyid: cloneTyped(bodyIdView, Int32Array),
+      dataid: cloneTyped(dataIdView, Int32Array),
     };
   }
   const nmat = typeof mod._mjwf_nmat === 'function' ? (mod._mjwf_nmat(handle) | 0) : 0;
@@ -70,23 +145,29 @@ export function collectRenderAssetsFromModule(mod, handle) {
   }
   const nmesh = typeof mod._mjwf_nmesh === 'function' ? (mod._mjwf_nmesh(handle) | 0) : 0;
   if (nmesh > 0) {
-    const vertAdr = readView(mod, mod._mjwf_mesh_vertadr_ptr, handle, nmesh, heapViewI32);
-    const vertNum = readView(mod, mod._mjwf_mesh_vertnum_ptr, handle, nmesh, heapViewI32);
-    const faceAdr = readView(mod, mod._mjwf_mesh_faceadr_ptr, handle, nmesh, heapViewI32);
-    const faceNum = readView(mod, mod._mjwf_mesh_facenum_ptr, handle, nmesh, heapViewI32);
-    const texCoordAdr = typeof mod._mjwf_mesh_texcoordadr_ptr === 'function'
+    const vertAdr = readView(mod, ensureFunc('_mjwf_mesh_vertadr_ptr'), handle, nmesh, heapViewI32);
+    const vertNum = readView(mod, ensureFunc('_mjwf_mesh_vertnum_ptr'), handle, nmesh, heapViewI32);
+    const faceAdr = readView(mod, ensureFunc('_mjwf_mesh_faceadr_ptr'), handle, nmesh, heapViewI32);
+    const faceNum = readView(mod, ensureFunc('_mjwf_mesh_facenum_ptr'), handle, nmesh, heapViewI32);
+    const texCoordAdr = ensureFunc('_mjwf_mesh_texcoordadr_ptr')
       ? readView(mod, mod._mjwf_mesh_texcoordadr_ptr, handle, nmesh, heapViewI32)
       : null;
-    const texCoordNum = typeof mod._mjwf_mesh_texcoordnum_ptr === 'function'
+    const texCoordNum = ensureFunc('_mjwf_mesh_texcoordnum_ptr')
       ? readView(mod, mod._mjwf_mesh_texcoordnum_ptr, handle, nmesh, heapViewI32)
       : null;
-    const vertView = readView(mod, mod._mjwf_mesh_vert_ptr, handle, (mod._mjwf_mesh_vert_count?.(handle) | 0) * 3 || 0, heapViewF32);
-    const faceView = readView(mod, mod._mjwf_mesh_face_ptr, handle, (mod._mjwf_mesh_face_count?.(handle) | 0) * 3 || 0, heapViewI32);
-    const normalView = typeof mod._mjwf_mesh_normal_ptr === 'function'
-      ? readView(mod, mod._mjwf_mesh_normal_ptr, handle, ((mod._mjwf_mesh_vert_count?.(handle) | 0) * 3) || 0, heapViewF32)
+    const vertCountFn = ensureFunc('_mjwf_mesh_vert_count');
+    const faceCountFn = ensureFunc('_mjwf_mesh_face_count');
+    const texcoordCountFn = ensureFunc('_mjwf_mesh_texcoord_count');
+    const vertCount = vertCountFn ? (vertCountFn.call(mod, handle) | 0) : 0;
+    const faceCount = faceCountFn ? (faceCountFn.call(mod, handle) | 0) : 0;
+    const texcoordCount = texcoordCountFn ? (texcoordCountFn.call(mod, handle) | 0) : 0;
+    const vertView = readView(mod, ensureFunc('_mjwf_mesh_vert_ptr'), handle, Math.max(0, vertCount * 3), heapViewF32);
+    const faceView = readView(mod, ensureFunc('_mjwf_mesh_face_ptr'), handle, Math.max(0, faceCount * 3), heapViewI32);
+    const normalView = ensureFunc('_mjwf_mesh_normal_ptr')
+      ? readView(mod, mod._mjwf_mesh_normal_ptr, handle, Math.max(0, vertCount * 3), heapViewF32)
       : null;
-    const texcoordView = typeof mod._mjwf_mesh_texcoord_ptr === 'function'
-      ? readView(mod, mod._mjwf_mesh_texcoord_ptr, handle, ((mod._mjwf_mesh_texcoord_count?.(handle) | 0) * 2) || 0, heapViewF32)
+    const texcoordView = ensureFunc('_mjwf_mesh_texcoord_ptr')
+      ? readView(mod, mod._mjwf_mesh_texcoord_ptr, handle, Math.max(0, texcoordCount * 2), heapViewF32)
       : null;
     assets.meshes = {
       count: nmesh,
@@ -102,11 +183,54 @@ export function collectRenderAssetsFromModule(mod, handle) {
       texcoord: cloneTyped(texcoordView, Float32Array),
     };
   }
+  if (diagnostics.missingFuncs.length || diagnostics.zeroPointers.length) {
+    assets.extras.diagnostics = diagnostics;
+    const globalKey = '__renderAssetDiagLogged';
+    const shouldLog = (() => {
+      if (typeof window !== 'undefined') {
+        window[globalKey] = window[globalKey] || { count: 0, lastTs: 0 };
+        const ref = window[globalKey];
+        const now = Date.now();
+        if (ref.count === 0 || (now - ref.lastTs) > 5000) {
+          ref.count += 1;
+          ref.lastTs = now;
+          return true;
+        }
+        return false;
+      }
+      if (!collectRenderAssetsFromModule.__diagLogged || (Date.now() - collectRenderAssetsFromModule.__diagLogged) > 5000) {
+        collectRenderAssetsFromModule.__diagLogged = Date.now();
+        return true;
+      }
+      return false;
+    })();
+    if (shouldLog && typeof console !== 'undefined') {
+      console.warn('[render-assets] diagnostics', diagnostics);
+    }
+  }
   return assets;
 }
 
 export class MjSimLite {
-  constructor(mod) { this.mod = mod; this.h = 0; this.pref = null; this.mode = 'handle'; }
+  constructor(mod) {
+    this.mod = mod;
+    this.h = 0;
+    this.pref = null;
+    this.mode = 'handle';
+    const heapBuf = resolveHeapBuffer(mod);
+    if (heapBuf) {
+      mod.__heapBuffer = heapBuf;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        window.__forgeModules = window.__forgeModules || [];
+        if (!window.__forgeModules.includes(mod)) {
+          window.__forgeModules.push(mod);
+        }
+        window.__forgeModule = mod;
+      } catch {}
+    }
+  }
 
   async maybeInstallShimFromQuery() {
     try {
@@ -123,10 +247,7 @@ export class MjSimLite {
 
   // Helpers
   _cstr(ptr){
-    if (!ptr) return '';
-    const u8 = this.mod.HEAPU8; let s='';
-    for (let i=ptr|0; i<u8.length; i++){ const c=u8[i]; if (!c) break; s += String.fromCharCode(c); }
-    return s;
+    return readCString(this.mod, ptr);
   }
 
   _mkdirTree(path){
@@ -293,6 +414,7 @@ export class MjSimLite {
   geomSizeView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_geom_size_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*3); }
   geomTypeView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_geom_type_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
   geomMatIdView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_geom_matid_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
+  geomDataidView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_geom_dataid_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
   nmat(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nmat']; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
   matRgbaView(){ const m=this.mod; const h=this.h|0; const nm=this.nmat(); if(!nm)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_mat_rgba_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF32(m,p,nm*4); }
   nmesh(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_nmesh; if (typeof d!=='function') return 0; try { return (d.call(m,h)|0)||0; } catch { return 0; } }
@@ -359,12 +481,12 @@ export function createLocalModule() {
   function _free(_p) {}
   const files = new Map();
   const FS = { writeFile: (p,d)=>files.set(String(p), d instanceof Uint8Array ? d : new TextEncoder().encode(String(d))), readFile:(p)=>files.get(String(p))||new Uint8Array(0) };
-  const mod = { HEAPU8, HEAPF64, _malloc, _free, FS };
+  const mod = { __heapBuffer: buf, HEAPU8, HEAPF64, _malloc, _free, FS };
   mod.ccall = (name, _ret, _argt, args) => { const fn = mod['_' + name] || mod[name]; if (typeof fn==='function') return fn.apply(mod, args||[]); return 0; };
   // Install tiny local shim
   try {
     const f64 = mod.HEAPF64;
-    function alloc(n){ const p = mod._malloc(n|0); new Uint8Array(mod.HEAPU8.buffer,p,n).fill(0); return p; }
+    function alloc(n){ const p = mod._malloc(n|0); new Uint8Array(mod.__heapBuffer, p, n).fill(0); return p; }
     function writeF64(p,arr){ const off=p>>>3; for(let i=0;i<arr.length;i++) f64[off+i]=+arr[i]||0; }
     const state = { h:1, dt:0.002, t:0, ngeom:2, geomXpos:0, geomXmat:0 };
     state.geomXpos = alloc(2*3*8); state.geomXmat = alloc(2*9*8);

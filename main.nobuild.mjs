@@ -8,8 +8,19 @@ import {
   readControlValue,
   mergeBackendSnapshot,
 } from './src/viewer/state.mjs';
+import { createSceneSnap, diffSceneSnaps } from './local_tools/viewer_demo/snapshots.mjs';
 
 const CAMERA_PRESETS = ['Free', 'Tracking', 'Fixed 1', 'Fixed 2', 'Fixed 3'];
+const MJ_GEOM = {
+  PLANE: 0,
+  HFIELD: 1,
+  SPHERE: 2,
+  CAPSULE: 3,
+  ELLIPSOID: 4,
+  CYLINDER: 5,
+  BOX: 6,
+  MESH: 7,
+};
 
 const leftPanel = document.querySelector('[data-testid="panel-left"]');
 const rightPanel = document.querySelector('[data-testid="panel-right"]');
@@ -260,6 +271,8 @@ const renderCtx = {
   root: null,
   grid: null,
   light: null,
+  assetSource: null,
+  assetCache: null,
   meshes: [],
   defaultVopt: null,
   alignSeq: 0,
@@ -267,6 +280,7 @@ const renderCtx = {
   cameraTarget: new THREE.Vector3(0, 0, 0),
   autoAligned: false,
   bounds: null,
+  snapshotLogState: null,
 };
 
 const tempVecA = new THREE.Vector3();
@@ -326,7 +340,7 @@ function initRenderer() {
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.1;
   renderer.setClearColor(0x181d28, 1);
@@ -398,6 +412,10 @@ function initRenderer() {
     light: dir,
     lightTarget,
     hemi,
+    assetSource: null,
+    assetCache: {
+      meshGeometries: new Map(),
+    },
     meshes: [],
     defaultVopt: null,
     alignSeq: 0,
@@ -417,8 +435,227 @@ function getDefaultVopt(state) {
   return renderCtx.defaultVopt;
 }
 
-function ensureGeomMesh(ctx, index, gtype) {
-  if (ctx.meshes[index]) return ctx.meshes[index];
+function disposeMeshObject(mesh) {
+  if (!mesh) return;
+  const parent = mesh.parent;
+  if (parent && typeof parent.remove === 'function') {
+    parent.remove(mesh);
+  }
+  const ownGeometry = mesh.userData?.ownGeometry !== false;
+  if (ownGeometry && mesh.geometry && typeof mesh.geometry.dispose === 'function') {
+    try { mesh.geometry.dispose(); } catch {}
+  }
+  const material = mesh.material;
+  if (Array.isArray(material)) {
+    for (const mat of material) {
+      if (mat && typeof mat.dispose === 'function') {
+        try { mat.dispose(); } catch {}
+      }
+    }
+  } else if (material && typeof material.dispose === 'function') {
+    try { material.dispose(); } catch {}
+  }
+}
+
+function syncRendererAssets(ctx, assets) {
+  const source = assets || null;
+  if (ctx.assetSource === source) return;
+  ctx.assetSource = source;
+  if (!ctx.meshes) {
+    ctx.meshes = [];
+    return;
+  }
+  for (let i = 0; i < ctx.meshes.length; i += 1) {
+    if (ctx.meshes[i]) {
+      disposeMeshObject(ctx.meshes[i]);
+    }
+  }
+  ctx.meshes = [];
+  if (ctx.assetCache && ctx.assetCache.meshGeometries instanceof Map) {
+    for (const geometry of ctx.assetCache.meshGeometries.values()) {
+      if (geometry && typeof geometry.dispose === 'function') {
+        try { geometry.dispose(); } catch {}
+      }
+    }
+    ctx.assetCache.meshGeometries.clear();
+  }
+  ctx.assetCache = {
+    meshGeometries: new Map(),
+  };
+}
+
+function isSnapshotDebugEnabled() {
+  if (typeof window === 'undefined') return false;
+  return !!window.PLAY_SNAPSHOT_DEBUG;
+}
+
+function buildAdapterMeshSnapshot(ctx, assets) {
+  if (assets?.meshes) {
+    return {
+      count: assets.meshes.count ?? 0,
+      vertadr: assets.meshes.vertadr ?? null,
+      vertnum: assets.meshes.vertnum ?? null,
+      faceadr: assets.meshes.faceadr ?? null,
+      facenum: assets.meshes.facenum ?? null,
+      texcoordadr: assets.meshes.texcoordadr ?? null,
+      texcoordnum: assets.meshes.texcoordnum ?? null,
+      vert: assets.meshes.vert ?? null,
+      face: assets.meshes.face ?? null,
+      normal: assets.meshes.normal ?? null,
+      texcoord: assets.meshes.texcoord ?? null,
+    };
+  }
+
+  const cache = ctx?.assetCache?.meshGeometries;
+  const entries = cache ? Array.from(cache.entries()).filter(([id, geometry]) => {
+    return Number.isInteger(id)
+      && id >= 0
+      && geometry
+      && typeof geometry.getAttribute === 'function';
+  }) : [];
+  if (!entries.length) {
+    return null;
+  }
+  entries.sort((a, b) => (a[0] | 0) - (b[0] | 0));
+  const maxId = entries[entries.length - 1][0] | 0;
+  const vertadr = new Int32Array(maxId + 1);
+  const vertnum = new Int32Array(maxId + 1);
+  const faceadr = new Int32Array(maxId + 1);
+  const facenum = new Int32Array(maxId + 1);
+  const texcoordadr = new Int32Array(maxId + 1);
+  const texcoordnum = new Int32Array(maxId + 1);
+  const vertData = [];
+  const faceData = [];
+  const normalData = [];
+  const texcoordData = [];
+  let vertCursor = 0;
+  let faceCursor = 0;
+  let texCursor = 0;
+  for (const [meshId, geometry] of entries) {
+    const positionAttr = geometry.getAttribute('position');
+    const normalAttr = geometry.getAttribute('normal');
+    const uvAttr = geometry.getAttribute('uv');
+    const indexAttr = geometry.getIndex ? geometry.getIndex() : null;
+
+    const positionArray = positionAttr?.array;
+    const vertexCount = positionArray ? Math.floor(positionArray.length / 3) : 0;
+    vertadr[meshId] = vertCursor;
+    vertnum[meshId] = vertexCount;
+    if (vertexCount > 0 && positionArray) {
+      for (let i = 0; i < positionArray.length; i += 1) {
+        vertData.push(Number(positionArray[i]) || 0);
+      }
+      vertCursor += vertexCount;
+    }
+
+    if (indexAttr && indexAttr.array) {
+      const indexArray = indexAttr.array;
+      const triCount = Math.floor(indexArray.length / 3);
+      faceadr[meshId] = faceCursor;
+      facenum[meshId] = triCount;
+      for (let i = 0; i < indexArray.length; i += 1) {
+        faceData.push(Number(indexArray[i]) || 0);
+      }
+      faceCursor += triCount;
+    } else {
+      faceadr[meshId] = faceCursor;
+      facenum[meshId] = 0;
+    }
+
+    if (normalAttr && normalAttr.array) {
+      const normalArray = normalAttr.array;
+      for (let i = 0; i < normalArray.length; i += 1) {
+        normalData.push(Number(normalArray[i]) || 0);
+      }
+    }
+
+    if (uvAttr && uvAttr.array) {
+      const uvArray = uvAttr.array;
+      const uvCount = Math.floor(uvArray.length / 2);
+      texcoordadr[meshId] = texCursor;
+      texcoordnum[meshId] = uvCount;
+      for (let i = 0; i < uvArray.length; i += 1) {
+        texcoordData.push(Number(uvArray[i]) || 0);
+      }
+      texCursor += uvCount;
+    } else {
+      texcoordadr[meshId] = texCursor;
+      texcoordnum[meshId] = 0;
+    }
+  }
+
+  return {
+    count: maxId + 1,
+    vertadr,
+    vertnum,
+    faceadr,
+    facenum,
+    texcoordadr,
+    texcoordnum,
+    vert: vertData.length ? new Float32Array(vertData) : new Float32Array(0),
+    face: faceData.length ? new Int32Array(faceData) : new Int32Array(0),
+    normal: normalData.length ? new Float32Array(normalData) : null,
+    texcoord: texcoordData.length ? new Float32Array(texcoordData) : null,
+  };
+}
+
+function emitAdapterSceneSnapshot(ctx, snapshot, state) {
+  if (!isSnapshotDebugEnabled()) return;
+  if (!ctx || !snapshot || typeof window === 'undefined') return;
+  try {
+    const assets = state?.rendering?.assets || null;
+    ctx.snapshotFrameCounter = (ctx.snapshotFrameCounter || 0) + 1;
+    const frameIndex = ctx.snapshotFrameCounter;
+    const shouldSample = frameIndex === 1 || (frameIndex % 60) === 0;
+    const geomTypes = assets?.geoms?.type ?? snapshot.gtype;
+    if (!shouldSample || !geomTypes || !geomTypes.length) {
+      return;
+    }
+    const geomSizes = assets?.geoms?.size ?? snapshot.gsize;
+    const geomMatIds = assets?.geoms?.matid ?? snapshot.gmatid;
+    const geomDataIds = assets?.geoms?.dataid ?? snapshot.gdataid;
+    const materialRgba = assets?.materials?.rgba ?? snapshot.matrgba;
+    const meshData = buildAdapterMeshSnapshot(ctx, assets);
+    const sceneSnap = createSceneSnap({
+      frame: frameIndex,
+      ngeom: snapshot.ngeom,
+      gtype: geomTypes,
+      gsize: geomSizes,
+      gmatid: geomMatIds,
+      matrgba: materialRgba,
+      gdataid: geomDataIds,
+      xpos: snapshot.xpos,
+      xmat: snapshot.xmat,
+      mesh: meshData,
+    });
+    window.__sceneSnaps = window.__sceneSnaps || {};
+    window.__sceneSnaps.adapter = sceneSnap;
+    const simSnap = window.__sceneSnaps.sim;
+    if (simSnap) {
+      const diff = diffSceneSnaps(simSnap, sceneSnap);
+      const now = Date.now();
+      const stateRef = ctx.snapshotLogState || { lastOkTs: 0, lastFailTs: 0 };
+      if (diff.ok) {
+        if (!stateRef.lastOkTs || (now - stateRef.lastOkTs) > 3000) {
+          console.log('[snapshot] adapter OK', { frame: sceneSnap.frame, ngeom: sceneSnap.geoms.length });
+          stateRef.lastOkTs = now;
+        }
+      } else {
+        if (!stateRef.lastFailTs || (now - stateRef.lastFailTs) > 1500) {
+          console.warn('[snapshot] adapter mismatch', diff.differences.slice(0, 4));
+          stateRef.lastFailTs = now;
+        }
+      }
+      ctx.snapshotLogState = stateRef;
+    }
+  } catch (err) {
+    if (debugMode) {
+      console.warn('[snapshot] adapter capture failed', err);
+    }
+  }
+}
+
+function createPrimitiveGeometry(gtype) {
   let geometry;
   let materialOpts = {
     color: 0x6fa0ff,
@@ -427,18 +664,18 @@ function ensureGeomMesh(ctx, index, gtype) {
   };
   let postCreate = null;
   switch (gtype) {
-    case 2: // sphere
-    case 4: // ellipsoid -> sphere fallback
+    case MJ_GEOM.SPHERE:
+    case MJ_GEOM.ELLIPSOID:
       geometry = new THREE.SphereGeometry(1, 24, 16);
       break;
-    case 3: // capsule
+    case MJ_GEOM.CAPSULE:
       geometry = new THREE.CapsuleGeometry(1, 1, 16, 12);
       break;
-    case 5: // cylinder
+    case MJ_GEOM.CYLINDER:
       geometry = new THREE.CylinderGeometry(1, 1, 1, 24, 1);
       break;
-    case 0: // plane
-    case 1: // hfield -> plane
+    case MJ_GEOM.PLANE:
+    case MJ_GEOM.HFIELD:
       geometry = new THREE.PlaneGeometry(1, 1, 1, 1);
       materialOpts = {
         color: 0x4a5661,
@@ -454,25 +691,163 @@ function ensureGeomMesh(ctx, index, gtype) {
       geometry = new THREE.BoxGeometry(1, 1, 1);
       break;
   }
-  const material = new THREE.MeshStandardMaterial(materialOpts);
-  material.side = THREE.DoubleSide;
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  if (typeof postCreate === 'function') {
-    try {
-      postCreate(mesh);
-    } catch {}
+  return { geometry, materialOpts, postCreate };
+}
+
+function createMeshGeometryFromAssets(assets, meshId) {
+  if (!assets || !assets.meshes || !(meshId >= 0)) return null;
+  const { vert, vertadr, vertnum, face, faceadr, facenum, normal, texcoord, texcoordadr, texcoordnum } = assets.meshes;
+  if (!vert || !vertadr || !vertnum) return null;
+  const count = vertnum[meshId] | 0;
+  if (!(count > 0)) return null;
+  const start = (vertadr[meshId] | 0) * 3;
+  const end = start + (count * 3);
+  if (start < 0 || end > vert.length) return null;
+  const positions = vert.slice(start, end);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  if (normal && normal.length >= end) {
+    const normalSlice = normal.slice(start, end);
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normalSlice, 3));
   }
-  ctx.root.add(mesh);
-  ctx.meshes[index] = mesh;
+
+  if (face && faceadr && facenum) {
+    const triCount = facenum[meshId] | 0;
+    if (triCount > 0) {
+      const faceStart = (faceadr[meshId] | 0) * 3;
+      const faceEnd = faceStart + (triCount * 3);
+      if (faceStart >= 0 && faceEnd <= face.length) {
+        const rawFaces = face.slice(faceStart, faceEnd);
+        let needsUint32 = count > 65535;
+        if (!needsUint32) {
+          for (let i = 0; i < rawFaces.length; i += 1) {
+            if (rawFaces[i] > 65535) {
+              needsUint32 = true;
+              break;
+            }
+          }
+        }
+        const IndexCtor = needsUint32 ? Uint32Array : Uint16Array;
+        const indices = new IndexCtor(rawFaces);
+        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      }
+    }
+  }
+
+  if (texcoord && texcoordadr && texcoordnum) {
+    const tcCount = texcoordnum[meshId] | 0;
+    if (tcCount > 0) {
+      const tcStart = (texcoordadr[meshId] | 0) * 2;
+      const tcEnd = tcStart + (tcCount * 2);
+      if (tcStart >= 0 && tcEnd <= texcoord.length) {
+        const uvSlice = texcoord.slice(tcStart, tcEnd);
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvSlice, 2));
+      }
+    }
+  }
+
+  if (!geometry.getAttribute('normal')) {
+    geometry.computeVertexNormals();
+  }
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function getSharedMeshGeometry(ctx, assets, dataId) {
+  if (!ctx.assetCache || !(ctx.assetCache.meshGeometries instanceof Map)) {
+    ctx.assetCache = {
+      meshGeometries: new Map(),
+    };
+  }
+  const cache = ctx.assetCache.meshGeometries;
+  if (cache.has(dataId)) {
+    return cache.get(dataId);
+  }
+  const geometry = createMeshGeometryFromAssets(assets, dataId);
+  if (geometry) {
+    cache.set(dataId, geometry);
+  }
+  return geometry;
+}
+
+function ensureGeomMesh(ctx, index, gtype, assets, dataId) {
+  if (!ctx.meshes) ctx.meshes = [];
+  let mesh = ctx.meshes[index];
+  const needsRebuild =
+    !mesh ||
+    mesh.userData?.geomType !== gtype ||
+    (gtype === MJ_GEOM.MESH && mesh.userData?.geomDataId !== dataId);
+
+  if (needsRebuild) {
+    if (mesh) {
+      disposeMeshObject(mesh);
+    }
+
+    let geometryInfo = null;
+    if (gtype === MJ_GEOM.MESH && assets && dataId >= 0) {
+      const meshGeometry = getSharedMeshGeometry(ctx, assets, dataId);
+      if (!ctx.meshAssetDebugLogged) {
+        const meshData = assets.meshes || {};
+        console.log('[render] mesh asset', {
+          dataId,
+          vertnum: meshData.vertnum?.[dataId] ?? null,
+          facecount: meshData.facenum?.[dataId] ?? null,
+          vertLength: meshData.vert?.length ?? 0,
+          faceLength: meshData.face?.length ?? 0,
+        });
+        ctx.meshAssetDebugLogged = true;
+      }
+      if (meshGeometry) {
+        geometryInfo = {
+          geometry: meshGeometry,
+          materialOpts: {
+            color: 0xffffff,
+            metalness: 0.05,
+            roughness: 0.55,
+          },
+          postCreate: null,
+          ownGeometry: false,
+        };
+      } else if (!ctx.meshAssetMissingLogged) {
+        console.warn('[render] mesh geometry missing', { dataId });
+        ctx.meshAssetMissingLogged = true;
+      }
+    }
+    if (!geometryInfo) {
+      geometryInfo = createPrimitiveGeometry(gtype);
+      geometryInfo.ownGeometry = true;
+    }
+
+    const material = new THREE.MeshStandardMaterial(geometryInfo.materialOpts);
+    material.side = THREE.DoubleSide;
+    mesh = new THREE.Mesh(geometryInfo.geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    if (typeof geometryInfo.postCreate === 'function') {
+      try { geometryInfo.postCreate(mesh); } catch {}
+    }
+    mesh.userData = mesh.userData || {};
+    mesh.userData.geomType = gtype;
+    mesh.userData.geomDataId = gtype === MJ_GEOM.MESH ? dataId : -1;
+    mesh.userData.ownGeometry = geometryInfo.ownGeometry !== false;
+    ctx.root.add(mesh);
+    ctx.meshes[index] = mesh;
+  }
+
   return mesh;
 }
 
 function applyMaterialFlags(mesh, index, state) {
+  if (!mesh || !mesh.material) return;
   const sceneFlags = state.rendering?.sceneFlags || [];
   mesh.material.wireframe = !!sceneFlags[1];
-  mesh.material.emissive = sceneFlags[0] ? new THREE.Color(0x1a1f2a) : new THREE.Color(0x000000);
+  if (mesh.material.emissive && typeof mesh.material.emissive.set === 'function') {
+    mesh.material.emissive.set(sceneFlags[0] ? 0x1a1f2a : 0x000000);
+  } else {
+    mesh.material.emissive = new THREE.Color(sceneFlags[0] ? 0x1a1f2a : 0x000000);
+  }
 }
 
 function shouldHighlightFlag(index, value, defaults) {
@@ -482,13 +857,18 @@ function shouldHighlightFlag(index, value, defaults) {
   return true;
 }
 
-function updateMeshFromSnapshot(mesh, i, snapshot, state) {
+function updateMeshFromSnapshot(mesh, i, snapshot, state, assets) {
   const n = snapshot.ngeom | 0;
   if (i >= n) {
     mesh.visible = false;
     return;
   }
-  const { xpos, xmat, gsize, gtype, gmatid, matrgba } = snapshot;
+  const xpos = snapshot.xpos;
+  const xmat = snapshot.xmat;
+  const sizeView = snapshot.gsize || assets?.geoms?.size || null;
+  const typeView = snapshot.gtype || assets?.geoms?.type || null;
+  const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
+  const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
   const baseIndex = 3 * i;
   const pos = [
     xpos?.[baseIndex + 0] ?? 0,
@@ -512,38 +892,41 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state) {
   mesh.quaternion.copy(mat3ToQuat(rot));
 
   const sizeBase = 3 * i;
-  const sx = gsize?.[sizeBase + 0] ?? 0.1;
-  const sy = gsize?.[sizeBase + 1] ?? sx;
-  const sz = gsize?.[sizeBase + 2] ?? sx;
-  const type = gtype?.[i] ?? 6;
+  const sx = sizeView?.[sizeBase + 0] ?? 0.1;
+  const sy = sizeView?.[sizeBase + 1] ?? sx;
+  const sz = sizeView?.[sizeBase + 2] ?? sx;
+  const type = typeView?.[i] ?? MJ_GEOM.BOX;
   switch (type) {
-    case 2:
-    case 4:
+    case MJ_GEOM.SPHERE:
+    case MJ_GEOM.ELLIPSOID:
       mesh.scale.set(Math.max(1e-6, sx * 2), Math.max(1e-6, sx * 2), Math.max(1e-6, sx * 2));
       break;
-    case 3:
+    case MJ_GEOM.CAPSULE:
       mesh.scale.set(Math.max(1e-6, sx * 2), Math.max(1e-6, (sy * 2) + (sx * 2)), Math.max(1e-6, sx * 2));
       break;
-    case 5:
+    case MJ_GEOM.CYLINDER:
       mesh.scale.set(Math.max(1e-6, sx * 2), Math.max(1e-6, sy * 2), Math.max(1e-6, sx * 2));
       break;
-    case 0:
-    case 1:
+    case MJ_GEOM.PLANE:
+    case MJ_GEOM.HFIELD:
       mesh.scale.set(Math.max(1e-6, sx * 4), Math.max(1e-6, sy * 4), 1);
+      break;
+    case MJ_GEOM.MESH:
+      mesh.scale.set(1, 1, 1);
       break;
     default:
       mesh.scale.set(Math.max(1e-6, sx * 2), Math.max(1e-6, sy * 2), Math.max(1e-6, sz * 2));
       break;
   }
 
-  if (Array.isArray(matrgba) || ArrayBuffer.isView(matrgba)) {
-    const matIndex = gmatid?.[i] ?? -1;
+  if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
+    const matIndex = matIdView?.[i] ?? -1;
     if (matIndex >= 0) {
       const rgbaBase = matIndex * 4;
-      const r = matrgba?.[rgbaBase + 0] ?? 0.6;
-      const g = matrgba?.[rgbaBase + 1] ?? 0.6;
-      const b = matrgba?.[rgbaBase + 2] ?? 0.9;
-      const a = matrgba?.[rgbaBase + 3] ?? 1;
+      const r = matRgbaView?.[rgbaBase + 0] ?? 0.6;
+      const g = matRgbaView?.[rgbaBase + 1] ?? 0.6;
+      const b = matRgbaView?.[rgbaBase + 2] ?? 0.9;
+      const a = matRgbaView?.[rgbaBase + 3] ?? 1;
       mesh.material.color.setRGB(r, g, b);
       mesh.material.opacity = a;
       mesh.material.transparent = a < 0.999;
@@ -634,6 +1017,40 @@ function computeBoundsFromSnapshot(snapshot) {
 function renderScene(snapshot, state) {
   if (!snapshot || !state) return;
   const ctx = initRenderer();
+  const assets = state.rendering?.assets || null;
+  syncRendererAssets(ctx, assets);
+  if (assets && !ctx.assetSummaryLogged) {
+    const summary = {
+      geoms: assets.geoms?.count ?? 0,
+      meshes: assets.meshes?.count ?? 0,
+      vert: assets.meshes?.vert?.length ?? 0,
+      face: assets.meshes?.face?.length ?? 0,
+      normal: assets.meshes?.normal?.length ?? 0,
+      texcoord: assets.meshes?.texcoord?.length ?? 0,
+    };
+    console.log('[render] assets summary', summary);
+    ctx.assetSummaryLogged = true;
+  }
+  const typeSource = snapshot.gtype || assets?.geoms?.type || null;
+  if (!ctx.gtypeLogged && typeSource) {
+    const counts = Object.create(null);
+    for (let i = 0; i < typeSource.length; i += 1) {
+      const type = typeSource[i] | 0;
+      counts[type] = (counts[type] || 0) + 1;
+    }
+    console.log('[render] gtype histogram', counts);
+    ctx.gtypeLogged = true;
+  }
+  const dataIdSource = snapshot.gdataid || assets?.geoms?.dataid || null;
+  if (!ctx.dataIdLogged && dataIdSource) {
+    const sample = Array.from(dataIdSource.slice(0, 16));
+    let meshRefs = 0;
+    for (let i = 0; i < dataIdSource.length; i += 1) {
+      if ((dataIdSource[i] | 0) >= 0) meshRefs += 1;
+    }
+    console.log('[render] gdataid sample', { sample, meshRefs });
+    ctx.dataIdLogged = true;
+  }
   const defaults = getDefaultVopt(state);
   const voptFlags = state.rendering?.voptFlags || [];
   const sceneFlags = state.rendering?.sceneFlags || [];
@@ -666,15 +1083,23 @@ function renderScene(snapshot, state) {
   }
   const ngeom = snapshot.ngeom | 0;
   let drawn = 0;
+  const typeView = snapshot.gtype || assets?.geoms?.type || null;
+  const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
   for (let i = 0; i < ngeom; i += 1) {
-    const type = snapshot.gtype?.[i] ?? 6;
-    const mesh = ensureGeomMesh(ctx, i, type);
-    updateMeshFromSnapshot(mesh, i, snapshot, state);
+    const type = typeView?.[i] ?? MJ_GEOM.BOX;
+    const dataId = dataIdView?.[i] ?? -1;
+    const mesh = ensureGeomMesh(ctx, i, type, assets, dataId);
+    if (!mesh) continue;
+    updateMeshFromSnapshot(mesh, i, snapshot, state, assets);
     let visible = mesh.visible;
     if (hideAllGeometry) {
       visible = false;
     } else if (highlightGeometry) {
-      mesh.material.emissive = new THREE.Color(0x2b3a7a);
+      if (mesh.material?.emissive && typeof mesh.material.emissive.set === 'function') {
+        mesh.material.emissive.set(0x2b3a7a);
+      } else if (mesh.material) {
+        mesh.material.emissive = new THREE.Color(0x2b3a7a);
+      }
     }
     mesh.visible = visible;
     if (visible) drawn += 1;
@@ -694,7 +1119,10 @@ function renderScene(snapshot, state) {
 
   if (debugMode) {
     ctx.debugFrameCount = (ctx.debugFrameCount || 0) + 1;
-    if (ctx.debugFrameCount <= 5 || ctx.debugFrameCount % 60 === 0) {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const logState = ctx.debugLogState || { count: 0, lastTs: 0 };
+    const shouldLog = logState.count < 3 || (now - logState.lastTs) > 5000;
+    if (shouldLog) {
       console.log('[render] stats', {
         frame: ctx.debugFrameCount,
         drawn,
@@ -717,8 +1145,13 @@ function renderScene(snapshot, state) {
             ? Array.from(snapshot.xpos.slice(0, 3)).map((v) => Number(v.toFixed(4)))
             : null,
       });
+      logState.count += 1;
+      logState.lastTs = now;
+      ctx.debugLogState = logState;
     }
   }
+
+  emitAdapterSceneSnapshot(ctx, snapshot, state);
 
   if (ngeom > 0) {
     const bounds = computeBoundsFromSnapshot(snapshot);

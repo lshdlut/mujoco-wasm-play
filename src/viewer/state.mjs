@@ -742,6 +742,15 @@ function resolveSnapshot(state) {
 export async function createBackend(options = {}) {
   const mode = options.mode ?? 'auto';
   const debug = !!options.debug;
+  const snapshotDebug =
+    typeof window !== 'undefined'
+    && (
+      (window.location?.search?.includes('snapshot=1'))
+      || (window.location?.search?.includes('snapshot=debug'))
+    );
+  if (typeof window !== 'undefined') {
+    window.PLAY_SNAPSHOT_DEBUG = snapshotDebug;
+  }
   const modelToken = typeof options.model === 'string' ? options.model.trim() : '';
   const modelKey = modelToken.toLowerCase();
   const modelFile = resolveModelFileName(modelToken);
@@ -780,7 +789,9 @@ export async function createBackend(options = {}) {
   let messageHandler = null;
 
   async function spawnWorkerBackend() {
-    const worker = new Worker(WORKER_URL, { type: 'module' });
+    const workerUrl = new URL(WORKER_URL.href);
+    if (snapshotDebug) workerUrl.searchParams.set('snapshot', '1');
+    const worker = new Worker(workerUrl, { type: 'module' });
     return worker;
   }
 
@@ -793,6 +804,7 @@ export async function createBackend(options = {}) {
       ver: options.ver ?? '3.3.7',
       shimParam: options.shimParam ?? 'local',
       debug,
+      snapshotDebug,
     });
   }
 
@@ -914,7 +926,18 @@ export async function createBackend(options = {}) {
     const data = event?.data ?? event;
     if (!data || typeof data !== 'object') return;
     if (debug) {
-      console.log('[backend] message', data.kind, data);
+      const key = '__backendLogCounter';
+      handleMessage[key] = handleMessage[key] || { snapshot: 0 };
+      if (data.kind === 'snapshot') {
+        const info = handleMessage[key];
+        if (info.snapshot < 3 || (Date.now() - (info.lastSnapshotTs || 0)) > 5000) {
+          console.log('[backend] message', data.kind, { ngeom: data.ngeom, t: data.tSim });
+        }
+        info.snapshot += 1;
+        info.lastSnapshotTs = Date.now();
+      } else {
+        console.log('[backend] message', data.kind, data);
+      }
     }
     switch (data.kind) {
       case 'ready':
@@ -964,6 +987,15 @@ export async function createBackend(options = {}) {
           notifyListeners();
         }
         break;
+      case 'scene_snapshot': {
+        const source = data.source || 'sim';
+        if (typeof window !== 'undefined' && data.snap) {
+          window.__sceneSnaps = window.__sceneSnaps || {};
+          window.__sceneSnaps[source] = data.snap;
+        }
+        if (debug) console.log('[snapshot]', source, data.frame ?? null);
+        break;
+      }
       case 'gesture':
         if (data.gesture) {
           lastSnapshot.gesture = {

@@ -1,6 +1,7 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
-import { collectRenderAssetsFromModule } from './bridge.mjs';
+import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString } from './bridge.mjs';
+import { createSceneSnap } from './snapshots.mjs';
 // Minimal local getView to avoid path issues in buildless mode
 function getView(mod, ptr, dtype, len) {
   if (!ptr || !len) {
@@ -8,10 +9,16 @@ function getView(mod, ptr, dtype, len) {
     if (dtype === 'f32') return new Float32Array(0);
     return new Int32Array(0);
   }
-  if (dtype === 'f64') return mod.HEAPF64.subarray((ptr>>>3), (ptr>>>3) + (len|0));
-  if (dtype === 'f32') return new Float32Array(mod.HEAPU8.buffer, ptr|0, len|0);
-  if (dtype === 'i32') return new Int32Array(mod.HEAPU8.buffer, ptr|0, len|0);
-  return new Float64Array(0);
+  switch (dtype) {
+    case 'f64':
+      return heapViewF64(mod, ptr, len);
+    case 'f32':
+      return heapViewF32(mod, ptr, len);
+    case 'i32':
+      return heapViewI32(mod, ptr, len);
+    default:
+      return new Float64Array(0);
+  }
 }
 
 let mod = null;
@@ -34,25 +41,27 @@ let alignSeq = 0;
 let copySeq = 0;
 let renderAssets = null;
 
+const snapshotDebug = (() => {
+  if (typeof self !== 'undefined') {
+    const flag = self.PLAY_SNAPSHOT_DEBUG;
+    if (flag === true || flag === 1 || flag === '1') return true;
+  }
+  try {
+    const url = new URL(import.meta.url);
+    return url.searchParams.get('snapshot') === '1';
+  } catch {}
+  return false;
+})();
+
+const snapshotState = snapshotDebug ? { frame: 0, lastSim: null } : null;
+
 function wasmUrl(rel) { return new URL(rel, import.meta.url).href; }
 
 // Boot log for diagnostics
 try { postMessage({ kind:'log', message:'worker: boot' }); } catch {}
 
 function cstr(modRef, ptr) {
-  if (!ptr) return '';
-  try {
-    const heap = modRef.HEAPU8;
-    let out = '';
-    for (let i = ptr | 0; i < heap.length; i++) {
-      const ch = heap[i];
-      if (!ch) break;
-      out += String.fromCharCode(ch);
-    }
-    return out;
-  } catch {
-    return '';
-  }
+  return readCString(modRef, ptr);
 }
 
 function logHandleFailure(stage, info) {
@@ -243,9 +252,7 @@ async function loadModule() {
           postMessage({ kind: 'log', message: 'ForgeShim installed' });
         }
       } catch (e) {
-        // Fallback: install a tiny local shim sufficient for rendering
-        installLocalShim(mod);
-        postMessage({ kind: 'log', message: 'Local shim installed' });
+        postMessage({ kind: 'log', message: 'ForgeShim unavailable, skipping shim install', extra: String(e || '') });
       }
     }
   } catch {}
@@ -258,6 +265,8 @@ async function loadModule() {
         hasCcall: typeof mod.ccall === 'function'
       }
     });
+    const geomKeys = Object.keys(mod || {}).filter((k) => k.includes('_geom_')).slice(0, 16);
+    postMessage({ kind: 'log', message: 'worker: geom export sample', extra: geomKeys });
   } catch {}
   return mod;
 }
@@ -288,9 +297,18 @@ function installLocalShim(mod) {
   try {
     const malloc = mod._malloc?.bind(mod);
     if (!malloc) return;
-    const f64 = mod.HEAPF64; const u8 = mod.HEAPU8;
-    function alloc(n){ const p = malloc(n|0); new Uint8Array(u8.buffer, p, n).fill(0); return p; }
-    function writeF64(p,arr){ const off=p>>>3; for(let i=0;i<arr.length;i++) f64[off+i]=+arr[i]||0; }
+    const buffer =
+      (mod.__heapBuffer instanceof ArrayBuffer && mod.__heapBuffer) ||
+      mod.wasmExports?.memory?.buffer ||
+      mod.wasmMemory?.buffer ||
+      mod.asm?.memory?.buffer ||
+      mod.asm?.wasmMemory?.buffer;
+    if (!(buffer instanceof ArrayBuffer)) return;
+    mod.__heapBuffer = buffer;
+    const u8view = new Uint8Array(buffer);
+    const f64view = new Float64Array(buffer);
+    function alloc(n){ const p = malloc(n|0); new Uint8Array(buffer, p, n).fill(0); return p; }
+    function writeF64(p,arr){ const off=p>>>3; for(let i=0;i<arr.length;i++) f64view[off+i]=+arr[i]||0; }
     const state = { h:1, dt:0.002, t:0, ngeom:2, geomXpos:0, geomXmat:0 };
     state.geomXpos = alloc(2*3*8); state.geomXmat = alloc(2*9*8);
     writeF64(state.geomXpos,[0,0,0.05, 0.2,0,0.08]);
@@ -375,6 +393,7 @@ function snapshot() {
   let gsize = null; // Float64Array length n*3
   let gtype = null; // Int32Array length n
   let gmatid = null; // Int32Array length n
+  let gdataid = null; // Int32Array length n
   let matrgba = null; // Float32Array length nmat*4
   if (n > 0) {
     const pPtr = (mod)._mjwf_geom_xpos_ptr ? (mod)._mjwf_geom_xpos_ptr(h)|0 : mod.ccall('mjwf_geom_xpos_ptr','number',['number'],[h])|0;
@@ -391,9 +410,25 @@ function snapshot() {
     if (typePtr) gtype = new Int32Array(getView(mod, typePtr, 'i32', n));
     const matidPtr = typeof mod._mjwf_geom_matid_ptr === 'function' ? (mod._mjwf_geom_matid_ptr(h)|0) : 0;
     if (matidPtr) gmatid = new Int32Array(getView(mod, matidPtr, 'i32', n));
+    const dataidPtr = typeof mod._mjwf_geom_dataid_ptr === 'function' ? (mod._mjwf_geom_dataid_ptr(h)|0) : 0;
+    if (dataidPtr) gdataid = new Int32Array(getView(mod, dataidPtr, 'i32', n));
     const nmat = typeof mod._mjwf_nmat === 'function' ? (mod._mjwf_nmat(h)|0) : 0;
     const mrgbaPtr = typeof mod._mjwf_mat_rgba_ptr === 'function' ? (mod._mjwf_mat_rgba_ptr(h)|0) : 0;
     if (nmat > 0 && mrgbaPtr) matrgba = new Float32Array(getView(mod, mrgbaPtr, 'f32', nmat*4));
+    if (snapshotDebug && snapshotState) {
+      snapshotState.lastSim = {
+        frame: snapshotState.frame,
+        ngeom: n,
+        gtype,
+        gsize,
+        gmatid,
+        matrgba,
+        gdataid,
+        xpos,
+        xmat,
+      };
+      snapshotState.frame += 1;
+    }
   }
   lastBounds = computeBoundsFromPositions(xpos, n);
   const nq = mod && typeof mod._mjwf_nq === 'function' ? (mod._mjwf_nq(h) | 0) : 0;
@@ -467,6 +502,7 @@ function snapshot() {
   if (gsize) { msg.gsize = gsize; transfers.push(gsize.buffer); }
   if (gtype) { msg.gtype = gtype; transfers.push(gtype.buffer); }
   if (gmatid) { msg.gmatid = gmatid; transfers.push(gmatid.buffer); }
+  if (gdataid) { msg.gdataid = gdataid; transfers.push(gdataid.buffer); }
   if (matrgba) { msg.matrgba = matrgba; transfers.push(matrgba.buffer); }
   postMessage(msg, transfers);
 }
@@ -480,6 +516,34 @@ function emitRenderAssets() {
     const transfers = collectAssetBuffersForTransfer(assets);
     try {
       postMessage({ kind: 'render_assets', assets }, transfers);
+      if (snapshotDebug && snapshotState?.lastSim) {
+        try {
+          const scene = createSceneSnap({
+            frame: snapshotState.lastSim.frame,
+            ngeom: snapshotState.lastSim.ngeom,
+            gtype: snapshotState.lastSim.gtype,
+            gsize: snapshotState.lastSim.gsize,
+            gmatid: snapshotState.lastSim.gmatid,
+            matrgba: snapshotState.lastSim.matrgba,
+            gdataid: assets.geoms?.dataid ?? snapshotState.lastSim.gdataid,
+            xpos: snapshotState.lastSim.xpos,
+            xmat: snapshotState.lastSim.xmat,
+            mesh: assets.meshes ? {
+              vertnum: assets.meshes.vertnum,
+              facenum: assets.meshes.facenum,
+              vertadr: assets.meshes.vertadr,
+              faceadr: assets.meshes.faceadr,
+              vert: assets.meshes.vert,
+              face: assets.meshes.face,
+              normal: assets.meshes.normal,
+              texcoord: assets.meshes.texcoord,
+            } : null,
+          });
+          postMessage({ kind: 'scene_snapshot', source: 'sim', frame: scene.frame, snap: scene });
+        } catch (err) {
+          postMessage({ kind: 'log', message: 'worker: scene snapshot failed', extra: String(err) });
+        }
+      }
     } catch (err) {
       postMessage({ kind: 'log', message: 'worker: render_assets post failed', extra: String(err) });
     }
@@ -611,9 +675,7 @@ onmessage = async (ev) => {
             try {
               const nptr = typeof mod._mjwf_actuator_name_of === 'function' ? (mod._mjwf_actuator_name_of(h,i)|0) : 0;
               if (nptr) {
-                const bytes = new Uint8Array(mod.HEAPU8.buffer, nptr);
-                let s = '';
-                for (let j=0;j<256 && bytes[j]!==0;j++) s += String.fromCharCode(bytes[j]);
+                const s = readCString(mod, nptr);
                 if (s) name = s;
               }
             } catch {}
