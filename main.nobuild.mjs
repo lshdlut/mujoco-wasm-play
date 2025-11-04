@@ -1297,7 +1297,9 @@ function renderScene(snapshot, state) {
   const voptFlags = state.rendering?.voptFlags || [];
   const sceneFlags = state.rendering?.sceneFlags || [];
   if (ctx.renderer) {
-    ctx.renderer.shadowMap.enabled = !!sceneFlags[0];
+    // In fallback presets we want shadows always on; otherwise respect scene flag 0
+    const fb = ctx.fallback || {};
+    ctx.renderer.shadowMap.enabled = (fb.enabled !== false) ? true : !!sceneFlags[0];
   }
   if (ctx.light) {
     const baseLight = sceneFlags[0] ? 1.45 : 1.05;
@@ -1367,6 +1369,28 @@ function renderScene(snapshot, state) {
     contacts: snapshot.contacts?.n ?? 0,
     t: typeof snapshot.t === 'number' ? snapshot.t : null,
   };
+
+  // Expand shadow frustum to cover current bounds so shadows become visible
+  if (ctx.light && ctx.bounds) {
+    const r = Math.max(0.1, Number(ctx.bounds.radius) || 1);
+    const cam = ctx.light.shadow && ctx.light.shadow.camera ? ctx.light.shadow.camera : null;
+    if (cam && typeof cam.left !== 'undefined') {
+      const k = 2.5;
+      const l = -r * k;
+      const rt = r * k;
+      cam.left = l;
+      cam.right = rt;
+      cam.top = r * 2.0;
+      cam.bottom = -r * 2.0;
+      cam.near = Math.max(0.01, r * 0.05);
+      cam.far = Math.max(40, r * 10);
+      if (typeof cam.updateProjectionMatrix === 'function') cam.updateProjectionMatrix();
+      if (ctx.lightTarget) {
+        ctx.lightTarget.position.set(ctx.bounds.center[0], ctx.bounds.center[1], ctx.bounds.center[2]);
+        if (ctx.light && ctx.light.target) ctx.light.target.updateMatrixWorld?.();
+      }
+    }
+  }
 
   if (debugMode) {
     ctx.debugFrameCount = (ctx.debugFrameCount || 0) + 1;
