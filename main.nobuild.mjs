@@ -863,7 +863,7 @@ function ensureOutdoorSkyEnv(ctx, preset) {
     candidates.push('dist/assets/env/sky_clear_4k.hdr');
     const tryLoadHDRI = async (url) => {
       try {
-        const mod = await import('https://unpkg.com/three@0.161.0/examples/jsm/loaders/RGBELoader.js');
+        const mod = await import('https://unpkg.com/three@0.161.0/examples/jsm/loaders/RGBELoader.js?module');
         if (!mod || !mod.RGBELoader) return false;
         const loader = new mod.RGBELoader();
         const hdr = await new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
@@ -881,7 +881,10 @@ function ensureOutdoorSkyEnv(ctx, preset) {
           }
         }
         return true;
-      } catch { return false; }
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[env] HDRI load failed', { url, error: String(e) });
+        return false;
+      }
     };
     (async () => {
       for (const url of candidates) {
@@ -893,7 +896,7 @@ function ensureOutdoorSkyEnv(ctx, preset) {
   if (!ctx.skyInit) {
     ctx.skyInit = true;
     try {
-      import('https://unpkg.com/three@0.161.0/examples/jsm/objects/Sky.js').then((mod) => {
+      import('https://unpkg.com/three@0.161.0/examples/jsm/objects/Sky.js?module').then((mod) => {
         if (!mod || !mod.Sky) return;
         const sky = new mod.Sky();
         sky.scale.setScalar(450000);
