@@ -791,6 +791,30 @@ class DirectBackend {
         this.#emitMessage({ kind: 'render_assets', assets });
         if (this.snapshotState?.lastSim) {
           try {
+            const clone = (view) => {
+              if (!view) return view ?? null;
+              if (typeof view.slice === 'function') return view.slice();
+              try { return new view.constructor(view); } catch { return view; }
+            };
+            this.snapshotState.lastSim.gtype = assets.geoms?.type ? clone(assets.geoms.type) : this.snapshotState.lastSim.gtype;
+            this.snapshotState.lastSim.gsize = assets.geoms?.size ? clone(assets.geoms.size) : this.snapshotState.lastSim.gsize;
+            this.snapshotState.lastSim.gmatid = assets.geoms?.matid ? clone(assets.geoms.matid) : this.snapshotState.lastSim.gmatid;
+            this.snapshotState.lastSim.gdataid = assets.geoms?.dataid ? clone(assets.geoms.dataid) : this.snapshotState.lastSim.gdataid;
+            this.snapshotState.lastSim.matrgba = assets.materials?.rgba ? clone(assets.materials.rgba) : this.snapshotState.lastSim.matrgba;
+            const meshSnapshot = assets.meshes
+              ? {
+                  vertnum: assets.meshes.vertnum ? clone(assets.meshes.vertnum) : null,
+                  facenum: assets.meshes.facenum ? clone(assets.meshes.facenum) : null,
+                  vertadr: assets.meshes.vertadr ? clone(assets.meshes.vertadr) : null,
+                  faceadr: assets.meshes.faceadr ? clone(assets.meshes.faceadr) : null,
+                  texcoordadr: assets.meshes.texcoordadr ? clone(assets.meshes.texcoordadr) : null,
+                  texcoordnum: assets.meshes.texcoordnum ? clone(assets.meshes.texcoordnum) : null,
+                  vert: assets.meshes.vert ? clone(assets.meshes.vert) : null,
+                  face: assets.meshes.face ? clone(assets.meshes.face) : null,
+                  normal: assets.meshes.normal ? clone(assets.meshes.normal) : null,
+                  texcoord: assets.meshes.texcoord ? clone(assets.meshes.texcoord) : null,
+                }
+              : null;
             const scene = createSceneSnap({
               frame: this.snapshotState.lastSim.frame,
               ngeom: this.snapshotState.lastSim.ngeom,
@@ -798,21 +822,10 @@ class DirectBackend {
               gsize: this.snapshotState.lastSim.gsize,
               gmatid: this.snapshotState.lastSim.gmatid,
               matrgba: this.snapshotState.lastSim.matrgba,
-              gdataid: assets.geoms?.dataid ?? this.snapshotState.lastSim.gdataid,
+              gdataid: this.snapshotState.lastSim.gdataid,
               xpos: this.snapshotState.lastSim.xpos,
               xmat: this.snapshotState.lastSim.xmat,
-              mesh: assets.meshes
-                ? {
-                    vertnum: assets.meshes.vertnum,
-                    facenum: assets.meshes.facenum,
-                    vertadr: assets.meshes.vertadr,
-                    faceadr: assets.meshes.faceadr,
-                    vert: assets.meshes.vert,
-                    face: assets.meshes.face,
-                    normal: assets.meshes.normal,
-                    texcoord: assets.meshes.texcoord,
-                  }
-                : null,
+              mesh: meshSnapshot,
             });
             this.#emitMessage({ kind: 'scene_snapshot', source: 'sim', frame: scene.frame, snap: scene });
           } catch (err) {

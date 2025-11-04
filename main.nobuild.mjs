@@ -655,7 +655,7 @@ function emitAdapterSceneSnapshot(ctx, snapshot, state) {
   }
 }
 
-function createPrimitiveGeometry(gtype) {
+function createPrimitiveGeometry(gtype, sizeVec) {
   let geometry;
   let materialOpts = {
     color: 0x6fa0ff,
@@ -667,16 +667,34 @@ function createPrimitiveGeometry(gtype) {
     case MJ_GEOM.SPHERE:
     case MJ_GEOM.ELLIPSOID:
       geometry = new THREE.SphereGeometry(1, 24, 16);
+      if (Array.isArray(sizeVec)) {
+        const ax = Math.max(1e-6, sizeVec[0] || 0);
+        const ay = Math.max(1e-6, (sizeVec[1] ?? sizeVec[0]) || 0);
+        const az = Math.max(1e-6, (sizeVec[2] ?? sizeVec[0]) || 0);
+        geometry.scale(ax, ay, az);
+      }
       break;
     case MJ_GEOM.CAPSULE:
-      geometry = new THREE.CapsuleGeometry(1, 1, 16, 12);
+      {
+        const radius = Math.max(1e-6, sizeVec?.[0] || 0.05);
+        const halfLength = Math.max(0, sizeVec?.[1] || 0);
+        geometry = new THREE.CapsuleGeometry(radius, Math.max(0, 2 * halfLength), 16, 12);
+      }
       break;
     case MJ_GEOM.CYLINDER:
-      geometry = new THREE.CylinderGeometry(1, 1, 1, 24, 1);
+      {
+        const radius = Math.max(1e-6, sizeVec?.[0] || 0.05);
+        const halfLength = Math.max(0, sizeVec?.[1] || 0.05);
+        geometry = new THREE.CylinderGeometry(radius, radius, Math.max(1e-6, 2 * halfLength), 24, 1);
+      }
       break;
     case MJ_GEOM.PLANE:
     case MJ_GEOM.HFIELD:
-      geometry = new THREE.PlaneGeometry(1, 1, 1, 1);
+      {
+        const width = Math.max(1, Math.abs(sizeVec?.[0] || 0) > 1e-6 ? (sizeVec[0] * 2) : 20);
+        const height = Math.max(1, Math.abs(sizeVec?.[1] || 0) > 1e-6 ? (sizeVec[1] * 2) : 20);
+        geometry = new THREE.PlaneGeometry(width, height, 1, 1);
+      }
       materialOpts = {
         color: 0x4a5661,
         metalness: 0.0,
@@ -688,8 +706,19 @@ function createPrimitiveGeometry(gtype) {
       };
       break;
     default:
-      geometry = new THREE.BoxGeometry(1, 1, 1);
+      {
+        const sx = Math.max(1e-6, sizeVec?.[0] || 0.1);
+        const sy = Math.max(1e-6, sizeVec?.[1] || sx);
+        const sz = Math.max(1e-6, sizeVec?.[2] || sx);
+        geometry = new THREE.BoxGeometry(2 * sx, 2 * sy, 2 * sz);
+      }
       break;
+  }
+  if (geometry && typeof geometry.computeBoundingBox === 'function') {
+    geometry.computeBoundingBox();
+  }
+  if (geometry && typeof geometry.computeBoundingSphere === 'function') {
+    geometry.computeBoundingSphere();
   }
   return { geometry, materialOpts, postCreate };
 }
@@ -772,13 +801,17 @@ function getSharedMeshGeometry(ctx, assets, dataId) {
   return geometry;
 }
 
-function ensureGeomMesh(ctx, index, gtype, assets, dataId) {
+function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec) {
   if (!ctx.meshes) ctx.meshes = [];
   let mesh = ctx.meshes[index];
+  const sizeKey = Array.isArray(sizeVec)
+    ? sizeVec.map((v) => (Number.isFinite(v) ? v.toFixed(6) : '0')).join(',')
+    : 'null';
   const needsRebuild =
     !mesh ||
     mesh.userData?.geomType !== gtype ||
-    (gtype === MJ_GEOM.MESH && mesh.userData?.geomDataId !== dataId);
+    (gtype === MJ_GEOM.MESH && mesh.userData?.geomDataId !== dataId) ||
+    (gtype !== MJ_GEOM.MESH && mesh.userData?.geomSizeKey !== sizeKey);
 
   if (needsRebuild) {
     if (mesh) {
@@ -816,7 +849,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId) {
       }
     }
     if (!geometryInfo) {
-      geometryInfo = createPrimitiveGeometry(gtype);
+      geometryInfo = createPrimitiveGeometry(gtype, sizeVec);
       geometryInfo.ownGeometry = true;
     }
 
@@ -831,6 +864,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId) {
     mesh.userData = mesh.userData || {};
     mesh.userData.geomType = gtype;
     mesh.userData.geomDataId = gtype === MJ_GEOM.MESH ? dataId : -1;
+    mesh.userData.geomSizeKey = gtype === MJ_GEOM.MESH ? null : sizeKey;
     mesh.userData.ownGeometry = geometryInfo.ownGeometry !== false;
     ctx.root.add(mesh);
     ctx.meshes[index] = mesh;
@@ -899,23 +933,23 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets) {
   switch (type) {
     case MJ_GEOM.SPHERE:
     case MJ_GEOM.ELLIPSOID:
-      mesh.scale.set(Math.max(1e-6, sx * 2), Math.max(1e-6, sx * 2), Math.max(1e-6, sx * 2));
+      mesh.scale.set(1, 1, 1);
       break;
     case MJ_GEOM.CAPSULE:
-      mesh.scale.set(Math.max(1e-6, sx * 2), Math.max(1e-6, (sy * 2) + (sx * 2)), Math.max(1e-6, sx * 2));
+      mesh.scale.set(1, 1, 1);
       break;
     case MJ_GEOM.CYLINDER:
-      mesh.scale.set(Math.max(1e-6, sx * 2), Math.max(1e-6, sy * 2), Math.max(1e-6, sx * 2));
+      mesh.scale.set(1, 1, 1);
       break;
     case MJ_GEOM.PLANE:
     case MJ_GEOM.HFIELD:
-      mesh.scale.set(Math.max(1e-6, sx * 4), Math.max(1e-6, sy * 4), 1);
+      mesh.scale.set(1, 1, 1);
       break;
     case MJ_GEOM.MESH:
       mesh.scale.set(1, 1, 1);
       break;
     default:
-      mesh.scale.set(Math.max(1e-6, sx * 2), Math.max(1e-6, sy * 2), Math.max(1e-6, sz * 2));
+      mesh.scale.set(1, 1, 1);
       break;
   }
 
@@ -1083,12 +1117,21 @@ function renderScene(snapshot, state) {
   }
   const ngeom = snapshot.ngeom | 0;
   let drawn = 0;
+  const sizeView = snapshot.gsize || assets?.geoms?.size || null;
   const typeView = snapshot.gtype || assets?.geoms?.type || null;
   const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
   for (let i = 0; i < ngeom; i += 1) {
     const type = typeView?.[i] ?? MJ_GEOM.BOX;
     const dataId = dataIdView?.[i] ?? -1;
-    const mesh = ensureGeomMesh(ctx, i, type, assets, dataId);
+    const base = 3 * i;
+    const sizeVec = sizeView
+      ? [
+          sizeView[base + 0] ?? 0,
+          sizeView[base + 1] ?? 0,
+          sizeView[base + 2] ?? 0,
+        ]
+      : null;
+    const mesh = ensureGeomMesh(ctx, i, type, assets, dataId, sizeVec);
     if (!mesh) continue;
     updateMeshFromSnapshot(mesh, i, snapshot, state, assets);
     let visible = mesh.visible;
