@@ -875,10 +875,16 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         if (!mod || !mod.RGBELoader) return false;
         const loader = new mod.RGBELoader();
         const hdr = await new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
+        // Use PMREM for environment (reflections)
         const envRT = ctx.pmrem.fromEquirectangular(hdr);
-        hdr.dispose?.();
-        if (ctx.scene) ctx.scene.environment = envRT.texture;
+        // Keep the original equirect HDRI as visible background to avoid black sky
+        hdr.mapping = THREE.EquirectangularReflectionMapping;
+        if (ctx.scene) {
+          ctx.scene.environment = envRT.texture;
+          ctx.scene.background = hdr;
+        }
         ctx.envRT = envRT;
+        ctx.hdriBackground = hdr;
         ctx.envFromHDRI = true;
         const intensity = preset?.envIntensity ?? 1.7;
         if (Array.isArray(ctx.meshes)) {
