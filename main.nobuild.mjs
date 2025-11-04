@@ -46,13 +46,11 @@ const debugMode = searchParams.get('debug') === '1';
 const requestedMode = searchParams.get('mode');
 const backendMode = requestedMode === 'worker' || requestedMode === 'direct' ? requestedMode : 'auto';
 const requestedModel = searchParams.get('model');
-let backend = null;
+const backend = await createBackend({ mode: backendMode, debug: debugMode, model: requestedModel });
 const store = createViewerStore({});
 if (typeof window !== 'undefined') {
   window.__viewerStore = store;
 }
-
-
 
 const fallbackModeParam = (searchParams.get('fallback') || 'auto').toLowerCase();
 const fallbackEnabledDefault = fallbackModeParam !== 'off';
@@ -119,6 +117,11 @@ function applySnapshot(snapshot) {
   });
 }
 
+const initialSnapshot = await backend.snapshot();
+applySnapshot(initialSnapshot);
+backend.subscribe((snapshot) => {
+  applySnapshot(snapshot);
+});
 
 function sanitiseName(name) {
   return String(name ?? '')
@@ -501,6 +504,19 @@ function getDefaultVopt(state) {
 }
 
 function disposeMeshObject(mesh) {
+  try {
+    if (mesh.userData && mesh.userData.fallbackBackface) {
+      const back = mesh.userData.fallbackBackface;
+      if (back.material && typeof back.material.dispose === 'function') {
+        try { back.material.dispose(); } catch {}
+      }
+      if (typeof mesh.remove === 'function') {
+        try { mesh.remove(back); } catch {}
+      }
+      mesh.userData.fallbackBackface = null;
+    }
+  } catch {}
+
   if (!mesh) return;
   const parent = mesh.parent;
   if (parent && typeof parent.remove === 'function') {
@@ -592,40 +608,11 @@ function getFallbackGroundTexture() {
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(10, 10);
   texture.anisotropy = 8;
-  if (THREE.SRGBColorSpace) {
-    texture.colorSpace = THREE.SRGBColorSpace;
-  } else {
-    texture.encoding = THREE.sRGBEncoding;
-  }
+  texture.encoding = THREE.sRGBEncoding;
   fallbackGroundTexture = texture;
   return texture;
 }
 
-function applyBackfaceFade(material, options = {}) {
-  const opacity = Math.max(0, Math.min(1, options.opacity ?? 0.25));
-  const materials = Array.isArray(material) ? material : [material];
-  for (const mat of materials) {
-    if (!mat) continue;
-    mat.userData = mat.userData || {};
-    if (mat.userData.backfaceFadeApplied) continue;
-    mat.userData.backfaceFadeApplied = true;
-    mat.userData.backfaceFadeOpacity = opacity;
-    const previous = typeof mat.onBeforeCompile === 'function' ? mat.onBeforeCompile : null;
-    mat.transparent = true;
-    mat.onBeforeCompile = (shader) => {
-      if (previous) previous(shader);
-      shader.uniforms.backfaceFadeOpacity = { value: opacity };
-      const marker = '\n#include <alphatest_fragment>\n';
-      const fadeChunk = '\n  vec3 viewDir = normalize(-vViewPosition);\n'
-        + '  float ndotv = dot(normalize(geometryNormal), viewDir);\n'
-        + '  float fade = smoothstep(-0.35, 0.05, ndotv);\n'
-        + '  float opacityFactor = mix(backfaceFadeOpacity, 1.0, fade);\n'
-        + '  diffuseColor.a *= opacityFactor;\n';
-      shader.fragmentShader = shader.fragmentShader.replace(marker, marker + fadeChunk);
-    };
-    mat.needsUpdate = true;
-  }
-}
 function buildAdapterMeshSnapshot(ctx, assets) {
   if (assets?.meshes) {
     return {
@@ -863,7 +850,6 @@ function emitAdapterSceneSnapshot(ctx, snapshot, state) {
 
 function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
   const fallbackEnabled = options.fallbackEnabled !== false;
-  const backfaceFadeDefault = options.backfaceFadeOpacity ?? 0.25;
   let geometry;
   let materialOpts = {
     color: 0x6fa0ff,
@@ -871,9 +857,6 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
     roughness: 0.65,
   };
   let postCreate = null;
-  let backfaceFade = fallbackEnabled;
-  let backfaceOpacity = backfaceFadeDefault;
-
   switch (gtype) {
     case MJ_GEOM.SPHERE:
     case MJ_GEOM.ELLIPSOID:
@@ -905,8 +888,6 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
         const width = Math.max(1, Math.abs(sizeVec?.[0] || 0) > 1e-6 ? (sizeVec[0] * 2) : 20);
         const height = Math.max(1, Math.abs(sizeVec?.[1] || 0) > 1e-6 ? (sizeVec[1] * 2) : 20);
         geometry = new THREE.PlaneGeometry(width, height, 1, 1);
-        backfaceFade = true;
-        backfaceOpacity = options.groundBackfaceOpacity ?? 0.12;
       }
       materialOpts = {
         color: 0x2f343f,
@@ -917,6 +898,22 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
       postCreate = (mesh) => {
         mesh.rotation.x = -Math.PI / 2;
         mesh.receiveShadow = true;
+        try {
+          const backMat = mesh.material.clone();
+          backMat.side = THREE.BackSide;
+          backMat.transparent = true;
+          backMat.opacity = 0.35;
+          backMat.depthWrite = false;
+          backMat.polygonOffset = true;
+          backMat.polygonOffsetFactor = -1;
+          const backMesh = new THREE.Mesh(mesh.geometry, backMat);
+          backMesh.receiveShadow = false;
+          backMesh.castShadow = false;
+          backMesh.renderOrder = (mesh.renderOrder || 0) + 0.01;
+          mesh.add(backMesh);
+          mesh.userData = mesh.userData || {};
+          mesh.userData.fallbackBackface = backMesh;
+        } catch {}
       };
       break;
     default:
@@ -934,10 +931,71 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
   if (geometry && typeof geometry.computeBoundingSphere === 'function') {
     geometry.computeBoundingSphere();
   }
-  return { geometry, materialOpts, postCreate, backfaceFade, backfaceOpacity };
+  return { geometry, materialOpts, postCreate };
 }
 
-function getSharedMeshGeometry(ctx, assets, dataId) {function getSharedMeshGeometry(ctx, assets, dataId) {
+function createMeshGeometryFromAssets(assets, meshId) {
+  if (!assets || !assets.meshes || !(meshId >= 0)) return null;
+  const { vert, vertadr, vertnum, face, faceadr, facenum, normal, texcoord, texcoordadr, texcoordnum } = assets.meshes;
+  if (!vert || !vertadr || !vertnum) return null;
+  const count = vertnum[meshId] | 0;
+  if (!(count > 0)) return null;
+  const start = (vertadr[meshId] | 0) * 3;
+  const end = start + (count * 3);
+  if (start < 0 || end > vert.length) return null;
+  const positions = vert.slice(start, end);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  if (normal && normal.length >= end) {
+    const normalSlice = normal.slice(start, end);
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normalSlice, 3));
+  }
+
+  if (face && faceadr && facenum) {
+    const triCount = facenum[meshId] | 0;
+    if (triCount > 0) {
+      const faceStart = (faceadr[meshId] | 0) * 3;
+      const faceEnd = faceStart + (triCount * 3);
+      if (faceStart >= 0 && faceEnd <= face.length) {
+        const rawFaces = face.slice(faceStart, faceEnd);
+        let needsUint32 = count > 65535;
+        if (!needsUint32) {
+          for (let i = 0; i < rawFaces.length; i += 1) {
+            if (rawFaces[i] > 65535) {
+              needsUint32 = true;
+              break;
+            }
+          }
+        }
+        const IndexCtor = needsUint32 ? Uint32Array : Uint16Array;
+        const indices = new IndexCtor(rawFaces);
+        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      }
+    }
+  }
+
+  if (texcoord && texcoordadr && texcoordnum) {
+    const tcCount = texcoordnum[meshId] | 0;
+    if (tcCount > 0) {
+      const tcStart = (texcoordadr[meshId] | 0) * 2;
+      const tcEnd = tcStart + (tcCount * 2);
+      if (tcStart >= 0 && tcEnd <= texcoord.length) {
+        const uvSlice = texcoord.slice(tcStart, tcEnd);
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvSlice, 2));
+      }
+    }
+  }
+
+  if (!geometry.getAttribute('normal')) {
+    geometry.computeVertexNormals();
+  }
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function getSharedMeshGeometry(ctx, assets, dataId) {
   if (!ctx.assetCache || !(ctx.assetCache.meshGeometries instanceof Map)) {
     ctx.assetCache = {
       meshGeometries: new Map(),
@@ -972,8 +1030,6 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec) {
     }
 
     let geometryInfo = null;
-    const fallbackConfig = ctx.fallback || {};
-    const fallbackEnabled = fallbackConfig.enabled !== false;
     if (gtype === MJ_GEOM.MESH && assets && dataId >= 0) {
       const meshGeometry = getSharedMeshGeometry(ctx, assets, dataId);
       if (!ctx.meshAssetDebugLogged) {
@@ -1009,13 +1065,10 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec) {
     }
 
     const material = new THREE.MeshStandardMaterial(geometryInfo.materialOpts);
-    material.side = THREE.DoubleSide;
+    material.side = THREE.FrontSide;
     mesh = new THREE.Mesh(geometryInfo.geometry, material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    if (geometryInfo.backfaceFade && ctx.fallback?.enabled !== false) {
-      applyBackfaceFade(mesh.material, { opacity: geometryInfo.backfaceOpacity });
-    }
     if (typeof geometryInfo.postCreate === 'function') {
       try { geometryInfo.postCreate(mesh); } catch {}
     }
@@ -1977,14 +2030,14 @@ store.subscribe((state) => {
   updateControls(state);
 });
 
+const spec = await loadUiSpec();
+renderPanels(spec);
+updateControls(store.get());
 if (typeof window !== 'undefined') {
   try {
     window.__viewerStore = store;
     window.__viewerControls = {
-      getBinding: (id) => {
-        const control = controlById.get(id);
-        return control && control.binding ? control.binding : null;
-      },
+      getBinding: (id) => controlById.get(id)?.binding ?? null,
       listIds: (prefix) => {
         const ids = Array.from(controlById.keys()).sort();
         if (!prefix) return ids;
@@ -1993,17 +2046,12 @@ if (typeof window !== 'undefined') {
     };
     window.__viewerRenderer = {
       getStats: () => ({ ...renderStats }),
-      getContext: () => (renderCtx.initialized ? renderCtx : null),
-      getFallbackState: () => {
-        const fallbackState = renderCtx.fallback || {};
-        return {
-          enabled: typeof fallbackState.enabled === 'boolean'
-            ? fallbackState.enabled
-            : fallbackEnabledDefault,
-          preset: fallbackState.preset || fallbackPresetKey,
-          mode: fallbackState.mode || fallbackModeParam,
-        };
-      },
+      getContext: () => renderCtx.initialized ? renderCtx : null,
+      getFallbackState: () => ({
+        enabled: renderCtx.fallback?.enabled ?? fallbackEnabledDefault,
+        preset: renderCtx.fallback?.preset ?? fallbackPresetKey,
+        mode: renderCtx.fallback?.mode ?? fallbackModeParam,
+      }),
       setFallbackEnabled: (enabled) => {
         renderCtx.fallback = renderCtx.fallback || {};
         renderCtx.fallback.enabled = !!enabled;
@@ -2067,94 +2115,6 @@ function clampCameraIndex(index) {
   if (index >= total) return 0;
   return index;
 }
-
-canvas.addEventListener('pointerdown', (event) => {
-  event.preventDefault();
-  beginGesture(event);
-});
-
-canvas.addEventListener('pointermove', (event) => {
-  if (!pointerState.active) return;
-  event.preventDefault();
-  moveGesture(event);
-});
-
-canvas.addEventListener('pointerup', (event) => {
-  event.preventDefault();
-  endGesture(event);
-});
-
-canvas.addEventListener('pointercancel', (event) => {
-  endGesture(event);
-});
-
-canvas.addEventListener('lostpointercapture', () => {
-  if (!pointerState.active) return;
-  endGesture(undefined, { releaseCapture: false });
-});
-
-canvas.addEventListener('wheel', (event) => {
-  if (!renderCtx.camera) return;
-  event.preventDefault();
-  const delta = event.deltaY;
-  if (!Number.isFinite(delta) || delta === 0) return;
-  const direction = delta > 0 ? 1 : -1;
-  applyCameraGesture('zoom', 0, direction * Math.abs(delta) * 0.35);
-});
-
-canvas.addEventListener('contextmenu', (event) => {
-  event.preventDefault();
-});
-
-canvas.addEventListener('mousedown', (event) => {
-  if (pointerState.active) return;
-  event.preventDefault();
-  beginGesture(event);
-});
-
-canvas.addEventListener('mousemove', (event) => {
-  if (!pointerState.active) return;
-  event.preventDefault();
-  moveGesture(event);
-});
-
-canvas.addEventListener('mouseup', (event) => {
-  if (!pointerState.active) return;
-  event.preventDefault();
-  endGesture(event);
-});
-
-function resizeCanvas() {
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = rect.width;
-  canvas.height = rect.height;
-}
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-
-document.addEventListener('pointerup', (event) => {
-  if (!pointerState.active) return;
-  if (event.target === canvas) return;
-  endGesture(event, { releaseCapture: false });
-});
-
-async function startViewer() {
-  try {
-    backend = await createBackend({ mode: backendMode, debug: debugMode, model: requestedModel });
-    const initialSnapshot = await backend.snapshot();
-    applySnapshot(initialSnapshot);
-    backend.subscribe((snapshot) => {
-      applySnapshot(snapshot);
-    });
-    const spec = await loadUiSpec();
-    renderPanels(spec);
-    updateControls(store.get());
-  } catch (err) {
-    console.error('[viewer] init failed', err);
-  }
-}
-
-startViewer();
 
 window.addEventListener('keydown', async (event) => {
   switch (event.key) {
@@ -2468,4 +2428,72 @@ function applyCameraGesture(mode, dx, dy) {
     });
   }
 }
+
+canvas.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  beginGesture(event);
+});
+
+canvas.addEventListener('pointermove', (event) => {
+  if (!pointerState.active) return;
+  event.preventDefault();
+  moveGesture(event);
+});
+
+canvas.addEventListener('pointerup', (event) => {
+  event.preventDefault();
+  endGesture(event);
+});
+
+canvas.addEventListener('pointercancel', (event) => {
+  endGesture(event);
+});
+
+canvas.addEventListener('lostpointercapture', () => {
+  if (!pointerState.active) return;
+  endGesture(undefined, { releaseCapture: false });
+});
+
+canvas.addEventListener('wheel', (event) => {
+  if (!renderCtx.camera) return;
+  event.preventDefault();
+  const delta = event.deltaY;
+  if (!Number.isFinite(delta) || delta === 0) return;
+  const direction = delta > 0 ? 1 : -1;
+  applyCameraGesture('zoom', 0, direction * Math.abs(delta) * 0.35);
+});
+
+canvas.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+});
+
+canvas.addEventListener('mousedown', (event) => {
+  if (pointerState.active) return;
+  event.preventDefault();
+  beginGesture(event);
+});
+
+canvas.addEventListener('mousemove', (event) => {
+  if (!pointerState.active) return;
+  event.preventDefault();
+  moveGesture(event);
+});
+
+canvas.addEventListener('mouseup', (event) => {
+  if (!pointerState.active) return;
+  event.preventDefault();
+  endGesture(event);
+});
+
+// Keep canvas resized to container.
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// Initialise control values after DOM render.
+updateControls(store.get());
 
