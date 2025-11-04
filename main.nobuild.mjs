@@ -46,11 +46,13 @@ const debugMode = searchParams.get('debug') === '1';
 const requestedMode = searchParams.get('mode');
 const backendMode = requestedMode === 'worker' || requestedMode === 'direct' ? requestedMode : 'auto';
 const requestedModel = searchParams.get('model');
-const backend = await createBackend({ mode: backendMode, debug: debugMode, model: requestedModel });
+let backend = null;
 const store = createViewerStore({});
 if (typeof window !== 'undefined') {
   window.__viewerStore = store;
 }
+
+
 
 const fallbackModeParam = (searchParams.get('fallback') || 'auto').toLowerCase();
 const fallbackEnabledDefault = fallbackModeParam !== 'off';
@@ -117,11 +119,6 @@ function applySnapshot(snapshot) {
   });
 }
 
-const initialSnapshot = await backend.snapshot();
-applySnapshot(initialSnapshot);
-backend.subscribe((snapshot) => {
-  applySnapshot(snapshot);
-});
 
 function sanitiseName(name) {
   return String(name ?? '')
@@ -1980,9 +1977,6 @@ store.subscribe((state) => {
   updateControls(state);
 });
 
-const spec = await loadUiSpec();
-renderPanels(spec);
-updateControls(store.get());
 if (typeof window !== 'undefined') {
   try {
     window.__viewerStore = store;
@@ -2073,6 +2067,94 @@ function clampCameraIndex(index) {
   if (index >= total) return 0;
   return index;
 }
+
+canvas.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  beginGesture(event);
+});
+
+canvas.addEventListener('pointermove', (event) => {
+  if (!pointerState.active) return;
+  event.preventDefault();
+  moveGesture(event);
+});
+
+canvas.addEventListener('pointerup', (event) => {
+  event.preventDefault();
+  endGesture(event);
+});
+
+canvas.addEventListener('pointercancel', (event) => {
+  endGesture(event);
+});
+
+canvas.addEventListener('lostpointercapture', () => {
+  if (!pointerState.active) return;
+  endGesture(undefined, { releaseCapture: false });
+});
+
+canvas.addEventListener('wheel', (event) => {
+  if (!renderCtx.camera) return;
+  event.preventDefault();
+  const delta = event.deltaY;
+  if (!Number.isFinite(delta) || delta === 0) return;
+  const direction = delta > 0 ? 1 : -1;
+  applyCameraGesture('zoom', 0, direction * Math.abs(delta) * 0.35);
+});
+
+canvas.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+});
+
+canvas.addEventListener('mousedown', (event) => {
+  if (pointerState.active) return;
+  event.preventDefault();
+  beginGesture(event);
+});
+
+canvas.addEventListener('mousemove', (event) => {
+  if (!pointerState.active) return;
+  event.preventDefault();
+  moveGesture(event);
+});
+
+canvas.addEventListener('mouseup', (event) => {
+  if (!pointerState.active) return;
+  event.preventDefault();
+  endGesture(event);
+});
+
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+document.addEventListener('pointerup', (event) => {
+  if (!pointerState.active) return;
+  if (event.target === canvas) return;
+  endGesture(event, { releaseCapture: false });
+});
+
+async function startViewer() {
+  try {
+    backend = await createBackend({ mode: backendMode, debug: debugMode, model: requestedModel });
+    const initialSnapshot = await backend.snapshot();
+    applySnapshot(initialSnapshot);
+    backend.subscribe((snapshot) => {
+      applySnapshot(snapshot);
+    });
+    const spec = await loadUiSpec();
+    renderPanels(spec);
+    updateControls(store.get());
+  } catch (err) {
+    console.error('[viewer] init failed', err);
+  }
+}
+
+startViewer();
 
 window.addEventListener('keydown', async (event) => {
   switch (event.key) {
@@ -2386,72 +2468,4 @@ function applyCameraGesture(mode, dx, dy) {
     });
   }
 }
-
-canvas.addEventListener('pointerdown', (event) => {
-  event.preventDefault();
-  beginGesture(event);
-});
-
-canvas.addEventListener('pointermove', (event) => {
-  if (!pointerState.active) return;
-  event.preventDefault();
-  moveGesture(event);
-});
-
-canvas.addEventListener('pointerup', (event) => {
-  event.preventDefault();
-  endGesture(event);
-});
-
-canvas.addEventListener('pointercancel', (event) => {
-  endGesture(event);
-});
-
-canvas.addEventListener('lostpointercapture', () => {
-  if (!pointerState.active) return;
-  endGesture(undefined, { releaseCapture: false });
-});
-
-canvas.addEventListener('wheel', (event) => {
-  if (!renderCtx.camera) return;
-  event.preventDefault();
-  const delta = event.deltaY;
-  if (!Number.isFinite(delta) || delta === 0) return;
-  const direction = delta > 0 ? 1 : -1;
-  applyCameraGesture('zoom', 0, direction * Math.abs(delta) * 0.35);
-});
-
-canvas.addEventListener('contextmenu', (event) => {
-  event.preventDefault();
-});
-
-canvas.addEventListener('mousedown', (event) => {
-  if (pointerState.active) return;
-  event.preventDefault();
-  beginGesture(event);
-});
-
-canvas.addEventListener('mousemove', (event) => {
-  if (!pointerState.active) return;
-  event.preventDefault();
-  moveGesture(event);
-});
-
-canvas.addEventListener('mouseup', (event) => {
-  if (!pointerState.active) return;
-  event.preventDefault();
-  endGesture(event);
-});
-
-// Keep canvas resized to container.
-function resizeCanvas() {
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = rect.width;
-  canvas.height = rect.height;
-}
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-
-// Initialise control values after DOM render.
-updateControls(store.get());
 
