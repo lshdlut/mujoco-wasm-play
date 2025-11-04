@@ -391,12 +391,11 @@ function initRenderer() {
   if ('physicallyCorrectLights' in renderer) {
     renderer.physicallyCorrectLights = true;
   }
-  renderer.setClearColor(0x181d28, 1);
+    renderer.setClearColor(0x000000, 1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x151a26);
+    const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0x151a26, 12, 48);
 
   const ambient = new THREE.AmbientLight(0xffffff, 0);
@@ -908,26 +907,18 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         hdr.magFilter = THREE.LinearFilter;
         hdr.generateMipmaps = false;
         hdr.needsUpdate = true;
+        ctx.hdriBackground = hdr;
+        ctx.envFromHDRI = true;
+        ctx.hdriReady = true;
         // Use PMREM for environment (reflections)
         const envRT = ctx.pmrem.fromEquirectangular(hdr);
         const envTexture = envRT.texture;
         if (THREE.LinearSRGBColorSpace && envTexture) {
           envTexture.colorSpace = THREE.LinearSRGBColorSpace;
         }
-
-        // For background, convert to cube texture for broader driver compatibility
-        const cubeRT = new THREE.WebGLCubeRenderTarget(1024, {
-          type: hdr.type,
-          colorSpace: THREE.LinearSRGBColorSpace,
-        });
-        cubeRT.fromEquirectangularTexture(ctx.renderer, hdr);
-        const cubeTexture = cubeRT.texture;
-        cubeTexture.colorSpace = THREE.LinearSRGBColorSpace;
-        cubeTexture.needsUpdate = true;
-
         if (ctx.scene) {
           ctx.scene.environment = envTexture;
-          ctx.scene.background = cubeTexture;
+          ctx.scene.background = hdr;
           // Ensure visible intensity (some setups render very dark without this)
           if ('backgroundIntensity' in ctx.scene) {
             const bi = preset?.envIntensity ?? 1.7;
@@ -939,7 +930,6 @@ function ensureOutdoorSkyEnv(ctx, preset) {
         }
         ctx.envRT = envRT;
         ctx.hdriBackground = hdr;
-        ctx.hdriBackgroundCube = cubeRT;
         ctx.envFromHDRI = true;
         ctx.hdriReady = true;
         const intensity = preset?.envIntensity ?? 1.7;
