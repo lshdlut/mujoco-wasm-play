@@ -613,6 +613,7 @@ export function createRendererManager({
   ctx.cameraTarget = ctx.cameraTarget || new THREE.Vector3(0, 0, 0);
   ctx.meshes = ctx.meshes || [];
   ctx.assetCache = ctx.assetCache || { meshGeometries: new Map() };
+  ctx._shadow = ctx._shadow || { lastCenter: null, lastRadius: 0 };
   ctx._frameCounter = ctx._frameCounter || 0;
   ctx.boundsEvery = typeof ctx.boundsEvery === 'number' && ctx.boundsEvery > 0 ? ctx.boundsEvery : 2;
 
@@ -942,13 +943,38 @@ export function createRendererManager({
         cam.near = Math.max(0.01, r * 0.03);
         cam.far = Math.max(40, r * 8);
         if (typeof cam.updateProjectionMatrix === 'function') cam.updateProjectionMatrix();
-        if (context.lightTarget) {
-          context.lightTarget.position.set(
-            context.bounds.center[0],
-            context.bounds.center[1],
-            context.bounds.center[2]
-          );
-          context.light.target?.updateMatrixWorld?.();
+        // Texel snapping stabilization
+        const mapSizeX = context.light.shadow?.mapSize?.x || 2048;
+        const mapSizeY = context.light.shadow?.mapSize?.y || mapSizeX;
+        const texelX = (cam.right - cam.left) / mapSizeX;
+        const texelY = (cam.top - cam.bottom) / mapSizeY;
+        const desiredCenter = tempVecA.set(
+          context.bounds.center[0],
+          context.bounds.center[1],
+          context.bounds.center[2]
+        );
+        // Ensure matrices are up to date
+        context.light.updateMatrixWorld?.(true);
+        context.light.target?.updateMatrixWorld?.(true);
+        cam.updateMatrixWorld?.(true);
+        const toLight = desiredCenter.clone().applyMatrix4(cam.matrixWorldInverse);
+        const snappedLS = toLight.clone();
+        snappedLS.x = Math.round(snappedLS.x / texelX) * texelX;
+        snappedLS.y = Math.round(snappedLS.y / texelY) * texelY;
+        const snappedWS = snappedLS.clone().applyMatrix4(cam.matrixWorld);
+        const lastC = context._shadow.lastCenter;
+        const needUpdate =
+          !lastC ||
+          Math.abs(snappedWS.x - lastC.x) > texelX * 0.5 ||
+          Math.abs(snappedWS.y - lastC.y) > texelY * 0.5 ||
+          Math.abs(r - context._shadow.lastRadius) > r * 0.02;
+        if (needUpdate) {
+          if (context.lightTarget) {
+            context.lightTarget.position.copy(snappedWS);
+            context.light.target?.updateMatrixWorld?.();
+          }
+          context._shadow.lastCenter = snappedWS.clone();
+          context._shadow.lastRadius = r;
         }
       }
     }
@@ -981,9 +1007,11 @@ export function createRendererManager({
         const horiz = radius * 3.0;
         const alt = Math.tan(20 * Math.PI / 180) * horiz;
         const lightOffset = tempVecD.set(horiz, -horiz * 0.9, Math.max(0.6, alt));
-        context.light.position.copy(focus.clone().add(lightOffset));
+        // If we have a snapped center from previous step, prefer it to reduce jitter
+        const baseCenter = context._shadow.lastCenter ? context._shadow.lastCenter : focus;
+        context.light.position.copy(baseCenter.clone().add(lightOffset));
         if (context.lightTarget) {
-          context.lightTarget.position.copy(focus);
+          context.lightTarget.position.copy(baseCenter);
           context.light.target?.updateMatrixWorld?.();
         }
         context.envDirty = true;
