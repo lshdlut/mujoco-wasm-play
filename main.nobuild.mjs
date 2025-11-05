@@ -42,30 +42,69 @@ let latestSnapshot = null;
 let renderStats = { drawn: 0, hidden: 0 };
 
 const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
-const debugMode = searchParams.get('debug') === '1';
+
+const BOOL_TRUE = new Set(['1', 'true', 'yes', 'on']);
+const BOOL_FALSE = new Set(['0', 'false', 'no', 'off']);
+
+const getParamToken = (key) => (searchParams.get(key) || '').trim().toLowerCase();
+
+function readBoolean(keys) {
+  const list = Array.isArray(keys) ? keys : [keys];
+  for (const key of list) {
+    const token = getParamToken(key);
+    if (!token) continue;
+    if (BOOL_TRUE.has(token)) return true;
+    if (BOOL_FALSE.has(token)) return false;
+  }
+  return null;
+}
+
+function readTruthyFlag(keys) {
+  return readBoolean(keys) === true;
+}
+
+function readListParam(name) {
+  const raw = getParamToken(name);
+  if (!raw) return [];
+  return raw.split(/[,\s]+/).map((token) => token.trim()).filter(Boolean);
+}
+
+function readIndexSet(name) {
+  const values = readListParam(name)
+    .map((token) => Number.parseInt(token, 10))
+    .filter((n) => Number.isFinite(n) && n >= 0);
+  return new Set(values);
+}
+
+function readNumericParam(name, defaultValue, { min, max, parser } = {}) {
+  const raw = searchParams.get(name);
+  if (raw == null || raw === '') return defaultValue;
+  const parseFn = parser ?? ((value) => Number.parseFloat(value));
+  const parsed = parseFn(raw, 10);
+  if (!Number.isFinite(parsed)) return defaultValue;
+  let result = parsed;
+  if (typeof min === 'number') result = Math.max(min, result);
+  if (typeof max === 'number') result = Math.min(max, result);
+  return result;
+}
+
+const debugMode = readBoolean('debug') === true;
 const requestedMode = searchParams.get('mode');
-const hideAllGeomParam = (() => { const v1 = (searchParams.get('nogeom') || '').toLowerCase(); const v2 = (searchParams.get('no_geom') || '').toLowerCase(); const v3 = (searchParams.get('no-geom') || '').toLowerCase(); const v4 = (searchParams.get('hideall') || '').toLowerCase(); const v5 = (searchParams.get('hide_all') || '').toLowerCase(); const norm = (v) => (v === '1' || v === 'true' || v === 'yes' || v === 'on'); return norm(v1) || norm(v2) || norm(v3) || norm(v4) || norm(v5); })();
-const hideTypesParam = (searchParams.get('hide') || '').toLowerCase();
-const hiddenTypeTokens = hideTypesParam
-  ? hideTypesParam.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean)
-  : [];
-const hiddenTypeSet = new Set(hiddenTypeTokens);
-const dumpParam = (searchParams.get('dump') || '').toLowerCase();
-const findParam = (searchParams.get('find') || '').toLowerCase();
-const dumpBigParam = dumpParam === 'big' || findParam === 'big';
-const hideBigParam = (() => { const v1=(searchParams.get('hide_big')||'').toLowerCase(); const v2=(searchParams.get('hidebig')||'').toLowerCase(); const norm=(v)=> (v==='1'||v==='true'||v==='yes'||v==='on'); return norm(v1)||norm(v2); })();
-const bigNParam = Number.parseInt((searchParams.get('big_n') || '8'), 10);
-const bigN = Number.isFinite(bigNParam) && bigNParam > 0 ? Math.min(bigNParam, 64) : 8;
-const bigFactorParam = Number.parseFloat((searchParams.get('big_factor') || '8'));
-const bigFactor = Number.isFinite(bigFactorParam) && bigFactorParam > 0 ? bigFactorParam : 8;
-const hideIndexParam = (searchParams.get('hide_index') || '').trim();
-const hiddenIndexSet = new Set(
-  hideIndexParam
-    ? hideIndexParam.split(/[ ,]+/).map((t) => Number.parseInt(t, 10)).filter((n) => Number.isFinite(n) && n >= 0)
-    : []
+const hideAllGeometryDefault = readTruthyFlag(['nogeom', 'no_geom', 'no-geom', 'hideall', 'hide_all']);
+const hiddenTypeSet = new Set(readListParam('hide'));
+const dumpToken = getParamToken('dump');
+const findToken = getParamToken('find');
+const dumpBigParam = dumpToken === 'big' || findToken === 'big';
+const hideBigParam = readTruthyFlag(['hide_big', 'hidebig']);
+const bigN = Math.min(
+  Math.max(readNumericParam('big_n', 8, { parser: (value) => Number.parseInt(value, 10) }), 1),
+  64
 );
-// Procedural sky switch
-const skyOffParam = (() => { const v1=(searchParams.get('nosky')||'').toLowerCase(); const v2=(searchParams.get('sky_off')||'').toLowerCase(); const v3=(searchParams.get('sky')||'').toLowerCase(); const norm=(v)=> (v==='1'||v==='true'||v==='yes'||v==='on'); const no=(v)=> (v==='0'||v==='false'||v==='no'||v==='off'); return norm(v1)||norm(v2)||no(v3); })();
+const bigFactorRaw = readNumericParam('big_factor', 8);
+const bigFactor = Number.isFinite(bigFactorRaw) && bigFactorRaw > 0 ? bigFactorRaw : 8;
+const hiddenIndexSet = readIndexSet('hide_index');
+const skyOverride = readBoolean(['nosky', 'sky_off']);
+const skyOffParam = skyOverride === true || readBoolean('sky') === false;
 const backendMode = requestedMode === 'worker' || requestedMode === 'direct' ? requestedMode : 'auto';
 const requestedModel = searchParams.get('model');
 const backend = await createBackend({ mode: backendMode, debug: debugMode, model: requestedModel });
@@ -201,6 +240,27 @@ function formatNumber(value) {
   return Number(num.toPrecision(6)).toString();
 }
 
+function createBinding(control, { getValue, applyValue }) {
+  const binding = {
+    skip: false,
+    getValue,
+    setValue: (value) => {
+      binding.skip = true;
+      applyValue(value);
+      binding.skip = false;
+    },
+  };
+  registerControl(control, binding);
+  return binding;
+}
+
+function guardBinding(binding, handler) {
+  return (...args) => {
+    if (binding?.skip) return undefined;
+    return handler(...args);
+  };
+}
+
 function createControlRow(control, options = {}) {
   const row = document.createElement('div');
   row.className = 'control-row';
@@ -233,33 +293,6 @@ function createFullRow(options = {}) {
   field.className = 'control-field';
   row.append(field);
   return { row, field };
-}
-
-function createButtonElement(control, variant = 'secondary') {
-  const button = document.createElement('button');
-  button.type = 'button';
-  const labelText = control.label ?? control.name ?? control.item_id;
-  button.textContent = labelText;
-  button.setAttribute('data-testid', control.item_id);
-  button.classList.add(
-    variant === 'primary' ? 'btn-primary' : variant === 'pill' ? 'btn-pill' : 'btn-secondary',
-  );
-  const binding = {
-    skip: false,
-    getValue: () => true,
-    setValue: () => {},
-  };
-  registerControl(control, binding);
-  button.addEventListener('click', async (event) => {
-    await applySpecAction(store, backend, control, {
-      trigger: 'click',
-      shiftKey: !!event.shiftKey,
-      ctrlKey: !!event.ctrlKey,
-      altKey: !!event.altKey,
-      metaKey: !!event.metaKey,
-    });
-  });
-  return button;
 }
 
 function createPillToggle(control) {
@@ -391,6 +424,7 @@ const renderCtx = {
   autoAligned: false,
   bounds: null,
   snapshotLogState: null,
+  frameId: null,
 };
 
 const tempVecA = new THREE.Vector3();
@@ -446,11 +480,17 @@ function mat3ToQuat(m) {
 }
 
 function initRenderer() {
-  if (renderCtx.initialized) return renderCtx;
-  if (!canvas) return renderCtx;
+  if (renderCtx.initialized || !canvas) return renderCtx;
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    alpha: false,
+    powerPreference: 'high-performance',
+  });
+  if (typeof window !== 'undefined') {
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.1;
@@ -461,7 +501,7 @@ function initRenderer() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
 
-    const scene = new THREE.Scene();
+  const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0x151a26, 12, 48);
 
   const ambient = new THREE.AmbientLight(0xffffff, 0);
@@ -514,7 +554,6 @@ function initRenderer() {
   scene.add(grid);
   const axes = new THREE.AxesHelper(0.4);
   axes.position.set(0, 0, 0.01);
-  // Allow axes to be occluded by scene geometry; render early to avoid overlaying everything.
   const axesMaterials = Array.isArray(axes.material) ? axes.material : [axes.material];
   for (const mat of axesMaterials) {
     if (!mat) continue;
@@ -523,40 +562,6 @@ function initRenderer() {
   }
   axes.renderOrder = 0;
   scene.add(axes);
-
-  function resizeRenderer() {
-    const rect = canvas.getBoundingClientRect();
-    const width = Math.max(1, rect.width);
-    const height = Math.max(1, rect.height);
-    renderer.setSize(width, height, false);
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-  }
-
-  resizeRenderer();
-  window.addEventListener('resize', resizeRenderer);
-
-  function animate() {
-    requestAnimationFrame(animate);
-    if (!renderCtx.initialized) return;
-    // Ensure visible background if an HDRI has been loaded.
-    try {
-      if (renderCtx.hdriReady && renderCtx.hdriBackground && renderCtx.scene) {
-        if (renderCtx.scene.background !== renderCtx.hdriBackground) {
-          renderCtx.scene.background = renderCtx.hdriBackground;
-          if ('backgroundIntensity' in renderCtx.scene) {
-            const fb = renderCtx.fallback || {};
-            renderCtx.scene.backgroundIntensity = fb.envIntensity ?? 1.7;
-          }
-          if ('backgroundBlurriness' in renderCtx.scene) {
-            renderCtx.scene.backgroundBlurriness = 0.0;
-          }
-        }
-      }
-    } catch {}
-    renderer.render(scene, camera);
-  }
-  animate();
 
   Object.assign(renderCtx, {
     initialized: true,
@@ -590,7 +595,51 @@ function initRenderer() {
     },
   });
   renderCtx.cameraTarget.set(0, 0, 0);
+
+  updateRendererViewport();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateRendererViewport);
+    ensureRenderLoop();
+  }
   return renderCtx;
+}
+
+function updateRendererViewport() {
+  if (!canvas || !renderCtx.renderer || !renderCtx.camera) return;
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(1, rect.width);
+  const height = Math.max(1, rect.height);
+  renderCtx.renderer.setSize(width, height, false);
+  renderCtx.camera.aspect = width / height;
+  renderCtx.camera.updateProjectionMatrix();
+}
+
+function renderLoop() {
+  if (typeof window !== 'undefined') {
+    renderCtx.frameId = window.requestAnimationFrame(renderLoop);
+  }
+  if (!renderCtx.initialized || !renderCtx.renderer || !renderCtx.scene || !renderCtx.camera) return;
+  try {
+    if (renderCtx.hdriReady && renderCtx.hdriBackground && renderCtx.scene) {
+      if (renderCtx.scene.background !== renderCtx.hdriBackground) {
+        renderCtx.scene.background = renderCtx.hdriBackground;
+        if ('backgroundIntensity' in renderCtx.scene) {
+          const fb = renderCtx.fallback || {};
+          renderCtx.scene.backgroundIntensity = fb.envIntensity ?? 1.7;
+        }
+        if ('backgroundBlurriness' in renderCtx.scene) {
+          renderCtx.scene.backgroundBlurriness = 0.0;
+        }
+      }
+    }
+  } catch {}
+  renderCtx.renderer.render(renderCtx.scene, renderCtx.camera);
+}
+
+function ensureRenderLoop() {
+  if (typeof window === 'undefined') return;
+  if (renderCtx.frameId != null) return;
+  renderCtx.frameId = window.requestAnimationFrame(renderLoop);
 }
 
 function getDefaultVopt(state) {
@@ -1684,7 +1733,7 @@ function renderScene(snapshot, state) {
     ctx.hemi.intensity = fillLight;
     ctx.hemi.groundColor.set(sceneFlags[0] ? 0x111622 : 0x161b29);
   }
-  let hideAllGeometry = hideAllGeomParam;
+  let hideAllGeometry = hideAllGeometryDefault;
   let highlightGeometry = false;
   if (defaults) {
     for (let idx = 0; idx < Math.min(defaults.length, voptFlags.length); idx += 1) {
@@ -1975,24 +2024,22 @@ function renderCheckbox(container, control) {
   row.append(button);
   container.append(row);
 
-  const binding = {
-    skip: false,
+  const binding = createBinding(control, {
     getValue: () => button.classList.contains('is-active'),
-    setValue: (value) => {
-      binding.skip = true;
+    applyValue: (value) => {
       const active = !!value;
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
-      binding.skip = false;
     },
-  };
-  registerControl(control, binding);
-
-  button.addEventListener('click', async () => {
-    if (binding.skip) return;
-    const next = !binding.getValue();
-    await applySpecAction(store, backend, control, next);
   });
+
+  button.addEventListener(
+    'click',
+    guardBinding(binding, async () => {
+      const next = !binding.getValue();
+      await applySpecAction(store, backend, control, next);
+    })
+  );
 }
 
 function renderButton(container, control, variant = 'secondary') {
@@ -2062,24 +2109,22 @@ function renderSelect(container, control) {
   field.append(select);
   container.append(row);
 
-  const binding = {
-    skip: false,
+  const binding = createBinding(control, {
     getValue: () => Number(select.value),
-    setValue: (value) => {
-      binding.skip = true;
+    applyValue: (value) => {
       if (typeof value === 'number' && !Number.isNaN(value)) {
         select.value = String(value);
       }
-      binding.skip = false;
     },
-  };
-  registerControl(control, binding);
-
-  select.addEventListener('change', async () => {
-    if (binding.skip) return;
-    const value = Number(select.value);
-    await applySpecAction(store, backend, control, value);
   });
+
+  select.addEventListener(
+    'change',
+    guardBinding(binding, async () => {
+      const value = Number(select.value);
+      await applySpecAction(store, backend, control, value);
+    })
+  );
 }
 
 function renderRadio(container, control) {
@@ -2109,26 +2154,25 @@ function renderRadio(container, control) {
   field.append(group);
   container.append(row);
 
-  const binding = {
-    skip: false,
+  const binding = createBinding(control, {
     getValue: () => radios.find((r) => r.checked)?.value ?? options[0],
-    setValue: (value) => {
-      binding.skip = true;
+    applyValue: (value) => {
       radios.forEach((radio, idx) => {
         if (value === options[idx] || value === idx || value === radio.value) {
           radio.checked = true;
         }
       });
-      binding.skip = false;
     },
-  };
-  registerControl(control, binding);
+  });
 
   radios.forEach((radio) => {
-    radio.addEventListener('change', async () => {
-      if (binding.skip || !radio.checked) return;
-      await applySpecAction(store, backend, control, radio.value);
-    });
+    radio.addEventListener(
+      'change',
+      guardBinding(binding, async () => {
+        if (!radio.checked) return;
+        await applySpecAction(store, backend, control, radio.value);
+      })
+    );
   });
 }
 
@@ -2150,23 +2194,22 @@ function renderSlider(container, control) {
   field.append(input, valueLabel);
   container.append(row);
 
-  const binding = {
-    skip: false,
+  const binding = createBinding(control, {
     getValue: () => Number(input.value),
-    setValue: (value) => {
-      binding.skip = true;
-      input.value = String(value ?? 0);
+    applyValue: (value) => {
+      const numeric = Number(value ?? 0);
+      input.value = Number.isFinite(numeric) ? String(numeric) : '0';
       valueLabel.textContent = Number(input.value).toFixed(3);
-      binding.skip = false;
     },
-  };
-  registerControl(control, binding);
-
-  input.addEventListener('input', async () => {
-    if (binding.skip) return;
-    valueLabel.textContent = Number(input.value).toFixed(3);
-    await applySpecAction(store, backend, control, Number(input.value));
   });
+
+  input.addEventListener(
+    'input',
+    guardBinding(binding, async () => {
+      valueLabel.textContent = Number(input.value).toFixed(3);
+      await applySpecAction(store, backend, control, Number(input.value));
+    })
+  );
   valueLabel.textContent = Number(input.value).toFixed(3);
 }
 
@@ -2193,32 +2236,27 @@ function renderEditInput(container, control, mode = 'text') {
   field.append(input);
   container.append(row);
 
-  const binding = {
-    skip: false,
+  const binding = createBinding(control, {
     getValue: () => {
       if (mode === 'text') return input.value;
       const value = Number(input.value);
       return Number.isFinite(value) ? value : 0;
     },
-    setValue: (value) => {
-      binding.skip = true;
+    applyValue: (value) => {
       if (mode === 'text') {
         input.value = value == null ? '' : String(value);
       } else {
         const numeric = Number(value);
         input.value = Number.isFinite(numeric) ? String(numeric) : '';
       }
-      binding.skip = false;
     },
-  };
-  registerControl(control, binding);
+  });
 
   if (control.default !== undefined) {
     binding.setValue(control.default);
   }
 
-  async function commit() {
-    if (binding.skip) return;
+  const commit = guardBinding(binding, async () => {
     let raw;
     if (mode === 'text') {
       raw = input.value;
@@ -2227,17 +2265,20 @@ function renderEditInput(container, control, mode = 'text') {
       raw = Number.isFinite(numeric) ? numeric : 0;
     }
     await applySpecAction(store, backend, control, raw);
-  }
+  });
 
   input.addEventListener('change', commit);
   input.addEventListener('blur', commit);
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      commit();
-      input.blur();
+  input.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commit();
+        input.blur();
+      }
     }
-  });
+  );
 }
 
 function renderVectorInput(container, control, expectedLength) {
@@ -2256,11 +2297,9 @@ function renderVectorInput(container, control, expectedLength) {
   const targetLength = Math.max(1, expectedLength | 0);
   let lastValid = '';
 
-  const binding = {
-    skip: false,
+  const binding = createBinding(control, {
     getValue: () => input.value.trim(),
-    setValue: (value) => {
-      binding.skip = true;
+    applyValue: (value) => {
       let text = '';
       if (Array.isArray(value)) {
         text = value.map(formatNumber).join(' ');
@@ -2278,13 +2317,10 @@ function renderVectorInput(container, control, expectedLength) {
         lastValid = text;
         input.classList.remove('is-invalid');
       }
-      binding.skip = false;
     },
-  };
-  registerControl(control, binding);
+  });
 
-  async function commit() {
-    if (binding.skip) return;
+  const commit = guardBinding(binding, async () => {
     const tokens = input.value.trim().split(/\s+/).filter(Boolean);
     const numbers = tokens.map((token) => Number(token));
     const isValid =
@@ -2292,9 +2328,7 @@ function renderVectorInput(container, control, expectedLength) {
     if (isValid) {
       const formatted = numbers.map(formatNumber);
       const payload = formatted.join(' ');
-      binding.skip = true;
-      input.value = payload;
-      binding.skip = false;
+      binding.setValue(payload);
       lastValid = payload;
       input.classList.remove('is-invalid');
       await applySpecAction(store, backend, control, payload);
@@ -2306,23 +2340,24 @@ function renderVectorInput(container, control, expectedLength) {
         clearTimeout(input._invalidTimer);
       }
       input._invalidTimer = setTimeout(() => {
-        binding.skip = true;
-        input.value = lastValid;
-        binding.skip = false;
+        binding.setValue(lastValid);
         input.classList.remove('is-invalid');
       }, 900);
     }
-  }
+  });
 
   input.addEventListener('change', commit);
   input.addEventListener('blur', commit);
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      commit();
-      input.blur();
+  input.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commit();
+        input.blur();
+      }
     }
-  });
+  );
 }
 
 function renderStatic(container, control) {
@@ -2343,41 +2378,33 @@ function renderSeparator(container, control) {
   container.append(row);
 }
 
+const CONTROL_RENDERERS = {
+  checkbox: renderCheckbox,
+  toggle: renderCheckbox,
+  button: renderButton,
+  'button-secondary': (container, control) => renderButton(container, control, 'secondary'),
+  'button-primary': (container, control) => renderButton(container, control, 'primary'),
+  'button-pill': (container, control) => renderButton(container, control, 'pill'),
+  radio: renderRadio,
+  select: renderSelect,
+  slider: renderSlider,
+  slider_int: renderSlider,
+  slider_float: renderSlider,
+  slider_num: renderSlider,
+  slidernum: renderSlider,
+  edit_int: (container, control) => renderEditInput(container, control, 'int'),
+  edit_float: (container, control) => renderEditInput(container, control, 'float'),
+  edit_text: (container, control) => renderEditInput(container, control, 'text'),
+  edit_vec3: (container, control) => renderVectorInput(container, control, 3),
+  edit_rgba: (container, control) => renderVectorInput(container, control, 4),
+  static: renderStatic,
+  separator: renderSeparator,
+};
+
 function renderControl(container, control) {
-  switch (control.type) {
-    case 'checkbox':
-      return renderCheckbox(container, control);
-    case 'button':
-      return renderButton(container, control);
-    case 'button-secondary':
-      return renderButton(container, control, 'secondary');
-    case 'radio':
-      return renderRadio(container, control);
-    case 'select':
-      return renderSelect(container, control);
-    case 'slider_int':
-    case 'slider_float':
-    case 'slider':
-    case 'slider_num':
-    case 'slidernum':
-      return renderSlider(container, control);
-    case 'edit_int':
-      return renderEditInput(container, control, 'int');
-    case 'edit_float':
-      return renderEditInput(container, control, 'float');
-    case 'edit_text':
-      return renderEditInput(container, control, 'text');
-    case 'edit_vec3':
-      return renderVectorInput(container, control, 3);
-    case 'edit_rgba':
-      return renderVectorInput(container, control, 4);
-    case 'static':
-      return renderStatic(container, control);
-    case 'separator':
-      return renderSeparator(container, control);
-    default:
-      return renderStatic(container, control);
-  }
+  const type = typeof control.type === 'string' ? control.type.toLowerCase() : 'static';
+  const renderer = CONTROL_RENDERERS[type] || renderStatic;
+  return renderer(container, control);
 }
 
 function renderSection(container, section) {
@@ -2925,61 +2952,74 @@ function applyCameraGesture(mode, dx, dy) {
   }
 }
 
-canvas.addEventListener('pointerdown', (event) => {
-  event.preventDefault();
-  beginGesture(event);
-});
+function setupCanvasInteractions() {
+  if (!canvas) return;
+  const pointerOptions = { passive: false };
+  const pointerHandlers = {
+    pointerdown: (event) => {
+      event.preventDefault();
+      beginGesture(event);
+    },
+    pointermove: (event) => {
+      if (!pointerState.active) return;
+      event.preventDefault();
+      moveGesture(event);
+    },
+    pointerup: (event) => {
+      event.preventDefault();
+      endGesture(event);
+    },
+    pointercancel: (event) => {
+      endGesture(event);
+    },
+  };
 
-canvas.addEventListener('pointermove', (event) => {
-  if (!pointerState.active) return;
-  event.preventDefault();
-  moveGesture(event);
-});
+  Object.entries(pointerHandlers).forEach(([type, handler]) => {
+    canvas.addEventListener(type, handler, pointerOptions);
+  });
 
-canvas.addEventListener('pointerup', (event) => {
-  event.preventDefault();
-  endGesture(event);
-});
+  canvas.addEventListener('lostpointercapture', () => {
+    if (!pointerState.active) return;
+    endGesture(undefined, { releaseCapture: false });
+  });
 
-canvas.addEventListener('pointercancel', (event) => {
-  endGesture(event);
-});
+  canvas.addEventListener(
+    'wheel',
+    (event) => {
+      if (!renderCtx.camera) return;
+      event.preventDefault();
+      const delta = event.deltaY;
+      if (!Number.isFinite(delta) || delta === 0) return;
+      const direction = delta > 0 ? 1 : -1;
+      applyCameraGesture('zoom', 0, direction * Math.abs(delta) * 0.35);
+    },
+    { passive: false }
+  );
 
-canvas.addEventListener('lostpointercapture', () => {
-  if (!pointerState.active) return;
-  endGesture(undefined, { releaseCapture: false });
-});
+  canvas.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+  });
 
-canvas.addEventListener('wheel', (event) => {
-  if (!renderCtx.camera) return;
-  event.preventDefault();
-  const delta = event.deltaY;
-  if (!Number.isFinite(delta) || delta === 0) return;
-  const direction = delta > 0 ? 1 : -1;
-  applyCameraGesture('zoom', 0, direction * Math.abs(delta) * 0.35);
-});
+  const mouseHandlers = {
+    mousedown: (event) => {
+      if (pointerState.active) return;
+      pointerHandlers.pointerdown(event);
+    },
+    mousemove: (event) => {
+      if (!pointerState.active) return;
+      pointerHandlers.pointermove(event);
+    },
+    mouseup: (event) => {
+      if (!pointerState.active) return;
+      pointerHandlers.pointerup(event);
+    },
+  };
+  Object.entries(mouseHandlers).forEach(([type, handler]) => {
+    canvas.addEventListener(type, handler, { passive: false });
+  });
+}
 
-canvas.addEventListener('contextmenu', (event) => {
-  event.preventDefault();
-});
-
-canvas.addEventListener('mousedown', (event) => {
-  if (pointerState.active) return;
-  event.preventDefault();
-  beginGesture(event);
-});
-
-canvas.addEventListener('mousemove', (event) => {
-  if (!pointerState.active) return;
-  event.preventDefault();
-  moveGesture(event);
-});
-
-canvas.addEventListener('mouseup', (event) => {
-  if (!pointerState.active) return;
-  event.preventDefault();
-  endGesture(event);
-});
+setupCanvasInteractions();
 
 // Keep canvas resized to container.
 function resizeCanvas() {
