@@ -524,7 +524,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
           specularIntensity: 0.25,
           ior: 1.5,
         });
-        material.envMapIntensity = 0.6;
+        material.envMapIntensity = (ctx?.envIntensity ?? 0.6);
       }
     }
     material.side = THREE.FrontSide;
@@ -645,20 +645,7 @@ export function createRendererManager({
       if (!ctx.loopActive) return;
       ctx.frameId = window.requestAnimationFrame(step);
       if (!ctx.initialized || !ctx.renderer || !ctx.scene || !ctx.camera) return;
-      try {
-        if (ctx.hdriReady && ctx.hdriBackground && ctx.scene) {
-          if (ctx.scene.background !== ctx.hdriBackground) {
-            ctx.scene.background = ctx.hdriBackground;
-            if ('backgroundIntensity' in ctx.scene) {
-              const fb = ctx.fallback || {};
-              ctx.scene.backgroundIntensity = fb.envIntensity ?? 1.7;
-            }
-            if ('backgroundBlurriness' in ctx.scene) {
-              ctx.scene.backgroundBlurriness = 0.0;
-            }
-          }
-        }
-      } catch {}
+      // Background/environment is managed by environment manager (ensureEnvIfNeeded)
       ctx.renderer.render(ctx.scene, ctx.camera);
     };
     ctx.frameId = window.requestAnimationFrame(step);
