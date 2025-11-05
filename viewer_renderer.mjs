@@ -202,23 +202,43 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
       postCreate = (mesh) => {
         mesh.rotation.x = -Math.PI / 2;
         mesh.receiveShadow = true;
+        mesh.castShadow = false;
         try {
           const baseMat = mesh.material;
-          if (!baseMat || typeof baseMat.clone !== 'function') return;
-          const backMat = baseMat.clone();
-          backMat.side = THREE.BackSide;
-          backMat.transparent = true;
-          backMat.opacity = 0.25;
-          backMat.depthWrite = false;
-          backMat.polygonOffset = true;
-          backMat.polygonOffsetFactor = -1;
-          const backMesh = new THREE.Mesh(mesh.geometry, backMat);
-          backMesh.receiveShadow = false;
-          backMesh.castShadow = false;
-          backMesh.renderOrder = (mesh.renderOrder || 0) + 0.01;
-          mesh.add(backMesh);
+          if (baseMat && typeof baseMat.clone === 'function') {
+            const backMat = baseMat.clone();
+            backMat.side = THREE.BackSide;
+            backMat.transparent = true;
+            backMat.opacity = 0.25;
+            backMat.depthWrite = false;
+            backMat.polygonOffset = true;
+            backMat.polygonOffsetFactor = -1;
+            const backMesh = new THREE.Mesh(mesh.geometry, backMat);
+            backMesh.receiveShadow = false;
+            backMesh.castShadow = false;
+            backMesh.renderOrder = (mesh.renderOrder || 0) + 0.01;
+            backMesh.userData = { ownGeometry: false };
+            mesh.add(backMesh);
+            mesh.userData = mesh.userData || {};
+            mesh.userData.fallbackBackface = backMesh;
+          }
+
+          const shadowMaterial = new THREE.ShadowMaterial({
+            opacity: 0.38,
+            side: THREE.FrontSide,
+          });
+          shadowMaterial.depthWrite = false;
+          shadowMaterial.polygonOffset = true;
+          shadowMaterial.polygonOffsetFactor = -1;
+          shadowMaterial.polygonOffsetUnits = -1;
+          const shadowLayer = new THREE.Mesh(mesh.geometry, shadowMaterial);
+          shadowLayer.receiveShadow = true;
+          shadowLayer.castShadow = false;
+          shadowLayer.renderOrder = (mesh.renderOrder || 0) + 0.02;
+          shadowLayer.userData = { ownGeometry: false };
+          mesh.add(shadowLayer);
           mesh.userData = mesh.userData || {};
-          mesh.userData.fallbackBackface = backMesh;
+          mesh.userData.groundShadowLayer = shadowLayer;
         } catch {}
       };
       break;
@@ -322,6 +342,20 @@ function disposeMeshObject(mesh) {
         } catch {}
       }
       mesh.userData.fallbackBackface = null;
+    }
+    if (mesh.userData && mesh.userData.groundShadowLayer) {
+      const shadowLayer = mesh.userData.groundShadowLayer;
+      if (shadowLayer.material && typeof shadowLayer.material.dispose === 'function') {
+        try {
+          shadowLayer.material.dispose();
+        } catch {}
+      }
+      if (typeof mesh.remove === 'function') {
+        try {
+          mesh.remove(shadowLayer);
+        } catch {}
+      }
+      mesh.userData.groundShadowLayer = null;
     }
   } catch {}
 
@@ -480,7 +514,22 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
         : 0.5;
       material = new THREE.ShadowMaterial({ opacity: op });
     } else {
-      material = new THREE.MeshStandardMaterial(geometryInfo.materialOpts);
+      const baseOpts = geometryInfo.materialOpts || {};
+      const useStandard = gtype === MJ_GEOM.PLANE || gtype === MJ_GEOM.HFIELD;
+      if (useStandard) {
+        material = new THREE.MeshStandardMaterial(baseOpts);
+      } else {
+        material = new THREE.MeshPhysicalMaterial({
+          color: baseOpts.color ?? 0xffffff,
+          roughness: baseOpts.roughness ?? 0.55,
+          metalness: baseOpts.metalness ?? 0.0,
+          clearcoat: 0.2,
+          clearcoatRoughness: 0.15,
+          specularIntensity: 0.25,
+          ior: 1.5,
+        });
+        material.envMapIntensity = 0.6;
+      }
     }
     material.side = THREE.FrontSide;
     mesh = new THREE.Mesh(geometryInfo.geometry, material);
@@ -646,12 +695,12 @@ export function createRendererManager({
     if ('physicallyCorrectLights' in renderer) {
       renderer.physicallyCorrectLights = true;
     }
-    renderer.setClearColor(0x000000, 1);
+    renderer.setClearColor(0xd6dce4, 1);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x151a26, 12, 48);
+    scene.fog = new THREE.Fog(0xd6dce4, 12, 48);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0);
     scene.add(ambient);
@@ -660,10 +709,16 @@ export function createRendererManager({
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
     keyLight.position.set(6, -8, 8);
     keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(2048, 2048);
+    keyLight.shadow.mapSize.set(4096, 4096);
+    keyLight.shadow.camera.near = 0.1;
+    keyLight.shadow.camera.far = 200;
+    keyLight.shadow.camera.left = -30;
+    keyLight.shadow.camera.right = 30;
+    keyLight.shadow.camera.top = 30;
+    keyLight.shadow.camera.bottom = -30;
     keyLight.shadow.bias = -0.0001;
     if ('normalBias' in keyLight.shadow) {
-      keyLight.shadow.normalBias = 0.0008;
+      keyLight.shadow.normalBias = 0.001;
     }
     const lightTarget = new THREE.Object3D();
     scene.add(lightTarget);
@@ -687,8 +742,10 @@ export function createRendererManager({
 
     const axes = new THREE.AxesHelper(0.4);
     axes.position.set(0, 0, 0.01);
-    axes.renderOrder = 0;
-    axes.material.depthTest = false;
+    if (axes.material) {
+      axes.material.depthTest = true;
+      axes.material.depthWrite = true;
+    }
     scene.add(axes);
 
     Object.assign(ctx, {
@@ -755,15 +812,21 @@ export function createRendererManager({
     if (context.renderer) {
       context.renderer.shadowMap.enabled = true;
       if (context.renderer.shadowMap) {
-        context.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        context.renderer.shadowMap.type = THREE.PCFShadowMap;
       }
     }
     if (context.light) {
       const baseLight = sceneFlags[0] ? 1.45 : 1.05;
       context.light.intensity = baseLight;
     }
+    if (context.fill) {
+      context.fill.intensity = sceneFlags[0] ? 0.35 : 0.2;
+    }
+    if (context.ambient) {
+      context.ambient.intensity = 0.03;
+    }
     if (context.hemi) {
-      const fillLight = sceneFlags[0] ? 0.9 : 0.65;
+      const fillLight = sceneFlags[0] ? 0.6 : 0.35;
       context.hemi.intensity = fillLight;
       context.hemi.groundColor.set(sceneFlags[0] ? 0x111622 : 0x161b29);
     }
@@ -967,4 +1030,6 @@ export function createRendererManager({
     updateViewport: () => updateRendererViewport(),
   };
 }
+
+
 
