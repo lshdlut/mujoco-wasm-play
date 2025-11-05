@@ -9,6 +9,12 @@ import {
   mergeBackendSnapshot,
 } from './src/viewer/state.mjs';
 import { createSceneSnap, diffSceneSnaps } from './local_tools/viewer_demo/snapshots.mjs';
+import { parseDeg, consumeViewerParams } from './viewer_params.mjs';
+import {
+  FALLBACK_PRESET_ALIASES,
+  FALLBACK_PRESETS,
+  createEnvironmentManager,
+} from './viewer_environment.mjs';
 
 const CAMERA_PRESETS = ['Free', 'Tracking', 'Fixed 1', 'Fixed 2', 'Fixed 3'];
 const MJ_GEOM = {
@@ -41,91 +47,44 @@ const controlBindings = new Map();
 let latestSnapshot = null;
 let renderStats = { drawn: 0, hidden: 0 };
 
-const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+const {
+  fallbackModeParam,
+  presetParam: fallbackPresetParam,
+  envRotParam,
+  envRotXDeg,
+  envRotYDeg,
+  envRotZDeg,
+  debugMode,
+  hideAllGeometryDefault,
+  hiddenTypeTokens,
+  dumpToken,
+  findToken,
+  hideBigParam,
+  bigN,
+  bigFactorRaw,
+  hiddenIndexSet,
+  skyOverride,
+  skyFlag,
+  backendModeToken,
+  requestedModel,
+  hdriParam: hdriQueryParam,
+} = consumeViewerParams();
 
-const BOOL_TRUE = new Set(['1', 'true', 'yes', 'on']);
-const BOOL_FALSE = new Set(['0', 'false', 'no', 'off']);
-
-const getParamToken = (key) => (searchParams.get(key) || '').trim().toLowerCase();
-
-function readBoolean(keys) {
-  const list = Array.isArray(keys) ? keys : [keys];
-  for (const key of list) {
-    const token = getParamToken(key);
-    if (!token) continue;
-    if (BOOL_TRUE.has(token)) return true;
-    if (BOOL_FALSE.has(token)) return false;
-  }
-  return null;
-}
-
-function readTruthyFlag(keys) {
-  return readBoolean(keys) === true;
-}
-
-function readListParam(name) {
-  const raw = getParamToken(name);
-  if (!raw) return [];
-  return raw.split(/[,\s]+/).map((token) => token.trim()).filter(Boolean);
-}
-
-function readIndexSet(name) {
-  const values = readListParam(name)
-    .map((token) => Number.parseInt(token, 10))
-    .filter((n) => Number.isFinite(n) && n >= 0);
-  return new Set(values);
-}
-
-function readNumericParam(name, defaultValue, { min, max, parser } = {}) {
-  const raw = searchParams.get(name);
-  if (raw == null || raw === '') return defaultValue;
-  const parseFn = parser ?? ((value) => Number.parseFloat(value));
-  const parsed = parseFn(raw, 10);
-  if (!Number.isFinite(parsed)) return defaultValue;
-  let result = parsed;
-  if (typeof min === 'number') result = Math.max(min, result);
-  if (typeof max === 'number') result = Math.min(max, result);
-  return result;
-}
-
-const debugMode = readBoolean('debug') === true;
-const requestedMode = searchParams.get('mode');
-const hideAllGeometryDefault = readTruthyFlag(['nogeom', 'no_geom', 'no-geom', 'hideall', 'hide_all']);
-const hiddenTypeSet = new Set(readListParam('hide'));
-const dumpToken = getParamToken('dump');
-const findToken = getParamToken('find');
+const hiddenTypeSet = new Set(hiddenTypeTokens);
 const dumpBigParam = dumpToken === 'big' || findToken === 'big';
-const hideBigParam = readTruthyFlag(['hide_big', 'hidebig']);
-const bigN = Math.min(
-  Math.max(readNumericParam('big_n', 8, { parser: (value) => Number.parseInt(value, 10) }), 1),
-  64
-);
-const bigFactorRaw = readNumericParam('big_factor', 8);
 const bigFactor = Number.isFinite(bigFactorRaw) && bigFactorRaw > 0 ? bigFactorRaw : 8;
-const hiddenIndexSet = readIndexSet('hide_index');
-const skyOverride = readBoolean(['nosky', 'sky_off']);
-const skyOffParam = skyOverride === true || readBoolean('sky') === false;
-const backendMode = requestedMode === 'worker' || requestedMode === 'direct' ? requestedMode : 'auto';
-const requestedModel = searchParams.get('model');
+const skyOffParam = skyOverride === true || skyFlag === false;
+const backendMode =
+  backendModeToken === 'worker' || backendModeToken === 'direct' ? backendModeToken : 'auto';
 const backend = await createBackend({ mode: backendMode, debug: debugMode, model: requestedModel });
 const store = createViewerStore({});
 if (typeof window !== 'undefined') {
   window.__viewerStore = store;
 }
 
-const fallbackModeParam = (searchParams.get('fallback') || 'auto').toLowerCase();
 const fallbackEnabledDefault = fallbackModeParam !== 'off';
-const fallbackPresetParam = (searchParams.get('preset') || 'studio-neutral').toLowerCase();
 
 // Environment orientation controls (HDRI/PMREM)
-function parseDeg(v, def = 0) {
-  const n = Number.parseFloat(String(v ?? '').trim());
-  return Number.isFinite(n) ? (n * Math.PI) / 180 : def;
-}
-const envRotParam = (searchParams.get('envrot') || '').trim(); // e.g. "90,0,0" (deg)
-const envRotXDeg = searchParams.get('envrotx');
-const envRotYDeg = searchParams.get('envroty');
-const envRotZDeg = searchParams.get('envrotz');
 let envRotX = 0, envRotY = 0, envRotZ = 0;
 if (envRotParam) {
   const toks = envRotParam.split(/[ ,]+/).map((t) => t.trim()).filter(Boolean);
@@ -137,69 +96,16 @@ if (envRotXDeg != null) envRotX = parseDeg(envRotXDeg, envRotX);
 if (envRotYDeg != null) envRotY = parseDeg(envRotYDeg, envRotY);
 if (envRotZDeg != null) envRotZ = parseDeg(envRotZDeg, envRotZ);
 
-function applyEnvRotationToScene(scene, THREE_NS, rx, ry, rz) {
-  if (!scene || !THREE_NS) return;
-  try {
-    if (typeof scene.backgroundRotation !== 'undefined') {
-      const val = scene.backgroundRotation;
-      if (val && typeof val.set === 'function') {
-        val.set(rx, ry, rz);
-      } else if (THREE_NS.Euler) {
-        scene.backgroundRotation = new THREE_NS.Euler(rx, ry, rz, 'YXZ');
-      }
-    }
-  } catch {}
-  try {
-    if (typeof scene.environmentRotation !== 'undefined') {
-      const val = scene.environmentRotation;
-      if (val && typeof val.set === 'function') {
-        val.set(rx, ry, rz);
-      } else if (THREE_NS.Euler) {
-        scene.environmentRotation = new THREE_NS.Euler(rx, ry, rz, 'YXZ');
-      }
-    }
-  } catch {}
-}
-
-const FALLBACK_PRESET_ALIASES = {
-  'bright-outdoor': 'bright-outdoor',
-  bright: 'bright-outdoor',
-  outdoor: 'bright-outdoor',
-  'studio-clean': 'studio-clean',
-  clean: 'studio-clean',
-  studio: 'studio-clean',
-};
-
-const FALLBACK_PRESETS = {
-  // A: Outdoor-Crisp v2 — strong key, long shadows, cold sky reflections
-  'bright-outdoor': {
-    background: 0xe7edf5,
-    exposure: 1.0,
-    ambient: { color: 0xffffff, intensity: 0.0 },
-    hemi: { sky: 0xe9f1ff, ground: 0xbfc2c5, intensity: 0.1 },
-    dir: { color: 0xfff1d6, intensity: 3.0, position: [6, -8, 4] },
-    fill: { color: 0xcfe3ff, intensity: 0.18, position: [-6, 6, 3] },
-    shadowBias: -0.0001,
-    envIntensity: 0.9,
-    ground: { style: 'pbr', color: 0xdbcfc2, roughness: 0.55, metalness: 0.05 },
-  },
-  // B: Studio-Clean-HiKey v2 — bright, clean, no HDRI dependency
-  'studio-clean': {
-    background: 0xe0e6ef,
-    exposure: 1.0,
-    ambient: { color: 0xffffff, intensity: 0.0 },
-    hemi: { sky: 0xeef5ff, ground: 0xb7bcc2, intensity: 0.8 },
-    dir: { color: 0xffffff, intensity: 2.0, position: [5, -6, 4] },
-    fill: { color: 0xcfe3ff, intensity: 0.5, position: [-5, 4, 3] },
-    shadowBias: -0.0001,
-    envIntensity: 1.0,
-    ground: { style: 'shadow', opacity: 0.5 },
-  },
-};
-
-
-
 const fallbackPresetKey = FALLBACK_PRESET_ALIASES[fallbackPresetParam] || 'bright-outdoor';
+const { applyFallbackAppearance } = createEnvironmentManager({
+  THREE_NS: THREE,
+  store,
+  skyOffParam,
+  hdriQueryParam: hdriQueryParam,
+  fallbackEnabledDefault,
+  fallbackPresetKey,
+  envRotation: { x: envRotX, y: envRotY, z: envRotZ },
+});
 function applySnapshot(snapshot) {
   latestSnapshot = snapshot;
   store.update((draft) => {
@@ -868,328 +774,6 @@ function buildAdapterMeshSnapshot(ctx, assets) {
     normal: normalData.length ? new Float32Array(normalData) : null,
     texcoord: texcoordData.length ? new Float32Array(texcoordData) : null,
   };
-}
-
-function hasModelEnvironment(state) {
-  const env = state?.rendering?.environment;
-  if (!env) return false;
-  if (env.hdr || env.texture || env.color) return true;
-  if (Array.isArray(env.sources) && env.sources.length > 0) return true;
-  return false;
-}
-
-function hasModelLights(state) {
-  const lights = state?.rendering?.lights;
-  return Array.isArray(lights) && lights.length > 0;
-}
-
-function hasModelBackground(state) {
-  const bg = state?.rendering?.background;
-  if (!bg) return false;
-  return bg.color != null || !!bg.texture;
-}
-
-function applyFallbackAppearance(ctx, state) {
-  const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: fallbackPresetKey };
-  const preset = FALLBACK_PRESETS[fallback.preset] || FALLBACK_PRESETS[fallbackPresetKey];
-  const renderer = ctx.renderer;
-  if (renderer) {
-    renderer.toneMappingExposure = preset.exposure ?? 1.0;
-  }
-
-  if (!fallback.enabled) {
-    if (!hasModelLights(state)) {
-      if (ctx.ambient) ctx.ambient.intensity = 0;
-      if (ctx.hemi) ctx.hemi.intensity = 0;
-      if (ctx.light) ctx.light.intensity = 0;
-    }
-    return;
-  }
-
-  if (!hasModelBackground(state) && ctx.scene && !ctx.hdriReady) {
-    // Background: Outdoor uses gradient until Sky/HDRI ready; Studio uses gradient
-    if (fallback.preset === 'studio-clean') {
-      if (!ctx.studioBgTex) {
-        ctx.studioBgTex = createVerticalGradientTexture(0xeef5ff, 0xd2dae6, 256);
-      }
-      ctx.scene.background = ctx.studioBgTex;
-      if (ctx.scene.environment) {
-        // No HDRI in studio preset by default
-        ctx.scene.environment = null;
-      }
-    } else {
-      // Outdoor: if no env and no sky, show a cool blue gradient to avoid black
-      const noEnv = !ctx.scene.environment;
-      const noSky = !ctx.sky;
-      if (noEnv && noSky) {
-        if (!ctx.outdoorBgTex) {
-          ctx.outdoorBgTex = createVerticalGradientTexture(0xe7edf5, 0xcdd5e0, 256);
-        }
-        ctx.scene.background = ctx.outdoorBgTex;
-      }
-    }
-  }
-
-  // Even if model requested a black background, ensure outdoor preset doesn't stay black when no env/sky yet
-  if (ctx.scene && fallback.preset === 'bright-outdoor' && !ctx.hdriReady) {
-    const noEnv = !ctx.scene.environment;
-    const noSky = !ctx.sky;
-    const noHdri = !ctx.hdriBackground;
-    if (noEnv && noSky && noHdri) {
-      if (!ctx.outdoorBgTex) {
-        ctx.outdoorBgTex = createVerticalGradientTexture(0xe7edf5, 0xcdd5e0, 256);
-      }
-      ctx.scene.background = ctx.outdoorBgTex;
-    }
-  }
-
-  if (!hasModelLights(state)) {
-    if (ctx.ambient) {
-      const ambientCfg = preset.ambient || {};
-      ctx.ambient.color.setHex(ambientCfg.color ?? 0xffffff);
-      ctx.ambient.intensity = ambientCfg.intensity ?? 0.2;
-    }
-    if (ctx.hemi) {
-      const hemiCfg = preset.hemi || {};
-      ctx.hemi.color.setHex(hemiCfg.sky ?? 0xffffff);
-      ctx.hemi.groundColor.setHex(hemiCfg.ground ?? 0x20242f);
-      ctx.hemi.intensity = hemiCfg.intensity ?? 0.6;
-    }
-    if (ctx.light) {
-      const dirCfg = preset.dir || {};
-      ctx.light.color.setHex(dirCfg.color ?? 0xffffff);
-      ctx.light.intensity = dirCfg.intensity ?? 1.8;
-      if (Array.isArray(dirCfg.position) && dirCfg.position.length === 3) {
-        ctx.light.position.set(dirCfg.position[0], dirCfg.position[1], dirCfg.position[2]);
-      }
-      if (ctx.lightTarget && Array.isArray(dirCfg.target) && dirCfg.target.length === 3) {
-        ctx.lightTarget.position.set(dirCfg.target[0], dirCfg.target[1], dirCfg.target[2]);
-      }
-      if (ctx.light.shadow) {
-        ctx.light.shadow.bias = dirCfg.shadowBias ?? preset.shadowBias ?? ctx.light.shadow.bias;
-      }
-    }
-    if (ctx.fill) {
-      const fillCfg = preset.fill || {};
-      ctx.fill.color.setHex(fillCfg.color ?? 0xcfe3ff);
-      ctx.fill.intensity = fillCfg.intensity ?? 0.3;
-      if (Array.isArray(fillCfg.position) && fillCfg.position.length === 3) {
-        ctx.fill.position.set(fillCfg.position[0], fillCfg.position[1], fillCfg.position[2]);
-      }
-    }
-  }
-
-  // Environment handling: prefer model; otherwise Outdoor builds Sky+PMREM; Studio uses no HDRI
-  const hasEnv = hasModelEnvironment(state);
-  if (!hasEnv && fallback.enabled) {
-    if (fallback.preset === 'bright-outdoor') {
-      ensureOutdoorSkyEnv(ctx, preset);
-    } else {
-      // Clear any previous env
-      if (ctx.scene && ctx.scene.environment) ctx.scene.environment = null;
-    }
-  }
-}
-
-// Build a small vertical gradient texture for background
-function createVerticalGradientTexture(topHex, bottomHex, height = 256) {
-  const width = 2;
-  const h = Math.max(8, height | 0);
-  const data = new Uint8Array(width * h * 4);
-  const top = new THREE.Color(topHex);
-  const bot = new THREE.Color(bottomHex);
-  for (let y = 0; y < h; y += 1) {
-    const t = y / (h - 1);
-    const r = bot.r * t + top.r * (1 - t);
-    const g = bot.g * t + top.g * (1 - t);
-    const b = bot.b * t + top.b * (1 - t);
-    for (let x = 0; x < width; x += 1) {
-      const i = (y * width + x) * 4;
-      data[i + 0] = Math.round(r * 255);
-      data[i + 1] = Math.round(g * 255);
-      data[i + 2] = Math.round(b * 255);
-      data[i + 3] = 255;
-    }
-  }
-  const tex = new THREE.DataTexture(data, width, h);
-  tex.needsUpdate = true;
-  tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  tex.generateMipmaps = true;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-// Ensure Outdoor-Crisp sky + PMREM environment
-function ensureOutdoorSkyEnv(ctx, preset) {
-  if (!ctx || !ctx.renderer || !ctx.scene) return;
-  if (typeof skyOffParam !== 'undefined' && skyOffParam) {
-    try { if (ctx.sky) ctx.sky.visible = false; } catch {}
-  }
-  // Toggle procedural sky visibility based on HDRI usage before early-returns
-  try {
-    if (ctx.sky) {
-      ctx.sky.visible = !ctx.envFromHDRI;
-    }
-  } catch {}
-  // If HDRI already applied (or currently loading), do not re-enter
-  if ((ctx.envFromHDRI && ctx.envRT && ctx.scene.environment) || ctx.hdriLoading) {
-    return;
-  }
-  if (!ctx.pmrem) {
-    ctx.pmrem = new THREE.PMREMGenerator(ctx.renderer);
-  }
-  // Try HDRI first if provided via query (?hdri=url) or known local candidates
-  if (!ctx.envFromHDRI && !hasModelEnvironment(store.get())) {
-    const hdriParam = searchParams.get('hdri');
-    const candidates = [];
-    if (hdriParam) candidates.push(hdriParam);
-    candidates.push('local_tools/assets/env/sky_clear_4k.hdr');
-    candidates.push('local_tools/assets/env/hausdorf_clear_sky_4k.hdr');
-    candidates.push('local_tools/assets/env/autumn_field_puresky_4k.hdr');
-    candidates.push('dist/assets/env/sky_clear_4k.hdr');
-    candidates.push('dist/assets/env/hausdorf_clear_sky_4k.hdr');
-    candidates.push('dist/assets/env/autumn_field_puresky_4k.hdr');
-    const tryLoadHDRI = async (url) => {
-      try {
-        const mod = await import('three/addons/loaders/RGBELoader.js');
-        if (!mod || !mod.RGBELoader) return false;
-        const loader = new mod.RGBELoader().setDataType(THREE.FloatType);
-        if (typeof console !== 'undefined') console.log('[env] trying HDRI', url);
-        ctx.hdriLoading = true;
-        const hdr = await new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
-        // Configure HDR for visible background
-        hdr.mapping = THREE.EquirectangularReflectionMapping;
-        const isUByte = hdr.type === THREE.UnsignedByteType;
-        if (THREE.SRGBColorSpace && isUByte) {
-          hdr.colorSpace = THREE.SRGBColorSpace;
-        } else if (THREE.LinearSRGBColorSpace) {
-          hdr.colorSpace = THREE.LinearSRGBColorSpace;
-        }
-        hdr.minFilter = THREE.LinearFilter;
-        hdr.magFilter = THREE.LinearFilter;
-        hdr.generateMipmaps = false;
-        hdr.needsUpdate = true;
-        ctx.hdriBackground = hdr;
-        ctx.envFromHDRI = true;
-        ctx.hdriReady = true;
-        // Use PMREM for environment (reflections)
-        const envRT = ctx.pmrem.fromEquirectangular(hdr);
-        const envTexture = envRT.texture;
-        if (THREE.LinearSRGBColorSpace && envTexture) {
-          envTexture.colorSpace = THREE.LinearSRGBColorSpace;
-        }
-        if (ctx.scene) {
-          // Default: background uses equirectangular HDR, environment uses PMREM from HDR
-          ctx.scene.environment = envTexture;
-          ctx.scene.background = hdr;
-          if ('backgroundIntensity' in ctx.scene) {
-            const bi = 1.0;
-            ctx.scene.backgroundIntensity = bi;
-          }
-          if ('backgroundBlurriness' in ctx.scene) {
-            ctx.scene.backgroundBlurriness = 0.0;
-          }
-          // Attempt API-based rotation only (may be a no-op on this Three version)
-          try {
-            applyEnvRotationToScene(ctx.scene, THREE, envRotX, envRotY, envRotZ);
-          } catch {}
-        }
-        ctx.envRT = envRT;
-        ctx.hdriBackground = hdr;
-        ctx.envFromHDRI = true;
-        ctx.hdriReady = true;
-        const intensity = preset?.envIntensity ?? 1.7;
-        if (typeof console !== 'undefined') console.log('[env] HDRI loaded', { url, intensity });
-        if (Array.isArray(ctx.meshes)) {
-          for (const m of ctx.meshes) {
-            if (m && m.material && 'envMapIntensity' in m.material) {
-              m.material.envMapIntensity = intensity;
-            }
-          }
-        }
-        ctx.hdriLoading = false;
-
-        return true;
-      } catch (e) {
-        ctx.hdriLoading = false;
-        ctx.hdriReady = false;
-        if (typeof console !== 'undefined') console.warn('[env] HDRI load failed', { url, error: String(e) });
-        return false;
-      }
-    };
-    (async () => {
-      for (const url of candidates) {
-        // eslint-disable-next-line no-await-in-loop
-        if (await tryLoadHDRI(url)) { ctx.envDirty = false; return; }
-      }
-      ctx.hdriLoading = false;
-      if (!ctx.envFromHDRI) {
-        ctx.hdriReady = false;
-      }
-    })();
-  }
-  if (!ctx.skyInit) {
-    ctx.skyInit = true;
-    try {
-      import('three/addons/objects/Sky.js').then((mod) => {
-        if (!mod || !mod.Sky) return;
-        const sky = new mod.Sky();
-        sky.name = 'procedural_sky';
-        // Keep sky within camera far plane to ensure visibility
-        const far = (ctx && ctx.camera && ctx.camera.far) ? ctx.camera.far : 100;
-        const radius = Math.max(10, Math.min(far * 0.9, 90000));
-        sky.scale.setScalar(radius);
-        // Align Sky.js (Y-up) to our Z-up world
-        try { sky.rotation.x = Math.PI / 2; } catch {}
-        if (sky.material) {
-          sky.material.depthWrite = false;
-          sky.material.depthTest = false;
-          if (typeof THREE.BackSide !== 'undefined') {
-            sky.material.side = THREE.BackSide;
-          }
-        }
-        ctx.scene.add(sky);
-        ctx.sky = sky;
-        ctx.sunVec = new THREE.Vector3();
-      }).catch(() => {});
-    } catch {}
-  }
-  if (!ctx.envFromHDRI && ctx.sky && ctx.pmrem) {
-    const sky = ctx.sky;
-    const uniforms = sky.material.uniforms;
-    const cfg = preset || {};
-    uniforms['turbidity'].value = 5.0;
-    uniforms['rayleigh'].value = 2.5;
-    uniforms['mieCoefficient'].value = 0.004;
-    uniforms['mieDirectionalG'].value = 0.8;
-    // Link sun to key light direction
-    if (ctx.light) {
-      const L = ctx.light.position.clone().normalize();
-      ctx.sunVec.copy(L);
-      uniforms['sunPosition'].value.copy(ctx.sunVec);
-    }
-    // Bake environment
-    if (!ctx.envRT || ctx.envDirty) {
-      if (ctx.envRT) { ctx.envRT.dispose(); }
-      ctx.envRT = ctx.pmrem.fromScene(sky);
-      if (ctx.scene) ctx.scene.environment = ctx.envRT.texture;
-      ctx.envDirty = false;
-      // apply env intensity to materials
-      const intensity = cfg.envIntensity ?? 1.3;
-      if (Array.isArray(ctx.meshes)) {
-        for (const m of ctx.meshes) {
-          if (m && m.material && 'envMapIntensity' in m.material) {
-            m.material.envMapIntensity = intensity;
-          }
-        }
-      }
-    }
-    // Prefer visible procedural sky as background
-    if (ctx.scene) {
-      ctx.scene.background = null;
-    }
-  }
 }
 
 function emitAdapterSceneSnapshot(ctx, snapshot, state) {
@@ -3032,3 +2616,4 @@ window.addEventListener('resize', resizeCanvas);
 
 // Initialise control values after DOM render.
 updateControls(store.get());
+
