@@ -200,15 +200,28 @@ function updatePanels(state) {
   const leftVisible = !!state.panels.left;
   const rightVisible = !!state.panels.right;
   const fullscreen = !!state.overlays.fullscreen;
-  if (leftPanel) {
-    leftPanel.classList.toggle('is-hidden', !leftVisible);
-  }
-  if (rightPanel) {
-    rightPanel.classList.toggle('is-hidden', !rightVisible);
-  }
-  document.body.classList.toggle('panel-left-hidden', !leftVisible);
-  document.body.classList.toggle('panel-right-hidden', !rightVisible);
+
+  if (leftPanel) leftPanel.classList.toggle('is-hidden', !leftVisible);
+  if (rightPanel) rightPanel.classList.toggle('is-hidden', !rightVisible);
+
+  // Compute layout class (areas-based, mutually exclusive)
+  const layoutClass = fullscreen
+    ? 'layout-main'
+    : (leftVisible && rightVisible)
+      ? 'layout-3col'
+      : (leftVisible && !rightVisible)
+        ? 'layout-left'
+        : (!leftVisible && rightVisible)
+          ? 'layout-right'
+          : 'layout-main';
+
+  const layouts = ['layout-3col', 'layout-left', 'layout-right', 'layout-main'];
+  for (const cls of layouts) document.body.classList.remove(cls);
+  document.body.classList.add(layoutClass);
+
+  // Keep legacy fullscreen flag for other visual toggles
   document.body.classList.toggle('fullscreen', fullscreen);
+
   const changed =
     leftVisible !== panelStateCache.left ||
     rightVisible !== panelStateCache.right ||
@@ -355,5 +368,6 @@ function resizeCanvas() {
 }
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
+
 
 
