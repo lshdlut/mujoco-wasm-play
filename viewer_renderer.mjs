@@ -382,6 +382,57 @@ function disposeMeshObject(mesh) {
   }
 }
 
+// Lightweight pooled material factory to avoid excessive material instances
+class MaterialPool {
+  constructor(threeNS) {
+    this.THREE = threeNS;
+    this.cache = new Map();
+  }
+  _key(spec) {
+    const kind = spec.kind || 'standard';
+    const color = (spec.color >>> 0).toString(16);
+    const rough = Math.round(((spec.roughness ?? 0.55) + Number.EPSILON) * 1000) / 1000;
+    const metal = Math.round(((spec.metalness ?? 0.0) + Number.EPSILON) * 1000) / 1000;
+    const wire = !!spec.wireframe;
+    return `${kind}|${color}|r${rough}|m${metal}|w${wire}`;
+  }
+  get(spec) {
+    const key = this._key(spec);
+    if (this.cache.has(key)) return this.cache.get(key);
+    const T = this.THREE;
+    let mat;
+    if (spec.kind === 'standard') {
+      mat = new T.MeshStandardMaterial({
+        color: spec.color ?? 0xffffff,
+        roughness: spec.roughness ?? 0.55,
+        metalness: spec.metalness ?? 0.0,
+        wireframe: !!spec.wireframe,
+      });
+    } else {
+      mat = new T.MeshPhysicalMaterial({
+        color: spec.color ?? 0xffffff,
+        roughness: spec.roughness ?? 0.55,
+        metalness: spec.metalness ?? 0.0,
+        clearcoat: 0.2,
+        clearcoatRoughness: 0.15,
+        specularIntensity: 0.25,
+        ior: 1.5,
+        wireframe: !!spec.wireframe,
+      });
+    }
+    mat.userData = mat.userData || {};
+    mat.userData.pooled = true;
+    this.cache.set(key, mat);
+    return mat;
+  }
+  disposeAll() {
+    for (const m of this.cache.values()) {
+      try { m.dispose?.(); } catch {}
+    }
+    this.cache.clear();
+  }
+}
+
 function syncRendererAssets(ctx, assets) {
   const source = assets || null;
   if (ctx.assetSource === source) return;
