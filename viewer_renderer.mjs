@@ -855,8 +855,7 @@ export function createRendererManager({
     }
 
     const ngeom = snapshot.ngeom | 0;
-    const doBounds = (ctx._frameCounter++ % ctx.boundsEvery) === 0;
-    const nextBounds = doBounds && ngeom > 0 ? computeBoundsFromSnapshot(snapshot) : null;
+    const nextBounds = ngeom > 0 ? computeBoundsFromSnapshot(snapshot) : null;
     const planeExtentHint = (() => {
       const radiusSource =
         nextBounds?.radius ?? context.bounds?.radius ?? 0;
