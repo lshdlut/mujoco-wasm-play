@@ -189,16 +189,12 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
         1,
         1
       );
-      if (fallbackEnabled && preset === 'studio-clean') {
-        materialOpts = { shadow: true, shadowOpacity: options.groundBackfaceOpacity ?? 0.45 };
-      } else {
-        const lightGray = 0xd0d0d0;
-        materialOpts = {
-          color: lightGray,
-          metalness: 0.0,
-          roughness: 0.82,
-        };
-      }
+      const lightGray = 0xd0d0d0;
+      materialOpts = {
+        color: lightGray,
+        metalness: 0.0,
+        roughness: 0.82,
+      };
       postCreate = (mesh) => {
         mesh.rotation.x = -Math.PI / 2;
         mesh.receiveShadow = true;
@@ -910,6 +906,16 @@ export function createRendererManager({
       t: typeof snapshot.t === 'number' ? snapshot.t : null,
     };
     setRenderStats(stats);
+
+    if (typeof context.envIntensity === 'number' && context.envIntensity !== context.lastEnvIntensity) {
+      const intensity = context.envIntensity;
+      for (const m of context.meshes) {
+        if (m && m.material && 'envMapIntensity' in m.material) {
+          m.material.envMapIntensity = intensity;
+        }
+      }
+      context.lastEnvIntensity = intensity;
+    }
 
     if (context.light && context.bounds) {
       const r = Math.max(0.1, Number(context.bounds.radius) || 1);

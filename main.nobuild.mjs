@@ -124,7 +124,6 @@ const { applyFallbackAppearance } = createEnvironmentManager({
   hdriQueryParam: hdriQueryParam,
   fallbackEnabledDefault,
   fallbackPresetKey,
-  envRotation: { x: envRotX, y: envRotY, z: envRotZ },
 });
 
 const rendererManager = createRendererManager({

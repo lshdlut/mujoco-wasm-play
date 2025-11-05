@@ -2,9 +2,6 @@ export const FALLBACK_PRESET_ALIASES = {
   'bright-outdoor': 'bright-outdoor',
   bright: 'bright-outdoor',
   outdoor: 'bright-outdoor',
-  'studio-clean': 'studio-clean',
-  clean: 'studio-clean',
-  studio: 'studio-clean',
 };
 
 export const FALLBACK_PRESETS = {
@@ -18,17 +15,6 @@ export const FALLBACK_PRESETS = {
     shadowBias: -0.00015,
     envIntensity: 1.6,
     ground: { style: 'shadow', opacity: 0.35 },
-  },
-  'studio-clean': {
-    background: 0xe0e6ef,
-    exposure: 1.0,
-    ambient: { color: 0xffffff, intensity: 0.0 },
-    hemi: { sky: 0xeef5ff, ground: 0xb7bcc2, intensity: 0.8 },
-    dir: { color: 0xffffff, intensity: 2.0, position: [5, -6, 4] },
-    fill: { color: 0xcfe3ff, intensity: 0.5, position: [-5, 4, 3] },
-    shadowBias: -0.0001,
-    envIntensity: 1.0,
-    ground: { style: 'shadow', opacity: 0.5 },
   },
 };
 
@@ -51,29 +37,6 @@ function hasModelBackground(state) {
   return bg.color != null || !!bg.texture;
 }
 
-function applyEnvRotationToScene(scene, THREE_NS, rx, ry, rz) {
-  if (!scene || !THREE_NS) return;
-  try {
-    if (typeof scene.backgroundRotation !== 'undefined') {
-      const val = scene.backgroundRotation;
-      if (val && typeof val.set === 'function') {
-        val.set(rx, ry, rz);
-      } else if (THREE_NS.Euler) {
-        scene.backgroundRotation = new THREE_NS.Euler(rx, ry, rz, 'YXZ');
-      }
-    }
-  } catch {}
-  try {
-    if (typeof scene.environmentRotation !== 'undefined') {
-      const val = scene.environmentRotation;
-      if (val && typeof val.set === 'function') {
-        val.set(rx, ry, rz);
-      } else if (THREE_NS.Euler) {
-        scene.environmentRotation = new THREE_NS.Euler(rx, ry, rz, 'YXZ');
-      }
-    }
-  } catch {}
-}
 
 function createVerticalGradientTexture(THREE_NS, topHex, bottomHex, height = 256) {
   const width = 2;
@@ -110,13 +73,7 @@ export function createEnvironmentManager({
   hdriQueryParam,
   fallbackEnabledDefault,
   fallbackPresetKey,
-  envRotation,
 }) {
-  const envRot = {
-    x: envRotation?.x ?? 0,
-    y: envRotation?.y ?? 0,
-    z: envRotation?.z ?? 0,
-  };
 
   function ensureOutdoorSkyEnv(ctx, preset) {
     if (!ctx || !ctx.renderer || !ctx.scene) return;
@@ -183,23 +140,18 @@ export function createEnvironmentManager({
             if ('backgroundBlurriness' in ctx.scene) {
               ctx.scene.backgroundBlurriness = 0.0;
             }
-            try {
-              applyEnvRotationToScene(ctx.scene, THREE_NS, envRot.x, envRot.y, envRot.z);
-            } catch {}
+            // rotation support removed
           }
+          // dispose previous resources before committing the new ones
+          try { ctx.envRT?.dispose?.(); } catch {}
+          try { ctx.hdriBackground?.dispose?.(); } catch {}
           ctx.envRT = envRT;
           ctx.hdriBackground = hdr;
           ctx.envFromHDRI = true;
           ctx.hdriReady = true;
           const intensity = preset?.envIntensity ?? 1.7;
           if (typeof console !== 'undefined') console.log('[env] HDRI loaded', { url, intensity });
-          if (Array.isArray(ctx.meshes)) {
-            for (const m of ctx.meshes) {
-              if (m && m.material && 'envMapIntensity' in m.material) {
-                m.material.envMapIntensity = intensity;
-              }
-            }
-          }
+          ctx.envIntensity = intensity;
           ctx.hdriLoading = false;
           return true;
         } catch (error) {
@@ -274,13 +226,7 @@ export function createEnvironmentManager({
         if (ctx.scene) ctx.scene.environment = ctx.envRT.texture;
         ctx.envDirty = false;
         const intensity = cfg.envIntensity ?? 1.3;
-        if (Array.isArray(ctx.meshes)) {
-          for (const m of ctx.meshes) {
-            if (m && m.material && 'envMapIntensity' in m.material) {
-              m.material.envMapIntensity = intensity;
-            }
-          }
-        }
+        ctx.envIntensity = intensity;
       }
       if (ctx.scene) {
         ctx.scene.background = null;
@@ -289,69 +235,14 @@ export function createEnvironmentManager({
   }
 
   function applyFallbackAppearance(ctx, state) {
-    const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: fallbackPresetKey };
-    const preset = FALLBACK_PRESETS[fallback.preset] || FALLBACK_PRESETS[fallbackPresetKey];
+    const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: 'bright-outdoor' };
+    const preset = FALLBACK_PRESETS['bright-outdoor'];
     const renderer = ctx.renderer;
     if (renderer) {
       renderer.toneMappingExposure = preset.exposure ?? 1.0;
     }
 
-    if (!fallback.enabled) {
-      if (!hasModelLights(state)) {
-        if (ctx.ambient) ctx.ambient.intensity = 0;
-        if (ctx.hemi) ctx.hemi.intensity = 0;
-        if (ctx.light) ctx.light.intensity = 0;
-      }
-      return;
-    }
-
-    if (!hasModelBackground(state) && ctx.scene && !ctx.hdriReady) {
-      if (fallback.preset === 'studio-clean') {
-        if (!ctx.studioBgTex) {
-          ctx.studioBgTex = createVerticalGradientTexture(
-            THREE_NS,
-            0xeef5ff,
-            0xd2dae6,
-            256
-          );
-        }
-        ctx.scene.background = ctx.studioBgTex;
-        if (ctx.scene.environment) {
-          ctx.scene.environment = null;
-        }
-      } else {
-        const noEnv = !ctx.scene.environment;
-        const noSky = !ctx.sky;
-        if (noEnv && noSky) {
-          if (!ctx.outdoorBgTex) {
-            ctx.outdoorBgTex = createVerticalGradientTexture(
-              THREE_NS,
-              0xe7edf5,
-              0xcdd5e0,
-              256
-            );
-          }
-          ctx.scene.background = ctx.outdoorBgTex;
-        }
-      }
-    }
-
-    if (ctx.scene && fallback.preset === 'bright-outdoor' && !ctx.hdriReady) {
-      const noEnv = !ctx.scene.environment;
-      const noSky = !ctx.sky;
-      const noHdri = !ctx.hdriBackground;
-      if (noEnv && noSky && noHdri) {
-        if (!ctx.outdoorBgTex) {
-          ctx.outdoorBgTex = createVerticalGradientTexture(
-            THREE_NS,
-            0xe7edf5,
-            0xcdd5e0,
-            256
-          );
-        }
-        ctx.scene.background = ctx.outdoorBgTex;
-      }
-    }
+    // Background/environment handled solely by ensureOutdoorSkyEnv when needed.
 
     if (!hasModelLights(state)) {
       if (ctx.ambient) {
@@ -392,19 +283,13 @@ export function createEnvironmentManager({
 
     const hasEnv = hasModelEnvironment(state);
     if (!hasEnv && fallback.enabled) {
-      if (fallback.preset === 'bright-outdoor') {
-        ensureOutdoorSkyEnv(ctx, preset);
-      } else if (ctx.scene && ctx.scene.environment) {
-        ctx.scene.environment = null;
-      }
+      ensureOutdoorSkyEnv(ctx, preset);
     }
   }
 
   return {
     applyFallbackAppearance,
     ensureOutdoorSkyEnv,
-    applyEnvRotationToScene: (scene, rx, ry, rz) =>
-      applyEnvRotationToScene(scene, THREE_NS, rx, ry, rz),
     hasModelEnvironment,
     hasModelLights,
     hasModelBackground,
