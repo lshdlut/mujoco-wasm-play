@@ -457,7 +457,7 @@ function updateMeshMaterial(mesh, matIndex, matRgbaView) {
   }
 }
 
-function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}) {
+function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}, state = null) {
   if (!ctx.meshes) ctx.meshes = [];
   let mesh = ctx.meshes[index];
   const sizeKey = Array.isArray(sizeVec)
