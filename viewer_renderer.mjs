@@ -201,7 +201,7 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
       }
       postCreate = (mesh) => {
         mesh.rotation.x = -Math.PI / 2;
-        mesh.receiveShadow = true;
+        mesh.receiveShadow = false;
         mesh.castShadow = false;
         try {
           const baseMat = mesh.material;
