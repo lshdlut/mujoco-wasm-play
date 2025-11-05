@@ -117,19 +117,19 @@ if (envRotYDeg != null) envRotY = parseDeg(envRotYDeg, envRotY);
 if (envRotZDeg != null) envRotZ = parseDeg(envRotZDeg, envRotZ);
 
 const fallbackPresetKey = FALLBACK_PRESET_ALIASES[fallbackPresetParam] || 'bright-outdoor';
-const { applyFallbackAppearance } = createEnvironmentManager({
+const { applyFallbackAppearance, ensureEnvIfNeeded } = createEnvironmentManager({
   THREE_NS: THREE,
   store,
   skyOffParam,
   hdriQueryParam: hdriQueryParam,
   fallbackEnabledDefault,
-  fallbackPresetKey,
 });
 
 const rendererManager = createRendererManager({
   canvas,
   renderCtx,
   applyFallbackAppearance,
+  ensureEnvIfNeeded,
   hideAllGeometryDefault,
   fallbackEnabledDefault,
   fallbackPresetKey,

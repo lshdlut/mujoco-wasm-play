@@ -600,6 +600,7 @@ export function createRendererManager({
   canvas,
   renderCtx,
   applyFallbackAppearance,
+  ensureEnvIfNeeded,
   hideAllGeometryDefault,
   fallbackEnabledDefault,
   fallbackPresetKey,
@@ -800,6 +801,9 @@ export function createRendererManager({
 
     if (typeof applyFallbackAppearance === 'function') {
       applyFallbackAppearance(context, state);
+    }
+    if (typeof ensureEnvIfNeeded === 'function') {
+      ensureEnvIfNeeded(context, state);
     }
 
     const defaults = getDefaultVopt(context, state);

@@ -72,7 +72,6 @@ export function createEnvironmentManager({
   skyOffParam,
   hdriQueryParam,
   fallbackEnabledDefault,
-  fallbackPresetKey,
 }) {
 
   function ensureOutdoorSkyEnv(ctx, preset) {
@@ -140,7 +139,7 @@ export function createEnvironmentManager({
             if ('backgroundBlurriness' in ctx.scene) {
               ctx.scene.backgroundBlurriness = 0.0;
             }
-            // rotation support removed
+            
           }
           // dispose previous resources before committing the new ones
           try { ctx.envRT?.dispose?.(); } catch {}
@@ -242,7 +241,7 @@ export function createEnvironmentManager({
       renderer.toneMappingExposure = preset.exposure ?? 1.0;
     }
 
-    // Background/environment handled solely by ensureOutdoorSkyEnv when needed.
+    // Background/environment handled by ensureEnvIfNeeded (no side effects here).
 
     if (!hasModelLights(state)) {
       if (ctx.ambient) {
@@ -281,6 +280,12 @@ export function createEnvironmentManager({
       }
     }
 
+    // no env orchestration here
+  }
+
+  function ensureEnvIfNeeded(ctx, state) {
+    const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: 'bright-outdoor' };
+    const preset = FALLBACK_PRESETS['bright-outdoor'];
     const hasEnv = hasModelEnvironment(state);
     if (!hasEnv && fallback.enabled) {
       ensureOutdoorSkyEnv(ctx, preset);
@@ -290,6 +295,7 @@ export function createEnvironmentManager({
   return {
     applyFallbackAppearance,
     ensureOutdoorSkyEnv,
+    ensureEnvIfNeeded,
     hasModelEnvironment,
     hasModelLights,
     hasModelBackground,
