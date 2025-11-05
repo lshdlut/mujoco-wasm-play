@@ -192,9 +192,9 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
       if (fallbackEnabled && preset === 'studio-clean') {
         materialOpts = { shadow: true, shadowOpacity: options.groundBackfaceOpacity ?? 0.45 };
       } else {
-        const lightGray = 0xd0d0d0;
+        const groundTone = 0xcdd3db;
         materialOpts = {
-          color: lightGray,
+          color: groundTone,
           metalness: 0.0,
           roughness: 0.82,
         };
@@ -224,7 +224,7 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
           }
 
           const shadowMaterial = new THREE.ShadowMaterial({
-            opacity: 0.38,
+            opacity: 0.45,
             side: THREE.FrontSide,
           });
           shadowMaterial.depthWrite = false;
@@ -711,11 +711,11 @@ export function createRendererManager({
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(4096, 4096);
     keyLight.shadow.camera.near = 0.1;
-    keyLight.shadow.camera.far = 200;
-    keyLight.shadow.camera.left = -30;
-    keyLight.shadow.camera.right = 30;
-    keyLight.shadow.camera.top = 30;
-    keyLight.shadow.camera.bottom = -30;
+    keyLight.shadow.camera.far = 120;
+    keyLight.shadow.camera.left = -12;
+    keyLight.shadow.camera.right = 12;
+    keyLight.shadow.camera.top = 12;
+    keyLight.shadow.camera.bottom = -12;
     keyLight.shadow.bias = -0.0001;
     if ('normalBias' in keyLight.shadow) {
       keyLight.shadow.normalBias = 0.001;
@@ -724,9 +724,23 @@ export function createRendererManager({
     scene.add(lightTarget);
     keyLight.target = lightTarget;
     scene.add(keyLight);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.25);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.2);
     fill.position.set(-6, 6, 3);
     scene.add(fill);
+
+    const spot = new THREE.SpotLight(0xffffff, 0.6);
+    spot.castShadow = true;
+    spot.angle = THREE.MathUtils.degToRad(20);
+    spot.penumbra = 0.0;
+    spot.shadow.mapSize.set(2048, 2048);
+    spot.shadow.bias = -0.0001;
+    const spotTarget = new THREE.Object3D();
+    scene.add(spotTarget);
+    spot.position.set(6, 12, 6);
+    spotTarget.position.set(0, 0, 0);
+    spot.target = spotTarget;
+    scene.add(spot);
+
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
     camera.up.set(0, 0, 1);
@@ -761,6 +775,8 @@ export function createRendererManager({
       fill,
       hemi,
       ambient,
+      spotLight: spot,
+      spotTarget,
       assetSource: null,
       meshes: [],
       defaultVopt: null,
@@ -911,31 +927,6 @@ export function createRendererManager({
     };
     setRenderStats(stats);
 
-    if (context.light && context.bounds) {
-      const r = Math.max(0.1, Number(context.bounds.radius) || 1);
-      const cam = context.light.shadow && context.light.shadow.camera ? context.light.shadow.camera : null;
-      if (cam && typeof cam.left !== 'undefined') {
-        const k = 2.2;
-        const l = -r * k;
-        const rt = r * k;
-        cam.left = l;
-        cam.right = rt;
-        cam.top = r * 1.6;
-        cam.bottom = -r * 1.6;
-        cam.near = Math.max(0.01, r * 0.03);
-        cam.far = Math.max(40, r * 8);
-        if (typeof cam.updateProjectionMatrix === 'function') cam.updateProjectionMatrix();
-        if (context.lightTarget) {
-          context.lightTarget.position.set(
-            context.bounds.center[0],
-            context.bounds.center[1],
-            context.bounds.center[2]
-          );
-          context.light.target?.updateMatrixWorld?.();
-        }
-      }
-    }
-
     const bounds = nextBounds;
     if (bounds) {
       context.bounds = bounds;
@@ -954,22 +945,47 @@ export function createRendererManager({
           }
         }
         context.autoAligned = true;
-        if (debugMode) {
-          console.log('[render] auto align', { radius, center: bounds.center });
-        }
+      if (debugMode) {
+        console.log('[render] auto align', { radius, center: bounds.center });
       }
+    }
       if (context.light) {
         const radius = Math.max(bounds.radius || 0, 0.6);
         const focus = tempVecC.set(bounds.center[0], bounds.center[1], bounds.center[2]);
-        const horiz = radius * 3.0;
-        const alt = Math.tan(20 * Math.PI / 180) * horiz;
-        const lightOffset = tempVecD.set(horiz, -horiz * 0.9, Math.max(0.6, alt));
+        const horiz = Math.max(6, radius * 2.4);
+        const alt = Math.tan(22 * Math.PI / 180) * horiz;
+        const lightOffset = tempVecD.set(horiz, -horiz * 1.1, Math.max(4, alt));
         context.light.position.copy(focus.clone().add(lightOffset));
         if (context.lightTarget) {
           context.lightTarget.position.copy(focus);
           context.light.target?.updateMatrixWorld?.();
         }
+        const cam = context.light.shadow && context.light.shadow.camera ? context.light.shadow.camera : null;
+        if (cam && typeof cam.updateProjectionMatrix === 'function') {
+          const margin = Math.max(8, radius * 1.4);
+          cam.left = -margin;
+          cam.right = margin;
+          cam.top = margin;
+          cam.bottom = -margin;
+          cam.near = 0.1;
+          cam.far = Math.max(40, radius * 3.5);
+          cam.updateProjectionMatrix();
+        }
         context.envDirty = true;
+      }
+      if (context.spotLight && context.spotTarget) {
+        const radius = Math.max(bounds.radius || 0, 0.6);
+        const focus = tempVecA.set(bounds.center[0], bounds.center[1], bounds.center[2]);
+        const spotOffset = tempVecB.set(radius * 1.2, radius * 2.0, Math.max(6, radius * 2.2));
+        context.spotLight.position.copy(focus.clone().add(spotOffset));
+        context.spotTarget.position.copy(focus);
+        context.spotLight.target?.updateMatrixWorld?.();
+        const spotCam = context.spotLight.shadow && context.spotLight.shadow.camera ? context.spotLight.shadow.camera : null;
+        if (spotCam && typeof spotCam.updateProjectionMatrix === 'function') {
+          spotCam.near = 0.5;
+          spotCam.far = Math.max(30, radius * 4);
+          spotCam.updateProjectionMatrix();
+        }
       }
       if (context.hemi) {
         const radius = Math.max(bounds.radius || 0, 0.6);
@@ -1030,6 +1046,7 @@ export function createRendererManager({
     updateViewport: () => updateRendererViewport(),
   };
 }
+
 
 
 
