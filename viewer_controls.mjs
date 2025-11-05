@@ -6,9 +6,13 @@ export function createControlManager({
   leftPanel,
   rightPanel,
   cameraPresets = [],
+  shortcutRoot = null,
 }) {
   const controlById = new Map();
   const controlBindings = new Map();
+  const eventCleanup = [];
+  let shortcutsInstalled = false;
+  const shortcutHandlers = new Map();
 
   function sanitiseName(name) {
     return (
@@ -29,15 +33,230 @@ export function createControlManager({
       .filter(Boolean);
   }
 
-  function formatNumber(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return '';
-    const abs = Math.abs(num);
-    if (abs !== 0 && (abs >= 1e6 || abs < 1e-4)) {
-      return Number(num.toExponential(4)).toString();
-    }
-    return Number(num.toPrecision(6)).toString();
+function formatNumber(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '';
+  const abs = Math.abs(num);
+  if (abs !== 0 && (abs >= 1e6 || abs < 1e-4)) {
+    return Number(num.toExponential(4)).toString();
   }
+  return Number(num.toPrecision(6)).toString();
+}
+
+function coerceBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const lowered = value.toLowerCase();
+    return lowered === '1' || lowered === 'true' || lowered === 'run' || lowered === 'on' || lowered === 'yes';
+  }
+  return !!value;
+}
+
+function clamp01(x) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  return x;
+}
+
+function parseRange(control) {
+  const { range, min, max, step } = control || {};
+  const out = {
+    min: 0,
+    max: 1,
+    step: control?.type === 'slider_int' ? 1 : 0.01,
+    scale: 'lin',
+  };
+  if (Array.isArray(range) && range.length >= 2) {
+    const [rmin, rmax, rstep] = range;
+    if (Number.isFinite(Number(rmin))) out.min = Number(rmin);
+    if (Number.isFinite(Number(rmax))) out.max = Number(rmax);
+    if (Number.isFinite(Number(rstep))) out.step = Number(rstep);
+  } else if (typeof range === 'string') {
+    const match = range.trim().match(/\[([^\]]+)\]/);
+    if (match) {
+      const parts = match[1]
+        .split(/[,\s]+/)
+        .map((token) => Number(token))
+        .filter((num) => Number.isFinite(num));
+      if (parts.length >= 2) {
+        out.min = parts[0];
+        out.max = parts[1];
+      }
+      if (parts.length >= 3) {
+        out.step = parts[2];
+      }
+    }
+  } else if (range && typeof range === 'object') {
+    if (Number.isFinite(Number(range.min))) out.min = Number(range.min);
+    if (Number.isFinite(Number(range.max))) out.max = Number(range.max);
+    if (Number.isFinite(Number(range.step))) out.step = Number(range.step);
+    if (typeof range.scale === 'string') {
+      out.scale = range.scale.toLowerCase() === 'log' ? 'log' : 'lin';
+    }
+  } else {
+    if (Number.isFinite(Number(min))) out.min = Number(min);
+    if (Number.isFinite(Number(max))) out.max = Number(max);
+    if (Number.isFinite(Number(step))) out.step = Number(step);
+  }
+  if (!(out.max > out.min)) {
+    out.max = out.min + 1;
+  }
+  if (out.scale === 'log') {
+    out.min = Math.max(Number.EPSILON, out.min);
+    out.max = Math.max(out.min + Number.EPSILON, out.max);
+  }
+  if (!(out.step > 0)) {
+    out.step = control?.type === 'slider_int' ? 1 : 0.01;
+  }
+  return out;
+}
+
+function normaliseToRange(value, range) {
+  const { min, max, scale } = range;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  if (scale === 'log') {
+    const logMin = Math.log(min);
+    const logMax = Math.log(max);
+    const clamped = Math.log(Math.max(min, Math.min(max, numeric)));
+    return clamp01((clamped - logMin) / (logMax - logMin));
+  }
+  return clamp01((numeric - min) / (max - min));
+}
+
+function denormaliseFromRange(t, range) {
+  const clampedT = clamp01(Number(t));
+  const { min, max, scale, step } = range;
+  let value;
+  if (scale === 'log') {
+    const logMin = Math.log(min);
+    const logMax = Math.log(max);
+    value = Math.exp(logMin + clampedT * (logMax - logMin));
+  } else {
+    value = min + clampedT * (max - min);
+  }
+  if (Number.isFinite(step) && step > 0) {
+    const steps = Math.round((value - min) / step);
+    value = min + steps * step;
+  }
+  return Math.min(max, Math.max(min, value));
+}
+
+const MOD_KEYS = new Set(['ctrl', 'control', 'meta', 'cmd', 'win', 'shift', 'alt', 'option']);
+
+function resolveResetValue(control) {
+  const def = control?.default;
+  if (def === undefined || def === null) return undefined;
+  if (typeof def === 'number' || typeof def === 'boolean') return def;
+  if (typeof def === 'string') {
+    const trimmed = def.trim();
+    if (!trimmed) return undefined;
+    const lower = trimmed.toLowerCase();
+    if (lower === 'true') return true;
+    if (lower === 'false') return false;
+    const num = Number(trimmed);
+    return Number.isFinite(num) ? num : undefined;
+  }
+  return undefined;
+}
+
+function normaliseShortcutSpec(shortcut) {
+  const combos = [];
+  const addCombo = (tokens) => {
+    const canonical = canonicalShortcut(tokens);
+    if (canonical) combos.push(canonical);
+  };
+  if (!shortcut) return combos;
+  if (Array.isArray(shortcut)) {
+    if (shortcut.every((token) => typeof token === 'string')) {
+      addCombo(shortcut);
+    } else {
+      shortcut.forEach((entry) => {
+        if (typeof entry === 'string') addCombo(entry.split('+'));
+        else if (Array.isArray(entry)) addCombo(entry);
+      });
+    }
+    return combos;
+  }
+  if (typeof shortcut === 'string') {
+    addCombo(shortcut.split('+'));
+  }
+  return combos;
+}
+
+function canonicalShortcut(tokens) {
+  if (!tokens) return null;
+  const mods = [];
+  let key = null;
+  tokens.forEach((token) => {
+    if (typeof token !== 'string') return;
+    const lower = token.trim().toLowerCase();
+    if (!lower) return;
+    if (lower === 'ctrl' || lower === 'control') {
+      if (!mods.includes('ctrl')) mods.push('ctrl');
+      return;
+    }
+    if (lower === 'shift') {
+      if (!mods.includes('shift')) mods.push('shift');
+      return;
+    }
+    if (lower === 'alt' || lower === 'option') {
+      if (!mods.includes('alt')) mods.push('alt');
+      return;
+    }
+    if (lower === 'meta' || lower === 'cmd' || lower === 'win') {
+      if (!mods.includes('meta')) mods.push('meta');
+      return;
+    }
+    if (MOD_KEYS.has(lower)) return;
+    key = normaliseKeyToken(lower);
+  });
+  if (!key) return null;
+  mods.sort();
+  return [...mods, key].join('+');
+}
+
+function normaliseKeyToken(token) {
+  if (!token) return null;
+  if (token === ' ') return 'space';
+  if (token === 'spacebar') return 'space';
+  if (token === 'esc') return 'escape';
+  if (token === 'left') return 'arrowleft';
+  if (token === 'right') return 'arrowright';
+  if (token === 'up') return 'arrowup';
+  if (token === 'down') return 'arrowdown';
+  if (token.startsWith('key') && token.length === 4) return token.slice(3);
+  if (token.startsWith('digit') && token.length === 6) return token.slice(5);
+  return token;
+}
+
+function shortcutFromEvent(event) {
+  if (event.defaultPrevented) return null;
+  const tag = event.target?.tagName;
+  if (tag && ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return null;
+  if (event.target?.isContentEditable) return null;
+  const mods = [];
+  if (event.ctrlKey) mods.push('ctrl');
+  if (event.shiftKey) mods.push('shift');
+  if (event.altKey) mods.push('alt');
+  if (event.metaKey) mods.push('meta');
+  let key = event.key;
+  if (!key) return null;
+  key = key.toLowerCase();
+  if (key === ' ') key = 'space';
+  mods.sort();
+  return [...mods, key].join('+');
+}
+
+function registerShortcutHandlers(shortcutSpec, handler) {
+  const combos = normaliseShortcutSpec(shortcutSpec);
+  combos.forEach((combo) => {
+    const list = shortcutHandlers.get(combo) || [];
+    list.push(handler);
+    shortcutHandlers.set(combo, list);
+  });
+}
 
   function registerControl(control, binding) {
     controlById.set(control.item_id, control);
@@ -205,31 +424,45 @@ export function createControlManager({
   function renderCheckbox(container, control) {
     const row = createControlRow(control);
     row.classList.add('bool-row');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'bool-button';
-    button.textContent = control.label ?? control.name ?? control.item_id;
-    button.setAttribute('data-testid', control.item_id);
-    button.setAttribute('aria-pressed', 'false');
-    row.append(button);
+    const label = document.createElement('label');
+    label.className = 'bool-button bool-label';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = `${sanitiseName(control.item_id)}__checkbox`;
+    input.setAttribute('role', 'switch');
+    input.setAttribute('data-testid', control.item_id);
+    input.setAttribute('aria-checked', 'false');
+    const span = document.createElement('span');
+    span.className = 'bool-text';
+    span.textContent = control.label ?? control.name ?? control.item_id;
+    label.append(input, span);
+    row.append(label);
     container.append(row);
 
     const binding = createBinding(control, {
-      getValue: () => button.classList.contains('is-active'),
+      getValue: () => input.checked,
       applyValue: (value) => {
-        const active = !!value;
-        button.classList.toggle('is-active', active);
-        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+        const active = coerceBoolean(value);
+        input.checked = active;
+        input.setAttribute('aria-checked', active ? 'true' : 'false');
+        label.classList.toggle('is-active', active);
       },
     });
 
-    button.addEventListener(
-      'click',
+    input.addEventListener(
+      'change',
       guardBinding(binding, async () => {
         const next = !binding.getValue();
         await applySpecAction(store, backend, control, next);
       }),
     );
+
+    input.addEventListener('focus', () => {
+      label.classList.add('has-focus');
+    });
+    input.addEventListener('blur', () => {
+      label.classList.remove('has-focus');
+    });
   }
 
   function renderRunToggle(container, control) {
@@ -242,7 +475,7 @@ export function createControlManager({
     button.setAttribute('aria-pressed', 'false');
 
     const sync = (running) => {
-      const active = !!running;
+      const active = coerceBoolean(running);
       button.textContent = active ? 'Run' : 'Pause';
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -251,10 +484,10 @@ export function createControlManager({
     const binding = createBinding(control, {
       getValue: () => {
         const current = readControlValue(store.get(), control);
-        return current === 'Run' || current === true || current === 1;
+        return coerceBoolean(current);
       },
       applyValue: (value) => {
-        const active = value === 'Run' || value === true || value === 1;
+        const active = coerceBoolean(value);
         sync(active);
       },
     });
@@ -330,9 +563,9 @@ export function createControlManager({
     select.setAttribute('data-testid', control.item_id);
     select.id = inputId;
     const options = normaliseOptions(control.options);
-    options.forEach((opt, idx) => {
+    options.forEach((opt) => {
       const option = document.createElement('option');
-      option.value = String(idx);
+      option.value = opt;
       option.textContent = opt;
       select.appendChild(option);
     });
@@ -340,10 +573,13 @@ export function createControlManager({
     container.append(row);
 
     const binding = createBinding(control, {
-      getValue: () => Number(select.value),
+      getValue: () => select.value,
       applyValue: (value) => {
-        if (typeof value === 'number' && !Number.isNaN(value)) {
-          select.value = String(value);
+        if (typeof value === 'string') {
+          select.value = value;
+        } else if (typeof value === 'number' && Number.isFinite(value)) {
+          const idx = Math.max(0, Math.min(options.length - 1, Math.round(value)));
+          select.value = options[idx];
         }
       },
     });
@@ -351,7 +587,7 @@ export function createControlManager({
     select.addEventListener(
       'change',
       guardBinding(binding, async () => {
-        const value = Number(select.value);
+        const value = select.value;
         await applySpecAction(store, backend, control, value);
       }),
     );
@@ -407,6 +643,7 @@ export function createControlManager({
   }
 
   function renderSlider(container, control) {
+    const range = parseRange(control);
     const { row, label, field } = createLabeledRow(control);
     const inputId = `${sanitiseName(control.item_id)}__slider`;
     label.setAttribute('for', inputId);
@@ -414,9 +651,10 @@ export function createControlManager({
     input.type = 'range';
     input.min = '0';
     input.max = '1';
-    input.step = control.type === 'slider_int' ? '1' : '0.01';
+    input.step = '0.001';
     input.setAttribute('data-testid', control.item_id);
     input.id = inputId;
+    input.value = '0';
 
     const valueLabel = document.createElement('span');
     valueLabel.className = 'slider-value';
@@ -425,25 +663,30 @@ export function createControlManager({
     container.append(row);
 
     const binding = createBinding(control, {
-      getValue: () => Number(input.value),
+      getValue: () => denormaliseFromRange(Number(input.value), range),
       applyValue: (value) => {
-        const numeric = Number(value ?? 0);
-        input.value = Number.isFinite(numeric) ? String(numeric) : '0';
-        valueLabel.textContent = Number(input.value).toFixed(3);
+        const numeric = Number(value ?? range.min);
+        const limited = Number.isFinite(numeric) ? Math.min(range.max, Math.max(range.min, numeric)) : range.min;
+        const t = normaliseToRange(limited, range);
+        input.value = String(t);
+        valueLabel.textContent = formatNumber(limited);
       },
     });
 
     input.addEventListener(
       'input',
       guardBinding(binding, async () => {
-        valueLabel.textContent = Number(input.value).toFixed(3);
-        await applySpecAction(store, backend, control, Number(input.value));
+        const t = Number(input.value);
+        const realValue = denormaliseFromRange(t, range);
+        valueLabel.textContent = formatNumber(realValue);
+        await applySpecAction(store, backend, control, realValue);
       }),
     );
-    valueLabel.textContent = Number(input.value).toFixed(3);
+    valueLabel.textContent = formatNumber(denormaliseFromRange(Number(input.value), range));
   }
 
   function renderEditInput(container, control, mode = 'text') {
+    const range = mode === 'text' ? null : parseRange(control);
     const { row, label, field } = createLabeledRow(control);
     const inputId = `${sanitiseName(control.item_id)}__edit`;
     label.setAttribute('for', inputId);
@@ -477,7 +720,12 @@ export function createControlManager({
           input.value = value == null ? '' : String(value);
         } else {
           const numeric = Number(value);
-          input.value = Number.isFinite(numeric) ? String(numeric) : '';
+          if (Number.isFinite(numeric)) {
+            const clamped = Math.min(range.max, Math.max(range.min, numeric));
+            input.value = String(clamped);
+          } else {
+            input.value = '';
+          }
         }
       },
     });
@@ -492,7 +740,8 @@ export function createControlManager({
         raw = input.value;
       } else {
         const numeric = Number(input.value);
-        raw = Number.isFinite(numeric) ? numeric : 0;
+        raw = Number.isFinite(numeric) ? Math.min(range.max, Math.max(range.min, numeric)) : range.min;
+        input.value = String(raw);
       }
       await applySpecAction(store, backend, control, raw);
     });
@@ -522,7 +771,6 @@ export function createControlManager({
     container.append(row);
 
     const targetLength = Math.max(1, expectedLength | 0);
-    let lastValid = '';
 
     const binding = createBinding(control, {
       getValue: () => input.value.trim(),
@@ -541,7 +789,6 @@ export function createControlManager({
         }
         input.value = text;
         if (text) {
-          lastValid = text;
           input.classList.remove('is-invalid');
         }
       },
@@ -553,24 +800,19 @@ export function createControlManager({
       const isValid =
         tokens.length === targetLength && numbers.every((num) => Number.isFinite(num));
       if (isValid) {
-        const formatted = numbers.map(formatNumber);
-        const payload = formatted.join(' ');
-        binding.setValue(payload);
-        lastValid = payload;
+        const formatted = numbers.map(formatNumber).join(' ');
+        binding.setValue(formatted);
         input.classList.remove('is-invalid');
-        await applySpecAction(store, backend, control, payload);
+        await applySpecAction(store, backend, control, formatted);
         return;
       }
       input.classList.add('is-invalid');
-      if (lastValid) {
-        if (input._invalidTimer) {
-          clearTimeout(input._invalidTimer);
-        }
-        input._invalidTimer = setTimeout(() => {
-          binding.setValue(lastValid);
-          input.classList.remove('is-invalid');
-        }, 900);
+      if (input._invalidTimer) {
+        clearTimeout(input._invalidTimer);
       }
+      input._invalidTimer = setTimeout(() => {
+        input.classList.remove('is-invalid');
+      }, 900);
     });
 
     input.addEventListener('change', commit);
@@ -619,17 +861,35 @@ export function createControlManager({
     edit_int: (container, control) => renderEditInput(container, control, 'int'),
     edit_float: (container, control) => renderEditInput(container, control, 'float'),
     edit_text: (container, control) => renderEditInput(container, control, 'text'),
+    edit_vec2: (container, control) => renderVectorInput(container, control, 2),
     edit_vec3: (container, control) => renderVectorInput(container, control, 3),
+    edit_vec5: (container, control) => renderVectorInput(container, control, 5),
     edit_rgba: (container, control) => renderVectorInput(container, control, 4),
     static: renderStatic,
     separator: renderSeparator,
   };
 
   function renderControl(container, control) {
+    const type = typeof control.type === 'string' ? control.type.toLowerCase() : 'static';
+    if (control?.shortcut) {
+      registerShortcutHandlers(control.shortcut, async (event) => {
+        event?.preventDefault?.();
+        if (type.startsWith('button')) {
+          await applySpecAction(store, backend, control, {
+            trigger: 'shortcut',
+            shiftKey: !!event?.shiftKey,
+            ctrlKey: !!event?.ctrlKey,
+            altKey: !!event?.altKey,
+            metaKey: !!event?.metaKey,
+          });
+          return;
+        }
+        await toggleControl(control.item_id);
+      });
+    }
     if (control?.item_id === 'simulation.run') {
       return renderRunToggle(container, control);
     }
-    const type = typeof control.type === 'string' ? control.type.toLowerCase() : 'static';
     const renderer = CONTROL_RENDERERS[type] || renderStatic;
     return renderer(container, control);
   }
@@ -666,27 +926,81 @@ export function createControlManager({
     const body = document.createElement('div');
     body.className = 'section-body';
 
+    const setCollapsed = (collapsed) => {
+      sectionEl.classList.toggle('is-collapsed', collapsed);
+      toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    };
+
+    const isLeftPanel = container === leftPanel;
+    const initialCollapsed = isLeftPanel && section.section_id !== 'simulation';
+    setCollapsed(initialCollapsed);
+
+    const toggleCollapsed = () => {
+      const next = !sectionEl.classList.contains('is-collapsed');
+      setCollapsed(next);
+    };
+
+    if (section?.shortcut) {
+      registerShortcutHandlers(section.shortcut, (event) => {
+        event?.preventDefault?.();
+        toggleCollapsed();
+      });
+    }
+
     toggle.addEventListener('click', () => {
-      sectionEl.classList.toggle('is-collapsed');
+      toggleCollapsed();
     });
     header.addEventListener('click', (event) => {
       if (event.target === reset) return;
       if (event.target !== toggle) {
-        sectionEl.classList.toggle('is-collapsed');
+        toggleCollapsed();
       }
     });
 
     sectionEl.append(header, body);
 
+    const resetTargets = [];
     for (const item of section.items ?? []) {
       renderControl(body, item);
+      if (!item?.item_id) continue;
+      const resetValue = resolveResetValue(item);
+      if (resetValue !== undefined) {
+        resetTargets.push({ id: item.item_id, value: resetValue });
+      }
     }
+
+    if (resetTargets.length > 0) {
+      reset.disabled = false;
+      reset.addEventListener('click', async (event) => {
+        event.preventDefault();
+        for (const target of resetTargets) {
+          const control = controlById.get(target.id);
+          if (!control) continue;
+          try {
+            const type = typeof control.type === 'string' ? control.type.toLowerCase() : '';
+            let value = target.value;
+            if (type === 'checkbox' || type === 'toggle') {
+              value = coerceBoolean(value);
+            }
+            await applySpecAction(store, backend, control, value);
+          } catch (error) {
+            console.warn('[ui] reset failed', target.id, error);
+          }
+        }
+      });
+    } else {
+      reset.disabled = true;
+    }
+
     container.append(sectionEl);
   }
 
   function renderPanels(spec) {
     if (!leftPanel || !rightPanel) return;
     console.log('[ui] render panels', spec.left.length, spec.right.length);
+    controlById.clear();
+    controlBindings.clear();
+    shortcutHandlers.clear();
     leftPanel.innerHTML = '';
     rightPanel.innerHTML = '';
     for (const section of spec.left) {
@@ -695,26 +1009,22 @@ export function createControlManager({
     for (const section of spec.right) {
       renderSection(rightPanel, section);
     }
+    installShortcuts();
   }
 
-  function updateControls(state) {
+  function updateControls(state, { dirtyIds = null } = {}) {
+    const hasDirty = Array.isArray(dirtyIds) && dirtyIds.length > 0;
     for (const [id, binding] of controlBindings.entries()) {
+      if (hasDirty && !dirtyIds.includes(id)) continue;
       if (!binding || !binding.setValue) continue;
       const control = controlById.get(id);
       if (!control) continue;
       const value = readControlValue(state, control);
+      try {
+        if (binding.getValue && binding.getValue() === value) continue;
+      } catch {}
       binding.setValue?.(value);
     }
-  }
-
-  function bool(value) {
-    if (typeof value === 'boolean') return value;
-    if (typeof value === 'number') return value !== 0;
-    if (typeof value === 'string') {
-      const v = value.toLowerCase();
-      return v === '1' || v === 'true' || v === 'on';
-    }
-    return !!value;
   }
 
   async function toggleControl(id, overrideValue) {
@@ -725,18 +1035,19 @@ export function createControlManager({
 
     if (next === undefined) {
       if (control.type === 'radio' && Array.isArray(control.options)) {
-        const currentLabel = typeof current === 'string' ? current : '';
-        const currentIndex = control.options.findIndex((opt) => opt === currentLabel);
+        const options = normaliseOptions(control.options);
+        const currentLabel = typeof current === 'string' ? current : options[0];
+        const currentIndex = options.findIndex((opt) => opt === currentLabel);
         const nextIndex = currentIndex === 0 ? 1 : 0;
-        next = control.options[nextIndex] ?? control.options[0];
+        next = options[nextIndex] ?? options[0];
       } else if (control.type === 'select') {
         const options = normaliseOptions(control.options);
-        const currentIndex =
-          typeof current === 'number' && Number.isFinite(current) ? current : 0;
+        const currentLabel = typeof current === 'string' ? current : options[0];
+        const currentIndex = options.findIndex((opt) => opt === currentLabel);
         const nextIndex = (currentIndex + 1) % (options.length || 1);
-        next = nextIndex;
+        next = options[nextIndex] ?? options[0];
       } else {
-        next = !bool(current);
+        next = !coerceBoolean(current);
       }
     }
 
@@ -752,6 +1063,49 @@ export function createControlManager({
     await applySpecAction(store, backend, control, next);
   }
 
+  function installShortcuts() {
+    if (shortcutsInstalled) return;
+    const root = shortcutRoot || leftPanel?.ownerDocument?.body || rightPanel?.ownerDocument?.body;
+    if (!root || typeof root.addEventListener !== 'function') return;
+    const handler = (event) => {
+      const combo = shortcutFromEvent(event);
+      if (!combo) return;
+      const list = shortcutHandlers.get(combo);
+      if (!list || list.length === 0) return;
+      for (const fn of list) {
+        try {
+          const result = fn(event);
+          if (result && typeof result.then === 'function') {
+            result.catch?.((error) => console.warn('[ui] shortcut handler error', error));
+          }
+        } catch (error) {
+          console.warn('[ui] shortcut handler error', error);
+        }
+      }
+    };
+    root.addEventListener('keydown', handler, { capture: true });
+    eventCleanup.push(() => {
+      try {
+        root.removeEventListener('keydown', handler, { capture: true });
+      } catch {}
+      shortcutsInstalled = false;
+    });
+    shortcutsInstalled = true;
+  }
+
+  function dispose() {
+    while (eventCleanup.length) {
+      const fn = eventCleanup.pop();
+      try {
+        fn();
+      } catch {}
+    }
+    controlById.clear();
+    controlBindings.clear();
+    shortcutHandlers.clear();
+    shortcutsInstalled = false;
+  }
+
   return {
     loadUiSpec,
     renderPanels,
@@ -765,5 +1119,6 @@ export function createControlManager({
       return ids.filter((id) => id.startsWith(prefix));
     },
     getControl: (id) => controlById.get(id) ?? null,
+    dispose,
   };
 }

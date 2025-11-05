@@ -1,3 +1,18 @@
+/**
+ * Camera controller for orbit/pan/zoom with pointer gestures.
+ *
+ * Options:
+ * - minDistance: fixed minimum distance (takes precedence over getMinDistance).
+ * - getMinDistance(camera, target, ctx): dynamic minimum distance when minDistance is not provided.
+ * - zoomK: wheel delta scale (default 0.35), maxWheelStep clamps magnitude pre-scaling.
+ * - invertY: inverts vertical component for orbit/rotate and translate.
+ * - keyRoot: element to receive key events (falls back to canvas).
+ * - assertUp: when true, verify camera.up matches initial up and realign if it drifts.
+ * - wheelLineFactor / wheelPageFactor: DOM_DELTA normalization constants.
+ * - minOrthoZoom / maxOrthoZoom: zoom clamps for orthographic cameras.
+ *
+ * Deprecated: applyGesture(store, backend, event) — prefer onGesture(event) at call site.
+ */
 export function createCameraController({
   THREE_NS,
   canvas,
@@ -7,6 +22,18 @@ export function createCameraController({
   renderCtx,
   debugMode = false,
   globalUp = new THREE_NS.Vector3(0, 0, 1),
+  // new options (high‑leverage changes)
+  minDistance,
+  getMinDistance,
+  zoomK = 0.35,
+  maxWheelStep,
+  invertY = false,
+  keyRoot = null,
+  assertUp = false,
+  wheelLineFactor = 16,
+  wheelPageFactor = 800,
+  minOrthoZoom = 0.05,
+  maxOrthoZoom = 200,
 }) {
   const pointerState = {
     id: null,
@@ -31,6 +58,10 @@ export function createCameraController({
 
   const cleanup = [];
   let initialised = false;
+  let upNormalised = new THREE_NS.Vector3().copy(globalUp).normalize();
+  let up0 = upNormalised.clone();
+  let warnedUpDrift = false;
+  let warnedApplyGesture = false;
 
   function currentCtrl(event) {
     return !!event?.ctrlKey || modifierState.ctrl;
@@ -66,6 +97,17 @@ export function createCameraController({
     return 0;
   }
 
+  function computeMinDistance(camera, target) {
+    // Priority: explicit minDistance > dynamic getMinDistance
+    if (Number.isFinite(minDistance)) return Math.max(0.01, Number(minDistance));
+    if (typeof getMinDistance === 'function') {
+      const v = Number(getMinDistance(camera, target, renderCtx));
+      if (Number.isFinite(v) && v > 0) return Math.max(0.01, v);
+    }
+    // default fallback that does not read bounds: keep legacy feel (0.25 * 0.6)
+    return 0.15;
+  }
+
   function applyCameraGesture(mode, dx, dy) {
     const ctx = renderCtx;
     const camera = ctx.camera;
@@ -74,57 +116,144 @@ export function createCameraController({
       ctx.cameraTarget = new THREE_NS.Vector3(0, 0, 0);
     }
     const target = ctx.cameraTarget;
-    const distance = tempVecA.copy(camera.position).sub(target).length();
-    const radius = Math.max(ctx.bounds?.radius || 0, 0.6);
     const offset = tempVecA.copy(camera.position).sub(target);
+    const distance = offset.length();
+    const minDist = computeMinDistance(camera, target);
+    // Optional: enforce camera.up invariant
+    if (assertUp && renderCtx?.camera) {
+      try {
+        const dot = renderCtx.camera.up.clone().normalize().dot(up0);
+        if (dot < 0.999) {
+          renderCtx.camera.up.copy(upNormalised);
+          if (!warnedUpDrift && debugMode) {
+            console.warn('[camera] up drift corrected');
+            warnedUpDrift = true;
+          }
+        }
+      } catch {}
+    }
+
     const elementWidth = canvas?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 1) || 1;
-    const elementHeight =
-      canvas?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 1) || 1;
-    const toRadians = THREE_NS.MathUtils.degToRad(camera.fov || 45);
+    const elementHeight = canvas?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 1) || 1;
+    const shortEdge = Math.max(1, Math.min(elementWidth, elementHeight));
+    const fovRad = THREE_NS.MathUtils.degToRad(typeof camera.fov === 'number' ? camera.fov : 45);
+    const isOrtho = !!camera.isOrthographicCamera;
 
     switch (mode) {
       case 'translate': {
-        const panScale = distance * Math.tan(toRadians / 2);
-        const moveX = (-2 * dx * panScale) / elementHeight;
-        const moveY = (2 * dy * panScale) / elementHeight;
-        const forward = tempVecB;
+        const dyEff = invertY ? -dy : dy;
+        let moveX = 0;
+        let moveY = 0;
+        if (isOrtho && typeof camera.zoom === 'number') {
+          const zoom = Math.max(1e-6, camera.zoom || 1);
+          const widthWorld = Math.abs((camera.right ?? 1) - (camera.left ?? -1)) / zoom;
+          const heightWorld = Math.abs((camera.top ?? 1) - (camera.bottom ?? -1)) / zoom;
+          moveX = -dx * (widthWorld / elementWidth);
+          moveY = dyEff * (heightWorld / elementHeight);
+        } else {
+          const panScale = distance * Math.tan(fovRad / 2);
+          moveX = (-2 * dx * panScale) / shortEdge;
+          moveY = (2 * dyEff * panScale) / shortEdge;
+        }
+        const forward = tempVecB; // world forward
         camera.getWorldDirection(forward).normalize();
-        const up = tempVecD.copy(globalUp);
+        const up = tempVecD.copy(upNormalised);
         const right = tempVecC.copy(forward).cross(up).normalize();
         const pan = right.multiplyScalar(moveX).add(up.multiplyScalar(moveY));
         camera.position.add(pan);
         target.add(pan);
-        camera.up.copy(globalUp);
         camera.lookAt(target);
         break;
       }
       case 'zoom': {
-        const zoomSpeed = distance * 0.002;
-        const delta = dy * zoomSpeed;
-        const newLen = Math.max(radius * 0.25, distance + delta);
-        offset.setLength(newLen);
-        camera.position.copy(tempVecC.copy(target).add(offset));
-        camera.up.copy(globalUp);
+        if (isOrtho && typeof camera.zoom === 'number') {
+          const base = Math.max(1e-6, camera.zoom || 1);
+          const factor = Math.exp((dy / shortEdge) * (Number.isFinite(zoomK) ? zoomK * 0.2 : 0.07));
+          const nextZoom = THREE_NS.MathUtils.clamp(base * factor, minOrthoZoom, maxOrthoZoom);
+          camera.zoom = nextZoom;
+          if (typeof camera.updateProjectionMatrix === 'function') camera.updateProjectionMatrix();
+        } else {
+          const zoomSpeed = distance * 0.002;
+          const delta = dy * zoomSpeed;
+          const newLen = Math.max(minDist, distance + delta);
+          offset.setLength(newLen);
+          camera.position.copy(tempVecC.copy(target).add(offset));
+          camera.lookAt(target);
+        }
+        break;
+      }
+      case 'rotate': {
+        // First-person style: rotate view direction around camera, keep position
+        // and update cameraTarget at same distance.
+        let yaw = (1.6 * Math.PI * dx) / elementWidth;
+        let pitch = (1.6 * Math.PI * (invertY ? -dy : dy)) / elementHeight;
+        if (distance <= minDist * 1.05) {
+          yaw *= 0.35;
+          pitch *= 0.35;
+        }
+        const up = tempVecD.copy(upNormalised);
+        const forward = tempVecB.copy(target).sub(camera.position).normalize();
+        const right = tempVecC.copy(forward).cross(up).normalize();
+        forward.applyAxisAngle(up, -yaw);
+        forward.applyAxisAngle(right, -pitch);
+        // clamp polar angle to avoid singularities
+        const eps = 0.05;
+        let phi = Math.acos(THREE_NS.MathUtils.clamp(forward.dot(up), -1, 1));
+        const minPhi = eps;
+        const maxPhi = Math.PI - eps;
+        if (phi < minPhi || phi > maxPhi) {
+          const phiClamped = THREE_NS.MathUtils.clamp(phi, minPhi, maxPhi);
+          // rebuild forward from its projection on the horizontal plane
+          const horiz = forward.clone().sub(up.clone().multiplyScalar(forward.dot(up)));
+          if (horiz.lengthSq() < 1e-12) {
+            // choose an arbitrary horizontal axis orthogonal to up
+            horiz.copy(new THREE_NS.Vector3(1, 0, 0).cross(up)).normalize();
+            if (horiz.lengthSq() < 1e-12) horiz.copy(new THREE_NS.Vector3(0, 1, 0).cross(up)).normalize();
+          } else {
+            horiz.normalize();
+          }
+          forward.copy(horiz.multiplyScalar(Math.sin(phiClamped)).add(up.clone().multiplyScalar(Math.cos(phiClamped))));
+        }
+        const distSafe = Number.isFinite(distance) && distance > 0 ? Math.max(distance, minDist) : minDist;
+        const newTarget = camera.position.clone().add(forward.multiplyScalar(distSafe));
+        target.copy(newTarget);
         camera.lookAt(target);
         break;
       }
-      case 'rotate':
       case 'orbit':
       default: {
-        const yaw = (1.6 * Math.PI * dx) / elementWidth;
-        const pitch = (1.6 * Math.PI * dy) / elementHeight;
-        const orbitOffset = tempVecC.set(offset.x, offset.z, -offset.y);
-        tempSpherical.setFromVector3(orbitOffset);
-        tempSpherical.theta -= yaw;
-        tempSpherical.phi = THREE_NS.MathUtils.clamp(
-          tempSpherical.phi - pitch,
-          0.05,
-          Math.PI - 0.05,
-        );
-        orbitOffset.setFromSpherical(tempSpherical);
-        offset.set(orbitOffset.x, -orbitOffset.z, orbitOffset.y);
+        let yaw = (1.6 * Math.PI * dx) / elementWidth;
+        let pitch = (1.6 * Math.PI * (invertY ? -dy : dy)) / elementHeight;
+        if (distance <= minDist * 1.05) {
+          yaw *= 0.35;
+          pitch *= 0.35;
+        }
+        const up = tempVecD.copy(upNormalised);
+        // rotate offset around global up (yaw)
+        offset.applyAxisAngle(up, -yaw);
+        // rotate around local right (pitch)
+        const right = tempVecB.copy(up).cross(offset).normalize();
+        offset.applyAxisAngle(right, -pitch);
+        // clamp polar angle
+        const eps = 0.05;
+        const r = offset.length();
+        const offNorm = tempVecC.copy(offset).normalize();
+        let phi = Math.acos(THREE_NS.MathUtils.clamp(offNorm.dot(up), -1, 1));
+        const minPhi = eps;
+        const maxPhi = Math.PI - eps;
+        if (phi < minPhi || phi > maxPhi) {
+          const phiClamped = THREE_NS.MathUtils.clamp(phi, minPhi, maxPhi);
+          const horiz = offNorm.clone().sub(up.clone().multiplyScalar(offNorm.dot(up)));
+          if (horiz.lengthSq() < 1e-12) {
+            horiz.copy(new THREE_NS.Vector3(1, 0, 0).cross(up)).normalize();
+            if (horiz.lengthSq() < 1e-12) horiz.copy(new THREE_NS.Vector3(0, 1, 0).cross(up)).normalize();
+          } else {
+            horiz.normalize();
+          }
+          offset.copy(horiz.multiplyScalar(Math.sin(phiClamped) * r).add(up.clone().multiplyScalar(Math.cos(phiClamped) * r)));
+        }
+        if (offset.length() < minDist) offset.setLength(minDist);
         camera.position.copy(tempVecD.copy(target).add(offset));
-        camera.up.copy(globalUp);
         camera.lookAt(target);
         break;
       }
@@ -149,12 +278,18 @@ export function createCameraController({
     pointerState.lastX = event.clientX ?? 0;
     pointerState.lastY = event.clientY ?? 0;
     pointerState.active = true;
+    // focus canvas/root to receive key events locally
+    try { (keyRoot || canvas)?.focus?.(); } catch {}
     if (typeof event.pointerId === 'number' && canvas?.setPointerCapture) {
       try {
         canvas.setPointerCapture(event.pointerId);
       } catch {}
     }
     if (applyGesture) {
+      if (!warnedApplyGesture) {
+        try { console.warn('[camera] applyGesture is deprecated; prefer onGesture(event)'); } catch {}
+        warnedApplyGesture = true;
+      }
       applyGesture(store, backend, {
         mode: pointerState.mode,
         phase: 'start',
@@ -246,7 +381,15 @@ export function createCameraController({
   }
 
   function attachWindowListeners() {
-    if (typeof window === 'undefined') return;
+    // Scope keyboard to canvas (or provided root) to avoid cross-instance coupling
+    const root = keyRoot || canvas;
+    if (!root) return;
+    // ensure focusable
+    try {
+      if (typeof root.tabIndex !== 'number' || root.tabIndex < 0) {
+        root.tabIndex = 0;
+      }
+    } catch {}
 
     const keydown = (event) => {
       if (event.key === 'Control' || event.ctrlKey) modifierState.ctrl = true;
@@ -260,21 +403,21 @@ export function createCameraController({
       if (!event.altKey || event.key === 'Alt') modifierState.alt = false;
       if (!event.metaKey || event.key === 'Meta') modifierState.meta = false;
     };
-    const blur = () => {
+    const clearMods = () => {
       modifierState.ctrl = false;
       modifierState.shift = false;
       modifierState.alt = false;
       modifierState.meta = false;
     };
 
-    window.addEventListener('keydown', keydown, { capture: true });
-    window.addEventListener('keyup', keyup, { capture: true });
-    window.addEventListener('blur', blur, { capture: true });
+    root.addEventListener('keydown', keydown, { capture: true });
+    root.addEventListener('keyup', keyup, { capture: true });
+    root.addEventListener('focusout', clearMods, { capture: true });
 
     cleanup.push(() => {
-      window.removeEventListener('keydown', keydown, { capture: true });
-      window.removeEventListener('keyup', keyup, { capture: true });
-      window.removeEventListener('blur', blur, { capture: true });
+      try { root.removeEventListener('keydown', keydown, { capture: true }); } catch {}
+      try { root.removeEventListener('keyup', keyup, { capture: true }); } catch {}
+      try { root.removeEventListener('focusout', clearMods, { capture: true }); } catch {}
     });
   }
 
@@ -289,6 +432,13 @@ export function createCameraController({
       pointermove: (event) => {
         if (!pointerState.active) return;
         event.preventDefault();
+        // keep modifier state in sync with live event to avoid stale keys
+        try {
+          modifierState.ctrl = !!event.ctrlKey;
+          modifierState.shift = !!event.shiftKey;
+          modifierState.alt = !!event.altKey;
+          modifierState.meta = !!event.metaKey;
+        } catch {}
         moveGesture(event);
       },
       pointerup: (event) => {
@@ -315,10 +465,18 @@ export function createCameraController({
     const wheelHandler = (event) => {
       if (!renderCtx?.camera) return;
       event.preventDefault();
-      const delta = event.deltaY;
-      if (!Number.isFinite(delta) || delta === 0) return;
-      const direction = delta > 0 ? 1 : -1;
-      applyCameraGesture('zoom', 0, direction * Math.abs(delta) * 0.35);
+      const DOM_DELTA = { 0: 1, 1: wheelLineFactor, 2: wheelPageFactor };
+      const unit = DOM_DELTA[event.deltaMode] ?? 1;
+      let dy = Number(event.deltaY) * unit;
+      if (!Number.isFinite(dy) || dy === 0) return;
+      let scaled = dy * (Number.isFinite(zoomK) ? zoomK : 0.35);
+      if (Number.isFinite(maxWheelStep)) {
+        const lim = Math.abs(maxWheelStep);
+        if (lim > 0) {
+          scaled = THREE_NS.MathUtils.clamp(scaled, -lim, lim);
+        }
+      }
+      applyCameraGesture('zoom', 0, scaled);
     };
     canvas.addEventListener('wheel', wheelHandler, { passive: false });
     cleanup.push(() => canvas.removeEventListener('wheel', wheelHandler, { passive: false }));
@@ -329,29 +487,19 @@ export function createCameraController({
     canvas.addEventListener('contextmenu', contextMenuHandler);
     cleanup.push(() => canvas.removeEventListener('contextmenu', contextMenuHandler));
 
-    const mouseHandlers = {
-      mousedown: (event) => {
-        if (pointerState.active) return;
-        pointerHandlers.pointerdown(event);
-      },
-      mousemove: (event) => {
-        if (!pointerState.active) return;
-        pointerHandlers.pointermove(event);
-      },
-      mouseup: (event) => {
-        if (!pointerState.active) return;
-        pointerHandlers.pointerup(event);
-      },
-    };
-
-    Object.entries(mouseHandlers).forEach(([type, handler]) => {
-      canvas.addEventListener(type, handler, { passive: false });
-      cleanup.push(() => canvas.removeEventListener(type, handler, { passive: false }));
-    });
+    // Pointer-only path retained; legacy Mouse handlers removed to reduce duplication
   }
 
   function setup() {
     if (initialised) return;
+    // set camera up once
+    try {
+      if (renderCtx?.camera) {
+        upNormalised.copy(globalUp).normalize();
+        renderCtx.camera.up.copy(upNormalised);
+        up0 = upNormalised.clone();
+      }
+    } catch {}
     attachWindowListeners();
     attachCanvasListeners();
     initialised = true;
