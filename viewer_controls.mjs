@@ -232,6 +232,48 @@ export function createControlManager({
     );
   }
 
+  function renderRunToggle(container, control) {
+    const row = createControlRow(control);
+    row.classList.add('run-toggle-row');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'run-toggle';
+    button.setAttribute('data-testid', control.item_id);
+    button.setAttribute('aria-pressed', 'false');
+
+    const sync = (running) => {
+      const active = !!running;
+      button.textContent = active ? 'Run' : 'Pause';
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    };
+
+    const binding = createBinding(control, {
+      getValue: () => {
+        const current = readControlValue(store.get(), control);
+        return current === 'Run' || current === true || current === 1;
+      },
+      applyValue: (value) => {
+        const active = value === 'Run' || value === true || value === 1;
+        sync(active);
+      },
+    });
+
+    sync(binding.getValue());
+
+    button.addEventListener(
+      'click',
+      guardBinding(binding, async () => {
+        const next = !binding.getValue();
+        await applySpecAction(store, backend, control, next);
+      }),
+    );
+
+    row.append(button);
+    container.append(row);
+    return row;
+  }
+
   function renderButton(container, control, variant = 'secondary') {
     const row = createControlRow(control);
     row.classList.add('action-row');
@@ -584,6 +626,9 @@ export function createControlManager({
   };
 
   function renderControl(container, control) {
+    if (control?.item_id === 'simulation.run') {
+      return renderRunToggle(container, control);
+    }
     const type = typeof control.type === 'string' ? control.type.toLowerCase() : 'static';
     const renderer = CONTROL_RENDERERS[type] || renderStatic;
     return renderer(container, control);

@@ -1210,7 +1210,6 @@ export async function createBackend(options = {}) {
       }
       case 'simulation.reset':
         client.postMessage?.({ cmd: 'reset' });
-        paused = false;
         lastSnapshot.pausedSource = 'ui';
         notifyListeners();
         break;
