@@ -3,8 +3,8 @@ Strict Direct Load Sequence (Forge 3.3.7)
 Scope: local viewer demo only. No changes to forge artifacts.
 
 Entry points
-- Direct regression: `/local_tools/viewer_demo/?direct=1&nofallback=1`
-- Dev (shim): `/local_tools/viewer_demo/?shim=1`
+- Legacy demo paths (deprecated): `/local_tools/viewer_demo/`
+- Use `index.html` (root) for Simulate-like UI in all modes.
 
 Module loading
 - Forge module resolved from `local_tools/forge/dist/3.3.7/mujoco-3.3.7.{js,wasm}`.

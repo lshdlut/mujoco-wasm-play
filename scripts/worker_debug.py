@@ -126,7 +126,8 @@ async def run_probe(python_exe: str, port: int, timeout: float, ver: str) -> Non
             page.on("pageerror", on_page_error)
             page.on("response", lambda resp: asyncio.create_task(on_response(resp)))
 
-            url = f"http://localhost:{port}/local_tools/viewer_demo/index.html?ver={ver}&nofallback=1&debug=1"
+            # Load the main Simulate-like UI entry, not the legacy demo.
+            url = f"http://localhost:{port}/index.html?ver={ver}&mode=direct&debug=1&ver={ver}"
             goto_timeout = max(5.0, min(30.0, timeout + 10.0))
             try:
                 print(f"[worker-debug] goto {url}", flush=True)

@@ -34,13 +34,13 @@ Then copy `forge/dist/<ver>/*` to `mujoco-wasm-play/local_tools/forge/dist/<ver>
 
 ## Switching versions in the viewer
 
-- Direct mode: `local_tools/viewer_demo/index.html?direct=1&nofallback=1&ver=<ver>`
-- Worker mode: `local_tools/viewer_demo/index.html?ver=<ver>` (serve from repo root via HTTP)
+- Direct mode (Simulate UI): `index.html?mode=direct&ver=<ver>&debug=1`
+- Worker mode (Simulate UI): `index.html?ver=<ver>&debug=1` (serve from repo root via HTTP)
 - If `version.json` contains `sha256/git_sha/mujoco_git_sha`, the loader appends `?v=<sha8>` to `.wasm` for cache-busting.
 
 ## Probe (preflight)
 
-- Browser: open `local_tools/viewer_demo/probe.html?ver=<ver>` and click Probe → console prints `probe:<ver> core=OK ...`
+- Legacy note: the old demo at `local_tools/viewer_demo/` is deprecated and kept for reference only.
 - Node: `node tests/local_regression/probe_groups_node.mjs <ver>` scans loader text for `_mjwf_*` symbols grouped by feature.
 
 ## Load and step (Node ESM)

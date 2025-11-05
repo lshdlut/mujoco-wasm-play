@@ -68,6 +68,7 @@ The goals for `mujoco-wasm-play` are to reach feature parity with MuJoCo's deskt
 - **Forge wrapper updates**: mesh/scene exports require changes in `mujoco-wasm-forge` (`wrappers/official_app_337`). Coordinate before expecting runtime availability.
 - **Dev server hosting**: `/dist/<ver>/` must resolve to staged forge artifacts for direct backend fetches.
 - **Asset transfers**: large typed arrays should use transferable ArrayBuffers to keep main thread responsive.
+- **Legacy UI**: `local_tools/viewer_demo/` is deprecated (reference-only). Use the root `index.html` entry for all development and debugging.
 
 ## Tracking
 - Maintain task status inline (checkboxes) and annotate PRs with `[render-assets]`, `[scene-binding]`, etc.
