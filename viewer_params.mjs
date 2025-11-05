@@ -57,29 +57,17 @@ export function readNumericParam(name, defaultValue, options = {}, params = view
   return result;
 }
 
-export function parseDeg(value, fallback = 0) {
-  const n = Number.parseFloat(String(value ?? '').trim());
-  return Number.isFinite(n) ? (n * Math.PI) / 180 : fallback;
-}
+// parseDeg was only used for environment rotation, which is removed.
 
 export function consumeViewerParams(params = viewerSearchParams) {
   const requestedMode = params.get('mode');
   const fallbackModeParam = (params.get('fallback') || 'auto').toLowerCase();
-  const presetParam = (params.get('preset') || 'studio-neutral').toLowerCase();
-  const envRotParam = (params.get('envrot') || '').trim();
-
-  const envRotXDeg = params.get('envrotx');
-  const envRotYDeg = params.get('envroty');
-  const envRotZDeg = params.get('envrotz');
+  const presetParam = (params.get('preset') || 'bright-outdoor').toLowerCase();
 
   return {
     requestedMode,
     fallbackModeParam,
     presetParam,
-    envRotParam,
-    envRotXDeg,
-    envRotYDeg,
-    envRotZDeg,
     debugMode: readBoolean('debug', params) === true,
     hideAllGeometryDefault: readTruthyFlag(
       ['nogeom', 'no_geom', 'no-geom', 'hideall', 'hide_all'],
@@ -98,8 +86,6 @@ export function consumeViewerParams(params = viewerSearchParams) {
     bigFactorRaw: readNumericParam('big_factor', 8, {}, params),
     hiddenIndexSet: readIndexSet('hide_index', params),
     skyOverride: readBoolean(['nosky', 'sky_off'], params),
-    skyFlag: readBoolean('sky', params),
-    backendModeToken: requestedMode,
     requestedModel: params.get('model'),
     hdriParam: params.get('hdri'),
   };

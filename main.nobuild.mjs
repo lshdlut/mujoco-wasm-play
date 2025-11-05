@@ -8,7 +8,7 @@ import {
   readControlValue,
   mergeBackendSnapshot,
 } from './src/viewer/state.mjs';
-import { parseDeg, consumeViewerParams } from './viewer_params.mjs';
+import { consumeViewerParams } from './viewer_params.mjs';
 import {
   FALLBACK_PRESET_ALIASES,
   FALLBACK_PRESETS,
@@ -76,26 +76,21 @@ const renderCtx = {
 const {
   fallbackModeParam,
   presetParam: fallbackPresetParam,
-  envRotParam,
-  envRotXDeg,
-  envRotYDeg,
-  envRotZDeg,
   debugMode,
   hideAllGeometryDefault,
   dumpToken,
   findToken,
   bigN,
   skyOverride,
-  skyFlag,
-  backendModeToken,
+  requestedMode,
   requestedModel,
   hdriParam: hdriQueryParam,
 } = consumeViewerParams();
 
 const dumpBigParam = dumpToken === 'big' || findToken === 'big';
-const skyOffParam = skyOverride === true || skyFlag === false;
+const skyOffParam = skyOverride === true;
 const backendMode =
-  backendModeToken === 'worker' || backendModeToken === 'direct' ? backendModeToken : 'auto';
+  requestedMode === 'worker' || requestedMode === 'direct' ? requestedMode : 'auto';
 const backend = await createBackend({ mode: backendMode, debug: debugMode, model: requestedModel });
 const store = createViewerStore({});
 if (typeof window !== 'undefined') {
@@ -103,18 +98,6 @@ if (typeof window !== 'undefined') {
 }
 
 const fallbackEnabledDefault = fallbackModeParam !== 'off';
-
-// Environment orientation controls (HDRI/PMREM)
-let envRotX = 0, envRotY = 0, envRotZ = 0;
-if (envRotParam) {
-  const toks = envRotParam.split(/[ ,]+/).map((t) => t.trim()).filter(Boolean);
-  envRotX = parseDeg(toks[0] ?? 0, 0);
-  envRotY = parseDeg(toks[1] ?? 0, 0);
-  envRotZ = parseDeg(toks[2] ?? 0, 0);
-}
-if (envRotXDeg != null) envRotX = parseDeg(envRotXDeg, envRotX);
-if (envRotYDeg != null) envRotY = parseDeg(envRotYDeg, envRotY);
-if (envRotZDeg != null) envRotZ = parseDeg(envRotZDeg, envRotZ);
 
 const fallbackPresetKey = FALLBACK_PRESET_ALIASES[fallbackPresetParam] || 'bright-outdoor';
 const { applyFallbackAppearance, ensureEnvIfNeeded } = createEnvironmentManager({
