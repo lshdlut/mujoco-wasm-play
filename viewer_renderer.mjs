@@ -369,13 +369,13 @@ function disposeMeshObject(mesh) {
   const material = mesh.material;
   if (Array.isArray(material)) {
     for (const mat of material) {
-      if (mat && typeof mat.dispose === 'function') {
+      if (mat && !mat.userData?.pooled && typeof mat.dispose === 'function') {
         try {
           mat.dispose();
         } catch {}
       }
     }
-  } else if (material && typeof material.dispose === 'function') {
+  } else if (material && !material.userData?.pooled && typeof material.dispose === 'function') {
     try {
       material.dispose();
     } catch {}
@@ -512,20 +512,18 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
     } else {
       const baseOpts = geometryInfo.materialOpts || {};
       const useStandard = gtype === MJ_GEOM.PLANE || gtype === MJ_GEOM.HFIELD;
-      if (useStandard) {
-        material = new THREE.MeshStandardMaterial(baseOpts);
-      } else {
-        material = new THREE.MeshPhysicalMaterial({
-          color: baseOpts.color ?? 0xffffff,
-          roughness: baseOpts.roughness ?? 0.55,
-          metalness: baseOpts.metalness ?? 0.0,
-          clearcoat: 0.2,
-          clearcoatRoughness: 0.15,
-          specularIntensity: 0.25,
-          ior: 1.5,
-        });
-        material.envMapIntensity = (ctx?.envIntensity ?? 0.6);
-      }
+      const sceneFlags = state?.rendering?.sceneFlags || [];
+      const wire = !!sceneFlags[1];
+      const poolKey = {
+        kind: useStandard ? 'standard' : 'physical',
+        color: baseOpts.color ?? 0xffffff,
+        roughness: baseOpts.roughness ?? 0.55,
+        metalness: baseOpts.metalness ?? 0.0,
+        wireframe: wire,
+      };
+      if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
+      material = ctx.materialPool.get(poolKey);
+      if (!useStandard) material.envMapIntensity = (ctx?.envIntensity ?? 0.6);
     }
     material.side = THREE.FrontSide;
     mesh = new THREE.Mesh(geometryInfo.geometry, material);
@@ -882,9 +880,16 @@ export function createRendererManager({
             sizeView[base + 2] ?? 0,
           ]
         : null;
-      const mesh = ensureGeomMesh(context, i, type, assets, dataId, sizeVec, {
-        planeExtent: planeExtentHint,
-      });
+      const mesh = ensureGeomMesh(
+        context,
+        i,
+        type,
+        assets,
+        dataId,
+        sizeVec,
+        { planeExtent: planeExtentHint },
+        state,
+      );
       if (!mesh) continue;
       updateMeshFromSnapshot(mesh, i, snapshot, state, assets);
 
