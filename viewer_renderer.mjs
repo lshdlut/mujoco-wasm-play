@@ -613,6 +613,8 @@ export function createRendererManager({
   ctx.cameraTarget = ctx.cameraTarget || new THREE.Vector3(0, 0, 0);
   ctx.meshes = ctx.meshes || [];
   ctx.assetCache = ctx.assetCache || { meshGeometries: new Map() };
+  ctx._frameCounter = ctx._frameCounter || 0;
+  ctx.boundsEvery = typeof ctx.boundsEvery === 'number' && ctx.boundsEvery > 0 ? ctx.boundsEvery : 2;
 
   const cleanup = [];
   const tempVecA = new THREE.Vector3();
@@ -631,6 +633,10 @@ export function createRendererManager({
     } else {
       width = Math.max(1, canvas.width || canvas.clientWidth || 1);
       height = Math.max(1, canvas.height || canvas.clientHeight || 1);
+    }
+    if (typeof window !== 'undefined') {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (typeof ctx.renderer.setPixelRatio === 'function') ctx.renderer.setPixelRatio(dpr);
     }
     ctx.renderer.setSize(width, height, false);
     ctx.camera.aspect = width / height;
@@ -659,6 +665,20 @@ export function createRendererManager({
         ctx.loopCleanup = null;
       };
       cleanup.push(ctx.loopCleanup);
+    }
+    if (typeof document !== 'undefined' && !ctx._visibilityInstalled) {
+      const visHandler = () => {
+        try {
+          if (document.hidden) {
+            if (ctx.loopActive && ctx.loopCleanup) ctx.loopCleanup();
+          } else {
+            ensureRenderLoop();
+          }
+        } catch {}
+      };
+      document.addEventListener('visibilitychange', visHandler, { capture: true });
+      cleanup.push(() => document.removeEventListener('visibilitychange', visHandler, { capture: true }));
+      ctx._visibilityInstalled = true;
     }
   }
   function initRenderer() {
@@ -835,7 +855,8 @@ export function createRendererManager({
     }
 
     const ngeom = snapshot.ngeom | 0;
-    const nextBounds = ngeom > 0 ? computeBoundsFromSnapshot(snapshot) : null;
+    const doBounds = (ctx._frameCounter++ % ctx.boundsEvery) === 0;
+    const nextBounds = doBounds && ngeom > 0 ? computeBoundsFromSnapshot(snapshot) : null;
     const planeExtentHint = (() => {
       const radiusSource =
         nextBounds?.radius ?? context.bounds?.radius ?? 0;
