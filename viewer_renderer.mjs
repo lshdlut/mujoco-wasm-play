@@ -11,8 +11,6 @@ const MJ_GEOM = {
   MESH: 7,
 };
 
-let fallbackGroundTexture = null;
-
 function mat3ToQuat(m) {
   const m00 = m[0] ?? 1;
   const m01 = m[1] ?? 0;
@@ -54,48 +52,6 @@ function mat3ToQuat(m) {
     z = 0.25 * s;
   }
   return new THREE.Quaternion(x, y, z, w);
-}
-
-function getFallbackGroundTexture() {
-  if (fallbackGroundTexture) return fallbackGroundTexture;
-  if (typeof document === 'undefined') return null;
-  const size = 256;
-  const step = 32;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx2d = canvas.getContext('2d');
-  if (ctx2d) {
-    const colors = ['#2a2f38', '#252a34'];
-    for (let y = 0; y < size; y += step) {
-      for (let x = 0; x < size; x += step) {
-        const idx = ((x + y) / step) & 1;
-        ctx2d.fillStyle = colors[idx];
-        ctx2d.fillRect(x, y, step, step);
-      }
-    }
-    ctx2d.strokeStyle = '#1d212c';
-    ctx2d.lineWidth = 1;
-    for (let y = 0; y <= size; y += step) {
-      ctx2d.beginPath();
-      ctx2d.moveTo(0, y + 0.5);
-      ctx2d.lineTo(size, y + 0.5);
-      ctx2d.stroke();
-    }
-    for (let x = 0; x <= size; x += step) {
-      ctx2d.beginPath();
-      ctx2d.moveTo(x + 0.5, 0);
-      ctx2d.lineTo(x + 0.5, size);
-      ctx2d.stroke();
-    }
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(4, 4);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  fallbackGroundTexture = texture;
-  return texture;
 }
 
 function computeGeomRadius(type, sx, sy, sz) {
@@ -236,11 +192,11 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
       if (fallbackEnabled && preset === 'studio-clean') {
         materialOpts = { shadow: true, shadowOpacity: options.groundBackfaceOpacity ?? 0.45 };
       } else {
+        const lightGray = 0xd0d0d0;
         materialOpts = {
-          color: 0xdcdcdc,
+          color: lightGray,
           metalness: 0.0,
-          roughness: 0.8,
-          map: getFallbackGroundTexture(),
+          roughness: 0.82,
         };
       }
       postCreate = (mesh) => {
@@ -252,7 +208,7 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
           const backMat = baseMat.clone();
           backMat.side = THREE.BackSide;
           backMat.transparent = true;
-          backMat.opacity = 0.35;
+          backMat.opacity = 0.25;
           backMat.depthWrite = false;
           backMat.polygonOffset = true;
           backMat.polygonOffsetFactor = -1;
@@ -1008,6 +964,7 @@ export function createRendererManager({
     setup,
     renderScene,
     ensureRenderLoop,
+    updateViewport: () => updateRendererViewport(),
   };
 }
 

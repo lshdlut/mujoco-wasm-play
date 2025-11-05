@@ -45,6 +45,11 @@ const gestureEl = document.querySelector('[data-testid="perturb-state"]');
 
 let latestSnapshot = null;
 let renderStats = { drawn: 0, hidden: 0 };
+const panelStateCache = {
+  left: null,
+  right: null,
+  fullscreen: null,
+};
 const renderCtx = {
   initialized: false,
   renderer: null,
@@ -192,13 +197,28 @@ function updateHud(state) {
 }
 
 function updatePanels(state) {
+  const leftVisible = !!state.panels.left;
+  const rightVisible = !!state.panels.right;
+  const fullscreen = !!state.overlays.fullscreen;
   if (leftPanel) {
-    leftPanel.classList.toggle('is-hidden', !state.panels.left);
+    leftPanel.classList.toggle('is-hidden', !leftVisible);
   }
   if (rightPanel) {
-    rightPanel.classList.toggle('is-hidden', !state.panels.right);
+    rightPanel.classList.toggle('is-hidden', !rightVisible);
   }
-  document.body.classList.toggle('fullscreen', !!state.overlays.fullscreen);
+  document.body.classList.toggle('panel-left-hidden', !leftVisible);
+  document.body.classList.toggle('panel-right-hidden', !rightVisible);
+  document.body.classList.toggle('fullscreen', fullscreen);
+  const changed =
+    leftVisible !== panelStateCache.left ||
+    rightVisible !== panelStateCache.right ||
+    fullscreen !== panelStateCache.fullscreen;
+  panelStateCache.left = leftVisible;
+  panelStateCache.right = rightVisible;
+  panelStateCache.fullscreen = fullscreen;
+  if (changed && typeof resizeCanvas === 'function') {
+    resizeCanvas();
+  }
 }
 
 function applySnapshot(snapshot) {
@@ -325,9 +345,15 @@ if (typeof window !== 'undefined') {
 
 // Keep canvas resized to container.
 function resizeCanvas() {
+  if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
   canvas.width = rect.width;
   canvas.height = rect.height;
+  if (rendererManager?.updateViewport) {
+    rendererManager.updateViewport();
+  }
 }
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
+
+
