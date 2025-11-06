@@ -1165,6 +1165,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           for (let i = 0; i < actuators.length; i += 1) {
             const slider = container.querySelector(`input[type="range"][data-act-index="${i}"]`);
             if (slider) {
+              if (!slider.dataset.editing) slider.dataset.editing = '0';
               if (slider.dataset.editing === '1') continue;
               const fromCtrl = Array.isArray(ctrlValues) && Number.isFinite(Number(ctrlValues[i]))
                 ? Number(ctrlValues[i])
@@ -1196,15 +1197,19 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           input.value = String(fromCtrl != null ? fromCtrl : Number(a.value) || 0);
           input.setAttribute('data-act-index', String(a.index));
           input.setAttribute('data-testid', `control.act.${a.index}`);
+          input.dataset.editing = '0';
           field.appendChild(input);
           row.append(label, field);
           container.appendChild(row);
           input.addEventListener('focus', () => {
             input.dataset.editing = '1';
           });
-          input.addEventListener('blur', () => {
+          const clearEditing = () => {
             input.dataset.editing = '0';
-          });
+          };
+          input.addEventListener('blur', clearEditing);
+          input.addEventListener('pointerup', clearEditing);
+          input.addEventListener('pointerleave', clearEditing);
           input.addEventListener('input', async () => {
             const idx = Number(a.index) | 0;
             const v = Number(input.value) || 0;
