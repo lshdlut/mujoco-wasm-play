@@ -716,6 +716,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
         return Number.isFinite(value) ? value : 0;
       },
       applyValue: (value) => {
+        if (value === undefined || value === null) return;
         if (mode === 'text') {
           input.value = value == null ? '' : String(value);
         } else {
@@ -731,7 +732,11 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     });
 
     if (control.default !== undefined) {
-      binding.setValue(control.default);
+      if (mode === 'text' && typeof control.default === 'string') {
+        input.placeholder = String(control.default);
+      } else if (typeof control.default === 'number') {
+        binding.setValue(control.default);
+      }
     }
 
     const commit = guardBinding(binding, async () => {
@@ -775,6 +780,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     const binding = createBinding(control, {
       getValue: () => input.value.trim(),
       applyValue: (value) => {
+        if (value === undefined || value === null) return;
         let text = '';
         if (Array.isArray(value)) {
           text = value.map(formatNumber).join(' ');
