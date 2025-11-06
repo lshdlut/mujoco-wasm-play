@@ -41,6 +41,7 @@ let lastBounds = { center: [0, 0, 0], radius: 0 };
 let alignSeq = 0;
 let copySeq = 0;
 let renderAssets = null;
+let frameSeq = 0;
 
 const snapshotDebug = (() => {
   if (typeof self !== 'undefined') {
@@ -54,7 +55,7 @@ const snapshotDebug = (() => {
   return false;
 })();
 
-const snapshotState = { frame: 0, lastSim: null };
+const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
 
 function wasmUrl(rel) { return new URL(rel, import.meta.url).href; }
 
@@ -500,6 +501,7 @@ function snapshot() {
   const drag = dragState
     ? { dx: Number(dragState.dx) || 0, dy: Number(dragState.dy) || 0 }
     : { dx: 0, dy: 0 };
+  const frameId = frameSeq++;
   const msg = {
     kind: 'snapshot',
     tSim,
@@ -515,6 +517,7 @@ function snapshot() {
     labelMode,
     frameMode,
     cameraMode,
+    frameId,
   };
   const optionsStruct = readOptionStruct(mod, h);
   if (optionsStruct) {
@@ -530,7 +533,7 @@ function snapshot() {
   if (ctrl) {
     msg.ctrl = ctrl;
     transfers.push(ctrl.buffer);
-    if (snapshotDebug && !snapshotState.loggedCtrlSample) {
+    if (snapshotDebug && snapshotState && !snapshotState.loggedCtrlSample) {
       snapshotState.loggedCtrlSample = true;
       try {
         const sample = Array.from(ctrl.slice(0, Math.min(4, ctrl.length)));
@@ -650,6 +653,12 @@ onmessage = async (ev) => {
       if (mod && h) { try { mod.ccall('mjwf_free', null, ['number'], [h]); } catch{} h = 0; }
       const { ok, abi, handle } = await loadXmlWithFallback(msg.xmlText || '');
       h = handle|0;
+      frameSeq = 0;
+      if (snapshotState) {
+        snapshotState.frame = 0;
+        snapshotState.lastSim = null;
+        snapshotState.loggedCtrlSample = false;
+      }
       dt = (mod && mod.__localShimState) ? mod.__localShimState.dt : ((mod)._mjwf_timestep ? (mod)._mjwf_timestep(h) : (mod.ccall('mjwf_timestep','number',['number'],[h])||0.002));
       ngeom = (mod && mod.__localShimState) ? (mod.__localShimState.ngeom|0) : ((mod)._mjwf_ngeom ? (mod)._mjwf_ngeom(h)|0 : (mod.ccall('mjwf_ngeom','number',['number'],[h])|0));
       nu = (typeof mod._mjwf_nu === 'function') ? (mod._mjwf_nu(h)|0) : (mod.ccall('mjwf_nu','number',['number'],[h])|0);

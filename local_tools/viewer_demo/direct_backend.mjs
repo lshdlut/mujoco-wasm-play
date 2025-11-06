@@ -95,6 +95,7 @@ class DirectBackend {
     this.alignSeq = 0;
     this.copySeq = 0;
     this.snapshotState = this.snapshotDebug ? { frame: 0, lastSim: null } : null;
+    this.frameSeq = 0;
   }
 
   #computeBoundsFromPositions(view, n) {
@@ -417,6 +418,7 @@ class DirectBackend {
       this.snapshotState.frame = 0;
       this.snapshotState.lastSim = null;
     }
+    this.frameSeq = 0;
 
     let xmlText = String(msg.xmlText || '');
     if (!xmlText) xmlText = await this.#fallbackXml();
@@ -669,6 +671,7 @@ class DirectBackend {
       const drag = this.drag
         ? { dx: Number(this.drag.dx) || 0, dy: Number(this.drag.dy) || 0 }
         : { dx: 0, dy: 0 };
+      const frameId = this.frameSeq++;
     const ctrlView = this.sim.ctrlView?.();
     const ctrlArray = ctrlView ? cloneArray(ctrlView, Float64Array) || new Float64Array(ctrlView) : null;
     const msg = {
@@ -686,6 +689,7 @@ class DirectBackend {
       labelMode: this.labelMode | 0,
       frameMode: this.frameMode | 0,
       cameraMode: this.cameraMode | 0,
+      frameId,
     };
     const optionsStruct = readOptionStruct(this.mod, this.handle | 0);
     if (optionsStruct) {

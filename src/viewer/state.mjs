@@ -95,6 +95,10 @@ const MODEL_ALIASES = {
   rkob: 'RKOB_simplified_upper_with_marker_CAMS.xml',
 };
 
+function ctrlMirrorEnabled() {
+  return false;
+}
+
 function cloneState(state) {
   if (typeof structuredClone === 'function') {
     return structuredClone(state);
@@ -203,6 +207,7 @@ function cameraLabelFromIndex(index) {
 
 function mergeBackendSnapshot(draft, snapshot) {
   if (!snapshot) return;
+  const mirrorCtrl = ctrlMirrorEnabled();
   if (typeof snapshot.t === 'number' && Number.isFinite(snapshot.t)) {
     const t = snapshot.t;
     if (t + TIME_RESET_EPSILON < latestHudTime) {
@@ -315,7 +320,7 @@ function mergeBackendSnapshot(draft, snapshot) {
       ...snapshot.options,
     };
   }
-  if (snapshot.ctrl) {
+  if (snapshot.ctrl && mirrorCtrl) {
     if (!draft.model) draft.model = {};
     draft.model.ctrl = Array.isArray(snapshot.ctrl)
       ? snapshot.ctrl.slice()
@@ -846,6 +851,7 @@ export async function createBackend(options = {}) {
     options: null,
     ctrl: null,
   };
+  let lastFrameId = -1;
   let messageHandler = null;
 
   async function spawnWorkerBackend() {
@@ -1001,6 +1007,7 @@ export async function createBackend(options = {}) {
     }
     switch (data.kind) {
       case 'ready':
+        lastFrameId = -1;
         if (typeof data.ngeom === 'number') lastSnapshot.ngeom = data.ngeom;
         if (typeof data.nq === 'number') lastSnapshot.nq = data.nq;
         if (typeof data.nv === 'number') lastSnapshot.nv = data.nv;
@@ -1050,7 +1057,16 @@ export async function createBackend(options = {}) {
         } catch {}
         break;
       }
-      case 'snapshot':
+      case 'snapshot': {
+        const frameId = Number.isFinite(data.frameId) ? (data.frameId | 0) : null;
+        if (frameId !== null) {
+          if (frameId <= lastFrameId) {
+            if (debug) console.warn('[backend] drop stale snapshot', frameId, lastFrameId);
+            break;
+          }
+          lastFrameId = frameId;
+          lastSnapshot.frameId = frameId;
+        }
         if (debug) {
           handleMessage.__ctrlLog = handleMessage.__ctrlLog || { count: 0 };
           const info = handleMessage.__ctrlLog;
@@ -1089,6 +1105,7 @@ export async function createBackend(options = {}) {
         applyOptionSnapshot(data);
         notifyListeners();
         break;
+      }
       case 'render_assets':
         if (data.assets) {
           lastSnapshot.renderAssets = data.assets;
