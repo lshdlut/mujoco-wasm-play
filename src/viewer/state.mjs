@@ -691,6 +691,7 @@ function resolveSnapshot(state) {
     frameMode: Number.isFinite(state.frameMode) ? (state.frameMode | 0) : 0,
     cameraMode: Number.isFinite(state.cameraMode) ? (state.cameraMode | 0) : 0,
     actuators: Array.isArray(state.actuators) ? state.actuators.slice() : null,
+    scene: state.scene ?? null,
     xpos: viewOrNull(state.xpos, Float64Array),
     xmat: viewOrNull(state.xmat, Float64Array),
     gsize: viewOrNull(state.gsize, Float64Array),
@@ -786,6 +787,7 @@ export async function createBackend(options = {}) {
     matrgba: null,
     contacts: null,
     renderAssets: null,
+    scene: null,
   };
   let messageHandler = null;
 
@@ -1010,6 +1012,10 @@ export async function createBackend(options = {}) {
         if (typeof window !== 'undefined' && data.snap) {
           window.__sceneSnaps = window.__sceneSnaps || {};
           window.__sceneSnaps[source] = data.snap;
+        }
+        if (data.snap) {
+          lastSnapshot.scene = data.snap;
+          notifyListeners();
         }
         if (debug) console.log('[snapshot]', source, data.frame ?? null);
         break;

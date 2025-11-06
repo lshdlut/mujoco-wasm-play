@@ -382,6 +382,21 @@ function disposeMeshObject(mesh) {
   }
 }
 
+function sceneTypeToEnum(t) {
+  const s = String(t || '').toLowerCase();
+  switch (s) {
+    case 'plane': return MJ_GEOM.PLANE;
+    case 'hfield': return MJ_GEOM.HFIELD;
+    case 'sphere': return MJ_GEOM.SPHERE;
+    case 'capsule': return MJ_GEOM.CAPSULE;
+    case 'ellipsoid': return MJ_GEOM.ELLIPSOID;
+    case 'cylinder': return MJ_GEOM.CYLINDER;
+    case 'box': return MJ_GEOM.BOX;
+    case 'mesh': return MJ_GEOM.MESH;
+    default: return MJ_GEOM.BOX;
+  }
+}
+
 // Lightweight pooled material factory to avoid excessive material instances
 class MaterialPool {
   constructor(threeNS) {
@@ -602,36 +617,64 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets) {
     mesh.visible = false;
     return;
   }
-  const xpos = snapshot.xpos;
-  const baseIndex = 3 * i;
-  const pos = [
-    xpos?.[baseIndex + 0] ?? 0,
-    xpos?.[baseIndex + 1] ?? 0,
-    xpos?.[baseIndex + 2] ?? 0,
-  ];
-  mesh.position.set(pos[0], pos[1], pos[2]);
-
-  const xmat = snapshot.xmat;
-  const matBase = 9 * i;
-  const rot = [
-    xmat?.[matBase + 0] ?? 1,
-    xmat?.[matBase + 1] ?? 0,
-    xmat?.[matBase + 2] ?? 0,
-    xmat?.[matBase + 3] ?? 0,
-    xmat?.[matBase + 4] ?? 1,
-    xmat?.[matBase + 5] ?? 0,
-    xmat?.[matBase + 6] ?? 0,
-    xmat?.[matBase + 7] ?? 0,
-    xmat?.[matBase + 8] ?? 1,
-  ];
-  mesh.quaternion.copy(mat3ToQuat(rot));
+  const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
+  if (sceneGeom) {
+    const px = Number(sceneGeom.xpos?.[0]) || 0;
+    const py = Number(sceneGeom.xpos?.[1]) || 0;
+    const pz = Number(sceneGeom.xpos?.[2]) || 0;
+    mesh.position.set(px, py, pz);
+    const m = Array.isArray(sceneGeom.xmat) && sceneGeom.xmat.length >= 9 ? sceneGeom.xmat : [1,0,0,0,1,0,0,0,1];
+    mesh.quaternion.copy(mat3ToQuat(m));
+  } else {
+    const xpos = snapshot.xpos;
+    const baseIndex = 3 * i;
+    const pos = [
+      xpos?.[baseIndex + 0] ?? 0,
+      xpos?.[baseIndex + 1] ?? 0,
+      xpos?.[baseIndex + 2] ?? 0,
+    ];
+    mesh.position.set(pos[0], pos[1], pos[2]);
+    const xmat = snapshot.xmat;
+    const matBase = 9 * i;
+    const rot = [
+      xmat?.[matBase + 0] ?? 1,
+      xmat?.[matBase + 1] ?? 0,
+      xmat?.[matBase + 2] ?? 0,
+      xmat?.[matBase + 3] ?? 0,
+      xmat?.[matBase + 4] ?? 1,
+      xmat?.[matBase + 5] ?? 0,
+      xmat?.[matBase + 6] ?? 0,
+      xmat?.[matBase + 7] ?? 0,
+      xmat?.[matBase + 8] ?? 1,
+    ];
+    mesh.quaternion.copy(mat3ToQuat(rot));
+  }
   mesh.scale.set(1, 1, 1);
 
-  const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
-  const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
-  const matIndex = matIdView?.[i] ?? -1;
-  if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
-    updateMeshMaterial(mesh, matIndex, matRgbaView);
+  if (sceneGeom && Array.isArray(sceneGeom.rgba)) {
+    try {
+      const r = Number(sceneGeom.rgba[0]);
+      const g = Number(sceneGeom.rgba[1]);
+      const b = Number(sceneGeom.rgba[2]);
+      const a = Number(sceneGeom.rgba[3]);
+      if (mesh.material && mesh.material.color && typeof mesh.material.color.setRGB === 'function') {
+        if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+          mesh.material.color.setRGB(Math.max(0, r), Math.max(0, g), Math.max(0, b));
+        }
+      }
+      if ('opacity' in mesh.material && Number.isFinite(a)) {
+        mesh.material.opacity = a;
+        mesh.material.transparent = a < 0.999;
+      }
+      if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
+    } catch {}
+  } else {
+    const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
+    const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
+    const matIndex = matIdView?.[i] ?? -1;
+    if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
+      updateMeshMaterial(mesh, matIndex, matRgbaView);
+    }
   }
 
   applyMaterialFlags(mesh, i, state);
@@ -921,16 +964,19 @@ export function createRendererManager({
     const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
 
     for (let i = 0; i < ngeom; i += 1) {
-      const type = typeView?.[i] ?? MJ_GEOM.BOX;
+      const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
+      const type = sceneGeom ? sceneTypeToEnum(sceneGeom.type) : (typeView?.[i] ?? MJ_GEOM.BOX);
       const dataId = dataIdView?.[i] ?? -1;
       const base = 3 * i;
-      const sizeVec = sizeView
-        ? [
-            sizeView[base + 0] ?? 0,
-            sizeView[base + 1] ?? 0,
-            sizeView[base + 2] ?? 0,
-          ]
-        : null;
+      const sizeVec = sceneGeom && Array.isArray(sceneGeom.size)
+        ? [sceneGeom.size[0] ?? 0.1, sceneGeom.size[1] ?? sceneGeom.size[0] ?? 0.1, sceneGeom.size[2] ?? sceneGeom.size[0] ?? 0.1]
+        : (sizeView
+          ? [
+              sizeView[base + 0] ?? 0,
+              sizeView[base + 1] ?? 0,
+              sizeView[base + 2] ?? 0,
+            ]
+          : null);
       const mesh = ensureGeomMesh(
         context,
         i,
