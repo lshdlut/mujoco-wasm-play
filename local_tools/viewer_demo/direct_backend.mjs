@@ -669,6 +669,8 @@ class DirectBackend {
       const drag = this.drag
         ? { dx: Number(this.drag.dx) || 0, dy: Number(this.drag.dy) || 0 }
         : { dx: 0, dy: 0 };
+    const ctrlView = this.sim.ctrlView?.();
+    const ctrlArray = ctrlView ? cloneArray(ctrlView, Float64Array) || new Float64Array(ctrlView) : null;
     const msg = {
       kind: 'snapshot',
       tSim: this.sim.time?.() || 0,
@@ -688,6 +690,9 @@ class DirectBackend {
     const optionsStruct = readOptionStruct(this.mod, this.handle | 0);
     if (optionsStruct) {
       msg.options = optionsStruct;
+    }
+    if (ctrlArray) {
+      msg.ctrl = ctrlArray;
     }
       if (gsize) msg.gsize = gsize;
       if (gtype) msg.gtype = gtype;

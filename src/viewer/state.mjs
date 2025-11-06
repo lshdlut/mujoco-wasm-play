@@ -53,6 +53,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   },
   model: {
     opt: {},
+    ctrl: [],
   },
   panels: {
     left: true,
@@ -313,6 +314,12 @@ function mergeBackendSnapshot(draft, snapshot) {
       ...(draft.model.opt || {}),
       ...snapshot.options,
     };
+  }
+  if (snapshot.ctrl) {
+    if (!draft.model) draft.model = {};
+    draft.model.ctrl = Array.isArray(snapshot.ctrl)
+      ? snapshot.ctrl.slice()
+      : Array.from(snapshot.ctrl);
   }
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const mode = snapshot.cameraMode | 0;
@@ -737,6 +744,8 @@ function resolveSnapshot(state) {
     cameraMode: Number.isFinite(state.cameraMode) ? (state.cameraMode | 0) : 0,
     actuators: Array.isArray(state.actuators) ? state.actuators.slice() : null,
     scene: state.scene ?? null,
+    options: state.options ?? null,
+    ctrl: state.ctrl ? Array.from(state.ctrl) : null,
     xpos: viewOrNull(state.xpos, Float64Array),
     xmat: viewOrNull(state.xmat, Float64Array),
     gsize: viewOrNull(state.gsize, Float64Array),
@@ -835,6 +844,7 @@ export async function createBackend(options = {}) {
     renderAssets: null,
     scene: null,
     options: null,
+    ctrl: null,
   };
   let messageHandler = null;
 
@@ -1001,12 +1011,17 @@ export async function createBackend(options = {}) {
             ...data.gesture,
           };
         }
-        if (data.drag) {
-          lastSnapshot.drag = {
-            ...(lastSnapshot.drag || {}),
-            ...data.drag,
-          };
-        }
+      if (data.drag) {
+        lastSnapshot.drag = {
+          ...(lastSnapshot.drag || {}),
+          ...data.drag,
+        };
+      }
+      if (data.ctrl) {
+        lastSnapshot.ctrl = Array.isArray(data.ctrl)
+          ? data.ctrl.slice()
+          : Array.from(data.ctrl);
+      }
         if (data.options) {
           lastSnapshot.options = data.options;
         }

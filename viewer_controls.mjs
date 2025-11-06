@@ -1144,7 +1144,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     },
     getControl: (id) => controlById.get(id) ?? null,
     // Dynamic: ensure Actuator sliders exist under right panel 'control' section
-    ensureActuatorSliders: (actuators) => {
+    ensureActuatorSliders: (actuators, ctrlValues = []) => {
       try {
         if (!rightPanel || !Array.isArray(actuators)) return;
         const section = rightPanel.querySelector('[data-section-id="control"]');
@@ -1165,7 +1165,11 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           for (let i = 0; i < actuators.length; i += 1) {
             const slider = container.querySelector(`input[type="range"][data-act-index="${i}"]`);
             if (slider) {
-              const v = Number(actuators[i].value) || 0;
+              if (slider.dataset.editing === '1') continue;
+              const fromCtrl = Array.isArray(ctrlValues) && Number.isFinite(Number(ctrlValues[i]))
+                ? Number(ctrlValues[i])
+                : null;
+              const v = fromCtrl != null ? fromCtrl : Number(actuators[i].value) || 0;
               if (Number(slider.value) !== v) slider.value = String(v);
             }
           }
@@ -1186,12 +1190,21 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           input.min = String(Number.isFinite(a.min) ? a.min : -1);
           input.max = String(Number.isFinite(a.max) ? a.max : 1);
           input.step = String(Number.isFinite(a.step) && a.step > 0 ? a.step : 0.001);
-          input.value = String(Number(a.value) || 0);
+          const fromCtrl = Array.isArray(ctrlValues) && Number.isFinite(Number(ctrlValues[a.index]))
+            ? Number(ctrlValues[a.index])
+            : null;
+          input.value = String(fromCtrl != null ? fromCtrl : Number(a.value) || 0);
           input.setAttribute('data-act-index', String(a.index));
           input.setAttribute('data-testid', `control.act.${a.index}`);
           field.appendChild(input);
           row.append(label, field);
           container.appendChild(row);
+          input.addEventListener('focus', () => {
+            input.dataset.editing = '1';
+          });
+          input.addEventListener('blur', () => {
+            input.dataset.editing = '0';
+          });
           input.addEventListener('input', async () => {
             const idx = Number(a.index) | 0;
             const v = Number(input.value) || 0;

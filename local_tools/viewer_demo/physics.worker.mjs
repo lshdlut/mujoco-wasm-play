@@ -396,6 +396,7 @@ function snapshot() {
   let gmatid = null; // Int32Array length n
   let gdataid = null; // Int32Array length n
   let matrgba = null; // Float32Array length nmat*4
+  let ctrl = null;
   let scenePayload = null;
   if (n > 0) {
     const pPtr = (mod)._mjwf_geom_xpos_ptr ? (mod)._mjwf_geom_xpos_ptr(h)|0 : mod.ccall('mjwf_geom_xpos_ptr','number',['number'],[h])|0;
@@ -443,6 +444,14 @@ function snapshot() {
   lastBounds = computeBoundsFromPositions(xpos, n);
   const nq = mod && typeof mod._mjwf_nq === 'function' ? (mod._mjwf_nq(h) | 0) : 0;
   const nv = mod && typeof mod._mjwf_nv === 'function' ? (mod._mjwf_nv(h) | 0) : 0;
+  const nu = mod && typeof mod._mjwf_nu === 'function' ? (mod._mjwf_nu(h) | 0) : 0;
+  if (nu > 0) {
+    const ctrlPtr = typeof mod._mjwf_ctrl_ptr === 'function' ? (mod._mjwf_ctrl_ptr(h) | 0) : 0;
+    if (ctrlPtr) {
+      const view = getView(mod, ctrlPtr, 'f64', nu);
+      ctrl = new Float64Array(view);
+    }
+  }
   // Contacts (feature-detect)
   try {
     const ncon = typeof mod._mjwf_ncon === 'function' ? (mod._mjwf_ncon(h)|0) : 0;
@@ -518,6 +527,7 @@ function snapshot() {
   if (gmatid) { msg.gmatid = gmatid; transfers.push(gmatid.buffer); }
   if (gdataid) { msg.gdataid = gdataid; transfers.push(gdataid.buffer); }
   if (matrgba) { msg.matrgba = matrgba; transfers.push(matrgba.buffer); }
+  if (ctrl) { msg.ctrl = ctrl; transfers.push(ctrl.buffer); }
   postMessage(msg, transfers);
 
   if (scenePayload) {

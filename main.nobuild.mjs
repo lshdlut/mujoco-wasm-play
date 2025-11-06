@@ -247,7 +247,8 @@ store.subscribe((state) => {
       ? latestSnapshot.actuators
       : null;
     if (acts && acts.length > 0 && typeof controlManager.ensureActuatorSliders === 'function') {
-      controlManager.ensureActuatorSliders(acts);
+      const ctrlValues = state.model?.ctrl || latestSnapshot?.ctrl || [];
+      controlManager.ensureActuatorSliders(acts, ctrlValues);
     }
   } catch {}
 });
