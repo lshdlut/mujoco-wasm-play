@@ -19,7 +19,7 @@ async function ensureBindingIndex() {
   return bindingIndex;
 }
 
-function splitBinding(binding) {
+export function splitBinding(binding) {
   if (!binding || typeof binding !== 'string') return null;
   const [scope, rest] = binding.split('::');
   if (!scope || !rest) return null;

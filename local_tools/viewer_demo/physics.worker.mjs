@@ -1,7 +1,7 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString } from './bridge.mjs';
-import { writeOptionField } from './struct_writers.mjs';
+import { writeOptionField, readOptionStruct } from '../../viewer_option_struct.mjs';
 import { createSceneSnap } from './snapshots.mjs';
 // Minimal local getView to avoid path issues in buildless mode
 function getView(mod, ptr, dtype, len) {
@@ -507,6 +507,10 @@ function snapshot() {
     frameMode,
     cameraMode,
   };
+  const optionsStruct = readOptionStruct(mod, h);
+  if (optionsStruct) {
+    msg.options = optionsStruct;
+  }
   const transfers = [xpos.buffer, xmat.buffer];
   if (contacts) { msg.contacts = contacts; transfers.push(contacts.pos.buffer); }
   if (gsize) { msg.gsize = gsize; transfers.push(gsize.buffer); }

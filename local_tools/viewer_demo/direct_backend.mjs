@@ -3,7 +3,7 @@
 // viewer UI can remain agnostic to whether physics runs in a worker or inline.
 
 import { MjSimLite, createLocalModule, heapViewF64, heapViewF32, heapViewI32, readCString } from './bridge.mjs';
-import { writeOptionField } from './struct_writers.mjs';
+import { writeOptionField, readOptionStruct } from '../../viewer_option_struct.mjs';
 import { normalizeVer, getForgeDistBase, getVersionInfo, withCacheTag } from './paths.mjs';
 import { createSceneSnap } from './snapshots.mjs';
 
@@ -669,22 +669,26 @@ class DirectBackend {
       const drag = this.drag
         ? { dx: Number(this.drag.dx) || 0, dy: Number(this.drag.dy) || 0 }
         : { dx: 0, dy: 0 };
-      const msg = {
-        kind: 'snapshot',
-        tSim: this.sim.time?.() || 0,
-        ngeom,
-        nq: this.sim.nq?.() | 0,
-        nv: this.sim.nv?.() | 0,
+    const msg = {
+      kind: 'snapshot',
+      tSim: this.sim.time?.() || 0,
+      ngeom,
+      nq: this.sim.nq?.() | 0,
+      nv: this.sim.nv?.() | 0,
         xpos,
         xmat,
         gesture,
         drag,
         voptFlags: Array.isArray(this.voptFlags) ? [...this.voptFlags] : [],
-        sceneFlags: Array.isArray(this.sceneFlags) ? [...this.sceneFlags] : [],
-        labelMode: this.labelMode | 0,
-        frameMode: this.frameMode | 0,
-        cameraMode: this.cameraMode | 0,
-      };
+      sceneFlags: Array.isArray(this.sceneFlags) ? [...this.sceneFlags] : [],
+      labelMode: this.labelMode | 0,
+      frameMode: this.frameMode | 0,
+      cameraMode: this.cameraMode | 0,
+    };
+    const optionsStruct = readOptionStruct(this.mod, this.handle | 0);
+    if (optionsStruct) {
+      msg.options = optionsStruct;
+    }
       if (gsize) msg.gsize = gsize;
       if (gtype) msg.gtype = gtype;
       if (gmatid) msg.gmatid = gmatid;

@@ -1,5 +1,3 @@
-import { resolveHeapBuffer } from './bridge.mjs';
-
 const OPTION_LAYOUT = {
   timestep: { offset: 0, type: 'f64', count: 1 },
   impratio: { offset: 8, type: 'f64', count: 1 },
@@ -30,6 +28,32 @@ const OPTION_LAYOUT = {
   sdf_initpoints: { offset: 284, type: 'i32', count: 1 },
   sdf_iterations: { offset: 288, type: 'i32', count: 1 },
 };
+
+function resolveHeapBuffer(mod) {
+  if (!mod) return null;
+  if (mod.__heapBuffer instanceof ArrayBuffer) {
+    return mod.__heapBuffer;
+  }
+  try {
+    const mem = mod.wasmExports?.memory
+      || mod.asm?.memory
+      || mod.asm?.wasmMemory
+      || mod.wasmMemory;
+    if (mem?.buffer instanceof ArrayBuffer) {
+      mod.__heapBuffer = mem.buffer;
+      return mem.buffer;
+    }
+  } catch {}
+  if (mod.__heapBuffer instanceof ArrayBuffer) return mod.__heapBuffer;
+  const heaps = [mod.HEAPU8, mod.HEAPF64];
+  for (const view of heaps) {
+    if (view && view.buffer instanceof ArrayBuffer) {
+      mod.__heapBuffer = view.buffer;
+      return view.buffer;
+    }
+  }
+  return null;
+}
 
 function getOptionPtr(mod, handle) {
   if (!mod || !(handle > 0)) return 0;
@@ -90,3 +114,48 @@ export function writeOptionField(mod, handle, path, _kind, value) {
   return false;
 }
 
+function readFloatValues(mod, ptr, info) {
+  const buffer = resolveHeapBuffer(mod);
+  if (!buffer) return null;
+  try {
+    const view = new Float64Array(buffer, ptr + info.offset, info.count);
+    if (info.count === 1) {
+      return Number(view[0]);
+    }
+    return Array.from(view, (v) => Number(v));
+  } catch {
+    return null;
+  }
+}
+
+function readIntValues(mod, ptr, info) {
+  const buffer = resolveHeapBuffer(mod);
+  if (!buffer) return null;
+  try {
+    const view = new Int32Array(buffer, ptr + info.offset, info.count);
+    if (info.count === 1) {
+      return view[0] | 0;
+    }
+    return Array.from(view, (v) => v | 0);
+  } catch {
+    return null;
+  }
+}
+
+export function readOptionStruct(mod, handle) {
+  const optPtr = getOptionPtr(mod, handle);
+  if (!optPtr) return null;
+  const result = {};
+  for (const [key, info] of Object.entries(OPTION_LAYOUT)) {
+    let value = null;
+    if (info.type === 'f64') {
+      value = readFloatValues(mod, optPtr, info);
+    } else if (info.type === 'i32') {
+      value = readIntValues(mod, optPtr, info);
+    }
+    if (value != null) {
+      result[key] = value;
+    }
+  }
+  return result;
+}

@@ -266,6 +266,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
   function createBinding(control, { getValue, applyValue }) {
     const binding = {
       skip: false,
+      isEditing: false,
       getValue,
       setValue: (value) => {
         binding.skip = true;
@@ -751,12 +752,16 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       await applySpecAction(store, backend, control, raw);
     });
 
-    input.addEventListener('change', commit);
-    input.addEventListener('blur', commit);
+    input.addEventListener('focus', () => {
+      binding.isEditing = true;
+    });
+    input.addEventListener('blur', () => {
+      binding.isEditing = false;
+      commit();
+    });
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        commit();
         input.blur();
       }
     });
@@ -778,7 +783,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     const targetLength = Math.max(1, expectedLength | 0);
 
     const binding = createBinding(control, {
-      getValue: () => input.value.trim(),
+      getValue: () => input.value,
       applyValue: (value) => {
         if (value === undefined || value === null) return;
         let text = '';
@@ -799,6 +804,14 @@ function registerShortcutHandlers(shortcutSpec, handler) {
         }
       },
     });
+
+    if (control.default !== undefined) {
+      if (typeof control.default === 'string') {
+        input.placeholder = control.default;
+      } else if (Array.isArray(control.default)) {
+        binding.setValue(control.default);
+      }
+    }
 
     const commit = guardBinding(binding, async () => {
       const tokens = input.value.trim().split(/\s+/).filter(Boolean);
@@ -821,12 +834,16 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       }, 900);
     });
 
-    input.addEventListener('change', commit);
-    input.addEventListener('blur', commit);
+    input.addEventListener('focus', () => {
+      binding.isEditing = true;
+    });
+    input.addEventListener('blur', () => {
+      binding.isEditing = false;
+      commit();
+    });
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        commit();
         input.blur();
       }
     });
@@ -1023,6 +1040,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     for (const [id, binding] of controlBindings.entries()) {
       if (hasDirty && !dirtyIds.includes(id)) continue;
       if (!binding || !binding.setValue) continue;
+      if (binding.isEditing) continue;
       const control = controlById.get(id);
       if (!control) continue;
       const value = readControlValue(state, control);

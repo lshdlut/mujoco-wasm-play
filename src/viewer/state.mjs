@@ -1,4 +1,4 @@
-import { prepareBindingUpdate } from './bindings.mjs';
+import { prepareBindingUpdate, splitBinding } from './bindings.mjs';
 
 // Lightweight state container and backend helpers for the simulate parity UI.
 // Runtime implementation lives in JS so it can be consumed directly by the
@@ -50,6 +50,9 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
       qvelPreview: [],
       complete: false,
     },
+  },
+  model: {
+    opt: {},
   },
   panels: {
     left: true,
@@ -119,6 +122,25 @@ function bool(value) {
     return v === '1' || v === 'true' || v === 'on';
   }
   return !!value;
+}
+
+function resolveStructPath(target, pathSegments) {
+  if (!target || !Array.isArray(pathSegments)) return undefined;
+  let current = target;
+  for (const segment of pathSegments) {
+    if (current == null) return undefined;
+    const match = typeof segment === 'string' ? segment.match(/^(.*)\[(\d+)\]$/) : null;
+    if (match) {
+      const base = match[1];
+      const index = Number(match[2]);
+      const container = current?.[base];
+      if (!Array.isArray(container)) return undefined;
+      current = container[index];
+      continue;
+    }
+    current = current?.[segment];
+  }
+  return current;
 }
 
 function resolveModelFileName(raw) {
@@ -284,6 +306,13 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (snapshot.scene) {
     // Persist scene snapshot for diagnostics / external tools
     draft.scene = snapshot.scene;
+  }
+  if (snapshot.options) {
+    if (!draft.model) draft.model = {};
+    draft.model.opt = {
+      ...(draft.model.opt || {}),
+      ...snapshot.options,
+    };
   }
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const mode = snapshot.cameraMode | 0;
@@ -491,6 +520,14 @@ function readBindingValue(state, binding, control) {
   if (binding?.startsWith('Simulate::enableactuator[')) {
     const name = control?.label ?? control?.name ?? binding;
     return !!state.physics.actuatorGroups[name];
+  }
+  const bindingParts = splitBinding(binding);
+  if (bindingParts) {
+    const { scope, path } = bindingParts;
+    if (scope === 'mjOption') {
+      const value = resolveStructPath(state.model?.opt, path);
+      return value;
+    }
   }
   const voptMatch = binding?.match(/^mjvOption::flags\[(\d+)\]$/);
   if (voptMatch) {
@@ -745,6 +782,7 @@ function resolveSnapshot(state) {
             : [],
         }
       : null,
+    options: state.options ?? null,
     renderAssets: state.renderAssets ?? null,
   };
 }
@@ -796,6 +834,7 @@ export async function createBackend(options = {}) {
     contacts: null,
     renderAssets: null,
     scene: null,
+    options: null,
   };
   let messageHandler = null;
 
@@ -967,6 +1006,9 @@ export async function createBackend(options = {}) {
             ...(lastSnapshot.drag || {}),
             ...data.drag,
           };
+        }
+        if (data.options) {
+          lastSnapshot.options = data.options;
         }
         applyOptionSnapshot(data);
         notifyListeners();
