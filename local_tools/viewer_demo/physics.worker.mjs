@@ -1,6 +1,7 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString } from './bridge.mjs';
+import { writeOptionField } from './struct_writers.mjs';
 import { createSceneSnap } from './snapshots.mjs';
 // Minimal local getView to avoid path issues in buildless mode
 function getView(mod, ptr, dtype, len) {
@@ -761,6 +762,20 @@ onmessage = async (ev) => {
       const modeVal = Number(msg.mode) || 0;
       cameraMode = modeVal | 0;
       try { postMessage({ kind: 'options', voptFlags: [...voptFlags], sceneFlags: [...sceneFlags], labelMode, frameMode, cameraMode }); } catch {}
+    } else if (msg.cmd === 'setField') {
+      const target = msg.target;
+      if (target === 'mjOption') {
+        try {
+          const ok = writeOptionField(mod, h, Array.isArray(msg.path) ? msg.path : [], msg.kind, msg.value);
+          if (ok) {
+            snapshot();
+          } else if (snapshotDebug) {
+            postMessage({ kind: 'log', message: 'worker: setField (mjOption) unsupported', extra: String(msg.path || []) });
+          }
+        } catch (err) {
+          postMessage({ kind: 'log', message: 'worker: setField (mjOption) failed', extra: String(err) });
+        }
+      }
     } else if (msg.cmd === 'applyForce') {
       // Expected: { geomIndex, force:[fx,fy,fz], torque:[tx,ty,tz], point:[x,y,z] }
       try {

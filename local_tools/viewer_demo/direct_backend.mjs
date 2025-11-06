@@ -3,6 +3,7 @@
 // viewer UI can remain agnostic to whether physics runs in a worker or inline.
 
 import { MjSimLite, createLocalModule, heapViewF64, heapViewF32, heapViewI32, readCString } from './bridge.mjs';
+import { writeOptionField } from './struct_writers.mjs';
 import { normalizeVer, getForgeDistBase, getVersionInfo, withCacheTag } from './paths.mjs';
 import { createSceneSnap } from './snapshots.mjs';
 
@@ -322,6 +323,21 @@ class DirectBackend {
         const mode = Number(msg.mode) || 0;
         this.cameraMode = mode | 0;
         this.#emitOptions();
+        break;
+      }
+      case 'setField': {
+        if (msg.target === 'mjOption') {
+          try {
+            const ok = writeOptionField(this.mod, this.handle | 0, Array.isArray(msg.path) ? msg.path : [], msg.kind, msg.value);
+            if (ok) {
+              this.#snapshot();
+            } else if (this.debug) {
+              this.#emitLog('direct: setField (mjOption) unsupported', { path: msg.path });
+            }
+          } catch (err) {
+            this.#emitError(err);
+          }
+        }
         break;
       }
       case 'align': {

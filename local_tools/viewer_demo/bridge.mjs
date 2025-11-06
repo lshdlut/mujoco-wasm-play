@@ -1,6 +1,6 @@
 // Minimal browser-only bridge: heap views + MjSimLite (no Node deps)
 
-function resolveHeapBuffer(mod) {
+export function resolveHeapBuffer(mod) {
   if (!mod) return null;
   if (mod.__heapBuffer instanceof ArrayBuffer) {
     return mod.__heapBuffer;

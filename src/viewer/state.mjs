@@ -1,3 +1,5 @@
+import { prepareBindingUpdate } from './bindings.mjs';
+
 // Lightweight state container and backend helpers for the simulate parity UI.
 // Runtime implementation lives in JS so it can be consumed directly by the
 // buildless viewer. Type definitions are provided separately in state.ts.
@@ -1210,6 +1212,22 @@ export async function createBackend(options = {}) {
         }
       } catch {}
       notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+    const prepared = await prepareBindingUpdate(control, value);
+    if (prepared) {
+      try {
+        client.postMessage?.({
+          cmd: 'setField',
+          target: prepared.meta.scope,
+          path: prepared.meta.path,
+          kind: prepared.meta.kind,
+          size: prepared.meta.size,
+          value: prepared.value,
+        });
+      } catch (err) {
+        if (debug) console.warn('[backend setField] post failed', err);
+      }
       return resolveSnapshot(lastSnapshot);
     }
     const voptMatch = binding?.match(/^mjvOption::flags\[(\d+)\]$/);
