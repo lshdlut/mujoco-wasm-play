@@ -1169,8 +1169,9 @@ function registerShortcutHandlers(shortcutSpec, handler) {
               if (slider.dataset.editing === '1') continue;
               const fromCtrl = Array.isArray(ctrlValues) && Number.isFinite(Number(ctrlValues[i]))
                 ? Number(ctrlValues[i])
-                : null;
-              const v = fromCtrl != null ? fromCtrl : Number(actuators[i].value) || 0;
+                : (ctrlValues?.[i] ?? null);
+              if (fromCtrl == null || !Number.isFinite(Number(fromCtrl))) continue;
+              const v = Number(fromCtrl);
               if (Number(slider.value) !== v) slider.value = String(v);
             }
           }
@@ -1193,8 +1194,9 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           input.step = String(Number.isFinite(a.step) && a.step > 0 ? a.step : 0.001);
           const fromCtrl = Array.isArray(ctrlValues) && Number.isFinite(Number(ctrlValues[a.index]))
             ? Number(ctrlValues[a.index])
-            : null;
-          input.value = String(fromCtrl != null ? fromCtrl : Number(a.value) || 0);
+            : (ctrlValues?.[a.index] ?? null);
+          // Initialise from backend ctrl; fallback to 0
+          input.value = String(fromCtrl != null ? fromCtrl : 0);
           input.setAttribute('data-act-index', String(a.index));
           input.setAttribute('data-testid', `control.act.${a.index}`);
           input.dataset.editing = '0';

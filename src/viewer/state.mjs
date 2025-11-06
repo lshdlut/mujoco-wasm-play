@@ -848,6 +848,48 @@ export async function createBackend(options = {}) {
   };
   let messageHandler = null;
 
+  function ensureCtrlArray(lengthHint = 0) {
+    if (Array.isArray(lastSnapshot.ctrl)) {
+      if (lengthHint > lastSnapshot.ctrl.length) {
+        const prevLength = lastSnapshot.ctrl.length;
+        lastSnapshot.ctrl.length = lengthHint;
+        for (let i = prevLength; i < lastSnapshot.ctrl.length; i += 1) {
+          lastSnapshot.ctrl[i] = 0;
+        }
+      }
+      return lastSnapshot.ctrl;
+    }
+    if (ArrayBuffer.isView(lastSnapshot.ctrl)) {
+      lastSnapshot.ctrl = Array.from(lastSnapshot.ctrl);
+      return ensureCtrlArray(lengthHint);
+    }
+    const targetLength = lengthHint > 0
+      ? lengthHint
+      : Array.isArray(lastSnapshot.actuators) ? lastSnapshot.actuators.length : 0;
+    lastSnapshot.ctrl = Array.from({ length: targetLength }, () => 0);
+    return lastSnapshot.ctrl;
+  }
+
+  function writeCtrlValue(index, value) {
+    if (!(Number.isFinite(index) && index >= 0)) return;
+    const arr = ensureCtrlArray((index | 0) + 1);
+    arr[index | 0] = Number.isFinite(value) ? value : 0;
+  }
+
+  function clearCtrlValues() {
+    if (ArrayBuffer.isView(lastSnapshot.ctrl)) {
+      lastSnapshot.ctrl = Array.from(lastSnapshot.ctrl);
+    }
+    if (Array.isArray(lastSnapshot.ctrl)) {
+      for (let i = 0; i < lastSnapshot.ctrl.length; i += 1) {
+        lastSnapshot.ctrl[i] = 0;
+      }
+      return;
+    }
+    const count = Array.isArray(lastSnapshot.actuators) ? lastSnapshot.actuators.length : 0;
+    lastSnapshot.ctrl = Array.from({ length: count }, () => 0);
+  }
+
   async function spawnWorkerBackend() {
     const workerUrl = new URL(WORKER_URL.href);
     if (snapshotDebug) workerUrl.searchParams.set('snapshot', '1');
@@ -1249,6 +1291,7 @@ export async function createBackend(options = {}) {
         const v = Number(value?.value ?? value?.v ?? 0);
         if (Number.isFinite(idx) && idx >= 0) {
           client.postMessage?.({ cmd: 'setCtrl', index: idx | 0, value: v });
+          writeCtrlValue(idx | 0, v);
           // Optimistically update local copy if present
           if (Array.isArray(lastSnapshot.actuators) && lastSnapshot.actuators[idx|0]) {
             lastSnapshot.actuators[idx|0].value = v;
@@ -1267,6 +1310,7 @@ export async function createBackend(options = {}) {
           try { client.postMessage?.({ cmd: 'setCtrl', index: i, value: 0 }); } catch {}
           if (acts[i]) acts[i].value = 0;
         }
+        clearCtrlValues();
       } catch {}
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -1345,6 +1389,7 @@ export async function createBackend(options = {}) {
       case 'simulation.reset':
         client.postMessage?.({ cmd: 'reset' });
         lastSnapshot.pausedSource = 'ui';
+        clearCtrlValues();
         notifyListeners();
         break;
       case 'simulation.align': {

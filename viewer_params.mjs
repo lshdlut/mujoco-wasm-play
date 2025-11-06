@@ -64,6 +64,8 @@ export function consumeViewerParams(params = viewerSearchParams) {
   const fallbackModeParam = (params.get('fallback') || 'auto').toLowerCase();
   const presetParam = (params.get('preset') || 'bright-outdoor').toLowerCase();
 
+  const hdriParamRaw = params.get('hdri');
+
   return {
     requestedMode,
     fallbackModeParam,
@@ -87,7 +89,9 @@ export function consumeViewerParams(params = viewerSearchParams) {
     hiddenIndexSet: readIndexSet('hide_index', params),
     skyOverride: readBoolean(['nosky', 'sky_off'], params),
     requestedModel: params.get('model'),
-    hdriParam: params.get('hdri'),
+    hdriParam: hdriParamRaw && hdriParamRaw.trim().length > 0
+      ? hdriParamRaw
+      : 'local_tools/assets/env/autumn_field_puresky_4k.hdr',
   };
 }
 

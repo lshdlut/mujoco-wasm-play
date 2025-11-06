@@ -247,7 +247,10 @@ store.subscribe((state) => {
       ? latestSnapshot.actuators
       : null;
     if (acts && acts.length > 0 && typeof controlManager.ensureActuatorSliders === 'function') {
-      const ctrlValues = state.model?.ctrl || latestSnapshot?.ctrl || [];
+      // Prefer freshest ctrl values from the latest backend snapshot; fallback to state
+      const ctrlValues = (latestSnapshot && latestSnapshot.ctrl != null)
+        ? latestSnapshot.ctrl
+        : (state.model && state.model.ctrl != null ? state.model.ctrl : []);
       controlManager.ensureActuatorSliders(acts, ctrlValues);
     }
   } catch {}
