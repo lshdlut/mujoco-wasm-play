@@ -690,6 +690,7 @@ function resolveSnapshot(state) {
     labelMode: Number.isFinite(state.labelMode) ? (state.labelMode | 0) : 0,
     frameMode: Number.isFinite(state.frameMode) ? (state.frameMode | 0) : 0,
     cameraMode: Number.isFinite(state.cameraMode) ? (state.cameraMode | 0) : 0,
+    actuators: Array.isArray(state.actuators) ? state.actuators.slice() : null,
     xpos: viewOrNull(state.xpos, Float64Array),
     xmat: viewOrNull(state.xmat, Float64Array),
     gsize: viewOrNull(state.gsize, Float64Array),
@@ -960,6 +961,23 @@ export async function createBackend(options = {}) {
         applyOptionSnapshot(data);
         notifyListeners();
         break;
+      case 'meta': {
+        try {
+          // Actuator metadata for dynamic control UI
+          if (Array.isArray(data.actuators)) {
+            lastSnapshot.actuators = data.actuators.map((a) => ({
+              index: Number(a.index) | 0,
+              name: String(a.name ?? `act ${a.index|0}`),
+              min: Number(a.min),
+              max: Number(a.max),
+              step: Number.isFinite(+a.step) && +a.step > 0 ? +a.step : 0.001,
+              value: Number(a.value) || 0,
+            }));
+            notifyListeners();
+          }
+        } catch {}
+        break;
+      }
       case 'snapshot':
         if (typeof data.tSim === 'number') lastSnapshot.t = data.tSim;
         if (typeof data.ngeom === 'number') lastSnapshot.ngeom = data.ngeom;
@@ -1150,6 +1168,35 @@ export async function createBackend(options = {}) {
       try { client.postMessage?.({ cmd: 'setCameraMode', mode: modeValue }); } catch (err) {
         if (debug) console.warn('[backend camera] post failed', err);
       }
+      notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+    // Generic actuator control (dynamic UI)
+    if (id === 'control.actuator') {
+      try {
+        const idx = Number(value?.index ?? value?.i ?? value?.id);
+        const v = Number(value?.value ?? value?.v ?? 0);
+        if (Number.isFinite(idx) && idx >= 0) {
+          client.postMessage?.({ cmd: 'setCtrl', index: idx | 0, value: v });
+          // Optimistically update local copy if present
+          if (Array.isArray(lastSnapshot.actuators) && lastSnapshot.actuators[idx|0]) {
+            lastSnapshot.actuators[idx|0].value = v;
+          }
+          notifyListeners();
+        }
+      } catch (err) {
+        if (debug) console.warn('[backend control.actuator] failed', err);
+      }
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (id === 'control.clear') {
+      try {
+        const acts = Array.isArray(lastSnapshot.actuators) ? lastSnapshot.actuators : [];
+        for (let i = 0; i < acts.length; i += 1) {
+          try { client.postMessage?.({ cmd: 'setCtrl', index: i, value: 0 }); } catch {}
+          if (acts[i]) acts[i].value = 0;
+        }
+      } catch {}
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }

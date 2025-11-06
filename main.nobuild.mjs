@@ -241,6 +241,15 @@ store.subscribe((state) => {
   updatePanels(state);
   updateToast(state);
   updateControls(state);
+  // Dynamic: build actuator sliders when metadata arrives
+  try {
+    const acts = latestSnapshot && Array.isArray(latestSnapshot.actuators)
+      ? latestSnapshot.actuators
+      : null;
+    if (acts && acts.length > 0 && typeof controlManager.ensureActuatorSliders === 'function') {
+      controlManager.ensureActuatorSliders(acts);
+    }
+  } catch {}
 });
 
 rendererManager.renderScene(latestSnapshot, store.get());

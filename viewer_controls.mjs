@@ -1119,6 +1119,70 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       return ids.filter((id) => id.startsWith(prefix));
     },
     getControl: (id) => controlById.get(id) ?? null,
+    // Dynamic: ensure Actuator sliders exist under right panel 'control' section
+    ensureActuatorSliders: (actuators) => {
+      try {
+        if (!rightPanel || !Array.isArray(actuators)) return;
+        const section = rightPanel.querySelector('[data-section-id="control"]');
+        if (!section) return;
+        const body = section.querySelector('.section-body');
+        if (!body) return;
+        // Create a container for actuators if not present
+        let container = body.querySelector('[data-dynamic="actuators"]');
+        if (!container) {
+          container = document.createElement('div');
+          container.setAttribute('data-dynamic', 'actuators');
+          container.style.marginTop = '8px';
+          body.appendChild(container);
+        }
+        const prevCount = Number(container.getAttribute('data-count') || '0');
+        if (prevCount === actuators.length && container.childElementCount > 0) {
+          // Update values only
+          for (let i = 0; i < actuators.length; i += 1) {
+            const slider = container.querySelector(`input[type="range"][data-act-index="${i}"]`);
+            if (slider) {
+              const v = Number(actuators[i].value) || 0;
+              if (Number(slider.value) !== v) slider.value = String(v);
+            }
+          }
+          return;
+        }
+        // Rebuild all
+        container.innerHTML = '';
+        for (const a of actuators) {
+          const row = createControlRow({ item_id: `control.act.${a.index}` });
+          row.classList.add('half');
+          const label = document.createElement('label');
+          label.className = 'control-label';
+          label.textContent = a.name ?? `Act ${a.index}`;
+          const field = document.createElement('div');
+          field.className = 'control-field';
+          const input = document.createElement('input');
+          input.type = 'range';
+          input.min = String(Number.isFinite(a.min) ? a.min : -1);
+          input.max = String(Number.isFinite(a.max) ? a.max : 1);
+          input.step = String(Number.isFinite(a.step) && a.step > 0 ? a.step : 0.001);
+          input.value = String(Number(a.value) || 0);
+          input.setAttribute('data-act-index', String(a.index));
+          input.setAttribute('data-testid', `control.act.${a.index}`);
+          field.appendChild(input);
+          row.append(label, field);
+          container.appendChild(row);
+          input.addEventListener('input', async () => {
+            const idx = Number(a.index) | 0;
+            const v = Number(input.value) || 0;
+            try {
+              await backend.apply?.({ kind: 'ui', id: 'control.actuator', value: { index: idx, value: v }, control: { item_id: `control.act.${idx}` } });
+            } catch (err) {
+              console.warn('[ui] set actuator failed', err);
+            }
+          });
+        }
+        container.setAttribute('data-count', String(actuators.length));
+      } catch (err) {
+        console.warn('[ui] ensureActuatorSliders error', err);
+      }
+    },
     dispose,
   };
 }
