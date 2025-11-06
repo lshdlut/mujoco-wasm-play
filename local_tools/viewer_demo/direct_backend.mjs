@@ -693,6 +693,13 @@ class DirectBackend {
     }
     if (ctrlArray) {
       msg.ctrl = ctrlArray;
+      if (this.debug && !this._loggedCtrlSample) {
+        this._loggedCtrlSample = true;
+        try {
+          const sample = Array.from(ctrlArray.slice(0, Math.min(4, ctrlArray.length)));
+          this.#emitMessage({ kind: 'log', message: 'direct: ctrl sample', extra: { len: ctrlArray.length, sample } });
+        } catch {}
+      }
     }
       if (gsize) msg.gsize = gsize;
       if (gtype) msg.gtype = gtype;

@@ -527,7 +527,17 @@ function snapshot() {
   if (gmatid) { msg.gmatid = gmatid; transfers.push(gmatid.buffer); }
   if (gdataid) { msg.gdataid = gdataid; transfers.push(gdataid.buffer); }
   if (matrgba) { msg.matrgba = matrgba; transfers.push(matrgba.buffer); }
-  if (ctrl) { msg.ctrl = ctrl; transfers.push(ctrl.buffer); }
+  if (ctrl) {
+    msg.ctrl = ctrl;
+    transfers.push(ctrl.buffer);
+    if (snapshotDebug && !snapshotState.loggedCtrlSample) {
+      snapshotState.loggedCtrlSample = true;
+      try {
+        const sample = Array.from(ctrl.slice(0, Math.min(4, ctrl.length)));
+        postMessage({ kind: 'log', message: 'worker: ctrl sample', extra: { len: ctrl.length, sample } });
+      } catch {}
+    }
+  }
   postMessage(msg, transfers);
 
   if (scenePayload) {
