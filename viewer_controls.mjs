@@ -33,6 +33,34 @@ export function createControlManager({
       .filter(Boolean);
   }
 
+  const getOptionSupport = () => store.get()?.model?.optSupport ?? { supported: false, pointers: [] };
+  const OPTION_BINDING_PREFIX = 'mjOption::';
+
+  function isOptionBinding(control) {
+    return typeof control?.binding === 'string' && control.binding.startsWith(OPTION_BINDING_PREFIX);
+  }
+
+  function applyOptionAvailability(control, element) {
+    if (!element) return;
+    if (!isOptionBinding(control)) return;
+    const support = getOptionSupport();
+    const enabled = !!support.supported;
+    element.disabled = !enabled;
+    if (!enabled) {
+      element.classList.add('is-disabled');
+      const pointers = Array.isArray(support.pointers) && support.pointers.length > 0
+        ? support.pointers.join(', ')
+        : 'mjOption pointer exports';
+      element.title = `mjOption editing unavailable: Forge build missing ${pointers}`;
+      if ('placeholder' in element) {
+        element.placeholder = element.placeholder || 'unsupported';
+      }
+    } else {
+      element.classList.remove('is-disabled');
+      element.title = '';
+    }
+  }
+
 function formatNumber(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return '';
@@ -573,6 +601,8 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     field.append(select);
     container.append(row);
 
+    applyOptionAvailability(control, select);
+
     const binding = createBinding(control, {
       getValue: () => select.value,
       applyValue: (value) => {
@@ -674,6 +704,11 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       },
     });
 
+    applyOptionAvailability(control, input);
+    if (input.disabled) {
+      valueLabel.textContent = 'unsupported';
+    }
+
     input.addEventListener(
       'input',
       guardBinding(binding, async () => {
@@ -709,6 +744,8 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     }
     field.append(input);
     container.append(row);
+
+    applyOptionAvailability(control, input);
 
     const binding = createBinding(control, {
       getValue: () => {
@@ -779,6 +816,8 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     input.spellcheck = false;
     field.append(input);
     container.append(row);
+
+    applyOptionAvailability(control, input);
 
     const targetLength = Math.max(1, expectedLength | 0);
 
@@ -948,6 +987,16 @@ function registerShortcutHandlers(shortcutSpec, handler) {
 
     const body = document.createElement('div');
     body.className = 'section-body';
+
+    if (section.section_id === 'physics') {
+      const support = getOptionSupport();
+      if (!support.supported) {
+        const noteRow = createControlRow({ item_id: 'physics.option_notice' }, { full: true });
+        noteRow.classList.add('control-static', 'control-warning');
+        noteRow.textContent = 'Physics options are read-only: forge build missing mjOption pointer exports.';
+        body.append(noteRow);
+      }
+    }
 
     const setCollapsed = (collapsed) => {
       sectionEl.classList.toggle('is-collapsed', collapsed);

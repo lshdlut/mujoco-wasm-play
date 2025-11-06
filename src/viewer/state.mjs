@@ -54,6 +54,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   model: {
     opt: {},
     ctrl: [],
+    optSupport: { supported: false, pointers: [] },
   },
   panels: {
     left: true,
@@ -325,6 +326,10 @@ function mergeBackendSnapshot(draft, snapshot) {
     draft.model.ctrl = Array.isArray(snapshot.ctrl)
       ? snapshot.ctrl.slice()
       : Array.from(snapshot.ctrl);
+  }
+  if (snapshot.optionSupport) {
+    if (!draft.model) draft.model = {};
+    draft.model.optSupport = { ...snapshot.optionSupport };
   }
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const mode = snapshot.cameraMode | 0;
@@ -751,6 +756,8 @@ function resolveSnapshot(state) {
     scene: state.scene ?? null,
     options: state.options ?? null,
     ctrl: state.ctrl ? Array.from(state.ctrl) : null,
+    frameId: Number.isFinite(state.frameId) ? (state.frameId | 0) : null,
+    optionSupport: state.optionSupport ? { ...state.optionSupport } : null,
     xpos: viewOrNull(state.xpos, Float64Array),
     xmat: viewOrNull(state.xmat, Float64Array),
     gsize: viewOrNull(state.gsize, Float64Array),
@@ -850,6 +857,7 @@ export async function createBackend(options = {}) {
     scene: null,
     options: null,
     ctrl: null,
+    optionSupport: { supported: false, pointers: [] },
   };
   let lastFrameId = -1;
   let messageHandler = null;
@@ -1011,6 +1019,9 @@ export async function createBackend(options = {}) {
         if (typeof data.ngeom === 'number') lastSnapshot.ngeom = data.ngeom;
         if (typeof data.nq === 'number') lastSnapshot.nq = data.nq;
         if (typeof data.nv === 'number') lastSnapshot.nv = data.nv;
+        if (data.optionSupport) {
+          lastSnapshot.optionSupport = data.optionSupport;
+        }
         updateGeometryCaches(data);
         if (data.gesture) {
           lastSnapshot.gesture = {
@@ -1089,6 +1100,9 @@ export async function createBackend(options = {}) {
           } catch {
             lastSnapshot.ctrl = [];
           }
+        }
+        if (data.optionSupport) {
+          lastSnapshot.optionSupport = data.optionSupport;
         }
         if (data.gesture) {
           lastSnapshot.gesture = {
