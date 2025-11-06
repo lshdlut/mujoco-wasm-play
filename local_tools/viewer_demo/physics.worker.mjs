@@ -53,7 +53,7 @@ const snapshotDebug = (() => {
   return false;
 })();
 
-const snapshotState = snapshotDebug ? { frame: 0, lastSim: null } : null;
+const snapshotState = { frame: 0, lastSim: null };
 
 function wasmUrl(rel) { return new URL(rel, import.meta.url).href; }
 
@@ -395,6 +395,7 @@ function snapshot() {
   let gmatid = null; // Int32Array length n
   let gdataid = null; // Int32Array length n
   let matrgba = null; // Float32Array length nmat*4
+  let scenePayload = null;
   if (n > 0) {
     const pPtr = (mod)._mjwf_geom_xpos_ptr ? (mod)._mjwf_geom_xpos_ptr(h)|0 : mod.ccall('mjwf_geom_xpos_ptr','number',['number'],[h])|0;
     const mPtr = (mod)._mjwf_geom_xmat_ptr ? (mod)._mjwf_geom_xmat_ptr(h)|0 : mod.ccall('mjwf_geom_xmat_ptr','number',['number'],[h])|0;
@@ -415,8 +416,8 @@ function snapshot() {
     const nmat = typeof mod._mjwf_nmat === 'function' ? (mod._mjwf_nmat(h)|0) : 0;
     const mrgbaPtr = typeof mod._mjwf_mat_rgba_ptr === 'function' ? (mod._mjwf_mat_rgba_ptr(h)|0) : 0;
     if (nmat > 0 && mrgbaPtr) matrgba = new Float32Array(getView(mod, mrgbaPtr, 'f32', nmat*4));
-    if (snapshotDebug && snapshotState) {
-      snapshotState.lastSim = {
+    try {
+      scenePayload = createSceneSnap({
         frame: snapshotState.frame,
         ngeom: n,
         gtype,
@@ -426,7 +427,15 @@ function snapshot() {
         gdataid,
         xpos,
         xmat,
-      };
+        mesh: null,
+      });
+    } catch (err) {
+      if (snapshotDebug) {
+        try { postMessage({ kind: 'log', message: 'worker: scene snapshot prep failed', extra: String(err) }); } catch {}
+      }
+    }
+    if (snapshotState) {
+      snapshotState.lastSim = scenePayload ?? null;
       snapshotState.frame += 1;
     }
   }
@@ -505,6 +514,16 @@ function snapshot() {
   if (gdataid) { msg.gdataid = gdataid; transfers.push(gdataid.buffer); }
   if (matrgba) { msg.matrgba = matrgba; transfers.push(matrgba.buffer); }
   postMessage(msg, transfers);
+
+  if (scenePayload) {
+    try {
+      postMessage({ kind: 'scene_snapshot', source: 'sim', frame: scenePayload.frame ?? 0, snap: scenePayload });
+    } catch (err) {
+      if (snapshotDebug) {
+        try { postMessage({ kind: 'log', message: 'worker: scene snapshot emit failed', extra: String(err) }); } catch {}
+      }
+    }
+  }
 }
 
 function emitRenderAssets() {
@@ -516,49 +535,6 @@ function emitRenderAssets() {
     const transfers = collectAssetBuffersForTransfer(assets);
     try {
       postMessage({ kind: 'render_assets', assets }, transfers);
-      if (snapshotDebug && snapshotState?.lastSim) {
-        try {
-          const clone = (view) => {
-            if (!view) return view ?? null;
-            if (typeof view.slice === 'function') return view.slice();
-            try { return new view.constructor(view); } catch { return view; }
-          };
-          snapshotState.lastSim.gtype = assets.geoms?.type ? clone(assets.geoms.type) : snapshotState.lastSim.gtype;
-          snapshotState.lastSim.gsize = assets.geoms?.size ? clone(assets.geoms.size) : snapshotState.lastSim.gsize;
-          snapshotState.lastSim.gmatid = assets.geoms?.matid ? clone(assets.geoms.matid) : snapshotState.lastSim.gmatid;
-          snapshotState.lastSim.gdataid = assets.geoms?.dataid ? clone(assets.geoms.dataid) : snapshotState.lastSim.gdataid;
-          snapshotState.lastSim.matrgba = assets.materials?.rgba ? clone(assets.materials.rgba) : snapshotState.lastSim.matrgba;
-          const meshSnapshot = assets.meshes
-            ? {
-                vertnum: assets.meshes.vertnum ? clone(assets.meshes.vertnum) : null,
-                facenum: assets.meshes.facenum ? clone(assets.meshes.facenum) : null,
-                vertadr: assets.meshes.vertadr ? clone(assets.meshes.vertadr) : null,
-                faceadr: assets.meshes.faceadr ? clone(assets.meshes.faceadr) : null,
-                texcoordadr: assets.meshes.texcoordadr ? clone(assets.meshes.texcoordadr) : null,
-                texcoordnum: assets.meshes.texcoordnum ? clone(assets.meshes.texcoordnum) : null,
-                vert: assets.meshes.vert ? clone(assets.meshes.vert) : null,
-                face: assets.meshes.face ? clone(assets.meshes.face) : null,
-                normal: assets.meshes.normal ? clone(assets.meshes.normal) : null,
-                texcoord: assets.meshes.texcoord ? clone(assets.meshes.texcoord) : null,
-              }
-            : null;
-          const scene = createSceneSnap({
-            frame: snapshotState.lastSim.frame,
-            ngeom: snapshotState.lastSim.ngeom,
-            gtype: snapshotState.lastSim.gtype,
-            gsize: snapshotState.lastSim.gsize,
-            gmatid: snapshotState.lastSim.gmatid,
-            matrgba: snapshotState.lastSim.matrgba,
-            gdataid: snapshotState.lastSim.gdataid,
-            xpos: snapshotState.lastSim.xpos,
-            xmat: snapshotState.lastSim.xmat,
-            mesh: meshSnapshot,
-          });
-          postMessage({ kind: 'scene_snapshot', source: 'sim', frame: scene.frame, snap: scene });
-        } catch (err) {
-          postMessage({ kind: 'log', message: 'worker: scene snapshot failed', extra: String(err) });
-        }
-      }
     } catch (err) {
       postMessage({ kind: 'log', message: 'worker: render_assets post failed', extra: String(err) });
     }

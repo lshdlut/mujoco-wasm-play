@@ -75,6 +75,8 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     rateSource: 'backend',
   },
   toast: null,
+  // Optional scene snapshot (mjvScene-like) carried by backend
+  scene: null,
 });
 
 const CAMERA_PRESETS = ['Free', 'Tracking', 'Fixed 1', 'Fixed 2', 'Fixed 3'];
@@ -276,6 +278,10 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (snapshot.renderAssets) {
     const rendering = ensureRenderingState(draft);
     rendering.assets = snapshot.renderAssets;
+  }
+  if (snapshot.scene) {
+    // Persist scene snapshot for diagnostics / external tools
+    draft.scene = snapshot.scene;
   }
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const mode = snapshot.cameraMode | 0;
