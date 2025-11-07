@@ -3,7 +3,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
-import { diffSceneSnaps } from '../local_tools/viewer_demo/snapshots.mjs';
+import { diffSceneSnaps } from '../viewer_backend/snapshots.mjs';
 
 function printUsage() {
   const script = path.basename(process.argv[1] || 'compare_snaps.mjs');
@@ -82,4 +82,3 @@ main().catch((err) => {
   console.error('[compare] unexpected failure', err);
   process.exitCode = 1;
 });
-

@@ -119,7 +119,7 @@ async def run_probe(python_exe: str, port: int, timeout: float, ver: str) -> Non
                 url = resp.url
                 status = resp.status
                 ctype = resp.headers.get("content-type", "")
-                if "local_tools/viewer_demo/physics.worker.mjs" in url or "dist/3.3.7" in url:
+                if "viewer_backend/physics.worker.mjs" in url or "dist/3.3.7" in url:
                     logs.responses.append(f"[response] {status} {url} [{ctype}]")
 
             page.on("console", on_console)

@@ -7,10 +7,10 @@ Glue-layer and playground for consuming MuJoCo WASM artifacts produced by 'mujoc
 
 ## Legacy UI Notice
 
-- The old demo UI under `local_tools/viewer_demo/` is deprecated and not used for development or debugging.
-- It is kept only as historical reference while the Simulate-like UI at `index.html` evolves.
+- All runtime backends now live under `viewer_backend/`; there is no standalone legacy UI under `local_tools/viewer_demo/`.
+- Use the Simulate-like UI at `index.html` for every workflow (worker/direct).
 - The debug script `scripts/worker_debug.py` now launches the main entry (`/index.html`).
-- Small utilities such as `local_tools/viewer_demo/snapshots.mjs` may remain referenced temporarily; they are not part of the legacy UI surface.
+- Shared utilities such as `viewer_backend/snapshots.mjs` are common to both backends and do not represent a separate UI surface.
 
 ## TODO
 - Define stable JS/TS API surface

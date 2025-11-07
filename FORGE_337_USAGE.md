@@ -40,7 +40,7 @@ Then copy `forge/dist/<ver>/*` to `mujoco-wasm-play/local_tools/forge/dist/<ver>
 
 ## Probe (preflight)
 
-- Legacy note: the old demo at `local_tools/viewer_demo/` is deprecated and kept for reference only.
+- Legacy note: backend modules now live under `viewer_backend/`; the old `local_tools/viewer_demo/` tree has been removed.
 - Node: `node tests/local_regression/probe_groups_node.mjs <ver>` scans loader text for `_mjwf_*` symbols grouped by feature.
 
 ## Load and step (Node ESM)

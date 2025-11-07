@@ -12,7 +12,7 @@ const repo = path.resolve(__dirname, '../../');
 const ver = process.argv[2] || '3.3.7';
 const steps = parseInt(process.argv[3] || '2000', 10);
 const xmlPathArg = process.argv[4];
-const xmlDefault = path.resolve(repo, 'local_tools/viewer_demo/demo_box.xml');
+const xmlDefault = path.resolve(repo, 'viewer_backend/demo_box.xml');
 
 const demoXml = `<?xml version='1.0'?>\n<mujoco model='demo'><worldbody/></mujoco>`;
 
@@ -27,7 +27,7 @@ async function loadModule(ver) {
 }
 
 async function main(){
-  const { MjSimLite } = await import(pathToFileURL(path.resolve(repo, 'local_tools/viewer_demo/bridge.mjs')).href);
+  const { MjSimLite } = await import(pathToFileURL(path.resolve(repo, 'viewer_backend/bridge.mjs')).href);
   const xml = await readXmlOrDefault(xmlPathArg);
   const mod = await loadModule(ver);
   const sim = new MjSimLite(mod);
@@ -41,4 +41,3 @@ async function main(){
 }
 
 main().catch(e=>{ console.error('perf_sample error:', e); process.exit(1); });
-
