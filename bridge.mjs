@@ -16,20 +16,29 @@ function tagForgeModule(mod) {
 
 export function resolveHeapBuffer(mod) {
   if (!mod) return null;
-  if (mod.__heapBuffer instanceof ArrayBuffer) {
+  if (mod.__heapBuffer instanceof ArrayBuffer && mod.__heapBuffer.byteLength > 0) {
     return mod.__heapBuffer;
   }
   try {
     const mem = mod.wasmExports?.memory;
-    if (mem?.buffer instanceof ArrayBuffer) return mem.buffer;
+    if (mem?.buffer instanceof ArrayBuffer && mem.buffer.byteLength > 0) {
+      mod.__heapBuffer = mem.buffer;
+      return mem.buffer;
+    }
   } catch {}
   try {
     const heapU8 = mod.HEAPU8;
-    if (heapU8?.buffer instanceof ArrayBuffer) return heapU8.buffer;
+    if (heapU8?.buffer instanceof ArrayBuffer && heapU8.buffer.byteLength > 0) {
+      mod.__heapBuffer = heapU8.buffer;
+      return heapU8.buffer;
+    }
   } catch {}
   try {
     const heapF64 = mod.HEAPF64;
-    if (heapF64?.buffer instanceof ArrayBuffer) return heapF64.buffer;
+    if (heapF64?.buffer instanceof ArrayBuffer && heapF64.buffer.byteLength > 0) {
+      mod.__heapBuffer = heapF64.buffer;
+      return heapF64.buffer;
+    }
   } catch {}
   return null;
 }
@@ -542,6 +551,25 @@ export class MjSimLite {
   _readModelPtr(name){ return this._readPtr('model', name); }
   _readDataPtr(name){ return this._readPtr('data', name); }
 
+  _nameFromAdr(index, adrExport, countExport){
+    const m=this.mod; const h=this.h|0;
+    const namesPtrFn = m?._mjwf_model_names_ptr;
+    const adrFn = m?.[adrExport];
+    const countFn = m?.[countExport];
+    if (typeof namesPtrFn!=='function' || typeof adrFn!=='function' || typeof countFn!=='function') return '';
+    const count = countFn.call(m,h)|0;
+    const idx = index|0;
+    if (!(count>0) || idx<0 || idx>=count) return '';
+    const namesPtr = namesPtrFn.call(m,h)|0;
+    const adrPtr = adrFn.call(m,h)|0;
+    if (!(namesPtr>0) || !(adrPtr>0)) return '';
+    const offsets = heapViewI32(m, adrPtr, count+1);
+    if (!offsets || idx>=offsets.length) return '';
+    const rel = offsets[idx]|0;
+    if (!(rel>=0)) return '';
+    return this._cstr(namesPtr + rel);
+  }
+
   pointerDiagnostics(tag=''){
     const diag = {
       tag,
@@ -610,7 +638,17 @@ export class MjSimLite {
   contactFrameView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=m['_mjwf_contact_frame_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*9); }
 
   // --- Actuator metadata (optional) ---
-  actuatorNameOf(i){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_actuator_name_of']; if (typeof d!=='function') return ''; try { const p=d.call(m,h,(i|0))|0; return this._cstr(p); } catch { return ''; } }
+  actuatorNameOf(i){
+    const m=this.mod; const h=this.h|0; const idx=i|0;
+    const legacy = m['_mjwf_actuator_name_of'];
+    if (typeof legacy === 'function') {
+      try {
+        const p = legacy.call(m,h,idx)|0;
+        if (p) return this._cstr(p);
+      } catch {}
+    }
+    return this._nameFromAdr(idx, '_mjwf_model_name_actuatoradr_ptr', '_mjwf_model_nu') || '';
+  }
   
   // --- Apply/clear external force (xfrc_applied) ---
   applyXfrcByGeom(geomIndex, force3, torque3, point3){
