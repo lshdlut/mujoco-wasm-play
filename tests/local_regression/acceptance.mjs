@@ -15,7 +15,7 @@ const base = process.argv[3] || '3.3.7';
 const steps = parseInt(process.argv[4] || '1000', 10);
 const xmlArg = process.argv[5];
 
-const xmlDefault = path.resolve(repo, 'viewer_backend/tmp_det_model.xml');
+const xmlDefault = path.resolve(repo, 'tmp_det_model.xml');
 
 const groups = {
   core: ['_mjwf_make_from_xml','_mjwf_step','_mjwf_reset','_mjwf_free','_mjwf_timestep','_mjwf_time'],
@@ -58,7 +58,7 @@ async function probeGroups(ver) {
 }
 
 async function runDetAndPerf(verA, verB, steps, xmlText) {
-  const { MjSimLite } = await import(pathToFileURL(path.resolve(repo, 'viewer_backend/bridge.mjs')).href);
+  const { MjSimLite } = await import(pathToFileURL(path.resolve(repo, 'bridge.mjs')).href);
   async function run(ver, n, perfOnly=false){
     const mod = await loadModule(ver);
     const sim = new MjSimLite(mod);

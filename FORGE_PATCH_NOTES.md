@@ -3,7 +3,7 @@ Strict Direct Load Sequence (Forge 3.3.7)
 Scope: local viewer demo only. No changes to forge artifacts.
 
 Entry points
-- Backend modules live under `/viewer_backend/`; there is no separate legacy demo entry.
+- Backend modules (`physics.worker.mjs`, `direct_backend.mjs`, etc.) live at the repo root alongside `index.html`.
 - Use `index.html` (root) for Simulate-like UI in all modes.
 
 Module loading

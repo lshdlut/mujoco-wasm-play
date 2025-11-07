@@ -12,7 +12,7 @@ const verA = process.argv[2] || '3.3.7';
 const verB = process.argv[3] || '3.3.7';
 const steps = parseInt(process.argv[4] || '1000', 10);
 const xmlPathArg = process.argv[5];
-const xmlDefault = path.resolve(repo, 'viewer_backend/demo_box.xml');
+const xmlDefault = path.resolve(repo, 'demo_box.xml');
 
 const demoXml = `<?xml version='1.0'?>\n<mujoco model='demo'>\n  <option timestep='0.002'/>\n  <worldbody>\n    <geom type='plane' pos='0 0 0' size='2 2 0.1' />\n    <body pos='0 0 0.2'>\n      <joint name='hinge' type='hinge' axis='0 1 0'/>\n      <geom type='box' size='0.03 0.03 0.03'/>\n    </body>\n  </worldbody>\n</mujoco>`;
 
@@ -30,7 +30,7 @@ async function loadModule(ver) {
 }
 
 async function runOnce(ver, xmlText, nSteps) {
-  const { MjSimLite } = await import(pathToFileURL(path.resolve(repo, 'viewer_backend/bridge.mjs')).href);
+  const { MjSimLite } = await import(pathToFileURL(path.resolve(repo, 'bridge.mjs')).href);
   const mod = await loadModule(ver);
   const sim = new MjSimLite(mod);
   sim.initFromXmlStrict(xmlText);

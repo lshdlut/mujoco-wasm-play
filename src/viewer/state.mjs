@@ -696,8 +696,8 @@ export function applyGesture(store, backend, payload) {
   }
 }
 
-const WORKER_URL = new URL('../../viewer_backend/physics.worker.mjs', import.meta.url);
-const DIRECT_URL = new URL('../../viewer_backend/direct_backend.mjs', import.meta.url);
+const WORKER_URL = new URL('../../physics.worker.mjs', import.meta.url);
+const DIRECT_URL = new URL('../../direct_backend.mjs', import.meta.url);
 
 function resolveSnapshot(state) {
   const viewOrNull = (value, Ctor) => {
@@ -905,7 +905,7 @@ export async function createBackend(options = {}) {
       if (!file || seen.has(file)) continue;
       seen.add(file);
       try {
-        const url = new URL(`../../viewer_backend/${file}`, import.meta.url);
+        const url = new URL(`../../${file}`, import.meta.url);
         const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) {
           if (debug) console.warn(`[backend] fetch ${file} failed with status ${res.status}`);
