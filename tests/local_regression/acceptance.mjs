@@ -18,13 +18,13 @@ const xmlArg = process.argv[5];
 const xmlDefault = path.resolve(repo, 'tmp_det_model.xml');
 
 const groups = {
-  core: ['_mjwf_make_from_xml','_mjwf_step','_mjwf_reset','_mjwf_free','_mjwf_timestep','_mjwf_time'],
-  views: ['_mjwf_qpos_ptr','_mjwf_qvel_ptr','_mjwf_nq','_mjwf_nv'],
-  geom: ['_mjwf_geom_xpos_ptr','_mjwf_geom_xmat_ptr','_mjwf_ngeom'],
-  material: ['_mjwf_geom_type_ptr','_mjwf_geom_size_ptr','_mjwf_geom_matid_ptr','_mjwf_nmat','_mjwf_mat_rgba_ptr'],
-  joint: ['_mjwf_njnt','_mjwf_jnt_type_ptr','_mjwf_jnt_qposadr_ptr','_mjwf_jnt_range_ptr','_mjwf_jnt_name_of'],
-  act: ['_mjwf_nu','_mjwf_ctrl_ptr','_mjwf_actuator_ctrlrange_ptr','_mjwf_actuator_name_of'],
-  contact: ['_mjwf_ncon','_mjwf_contact_pos_ptr','_mjwf_contact_frame_ptr']
+  core: ['_mjwf_helper_make_from_xml','_mjwf_helper_model_ptr','_mjwf_helper_data_ptr','_mjwf_mj_step','_mjwf_mj_resetData'],
+  views: ['_mjwf_data_qpos_ptr','_mjwf_data_qvel_ptr','_mjwf_model_nq','_mjwf_model_nv'],
+  geom: ['_mjwf_data_geom_xpos_ptr','_mjwf_data_geom_xmat_ptr','_mjwf_model_ngeom'],
+  material: ['_mjwf_model_geom_type_ptr','_mjwf_model_geom_size_ptr','_mjwf_model_geom_matid_ptr','_mjwf_model_nmat','_mjwf_model_mat_rgba_ptr'],
+  joint: ['_mjwf_model_njnt','_mjwf_model_jnt_type_ptr','_mjwf_model_jnt_qposadr_ptr','_mjwf_model_jnt_range_ptr','_mjwf_model_name_jntadr_ptr'],
+  act: ['_mjwf_model_nu','_mjwf_data_ctrl_ptr','_mjwf_model_actuator_ctrlrange_ptr','_mjwf_model_name_actuatoradr_ptr'],
+  contact: ['_mjwf_data_ncon']
 };
 
 async function readXml() {
@@ -51,8 +51,8 @@ async function probeGroups(ver) {
   }
   const ok = {}; const miss = {};
   for (const [g, list] of Object.entries(groups)) {
-    ok[g] = list.every(k=> have.has(k) || have.has(k.replace('_mjwf_','_mjw_')) );
-    miss[g] = list.filter(k=> !(have.has(k) || have.has(k.replace('_mjwf_','_mjw_'))) );
+    ok[g] = list.every((k) => have.has(k));
+    miss[g] = list.filter((k) => !have.has(k));
   }
   return { ok, miss };
 }

@@ -1,5 +1,19 @@
 // Minimal browser-only bridge: heap views + MjSimLite (no Node deps)
 
+let __forgeModuleSeq = 1;
+function tagForgeModule(mod) {
+  if (!mod || typeof mod !== 'object') return 'unknown';
+  if (typeof mod.__forgeModuleId === 'string' && mod.__forgeModuleId.length) {
+    return mod.__forgeModuleId;
+  }
+  const seq = (__forgeModuleSeq += 1);
+  const stamp = Date.now().toString(16);
+  const rand = Math.floor(Math.random() * 0x10000).toString(16);
+  const id = `forge_mod_${stamp}_${seq}_${rand}`;
+  try { mod.__forgeModuleId = id; } catch {}
+  return id;
+}
+
 export function resolveHeapBuffer(mod) {
   if (!mod) return null;
   if (mod.__heapBuffer instanceof ArrayBuffer) {
@@ -9,16 +23,14 @@ export function resolveHeapBuffer(mod) {
     const mem = mod.wasmExports?.memory;
     if (mem?.buffer instanceof ArrayBuffer) return mem.buffer;
   } catch {}
-  if (mod.__localShimState) {
-    try {
-      const heapU8 = mod.HEAPU8;
-      if (heapU8?.buffer instanceof ArrayBuffer) return heapU8.buffer;
-    } catch {}
-    try {
-      const heapF64 = mod.HEAPF64;
-      if (heapF64?.buffer instanceof ArrayBuffer) return heapF64.buffer;
-    } catch {}
-  }
+  try {
+    const heapU8 = mod.HEAPU8;
+    if (heapU8?.buffer instanceof ArrayBuffer) return heapU8.buffer;
+  } catch {}
+  try {
+    const heapF64 = mod.HEAPF64;
+    if (heapF64?.buffer instanceof ArrayBuffer) return heapF64.buffer;
+  } catch {}
   return null;
 }
 
@@ -28,23 +40,38 @@ function createHeapTypedArray(mod, ptr, length, Ctor) {
     return new Ctor(0);
   }
   const buffer = resolveHeapBuffer(mod);
-  if (!buffer) {
-    return new Ctor(n);
-  }
-  mod.__heapBuffer = buffer;
-  try {
-    return new Ctor(buffer, ptr >>> 0, n);
-  } catch (err) {
+  if (buffer instanceof ArrayBuffer) {
+    mod.__heapBuffer = buffer;
     try {
-      const bytes = Ctor.BYTES_PER_ELEMENT * n;
-      const src = new Uint8Array(buffer, ptr >>> 0, bytes);
-      const copy = new Ctor(n);
-      new Uint8Array(copy.buffer).set(src);
-      return copy;
-    } catch {
-      return new Ctor(n);
+      return new Ctor(buffer, ptr >>> 0, n);
+    } catch (err) {
+      try {
+        const bytes = Ctor.BYTES_PER_ELEMENT * n;
+        const src = new Uint8Array(buffer, ptr >>> 0, bytes);
+        const copy = new Ctor(n);
+        new Uint8Array(copy.buffer).set(src);
+        return copy;
+      } catch {
+        // fall through to HEAP view fallback
+      }
     }
   }
+  const heapField =
+    Ctor === Float64Array ? 'HEAPF64'
+      : Ctor === Float32Array ? 'HEAPF32'
+        : Ctor === Int32Array ? 'HEAP32'
+          : null;
+  if (heapField && mod && mod[heapField] && mod[heapField].buffer instanceof ArrayBuffer) {
+    const heap = mod[heapField];
+    const shift = Math.log2(Ctor.BYTES_PER_ELEMENT) | 0;
+    const start = ptr >> shift;
+    try {
+      return heap.subarray(start, start + n);
+    } catch {
+      // ignore
+    }
+  }
+  return new Ctor(n);
 }
 
 export function heapViewF64(mod, ptr, length) {
@@ -214,6 +241,7 @@ export function collectRenderAssetsFromModule(mod, handle) {
 export class MjSimLite {
   constructor(mod) {
     this.mod = mod;
+    this.modId = tagForgeModule(mod);
     this.h = 0;
     this.pref = null;
     this.mode = 'handle';
@@ -256,11 +284,68 @@ export class MjSimLite {
     } catch {}
   }
 
+  _tryHelperMakeFromXml(paths){
+    const m = this.mod;
+    if (!m) return 0;
+    const list = Array.isArray(paths) ? paths : [paths];
+    for (const target of list){
+      if (!target) continue;
+      let h = 0;
+      if (typeof m._mjwf_helper_make_from_xml === 'function'){
+        try { h = m._mjwf_helper_make_from_xml.call(m, target) | 0; } catch { h = 0; }
+        if (h > 0) return h;
+      }
+      if (typeof m.ccall === 'function'){
+        try { h = m.ccall('mjwf_helper_make_from_xml','number',['string'],[target]) | 0; } catch { h = 0; }
+        if (h > 0) return h;
+      }
+    }
+    return 0;
+  }
+
+  _validateHandleOrThrow(h){
+    const m = this.mod;
+    if (!(h > 0)) {
+      throw new Error('handle missing');
+    }
+    const validators = ['_mjwf_helper_valid', '_mjwf_valid'];
+    for (const name of validators){
+      const fn = typeof m[name] === 'function' ? m[name] : null;
+      if (!fn) continue;
+      let ok = 1;
+      try { ok = fn.call(m, h) | 0; } catch { ok = 0; }
+      if (ok !== 1){
+        let eno = 0, emsg = '';
+        try { if (typeof m._mjwf_helper_errno_last === 'function') eno = m._mjwf_helper_errno_last(h) | 0; } catch {}
+        try { if (typeof m._mjwf_helper_errmsg_last === 'function') emsg = this._cstr(m._mjwf_helper_errmsg_last(h) | 0); } catch {}
+        if (!emsg) {
+          try { if (typeof m._mjwf_errmsg_last === 'function') emsg = this._cstr(m._mjwf_errmsg_last() | 0); } catch {}
+        }
+        throw new Error(`handle invalid (${name}): eno=${eno} ${emsg}`);
+      }
+    }
+  }
+
   initFromXml(xmlText, path='/model.xml') {
     const m = this.mod; const bytes = new TextEncoder().encode(xmlText);
-    try { m.FS.writeFile('/model.xml', bytes); } catch {}
-    try { m.FS.writeFile('model.xml', bytes); } catch {}
-    const candidates = ['/model.xml','model.xml'];
+    const allTargets = Array.from(new Set(
+      ['/model.xml','model.xml', path].filter((p) => typeof p === 'string' && p.length)
+    ));
+    for (const target of allTargets){
+      try {
+        if (target.includes('/')){
+          this._mkdirTree(target.slice(0, target.lastIndexOf('/')));
+        }
+      } catch {}
+      try { m.FS.writeFile(target, bytes); } catch {}
+    }
+    const helperHandle = this._tryHelperMakeFromXml(allTargets);
+    if (helperHandle > 0){
+      this.pref = 'mjwf';
+      this.h = helperHandle | 0;
+      this.mode='handle';
+      return;
+    }
     const hasMjwf = (typeof m._mjwf_make_from_xml === 'function') || (typeof m._mjwf_abi_version === 'function') || (typeof m._mjwf_ngeom === 'function');
     const hasMjw  = (typeof m._mjw_make_from_xml  === 'function') || (typeof m._mjw_init === 'function') || (typeof m._mjw_nq === 'function');
     const order = hasMjwf ? ['mjwf'] : (hasMjw ? ['mjw'] : ['mjwf']);
@@ -273,7 +358,7 @@ export class MjSimLite {
       try { return (m.ccall(pref + '_make_from_xml','number',['string'],[p])|0); } catch { return 0; }
     };
     for (const pref of order) {
-      for (const p of candidates) {
+      for (const p of allTargets) {
         const h = tryMake(pref, p);
         if (h > 0) { this.pref = pref; this.h = h|0; this.mode='handle'; return; }
       }
@@ -281,7 +366,7 @@ export class MjSimLite {
     if (hasMjw) {
       // Legacy fallback: mjw_init (returns 1 on success; no handle API)
       try {
-        for (const p of candidates) {
+        for (const p of allTargets) {
           let ok = 0;
           if (typeof m._mjw_init === 'function') ok = m._mjw_init(p)|0; else try { ok = m.ccall('mjw_init','number',['string'],[p])|0; } catch { ok = 0; }
           if (ok === 1) { this.pref = 'mjw'; this.h = 1; this.mode = 'legacy'; return; }
@@ -299,8 +384,7 @@ export class MjSimLite {
     try { if (typeof m._mjwf_version_string==='function') console.log('mjwf ver:', this._cstr(m._mjwf_version_string()|0)); } catch {}
     const required = ['_mjwf_make_from_xml','_mjwf_step','_mjwf_reset','_mjwf_free'];
     console.log('mjwf required present:', required.every(k=>typeof m[k]==='function'));
-    let h = 0;
-    // FS path only: write XML to /mem/model.xml then call wrapper with PATH
+    // FS path only: write XML to /mem/model.xml then call helper wrapper with PATH
     const xmlStr = String(xmlText);
     this._mkdirTree('/mem');
     try { m.FS.writeFile('/mem/model.xml', new TextEncoder().encode(xmlStr)); } catch {}
@@ -312,7 +396,9 @@ export class MjSimLite {
         try { m.ccall('mjwf_chdir','number',['string'],['/mem']); } catch {}
       }
     } catch {}
-    if (typeof m.ccall === 'function' && typeof m._mjwf_make_from_xml === 'function') {
+    const helperTargets = ['/mem/model.xml','/model.xml','model.xml'];
+    let h = this._tryHelperMakeFromXml(helperTargets);
+    if (!(h > 0) && typeof m.ccall === 'function' && typeof m._mjwf_make_from_xml === 'function') {
       try { h = m.ccall('mjwf_make_from_xml','number',['string'],['/mem/model.xml'])|0; } catch { h = 0; }
     }
     if (!(h>0)) {
@@ -322,13 +408,7 @@ export class MjSimLite {
       console.error('make_from_xml strict failed', { eno, emsg });
       throw new Error('make_from_xml failed');
     }
-    if (typeof m._mjwf_valid === 'function' && (m._mjwf_valid(h)|0) === 0) {
-      let eno = 0, emsg = '';
-      try { if (typeof m._mjwf_errno_last==='function') eno = m._mjwf_errno_last()|0; } catch {}
-      try { if (typeof m._mjwf_errmsg_last==='function') emsg = this._cstr(m._mjwf_errmsg_last()|0); } catch {}
-      console.error('invalid handle', { eno, emsg });
-      throw new Error('invalid handle');
-    }
+    this._validateHandleOrThrow(h);
     this.h = h;
     // Second-stage init (if present)
     const stage = ['_mjwf_make_data','_mjwf_bind','_mjwf_attach','_mjwf_finalize','_mjwf_forward','_mjwf_reset','_mjwf_resetData'];
@@ -354,6 +434,31 @@ export class MjSimLite {
     if (!((nq|0) > 0 && (nv|0) > 0 && (ng|0) > 2)) {
       throw new Error(`counts assertion failed: nq=${nq}, nv=${nv}, ngeom=${ng}`);
     }
+  }
+
+  ensurePointers(){
+    const m = this.mod;
+    if (!m || !(this.h > 0)) throw new Error('handle missing');
+    if (!this.modelPtr){
+      if (typeof m._mjwf_helper_model_ptr === 'function') {
+        try { this.modelPtr = m._mjwf_helper_model_ptr(this.h|0) | 0; } catch { this.modelPtr = 0; }
+      }
+      if (!this.modelPtr && typeof m.ccall === 'function'){
+        try { this.modelPtr = m.ccall('mjwf_helper_model_ptr','number',['number'],[this.h|0]) | 0; } catch { this.modelPtr = 0; }
+      }
+    }
+    if (!this.dataPtr){
+      if (typeof m._mjwf_helper_data_ptr === 'function') {
+        try { this.dataPtr = m._mjwf_helper_data_ptr(this.h|0) | 0; } catch { this.dataPtr = 0; }
+      }
+      if (!this.dataPtr && typeof m.ccall === 'function'){
+        try { this.dataPtr = m.ccall('mjwf_helper_data_ptr','number',['number'],[this.h|0]) | 0; } catch { this.dataPtr = 0; }
+      }
+    }
+    if (!(this.modelPtr && this.dataPtr)) {
+      throw new Error('helper pointers unavailable');
+    }
+    return { modelPtr: this.modelPtr, dataPtr: this.dataPtr };
   }
 
   // --- Basic counts ---
@@ -388,22 +493,89 @@ export class MjSimLite {
 
   step(n) {
     const m = this.mod; const h = this.h|0; const pref = this.pref || 'mjwf';
+    const count = Math.max(1, n|0);
     if (this.mode === 'legacy') {
       // minimal.c style demo step function
-      if (typeof m._mjw_step_demo === 'function') { m._mjw_step_demo(n|0); return; }
-      try { m.ccall('mjw_step_demo', null, ['number'], [n|0]); return; } catch {}
+      if (typeof m._mjw_step_demo === 'function') { m._mjw_step_demo(count); return; }
+      try { m.ccall('mjw_step_demo', null, ['number'], [count]); return; } catch {}
       throw new Error('step failed');
     } else {
+      const mjStep = typeof m._mjwf_mj_step === 'function' ? m._mjwf_mj_step : null;
+      if (mjStep) {
+        this.ensurePointers();
+        const modelPtr = this.modelPtr | 0;
+        const dataPtr = this.dataPtr | 0;
+        if (!(modelPtr && dataPtr)) throw new Error('mj_step pointers missing');
+        for (let i = 0; i < count; i += 1) {
+          mjStep.call(m, modelPtr, dataPtr);
+        }
+        return;
+      }
       const direct = m['_' + pref + '_step'];
       let r = 0;
-      if (typeof direct === 'function') { r = (direct.call(m, h, n|0)|0); }
-      else { try { r = (m.ccall(pref + '_step','number',['number','number'],[h,n|0])|0); } catch { r = 0; } }
+      if (typeof direct === 'function') { r = (direct.call(m, h, count)|0); }
+      else { try { r = (m.ccall(pref + '_step','number',['number','number'],[h,count])|0); } catch { r = 0; } }
       if (r !== 1) throw new Error('step failed');
     }
   }
 
-  timestep(){ const m=this.mod; const h=this.h|0; if(this.mode==='legacy'){ return 0.002; } const pref=this.pref||'mjwf'; const d=m['_' + pref + '_timestep']; if (typeof d==='function') return +d.call(m,h)||0.002; return 0.002; }
-  time(){ const m=this.mod; const h=this.h|0; if(this.mode==='legacy'){ return 0; } const pref=this.pref||'mjwf'; const d=m['_' + pref + '_time']; if (typeof d==='function') return +d.call(m,h)||0; return 0; }
+  timestep(){
+    const m=this.mod; const h=this.h|0; if(this.mode==='legacy'){ return 0.002; }
+    const ptr = this._readPtr('model','opt_timestep');
+    if (ptr) {
+      const view = heapViewF64(m, ptr, 1);
+      if (view && view.length) return +view[0] || 0.002;
+    }
+    const pref=this.pref||'mjwf'; const d=m['_' + pref + '_timestep']; if (typeof d==='function') return +d.call(m,h)||0.002; return 0.002;
+  }
+  time(){
+    const m=this.mod; const h=this.h|0; if(this.mode==='legacy'){ return 0; }
+    const ptr = this._readPtr('data','time');
+    if (ptr) {
+      const view = heapViewF64(m, ptr, 1);
+      if (view && view.length) return +view[0] || 0;
+    }
+    const pref=this.pref||'mjwf'; const d=m['_' + pref + '_time']; if (typeof d==='function') return +d.call(m,h)||0; return 0;
+  }
+
+  _readPtr(owner,name){ const m=this.mod; const h=this.h|0; const fn=m && m[`_mjwf_${owner}_${name}_ptr`]; if (typeof fn!=='function') return 0; try { return fn.call(m,h)|0; } catch { return 0; } }
+  _readModelPtr(name){ return this._readPtr('model', name); }
+  _readDataPtr(name){ return this._readPtr('data', name); }
+
+  pointerDiagnostics(tag=''){
+    const diag = {
+      tag,
+      moduleId: this.modId || null,
+      handle: this.h|0,
+      mode: this.mode,
+      modelPtr: this.modelPtr|0,
+      dataPtr: this.dataPtr|0,
+      timePtr: 0,
+      timestepPtr: 0,
+      time: null,
+      timestep: null,
+      heapBytes: 0,
+    };
+    try {
+      this.ensurePointers();
+      diag.modelPtr = this.modelPtr|0;
+      diag.dataPtr = this.dataPtr|0;
+    } catch (err) {
+      diag.error = String(err||'');
+      return diag;
+    }
+    const m=this.mod;
+    const readScalar=(ptr)=>{ if(!(ptr>0)) return null; const view=heapViewF64(m,ptr,1); if(!view||!view.length) return null; return +view[0]; };
+    diag.timePtr = this._readPtr('data','time') | 0;
+    diag.timestepPtr = this._readPtr('model','opt_timestep') | 0;
+    diag.time = readScalar(diag.timePtr);
+    diag.timestep = readScalar(diag.timestepPtr);
+    const heapBuf = resolveHeapBuffer(m);
+    if (heapBuf instanceof ArrayBuffer) {
+      diag.heapBytes = heapBuf.byteLength >>> 0;
+    }
+    return diag;
+  }
 
   ngeom(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_ngeom']; if (typeof d==='function') return (d.call(m,h)|0)||0; try{ return (m.ccall(pref+'_ngeom','number',['number'],[h])|0)||0;}catch{return 0;} }
   nbody(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nbody']; if (typeof d==='function') return (d.call(m,h)|0)||0; try{ return (m.ccall(pref+'_nbody','number',['number'],[h])|0)||0;}catch{return 0;} }
@@ -467,7 +639,23 @@ export class MjSimLite {
   }
   clearAllXfrc(){ const m=this.mod; const h=this.h|0; try { const nbody = typeof m._mjwf_nbody === 'function' ? (m._mjwf_nbody(h)|0) : 0; const xfPtr = typeof m._mjwf_xfrc_applied_ptr === 'function' ? (m._mjwf_xfrc_applied_ptr(h)|0) : 0; if (xfPtr && nbody>0) { const H = heapViewF64(m, xfPtr, nbody*6); H.fill(0); return true; } } catch {} return false; }
   reset(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_reset']; if (typeof d==='function') return ((d.call(m,h)|0)===1); try{ return ((m.ccall(pref+'_reset','number',['number'],[h])|0)===1);}catch{return false;} }
-  term(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; try { const d=m['_' + pref + '_free']; if (typeof d==='function') d.call(m,h); else m.ccall(pref+'_free', null, ['number'], [h]); } catch{} this.h=0; }
+  term(){
+    const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf';
+    if (h) {
+      if (typeof m?._mjwf_helper_free === 'function') {
+        try { m._mjwf_helper_free(h); } catch {}
+      } else {
+        try {
+          const d=m && m['_' + pref + '_free'];
+          if (typeof d==='function') d.call(m,h);
+          else if (typeof m?.ccall === 'function') m.ccall(pref+'_free', null, ['number'], [h]);
+        } catch {}
+      }
+    }
+    this.h=0;
+    this.modelPtr=0;
+    this.dataPtr=0;
+  }
 }
 
 // Build a minimal in-memory module and attach a tiny shim with 2 geoms.

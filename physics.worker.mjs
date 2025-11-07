@@ -1,7 +1,8 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
-import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString } from './bridge.mjs';
-import { writeOptionField, readOptionStruct } from '../../viewer_option_struct.mjs';
+import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite, createLocalModule } from './bridge.mjs';
+import { writeOptionField, readOptionStruct, detectOptionSupport } from '../../viewer_option_struct.mjs';
+import installForgeAbiCompat from './forge_abi_compat.js';
 import { createSceneSnap } from './snapshots.mjs';
 // Minimal local getView to avoid path issues in buildless mode
 function getView(mod, ptr, dtype, len) {
@@ -23,6 +24,7 @@ function getView(mod, ptr, dtype, len) {
 }
 
 let mod = null;
+let sim = null;
 let h = 0;
 let dt = 0.002;
 let rate = 1.0;
@@ -43,6 +45,7 @@ let copySeq = 0;
 let renderAssets = null;
 let frameSeq = 0;
 let optionSupport = { supported: false, pointers: [] };
+const diagStagesLogged = new Set();
 
 const snapshotDebug = (() => {
   if (typeof self !== 'undefined') {
@@ -58,15 +61,6 @@ const snapshotDebug = (() => {
 
 const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
 
-function detectOptionSupport(modRef) {
-  const names = ['_mjwf_model_opt_ptr', '_mjwf_opt_ptr', '_mjwf_option_ptr'];
-  const pointers = names.filter((name) => typeof modRef?.[name] === 'function');
-  return {
-    supported: pointers.length > 0,
-    pointers,
-  };
-}
-
 function wasmUrl(rel) { return new URL(rel, import.meta.url).href; }
 
 // Boot log for diagnostics
@@ -79,6 +73,8 @@ function cstr(modRef, ptr) {
 function logHandleFailure(stage, info) {
   let eno = 0;
   let emsg = '';
+  let helperErr = 0;
+  let helperMsg = '';
   try { if (mod && typeof mod._mjwf_errno_last === 'function') eno = mod._mjwf_errno_last() | 0; } catch {}
   try {
     if (mod && typeof mod._mjwf_errmsg_last === 'function') {
@@ -87,16 +83,85 @@ function logHandleFailure(stage, info) {
       emsg = cstr(mod, mod._mjwf_errmsg_last_global() | 0);
     }
   } catch {}
+  try { if (mod && typeof mod._mjwf_helper_errno_last_global === 'function') helperErr = mod._mjwf_helper_errno_last_global() | 0; } catch {}
+  try {
+    if (mod && typeof mod._mjwf_helper_errmsg_last_global === 'function') {
+      helperMsg = cstr(mod, mod._mjwf_helper_errmsg_last_global() | 0);
+    }
+  } catch {}
   try {
     postMessage({
       kind: 'log',
       message: `worker: handle failure (${stage})`,
       errno: eno,
       errmsg: emsg,
+      helperErrno: helperErr,
+      helperErrmsg: helperMsg,
       extra: info ?? null,
     });
   } catch {}
 }
+
+function readModelCount(name) {
+  if (sim && typeof sim[name] === 'function') {
+    try { return sim[name]() | 0; } catch { return 0; }
+  }
+  if (!mod || !(h > 0)) return 0;
+  const modern = mod[`_mjwf_model_${name}`];
+  if (typeof modern === 'function') {
+    try { return modern.call(mod, h) | 0; } catch { return 0; }
+  }
+  return 0;
+}
+
+function readDataCount(name) {
+  if (sim && typeof sim[name] === 'function') {
+    try { return sim[name]() | 0; } catch { return 0; }
+  }
+  if (!mod || !(h > 0)) return 0;
+  const modern = mod[`_mjwf_data_${name}`];
+  if (typeof modern === 'function') {
+    try { return modern.call(mod, h) | 0; } catch { return 0; }
+  }
+  return 0;
+}
+
+function readPtr(owner, name) {
+  if (sim) {
+    try {
+      if (owner === 'model') return sim._readModelPtr?.(name) || 0;
+      if (owner === 'data') return sim._readDataPtr?.(name) || 0;
+    } catch {}
+  }
+  if (!mod || !(h > 0)) return 0;
+  const modern = mod[`_mjwf_${owner}_${name}_ptr`];
+  if (typeof modern === 'function') {
+    try { return modern.call(mod, h) | 0; } catch { return 0; }
+  }
+  return 0;
+}
+
+const readModelPtr = (name) => readPtr('model', name);
+const readDataPtr = (name) => readPtr('data', name);
+
+function logSimPointers(stage, { force = false } = {}) {
+  if (!sim || typeof sim.pointerDiagnostics !== 'function') return;
+  if (!force && diagStagesLogged.has(stage)) return;
+  try {
+    const diag = sim.pointerDiagnostics(stage);
+    diag.modMatch = sim.mod === mod;
+    diag.moduleTag = sim.mod?.__forgeModuleId || null;
+    diagStagesLogged.add(stage);
+    try {
+      postMessage({ kind: 'log', message: `worker: sim pointer diag (${stage})`, extra: diag });
+    } catch {}
+  } catch (err) {
+    try {
+      postMessage({ kind: 'log', message: `worker: sim pointer diag failed (${stage})`, extra: String(err || '') });
+    } catch {}
+  }
+}
+
 
 function computeBoundsFromPositions(arr, n) {
   if (!arr || !n) {
@@ -140,32 +205,22 @@ function computeBoundsFromPositions(arr, n) {
 }
 
 function captureBounds() {
-  const n =
-    (mod && mod.__localShimState)
-      ? (mod.__localShimState.ngeom | 0)
-      : (mod && typeof mod._mjwf_ngeom === 'function'
-          ? (mod._mjwf_ngeom(h) | 0)
-          : (ngeom | 0));
-  if (!mod || !h || !(n > 0)) {
+  const n = sim?.ngeom?.() || (ngeom | 0);
+  if (!sim || !(n > 0)) {
     return { center: [0, 0, 0], radius: 0 };
   }
-  const ptr = typeof mod._mjwf_geom_xpos_ptr === 'function' ? (mod._mjwf_geom_xpos_ptr(h) | 0) : 0;
-  if (!ptr) {
+  const view = sim.geomXposView?.();
+  if (!view) {
     return { center: [0, 0, 0], radius: 0 };
   }
-  const view = getView(mod, ptr, 'f64', n * 3);
   return computeBoundsFromPositions(view, n);
 }
 
 function captureCopyState(precision) {
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const nq = mod && typeof mod._mjwf_nq === 'function' ? (mod._mjwf_nq(h) | 0) : 0;
-  const nv = mod && typeof mod._mjwf_nv === 'function' ? (mod._mjwf_nv(h) | 0) : 0;
-  const tSim = (mod && mod.__localShimState)
-    ? mod.__localShimState.t
-    : (mod && typeof mod._mjwf_time === 'function'
-        ? mod._mjwf_time(h)
-        : mod?.ccall?.('mjwf_time', 'number', ['number'], [h]) || 0);
+  const nq = readModelCount('nq');
+  const nv = readModelCount('nv');
+  const tSim = sim?.time?.() || 0;
   const payload = {
     kind: 'copyState',
     seq: ++copySeq,
@@ -179,9 +234,8 @@ function captureCopyState(precision) {
     complete: false,
   };
   if (nq > 0) {
-    const ptr = mod && typeof mod._mjwf_qpos_ptr === 'function' ? (mod._mjwf_qpos_ptr(h) | 0) : 0;
-    if (ptr) {
-      const view = getView(mod, ptr, 'f64', nq);
+    const view = sim?.qposView?.();
+    if (view) {
       const limit = precision === 'full' ? nq : Math.min(nq, 8);
       for (let i = 0; i < limit; i++) {
         payload.qposPreview.push(Number(view[i]) || 0);
@@ -193,9 +247,8 @@ function captureCopyState(precision) {
     }
   }
   if (nv > 0) {
-    const ptr = mod && typeof mod._mjwf_qvel_ptr === 'function' ? (mod._mjwf_qvel_ptr(h) | 0) : 0;
-    if (ptr) {
-      const view = getView(mod, ptr, 'f64', nv);
+    const view = sim?.qvelView?.();
+    if (view) {
       const limit = precision === 'full' ? nv : Math.min(nv, 8);
       for (let i = 0; i < limit; i++) {
         payload.qvelPreview.push(Number(view[i]) || 0);
@@ -216,7 +269,7 @@ async function loadModule() {
     const s = (u.searchParams.get('shim') || '').toLowerCase();
     if (s === 'local') {
       mod = createLocalModule();
-      installLocalShim(mod);
+      try { installForgeAbiCompat(mod); } catch {}
       try { postMessage({ kind:'log', message:'Local shim installed (forced)' }); } catch {}
       return mod;
     }
@@ -238,10 +291,11 @@ async function loadModule() {
     const wasmUrl = new URL(wasmAbs.href);
     if (vTag) wasmUrl.searchParams.set('v', vTag); else wasmUrl.searchParams.set('cb', String(Date.now()));
     mod = await load_mujoco({ locateFile: (p) => (p.endsWith('.wasm') ? wasmUrl.href : p) });
+    try { installForgeAbiCompat(mod); } catch {}
   } catch (e) {
     // If forge import fails, fallback to a local in-memory shim so model still shows
     mod = createLocalModule();
-    installLocalShim(mod);
+    try { installForgeAbiCompat(mod); } catch {}
     try { postMessage({ kind:'log', message:'Local shim installed (forge import failed)' }); } catch {}
     return mod;
   }
@@ -251,9 +305,8 @@ async function loadModule() {
     const shimParam = url.searchParams.get('shim');
     const wantShim = (shimParam !== null) || (typeof self !== 'undefined' && (self.PLAY_FORGE_SHIM === 1 || self.PLAY_FORGE_SHIM === '1')) || (typeof process !== 'undefined' && process.env && process.env.PLAY_FORGE_SHIM === '1');
     const forceLocal = (shimParam && shimParam.toLowerCase() === 'local');
-    const needShim = !(typeof (mod)._mjwf_make_from_xml === 'function' || typeof (mod).mjwf_make_from_xml === 'function');
+    const needShim = !(typeof (mod)._mjwf_helper_make_from_xml === 'function' || typeof (mod).mjwf_helper_make_from_xml === 'function');
     if (forceLocal) {
-      installLocalShim(mod);
       postMessage({ kind: 'log', message: 'Local shim installed (forced)' });
     } else if (wantShim || needShim) {
       const shimAbs = new URL('../../dist/src/forge_shim.js', import.meta.url);
@@ -273,7 +326,7 @@ async function loadModule() {
       kind:'log',
       message:'worker: forge module ready',
       extra: {
-        hasMake: typeof (mod)._mjwf_make_from_xml === 'function',
+        hasMake: typeof (mod)._mjwf_helper_make_from_xml === 'function',
         hasCcall: typeof mod.ccall === 'function'
       }
     });
@@ -283,112 +336,46 @@ async function loadModule() {
   return mod;
 }
 
-function createLocalModule() {
-  const MEM_BYTES = 4 * 1024 * 1024;
-  const buf = new ArrayBuffer(MEM_BYTES);
-  const HEAPU8 = new Uint8Array(buf);
-  const HEAPF64 = new Float64Array(buf);
-  let brk = 1024; // simple bump allocator
-  function _malloc(n) { n = (n|0); if (n<=0) return 0; const align = 8; brk = (brk + (align-1)) & ~(align-1); if (brk + n >= MEM_BYTES) return 0; const p = brk; brk += n; return p; }
-  function _free(_p) {}
-  const files = new Map();
-  const FS = {
-    writeFile: (path, data) => { files.set(String(path), (data instanceof Uint8Array) ? data : new TextEncoder().encode(String(data))); },
-    readFile: (path) => files.get(String(path)) || new Uint8Array(0),
-  };
-  const modLocal = { HEAPU8, HEAPF64, _malloc, _free, FS };
-  modLocal.ccall = (name, _ret, _argt, args) => {
-    const fn = modLocal['_' + name] || modLocal[name];
-    if (typeof fn === 'function') return fn.apply(modLocal, args || []);
-    return 0;
-  };
-  return modLocal;
-}
-
-function installLocalShim(mod) {
-  try {
-    const malloc = mod._malloc?.bind(mod);
-    if (!malloc) return;
-    const buffer =
-      (mod.__heapBuffer instanceof ArrayBuffer && mod.__heapBuffer) ||
-      mod.wasmExports?.memory?.buffer ||
-      mod.wasmMemory?.buffer ||
-      mod.asm?.memory?.buffer ||
-      mod.asm?.wasmMemory?.buffer;
-    if (!(buffer instanceof ArrayBuffer)) return;
-    mod.__heapBuffer = buffer;
-    const u8view = new Uint8Array(buffer);
-    const f64view = new Float64Array(buffer);
-    function alloc(n){ const p = malloc(n|0); new Uint8Array(buffer, p, n).fill(0); return p; }
-    function writeF64(p,arr){ const off=p>>>3; for(let i=0;i<arr.length;i++) f64view[off+i]=+arr[i]||0; }
-    const state = { h:1, dt:0.002, t:0, ngeom:2, geomXpos:0, geomXmat:0 };
-    state.geomXpos = alloc(2*3*8); state.geomXmat = alloc(2*9*8);
-    writeF64(state.geomXpos,[0,0,0.05, 0.2,0,0.08]);
-    writeF64(state.geomXmat,[1,0,0,0,1,0,0,0,1, 1,0,0,0,1,0,0,0,1]);
-    mod._mjwf_abi_version = () => 337;
-    mod._mjwf_make_from_xml = () => state.h;
-    mod._mjwf_free = () => {};
-    mod._mjwf_timestep = () => state.dt;
-    mod._mjwf_time = () => state.t;
-    mod._mjwf_step = (_h,n)=>{ state.t += (n|0)*state.dt; return 1; };
-    mod._mjwf_reset = ()=>{ state.t=0; return 1; };
-    mod._mjwf_ngeom = ()=> state.ngeom;
-    mod._mjwf_nu = ()=> 0;
-    mod._mjwf_geom_xpos_ptr = ()=> state.geomXpos;
-    mod._mjwf_geom_xmat_ptr = ()=> state.geomXmat;
-    // Mark local shim state
-    mod.__localShimState = state;
-  } catch {}
-}
-
-function tryMakeHandle(xmlText) {
-  try { if (mod && typeof mod._mjwf_init === 'function') mod._mjwf_init(); } catch {}
-  try {
-    if (mod && typeof mod._mjwf_set_workdir === 'function') mod._mjwf_set_workdir('/');
-    else if (mod && typeof mod._mjwf_chdir === 'function') mod._mjwf_chdir('/');
-  } catch {}
-  const candidates = ['/model.xml', 'model.xml'];
-  const bytes = new TextEncoder().encode(xmlText || '');
-  const pathExists = {};
-  for (const path of candidates) {
-    try { mod.FS.writeFile(path, bytes); } catch {}
-    try { pathExists[path] = !!mod.FS.analyzePath(path).exists; } catch { pathExists[path] = false; }
-  }
-  const abi = ((mod)._mjwf_abi_version ? (mod)._mjwf_abi_version() : mod.ccall('mjwf_abi_version','number',[],[]))|0;
-  for (const path of candidates) {
-    const handle = mod.ccall('mjwf_make_from_xml','number',['string'],[path])|0;
-    if (handle > 0) return { ok:true, abi, handle };
-    logHandleFailure('tryMakeHandle_fail', { abi, len: xmlText ? xmlText.length : 0, path, exists: pathExists[path] });
-  }
-  return { ok:false, abi };
-}
 
 async function loadXmlWithFallback(xmlText) {
-  try {
-    if (!mod) await loadModule();
-    const r = tryMakeHandle(xmlText);
-    if (r.ok) return r;
-  } catch (e) {
-    logHandleFailure('primary_exception', e && String(e));
-  }
-  // Fallback: demo_box.xml (local)
-  try {
-    if (!mod) await loadModule();
-    const res = await fetch(wasmUrl('./demo_box.xml'));
-    const demo = await res.text();
-    const r2 = tryMakeHandle(demo);
-    if (r2.ok) return r2;
-    logHandleFailure('demo_box_failed', { status: res.status });
-  } catch (e) {
-    logHandleFailure('demo_box_exception', e && String(e));
-  }
-  // Fallback: empty model inline
-  const empty = `<?xml version='1.0'?>\n<mujoco model='empty'><option timestep='0.002'/><worldbody/></mujoco>`;
   if (!mod) await loadModule();
-  const r3 = tryMakeHandle(empty);
-  if (r3.ok) {
-    try { postMessage({ kind:'log', message:'worker: empty model fallback succeeded' }); } catch {}
-    return r3;
+  const ensureSim = () => {
+    if (!sim || sim.mod !== mod) {
+      sim = new MjSimLite(mod);
+    }
+  };
+  const abi = typeof mod?._mjwf_abi_version === 'function' ? (mod._mjwf_abi_version() | 0) : 0;
+  const attempts = [];
+  if (typeof xmlText === 'string' && xmlText.trim().length) {
+    attempts.push({ stage: 'primary', loader: async () => xmlText });
+  }
+  attempts.push({
+    stage: 'demo',
+    loader: async () => {
+      const res = await fetch(wasmUrl('./demo_box.xml'));
+      if (!res.ok) {
+        logHandleFailure('demo_box_failed', { status: res.status });
+        throw new Error(`demo fetch failed (${res.status})`);
+      }
+      return res.text();
+    },
+  });
+  const emptyXml = `<?xml version='1.0'?>\n<mujoco model='empty'><option timestep='0.002'/><worldbody/></mujoco>`;
+  attempts.push({ stage: 'empty', loader: async () => emptyXml });
+
+  for (const attempt of attempts) {
+    try {
+      const text = await attempt.loader();
+      ensureSim();
+      sim.term();
+      sim.initFromXmlStrict(text);
+      h = sim.h | 0;
+      logSimPointers(`load:${attempt.stage}`, { force: true });
+      try { postMessage({ kind:'log', message:`worker: loaded via ${attempt.stage}`, extra: { abi } }); } catch {}
+      return { ok: true, abi, handle: h };
+    } catch (err) {
+      logHandleFailure('tryMakeHandle_fail', { stage: attempt.stage, error: String(err || '') });
+    }
   }
   throw new Error('Unable to create handle');
 }
@@ -396,51 +383,36 @@ async function loadXmlWithFallback(xmlText) {
 
 
 function snapshot() {
-  const tSim = (mod && mod.__localShimState) ? (mod.__localShimState.t) : ((mod)._mjwf_time ? (mod)._mjwf_time(h) : (mod.ccall('mjwf_time','number',['number'],[h])||0));
-  const n = (mod && mod.__localShimState) ? (mod.__localShimState.ngeom|0) : (ngeom|0);
-  let xpos = new Float64Array(0);
-  let xmat = new Float64Array(0);
-  // Optional contacts
-  let contacts = null;
-  let gsize = null; // Float64Array length n*3
-  let gtype = null; // Int32Array length n
-  let gmatid = null; // Int32Array length n
-  let gdataid = null; // Int32Array length n
-  let matrgba = null; // Float32Array length nmat*4
-  let ctrl = null;
+  if (!sim || !(sim.h > 0)) return;
+  const n = sim.ngeom?.() | 0;
+  const xposView = sim.geomXposView?.();
+  const xmatView = sim.geomXmatView?.();
+  const xpos = xposView ? new Float64Array(xposView) : new Float64Array(0);
+  const xmat = xmatView ? new Float64Array(xmatView) : new Float64Array(0);
+  const gsizeView = sim.geomSizeView?.();
+  const gtypeView = sim.geomTypeView?.();
+  const gmatidView = sim.geomMatIdView?.();
+  const gdataidView = sim.geomDataidView?.();
+  const matRgbaView = sim.matRgbaView?.();
+  const ctrlView = sim.ctrlView?.();
+  const tSim = sim.time?.() || 0;
+  if (!diagStagesLogged.has('first_snapshot')) {
+    logSimPointers('first_snapshot');
+  }
   let scenePayload = null;
-  if (n > 0) {
-    const pPtr = (mod)._mjwf_geom_xpos_ptr ? (mod)._mjwf_geom_xpos_ptr(h)|0 : mod.ccall('mjwf_geom_xpos_ptr','number',['number'],[h])|0;
-    const mPtr = (mod)._mjwf_geom_xmat_ptr ? (mod)._mjwf_geom_xmat_ptr(h)|0 : mod.ccall('mjwf_geom_xmat_ptr','number',['number'],[h])|0;
-    const vPos = getView(mod, pPtr, 'f64', n*3);
-    const vMat = getView(mod, mPtr, 'f64', n*9);
-    xpos = new Float64Array(vPos);
-    xmat = new Float64Array(vMat);
-
-    // Optional: geom size/type/matid and material rgba (feature-detect without ccall to avoid aborts)
-    const sizePtr = typeof mod._mjwf_geom_size_ptr === 'function' ? (mod._mjwf_geom_size_ptr(h)|0) : 0;
-    if (sizePtr) gsize = new Float64Array(getView(mod, sizePtr, 'f64', n*3));
-    const typePtr = typeof mod._mjwf_geom_type_ptr === 'function' ? (mod._mjwf_geom_type_ptr(h)|0) : 0;
-    if (typePtr) gtype = new Int32Array(getView(mod, typePtr, 'i32', n));
-    const matidPtr = typeof mod._mjwf_geom_matid_ptr === 'function' ? (mod._mjwf_geom_matid_ptr(h)|0) : 0;
-    if (matidPtr) gmatid = new Int32Array(getView(mod, matidPtr, 'i32', n));
-    const dataidPtr = typeof mod._mjwf_geom_dataid_ptr === 'function' ? (mod._mjwf_geom_dataid_ptr(h)|0) : 0;
-    if (dataidPtr) gdataid = new Int32Array(getView(mod, dataidPtr, 'i32', n));
-    const nmat = typeof mod._mjwf_nmat === 'function' ? (mod._mjwf_nmat(h)|0) : 0;
-    const mrgbaPtr = typeof mod._mjwf_mat_rgba_ptr === 'function' ? (mod._mjwf_mat_rgba_ptr(h)|0) : 0;
-    if (nmat > 0 && mrgbaPtr) matrgba = new Float32Array(getView(mod, mrgbaPtr, 'f32', nmat*4));
+  if (n > 0 && xposView && xmatView) {
     try {
       scenePayload = createSceneSnap({
         frame: snapshotState.frame,
         ngeom: n,
-        gtype,
-        gsize,
-        gmatid,
-        matrgba,
-        gdataid,
+        gtype: gtypeView ? new Int32Array(gtypeView) : null,
+        gsize: gsizeView ? new Float64Array(gsizeView) : null,
+        gmatid: gmatidView ? new Int32Array(gmatidView) : null,
+        matrgba: matRgbaView ? new Float32Array(matRgbaView) : null,
+        gdataid: gdataidView ? new Int32Array(gdataidView) : null,
         xpos,
         xmat,
-        mesh: null,
+        mesh: renderAssets?.meshes ?? null,
       });
     } catch (err) {
       if (snapshotDebug) {
@@ -453,44 +425,13 @@ function snapshot() {
     }
   }
   lastBounds = computeBoundsFromPositions(xpos, n);
-  const nq = mod && typeof mod._mjwf_nq === 'function' ? (mod._mjwf_nq(h) | 0) : 0;
-  const nv = mod && typeof mod._mjwf_nv === 'function' ? (mod._mjwf_nv(h) | 0) : 0;
-  const nu = mod && typeof mod._mjwf_nu === 'function' ? (mod._mjwf_nu(h) | 0) : 0;
-  if (nu > 0) {
-    const ctrlPtr = typeof mod._mjwf_ctrl_ptr === 'function' ? (mod._mjwf_ctrl_ptr(h) | 0) : 0;
-    if (ctrlPtr) {
-      const view = getView(mod, ctrlPtr, 'f64', nu);
-      ctrl = new Float64Array(view);
-    }
+  const nq = sim.nq?.() | 0;
+  const nv = sim.nv?.() | 0;
+  const nuLocal = sim.nu?.() | 0;
+  let ctrl = null;
+  if (nuLocal > 0 && ctrlView) {
+    ctrl = new Float64Array(ctrlView);
   }
-  // Contacts (feature-detect)
-  try {
-    const ncon = typeof mod._mjwf_ncon === 'function' ? (mod._mjwf_ncon(h)|0) : 0;
-    const cposPtr = typeof mod._mjwf_contact_pos_ptr === 'function' ? (mod._mjwf_contact_pos_ptr(h)|0) : 0;
-    const cfrmPtr = typeof mod._mjwf_contact_frame_ptr === 'function' ? (mod._mjwf_contact_frame_ptr(h)|0) : 0;
-    const g1Ptr = typeof mod._mjwf_contact_geom1_ptr === 'function' ? (mod._mjwf_contact_geom1_ptr(h)|0) : 0;
-    const g2Ptr = typeof mod._mjwf_contact_geom2_ptr === 'function' ? (mod._mjwf_contact_geom2_ptr(h)|0) : 0;
-    const cdPtr = typeof mod._mjwf_contact_dist_ptr === 'function' ? (mod._mjwf_contact_dist_ptr(h)|0) : 0;
-    const cfPtr = typeof mod._mjwf_contact_friction_ptr === 'function' ? (mod._mjwf_contact_friction_ptr(h)|0) : 0;
-    if (ncon > 0 && cposPtr) {
-      const pos = new Float64Array(getView(mod, cposPtr, 'f64', ncon*3));
-      const data = { n:ncon, pos };
-      if (cfrmPtr) {
-        data.frame = new Float64Array(getView(mod, cfrmPtr, 'f64', ncon*9));
-      }
-      if (g1Ptr && g2Ptr) {
-        data.geom1 = new Int32Array(getView(mod, g1Ptr, 'i32', ncon));
-        data.geom2 = new Int32Array(getView(mod, g2Ptr, 'i32', ncon));
-      }
-      if (cdPtr) {
-        data.dist = new Float64Array(getView(mod, cdPtr, 'f64', ncon));
-      }
-      if (cfPtr) {
-        data.fric = new Float64Array(getView(mod, cfPtr, 'f64', ncon*5));
-      }
-      contacts = data;
-    }
-  } catch {}
 
   const gesture = gestureState
     ? {
@@ -528,40 +469,35 @@ function snapshot() {
     frameMode,
     cameraMode,
     frameId,
-    optionSupport,
+    optionSupport: (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] },
   };
-  const optionsStruct = optionSupport.supported ? readOptionStruct(mod, h) : null;
+  const transfers = [xpos.buffer, xmat.buffer];
+  const optSup = (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] };
+  const optionsStruct = optSup.supported ? readOptionStruct(mod, h) : null;
   if (optionsStruct) {
     msg.options = optionsStruct;
   }
-  const transfers = [xpos.buffer, xmat.buffer];
-  if (contacts) { msg.contacts = contacts; transfers.push(contacts.pos.buffer); }
-  if (gsize) { msg.gsize = gsize; transfers.push(gsize.buffer); }
-  if (gtype) { msg.gtype = gtype; transfers.push(gtype.buffer); }
-  if (gmatid) { msg.gmatid = gmatid; transfers.push(gmatid.buffer); }
-  if (gdataid) { msg.gdataid = gdataid; transfers.push(gdataid.buffer); }
-  if (matrgba) { msg.matrgba = matrgba; transfers.push(matrgba.buffer); }
+  if (gsizeView) { const gsize = new Float64Array(gsizeView); msg.gsize = gsize; transfers.push(gsize.buffer); }
+  if (gtypeView) { const gtype = new Int32Array(gtypeView); msg.gtype = gtype; transfers.push(gtype.buffer); }
+  if (gmatidView) { const gmatid = new Int32Array(gmatidView); msg.gmatid = gmatid; transfers.push(gmatid.buffer); }
+  if (gdataidView) { const gdataid = new Int32Array(gdataidView); msg.gdataid = gdataid; transfers.push(gdataid.buffer); }
+  if (matRgbaView) { const matrgba = new Float32Array(matRgbaView); msg.matrgba = matrgba; transfers.push(matrgba.buffer); }
   if (ctrl) {
     msg.ctrl = ctrl;
     transfers.push(ctrl.buffer);
-    if (snapshotDebug && snapshotState && !snapshotState.loggedCtrlSample) {
+    if (!snapshotState.loggedCtrlSample) {
       snapshotState.loggedCtrlSample = true;
-      try {
-        const sample = Array.from(ctrl.slice(0, Math.min(4, ctrl.length)));
-        postMessage({ kind: 'log', message: 'worker: ctrl sample', extra: { len: ctrl.length, sample } });
-      } catch {}
+      try { postMessage({ kind:'log', message:'worker: ctrl sample', extra:{ len: ctrl.length, sample: Array.from(ctrl.slice(0, Math.min(4, ctrl.length))) } }); } catch {}
     }
   }
-  postMessage(msg, transfers);
-
+  msg.contacts = null;
   if (scenePayload) {
-    try {
-      postMessage({ kind: 'scene_snapshot', source: 'sim', frame: scenePayload.frame ?? 0, snap: scenePayload });
-    } catch (err) {
-      if (snapshotDebug) {
-        try { postMessage({ kind: 'log', message: 'worker: scene snapshot emit failed', extra: String(err) }); } catch {}
-      }
-    }
+    msg.scene_snapshot = { source: 'sim', frame: snapshotState.frame - 1, snap: scenePayload };
+  }
+  try {
+    postMessage(msg, transfers);
+  } catch (err) {
+    try { postMessage({ kind:'error', message: `snapshot postMessage failed: ${err}` }); } catch {}
   }
 }
 
@@ -623,20 +559,22 @@ setInterval(() => {
   if (!mod || !h || !running) return;
   // Flush pending control writes (coalesce burst updates)
   try {
-    if (pendingCtrl.size) {
-      const cptr = typeof mod._mjwf_ctrl_ptr === 'function' ? (mod._mjwf_ctrl_ptr(h)|0) : 0;
-      const crPtr = typeof mod._mjwf_actuator_ctrlrange_ptr === 'function' ? (mod._mjwf_actuator_ctrlrange_ptr(h)|0) : 0;
-      if (nu>0 && cptr) {
-        const ctrlView = getView(mod, cptr, 'f64', nu);
-        const rangeView = crPtr ? (getView(mod, crPtr, 'f64', nu*2)) : undefined;
-        for (const [i,v] of pendingCtrl.entries()) {
-          let vv = +v||0;
-          if (rangeView) {
-            const lo = +rangeView[2*(i|0)]; const hi = +rangeView[2*(i|0)+1];
-            const valid = Number.isFinite(lo) && Number.isFinite(hi) && (hi - lo) > 1e-12;
-            if (valid) vv = Math.max(Math.min(hi, vv), lo);
+    if (pendingCtrl.size && sim) {
+      const ctrlView = sim.ctrlView?.();
+      if (ctrlView && ctrlView.length) {
+        const rangeView = sim.actuatorCtrlRangeView?.();
+        for (const [i, v] of pendingCtrl.entries()) {
+          const idx = i | 0;
+          if (idx < 0 || idx >= ctrlView.length) continue;
+          let vv = +v || 0;
+          if (rangeView && (2 * idx + 1) < rangeView.length) {
+            const lo = +rangeView[2 * idx];
+            const hi = +rangeView[2 * idx + 1];
+            if (Number.isFinite(lo) && Number.isFinite(hi) && (hi - lo) > 1e-12) {
+              vv = Math.max(Math.min(hi, vv), lo);
+            }
           }
-          ctrlView[i|0] = vv;
+          ctrlView[idx] = vv;
         }
         pendingCtrl.clear();
       }
@@ -647,23 +585,38 @@ setInterval(() => {
   lastSimNow = now;
   let guard = 0;
   while (acc >= dt && guard < 1000) {
-    if ((mod)._mjwf_step) (mod)._mjwf_step(h,1); else mod.ccall('mjwf_step','number',['number','number'],[h,1]);
+    try {
+      if (sim) {
+        sim.step(1);
+      } else if (mod && h) {
+        const modelPtr = typeof mod._mjwf_helper_model_ptr === 'function' ? (mod._mjwf_helper_model_ptr(h) | 0) : 0;
+        const dataPtr = typeof mod._mjwf_helper_data_ptr === 'function' ? (mod._mjwf_helper_data_ptr(h) | 0) : 0;
+        const stepFn = mod._mjwf_mj_step;
+        if (stepFn && modelPtr && dataPtr) {
+          stepFn.call(mod, modelPtr, dataPtr);
+        }
+      }
+    } catch {}
     acc -= dt;
-    guard++;
+    guard += 1;
   }
 }, 8);
 
 // Snapshot timer at ~60Hz
-setInterval(() => { if (mod && h) snapshot(); }, 16);
+setInterval(() => { if (sim && h) snapshot(); }, 16);
 
 onmessage = async (ev) => {
   const msg = ev.data || {};
   try {
     if (msg.cmd === 'load') {
-      // Dispose previous handle
-      if (mod && h) { try { mod.ccall('mjwf_free', null, ['number'], [h]); } catch{} h = 0; }
+      if (sim) {
+        try { sim.term(); } catch {}
+      }
+      if (mod && h && typeof mod._mjwf_helper_free === 'function') {
+        try { mod._mjwf_helper_free(h); } catch {}
+      }
       const { ok, abi, handle } = await loadXmlWithFallback(msg.xmlText || '');
-      h = handle|0;
+      h = handle | 0;
       frameSeq = 0;
       if (snapshotState) {
         snapshotState.frame = 0;
@@ -671,9 +624,10 @@ onmessage = async (ev) => {
         snapshotState.loggedCtrlSample = false;
       }
       optionSupport = detectOptionSupport(mod);
-      dt = (mod && mod.__localShimState) ? mod.__localShimState.dt : ((mod)._mjwf_timestep ? (mod)._mjwf_timestep(h) : (mod.ccall('mjwf_timestep','number',['number'],[h])||0.002));
-      ngeom = (mod && mod.__localShimState) ? (mod.__localShimState.ngeom|0) : ((mod)._mjwf_ngeom ? (mod)._mjwf_ngeom(h)|0 : (mod.ccall('mjwf_ngeom','number',['number'],[h])|0));
-      nu = (typeof mod._mjwf_nu === 'function') ? (mod._mjwf_nu(h)|0) : (mod.ccall('mjwf_nu','number',['number'],[h])|0);
+      dt = sim?.timestep?.() || 0.002;
+      ngeom = sim?.ngeom?.() | 0;
+      nu = sim?.nu?.() | 0;
+      pendingCtrl.clear();
       running = true;
       rate = typeof msg.rate === 'number' ? msg.rate : 1.0;
       gestureState = { mode: 'idle', phase: 'idle', pointer: null };
@@ -683,41 +637,32 @@ onmessage = async (ev) => {
       labelMode = 0;
       frameMode = 0;
       cameraMode = 0;
-      postMessage({ kind:'ready', abi, dt, ngeom, optionSupport });
+      postMessage({ kind:'ready', abi, dt, ngeom, optionSupport: (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] } });
       try { postMessage({ kind: 'options', voptFlags: [...voptFlags], sceneFlags: [...sceneFlags], labelMode, frameMode, cameraMode }); } catch {}
       // Send joint/geom mapping meta for picking->joint association (optional)
       try {
-        const nj = typeof mod._mjwf_njnt === 'function' ? (mod._mjwf_njnt(h)|0) : 0;
-        const gbidPtr = typeof mod._mjwf_geom_bodyid_ptr === 'function' ? (mod._mjwf_geom_bodyid_ptr(h)|0) : 0;
-        const bjadrPtr = typeof mod._mjwf_body_jntadr_ptr === 'function' ? (mod._mjwf_body_jntadr_ptr(h)|0) : 0;
-        const bjnumPtr = typeof mod._mjwf_body_jntnum_ptr === 'function' ? (mod._mjwf_body_jntnum_ptr(h)|0) : 0;
-        const jtypePtr = typeof mod._mjwf_jnt_type_ptr === 'function' ? (mod._mjwf_jnt_type_ptr(h)|0) : 0;
-        let geom_bodyid = null, body_jntadr = null, body_jntnum = null, jtype = null;
-        if (ngeom>0 && gbidPtr) geom_bodyid = new Int32Array(getView(mod, gbidPtr, 'i32', ngeom));
-        const nbody = typeof mod._mjwf_nbody === 'function' ? (mod._mjwf_nbody(h)|0) : 0;
-        if (nbody>0 && bjadrPtr) body_jntadr = new Int32Array(getView(mod, bjadrPtr, 'i32', nbody));
-        if (nbody>0 && bjnumPtr) body_jntnum = new Int32Array(getView(mod, bjnumPtr, 'i32', nbody));
-        if (nj>0 && jtypePtr) jtype = new Int32Array(getView(mod, jtypePtr, 'i32', nj));
-        postMessage({ kind:'meta_joints', ngeom, nbody, njnt: nj, geom_bodyid, body_jntadr, body_jntnum, jtype },
-          [geom_bodyid?.buffer, body_jntadr?.buffer, body_jntnum?.buffer, jtype?.buffer].filter(Boolean));
+        const geomBody = sim?.geomBodyIdView?.();
+        const bodyAdr = sim?.bodyJntAdrView?.();
+        const bodyNum = sim?.bodyJntNumView?.();
+        const jtypeView = sim?.jntTypeView?.();
+        const nbody = sim?.nbody?.() | 0;
+        const nj = sim?.njnt?.() | 0;
+        const geom_bodyid = geomBody ? new Int32Array(geomBody) : null;
+        const body_jntadr = bodyAdr ? new Int32Array(bodyAdr) : null;
+        const body_jntnum = bodyNum ? new Int32Array(bodyNum) : null;
+        const jtype = jtypeView ? new Int32Array(jtypeView) : null;
+        const transfers = [geom_bodyid?.buffer, body_jntadr?.buffer, body_jntnum?.buffer, jtype?.buffer].filter(Boolean);
+        postMessage({ kind:'meta_joints', ngeom, nbody, njnt: nj, geom_bodyid, body_jntadr, body_jntnum, jtype }, transfers);
       } catch {}
       // Send meta for control panel (always). If nu==0, send empty to clear UI.
       try {
         const acts = [];
+        const rangeView = sim?.actuatorCtrlRangeView?.();
         if (nu > 0) {
-          const crPtr = typeof mod._mjwf_actuator_ctrlrange_ptr === 'function' ? (mod._mjwf_actuator_ctrlrange_ptr(h)|0) : 0;
-          const crView = crPtr ? (getView(mod, crPtr, 'f64', nu*2)) : undefined;
-          for (let i=0;i<nu;i++) {
-            let name = `act ${i}`;
-            try {
-              const nptr = typeof mod._mjwf_actuator_name_of === 'function' ? (mod._mjwf_actuator_name_of(h,i)|0) : 0;
-              if (nptr) {
-                const s = readCString(mod, nptr);
-                if (s) name = s;
-              }
-            } catch {}
-            const rawLo = crView ? (+crView[2*i]) : NaN;
-            const rawHi = crView ? (+crView[2*i+1]) : NaN;
+          for (let i = 0; i < nu; i += 1) {
+            const name = sim?.actuatorNameOf?.(i) || `act ${i}`;
+            const rawLo = rangeView ? +rangeView[2 * i] : NaN;
+            const rawHi = rangeView ? +rangeView[2 * i + 1] : NaN;
             const valid = Number.isFinite(rawLo) && Number.isFinite(rawHi) && (rawHi - rawLo) > 1e-12;
             const lo = valid ? rawLo : -1;
             const hi = valid ? rawHi : 1;
@@ -729,24 +674,21 @@ onmessage = async (ev) => {
       snapshot();
       emitRenderAssets();
     } else if (msg.cmd === 'reset') {
-      if (mod && h) {
-        const ok = mod.ccall('mjwf_reset','number',['number'],[h])|0;
-        if (ok === 1) {
-          gestureState = { mode: 'idle', phase: 'idle', pointer: null };
-          dragState = { dx: 0, dy: 0 };
-          voptFlags = Array.from({ length: 32 }, () => 0);
-          sceneFlags = Array.from({ length: 8 }, () => 0);
-          labelMode = 0;
-          frameMode = 0;
-          cameraMode = 0;
-          snapshot();
-          emitRenderAssets();
-        }
+      if (sim && sim.reset?.()) {
+        gestureState = { mode: 'idle', phase: 'idle', pointer: null };
+        dragState = { dx: 0, dy: 0 };
+        voptFlags = Array.from({ length: 32 }, () => 0);
+        sceneFlags = Array.from({ length: 8 }, () => 0);
+        labelMode = 0;
+        frameMode = 0;
+        cameraMode = 0;
+        snapshot();
+        emitRenderAssets();
       }
     } else if (msg.cmd === 'step') {
-      if (mod && h) {
-        const n = Math.max(1, Math.min(10000, (msg.n|0) || 1));
-        if ((mod)._mjwf_step) (mod)._mjwf_step(h,n); else mod.ccall('mjwf_step','number',['number','number'],[h,n]);
+      if (sim) {
+        const n = Math.max(1, Math.min(10000, (msg.n | 0) || 1));
+        sim.step(n);
         snapshot();
       }
     } else if (msg.cmd === 'gesture') {
@@ -828,20 +770,8 @@ onmessage = async (ev) => {
         const tx=+msg.torque?.[0]||0, ty=+msg.torque?.[1]||0, tz=+msg.torque?.[2]||0;
         const px=+msg.point?.[0]||0, py=+msg.point?.[1]||0, pz=+msg.point?.[2]||0;
         const gi=msg.geomIndex|0;
-        if (typeof mod._mjwf_apply_xfrc === 'function') {
-          mod._mjwf_apply_xfrc(h, gi, fx,fy,fz, tx,ty,tz, px,py,pz);
-        } else {
-          // Fallback: write to xfrc_applied for the owning body if pointers exist
-          const bodyIdPtr = typeof mod._mjwf_geom_bodyid_ptr === 'function' ? (mod._mjwf_geom_bodyid_ptr(h)|0) : 0;
-          const xfrcPtr = typeof mod._mjwf_xfrc_applied_ptr === 'function' ? (mod._mjwf_xfrc_applied_ptr(h)|0) : 0;
-          if (bodyIdPtr && xfrcPtr) {
-            const bodyIdView = getView(mod, bodyIdPtr, 'i32', ngeom);
-            const H = getView(mod, xfrcPtr, 'f64', (typeof mod._mjwf_nbody==='function' ? (mod._mjwf_nbody(h)|0) : 0)*6);
-            const bid = bodyIdView[gi|0]|0;
-            if (bid >= 0 && H && (6*bid+5) < H.length) {
-              H[6*bid+0]+=fx; H[6*bid+1]+=fy; H[6*bid+2]+=fz; H[6*bid+3]+=tx; H[6*bid+4]+=ty; H[6*bid+5]+=tz;
-            }
-          }
+        if (!sim?.applyXfrcByGeom?.(gi, fx, fy, fz, tx, ty, tz) && snapshotDebug) {
+          postMessage({ kind:'log', message:'worker: applyForce unsupported in current mode' });
         }
       } catch {}
     } else if (msg.cmd === 'align') {
@@ -871,9 +801,10 @@ onmessage = async (ev) => {
     } else if (msg.cmd === 'setPaused') {
       running = !msg.paused;
     } else if (msg.cmd === 'snapshot') {
-      if (mod && h) snapshot();
+      if (sim && h) snapshot();
     }
   } catch (e) {
     try { postMessage({ kind:'error', message: String(e) }); } catch {}
   }
 };
+

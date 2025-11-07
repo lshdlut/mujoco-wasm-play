@@ -3,21 +3,13 @@
 // viewer UI can remain agnostic to whether physics runs in a worker or inline.
 
 import { MjSimLite, createLocalModule, heapViewF64, heapViewF32, heapViewI32, readCString } from './bridge.mjs';
-import { writeOptionField, readOptionStruct } from '../../viewer_option_struct.mjs';
+import { writeOptionField, readOptionStruct, detectOptionSupport } from '../../viewer_option_struct.mjs';
 import { normalizeVer, getForgeDistBase, getVersionInfo, withCacheTag } from './paths.mjs';
 import { createSceneSnap } from './snapshots.mjs';
+import installForgeAbiCompat from './forge_abi_compat.js';
 
 const TICK_INTERVAL_MS = 8;   // matches physics.worker.mjs stepping cadence
 const SNAP_INTERVAL_MS = 16;  // ~60 Hz snapshot stream
-
-function detectOptionSupport(mod) {
-  const names = ['_mjwf_model_opt_ptr', '_mjwf_opt_ptr', '_mjwf_option_ptr'];
-  const pointers = names.filter((name) => typeof mod?.[name] === 'function');
-  return {
-    supported: pointers.length > 0,
-    pointers,
-  };
-}
 
 function getView(mod, ptr, dtype, len) {
   if (!mod || !ptr || !(len > 0)) return null;
@@ -462,7 +454,7 @@ class DirectBackend {
 
     const abi = this.#readAbi();
     this.#emitLog('direct: forge module ready', {
-      hasMake: typeof this.mod?._mjwf_make_from_xml === 'function',
+      hasMake: typeof this.mod?._mjwf_helper_make_from_xml === 'function',
       hasCcall: typeof this.mod?.ccall === 'function',
     });
     this.voptFlags = Array.from({ length: 32 }, () => 0);
@@ -513,6 +505,7 @@ class DirectBackend {
     } catch (err) {
       this.#emitLog('direct: forge loader import failed, using local shim', { error: String(err) });
       const modLocal = createLocalModule();
+      try { installForgeAbiCompat(modLocal); } catch {}
       return modLocal;
     }
     const loadMuJoCo = loader?.default;
@@ -522,6 +515,7 @@ class DirectBackend {
     const module = await loadMuJoCo({
       locateFile: (path) => (path.endsWith('.wasm') ? wasmHref : path),
     });
+    try { installForgeAbiCompat(module); } catch {}
     return module;
   }
 
@@ -760,14 +754,14 @@ class DirectBackend {
     try {
       const mod = this.mod;
       const h = this.handle | 0;
-      const njnt = typeof mod._mjwf_njnt === 'function' ? (mod._mjwf_njnt(h) | 0) : 0;
-      const gbidPtr = typeof mod._mjwf_geom_bodyid_ptr === 'function' ? (mod._mjwf_geom_bodyid_ptr(h) | 0) : 0;
-      const bjadrPtr = typeof mod._mjwf_body_jntadr_ptr === 'function' ? (mod._mjwf_body_jntadr_ptr(h) | 0) : 0;
-      const bjnumPtr = typeof mod._mjwf_body_jntnum_ptr === 'function' ? (mod._mjwf_body_jntnum_ptr(h) | 0) : 0;
-      const jtypePtr = typeof mod._mjwf_jnt_type_ptr === 'function' ? (mod._mjwf_jnt_type_ptr(h) | 0) : 0;
+      const njnt = typeof mod._mjwf_model_njnt === 'function' ? (mod._mjwf_model_njnt(h) | 0) : 0;
+      const gbidPtr = typeof mod._mjwf_model_geom_bodyid_ptr === 'function' ? (mod._mjwf_model_geom_bodyid_ptr(h) | 0) : 0;
+      const bjadrPtr = typeof mod._mjwf_model_body_jntadr_ptr === 'function' ? (mod._mjwf_model_body_jntadr_ptr(h) | 0) : 0;
+      const bjnumPtr = typeof mod._mjwf_model_body_jntnum_ptr === 'function' ? (mod._mjwf_model_body_jntnum_ptr(h) | 0) : 0;
+      const jtypePtr = typeof mod._mjwf_model_jnt_type_ptr === 'function' ? (mod._mjwf_model_jnt_type_ptr(h) | 0) : 0;
       const out = { kind: 'meta_joints', ngeom, njnt };
       if (ngeom > 0 && gbidPtr) out.geom_bodyid = cloneArray(getView(mod, gbidPtr, 'i32', ngeom), Int32Array);
-      const nbody = typeof mod._mjwf_nbody === 'function' ? (mod._mjwf_nbody(h) | 0) : 0;
+      const nbody = typeof mod._mjwf_model_nbody === 'function' ? (mod._mjwf_model_nbody(h) | 0) : 0;
       if (nbody > 0 && bjadrPtr) out.body_jntadr = cloneArray(getView(mod, bjadrPtr, 'i32', nbody), Int32Array);
       if (nbody > 0 && bjnumPtr) out.body_jntnum = cloneArray(getView(mod, bjnumPtr, 'i32', nbody), Int32Array);
       if (njnt > 0 && jtypePtr) out.jtype = cloneArray(getView(mod, jtypePtr, 'i32', njnt), Int32Array);

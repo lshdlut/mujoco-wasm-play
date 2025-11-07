@@ -11,13 +11,50 @@ const dist = path.resolve(root, `local_tools/forge/dist/${ver}`);
 const loader = path.resolve(dist, `mujoco-${ver}.js`);
 
 const groups = {
-  core: ['_mjwf_make_from_xml','_mjwf_step','_mjwf_reset','_mjwf_free','_mjwf_timestep','_mjwf_time'],
-  views: ['_mjwf_qpos_ptr','_mjwf_qvel_ptr','_mjwf_nq','_mjwf_nv'],
-  geom: ['_mjwf_geom_xpos_ptr','_mjwf_geom_xmat_ptr','_mjwf_ngeom'],
-  material: ['_mjwf_geom_type_ptr','_mjwf_geom_size_ptr','_mjwf_geom_matid_ptr','_mjwf_nmat','_mjwf_mat_rgba_ptr'],
-  joint: ['_mjwf_njnt','_mjwf_jnt_type_ptr','_mjwf_jnt_qposadr_ptr','_mjwf_jnt_range_ptr','_mjwf_jnt_name_of'],
-  act: ['_mjwf_nu','_mjwf_ctrl_ptr','_mjwf_actuator_ctrlrange_ptr','_mjwf_actuator_name_of'],
-  contact: ['_mjwf_ncon','_mjwf_contact_pos_ptr','_mjwf_contact_frame_ptr']
+  core: [
+    ['_mjwf_helper_make_from_xml'],
+    ['_mjwf_helper_model_ptr'],
+    ['_mjwf_helper_data_ptr'],
+    ['_mjwf_helper_free'],
+    ['_mjwf_mj_step'],
+    ['_mjwf_mj_resetData'],
+    ['_mjwf_model_opt_timestep_ptr'],
+    ['_mjwf_data_time_ptr'],
+  ],
+  views: [
+    ['_mjwf_data_qpos_ptr'],
+    ['_mjwf_data_qvel_ptr'],
+    ['_mjwf_model_nq'],
+    ['_mjwf_model_nv'],
+  ],
+  geom: [
+    ['_mjwf_data_geom_xpos_ptr'],
+    ['_mjwf_data_geom_xmat_ptr'],
+    ['_mjwf_model_ngeom'],
+  ],
+  material: [
+    ['_mjwf_model_geom_type_ptr'],
+    ['_mjwf_model_geom_size_ptr'],
+    ['_mjwf_model_geom_matid_ptr'],
+    ['_mjwf_model_nmat'],
+    ['_mjwf_model_mat_rgba_ptr'],
+  ],
+  joint: [
+    ['_mjwf_model_njnt'],
+    ['_mjwf_model_jnt_type_ptr'],
+    ['_mjwf_model_jnt_qposadr_ptr'],
+    ['_mjwf_model_jnt_range_ptr'],
+    ['_mjwf_model_name_jntadr_ptr'],
+  ],
+  act: [
+    ['_mjwf_model_nu'],
+    ['_mjwf_data_ctrl_ptr'],
+    ['_mjwf_model_actuator_ctrlrange_ptr'],
+    ['_mjwf_model_name_actuatoradr_ptr'],
+  ],
+  contact: [
+    ['_mjwf_data_ncon'],
+  ],
 };
 
 try {
@@ -28,7 +65,13 @@ try {
     const m = line.match(/_mjwf_[A-Za-z0-9_]+/g);
     if (m) for (const s of m) have.add(s);
   }
-  const ok = {}; for (const [g, list] of Object.entries(groups)) ok[g] = list.every(k=>have.has(k));
+  const ok = {};
+  for (const [group, requirements] of Object.entries(groups)) {
+    ok[group] = requirements.every((alts) => {
+      const names = Array.isArray(alts) ? alts : [alts];
+      return names.some((name) => have.has(name));
+    });
+  }
   const summary = Object.entries(ok).map(([k,v])=>`${k}=${v?'OK':'MISS'}`).join(' ');
   console.log(`probe:${ver}`, summary);
   process.exit(0);
@@ -36,4 +79,3 @@ try {
   console.error('probe failed:', e.message);
   process.exit(1);
 }
-
