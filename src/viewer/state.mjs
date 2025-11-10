@@ -1660,7 +1660,7 @@ const VISUAL_OVERRIDE_PRESET = [
   { path: ['scale', 'framewidth'], kind: 'float', size: 1, value: 0.1 },
   { path: ['scale', 'constraint'], kind: 'float', size: 1, value: 0.1 },
   { path: ['scale', 'slidercrank'], kind: 'float', size: 1, value: 0.2 },
-{ path: ['rgba', 'fog'], kind: 'float_vec', size: 4, value: [0.8666667, 0.9019608, 0.9568627, 1] },
+{ path: ['rgba', 'fog'], kind: 'float_vec', size: 4, value: [0.7, 0.75, 0.85, 1] },
 { path: ['rgba', 'haze'], kind: 'float_vec', size: 4, value: [0.9411765, 0.9568627, 1, 1] },
   { path: ['rgba', 'force'], kind: 'float_vec', size: 4, value: [1, 0.5, 0.5, 1] },
   { path: ['rgba', 'inertia'], kind: 'float_vec', size: 4, value: [0.8, 0.2, 0.2, 0.6] },
