@@ -77,7 +77,7 @@ Test Plan
 - Worker harness: `python scripts/worker_debug.py --python C:\\Users\\63427\\miniforge3\\envs\\myconda\\python.exe --port 8080 --wait 3`.
 
 Acceptance Checklist (update as we go)
-- [ ] M1: Edit mjVisual/mjStatistic fields reflect in snapshot and view.
+- [x] M1: Edit mjVisual/mjStatistic fields reflect in snapshot and view.
 - [ ] M2: Camera modes switch with UI and hotkeys; fixed cameras visible.
 - [ ] M3: Group toggles affect visibility and drawn counts.
 - [ ] M4: Contact points/forces/frames render when flags set.
@@ -98,5 +98,8 @@ Risks & Mitigations
 - Cross‑browser differences → cap DPR to 2; conservative shadow configs.
 
 Journal (fill as each milestone completes)
-- [M0] 2025‑11‑10 Baseline committed before plan.
-- [M1] …
+- [M0] 2025-11-10 Baseline committed before plan.
+- [M1] 2025-11-10 Enabled mjVisual/mjStatistic read/write via viewer_struct_access (worker/direct backends emit struct_state updates, UI now syncs controls). Expected effect: Visualization/Statistic controls update immediately, worker logs show `struct_state` messages, and snapshots carry `visual/statistic` structs. User verification: tweak headlight/map/scale sliders and confirm rendering changes & no console errors.
+
+Verification Expectations
+- After each milestone, I will summarize (a) the expected observable effects and (b) exactly what you need to verify (routes to click, toggles to try, screenshots/logs if needed). Please confirm those after each summary so we keep the devplan truthful.

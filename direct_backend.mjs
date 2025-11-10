@@ -4,6 +4,8 @@
 
 import { MjSimLite, createLocalModule, heapViewF64, heapViewF32, heapViewI32, readCString } from './bridge.mjs';
 import { writeOptionField, readOptionStruct, detectOptionSupport } from '../../viewer_option_struct.mjs';
+import { writeVisualField, readVisualStruct } from '../../viewer_visual_struct.mjs';
+import { writeStatisticField, readStatisticStruct } from '../../viewer_stat_struct.mjs';
 import { normalizeVer, getForgeDistBase, getVersionInfo, withCacheTag } from './paths.mjs';
 import { createSceneSnap } from './snapshots.mjs';
 import installForgeAbiCompat from './forge_abi_compat.js';
@@ -98,6 +100,8 @@ class DirectBackend {
     this.snapshotState = this.snapshotDebug ? { frame: 0, lastSim: null } : null;
     this.frameSeq = 0;
     this.optionSupport = { supported: false, pointers: [] };
+    this.visualState = null;
+    this.statisticState = null;
   }
 
   #computeBoundsFromPositions(view, n) {
@@ -136,6 +140,34 @@ class DirectBackend {
       radius = Math.max(0.1, Math.max(Math.abs(cx), Math.abs(cy), Math.abs(cz)));
     }
     return { center: [cx, cy, cz], radius };
+  }
+
+  #captureStructState(scope) {
+    if (!this.mod || !(this.handle > 0)) return null;
+    try {
+      if (scope === 'mjVisual') {
+        return readVisualStruct(this.mod, this.handle | 0);
+      }
+      if (scope === 'mjStatistic') {
+        return readStatisticStruct(this.mod, this.handle | 0);
+      }
+    } catch (err) {
+      if (this.debug) {
+        this.#emitLog('direct: capture struct failed', { scope, error: String(err) });
+      }
+    }
+    return null;
+  }
+
+  #emitStructState(scope) {
+    const value = this.#captureStructState(scope);
+    if (!value) return;
+    if (scope === 'mjVisual') {
+      this.visualState = value;
+    } else if (scope === 'mjStatistic') {
+      this.statisticState = value;
+    }
+    this.#emitMessage({ kind: 'struct_state', scope, value });
   }
 
   #captureBounds() {
@@ -340,6 +372,28 @@ class DirectBackend {
           } catch (err) {
             this.#emitError(err);
           }
+        } else if (msg.target === 'mjVisual') {
+          try {
+            const ok = writeVisualField(this.mod, this.handle | 0, Array.isArray(msg.path) ? msg.path : [], msg.kind, msg.value, msg.size);
+            if (ok) {
+              this.#emitStructState('mjVisual');
+            } else if (this.debug) {
+              this.#emitLog('direct: setField (mjVisual) unsupported', { path: msg.path });
+            }
+          } catch (err) {
+            this.#emitError(err);
+          }
+        } else if (msg.target === 'mjStatistic') {
+          try {
+            const ok = writeStatisticField(this.mod, this.handle | 0, Array.isArray(msg.path) ? msg.path : [], msg.kind, msg.value, msg.size);
+            if (ok) {
+              this.#emitStructState('mjStatistic');
+            } else if (this.debug) {
+              this.#emitLog('direct: setField (mjStatistic) unsupported', { path: msg.path });
+            }
+          } catch (err) {
+            this.#emitError(err);
+          }
         }
         break;
       }
@@ -451,6 +505,8 @@ class DirectBackend {
     this.rate = typeof msg.rate === 'number' ? msg.rate : 1.0;
     this.running = true;
     this.lastSimNow = performance.now();
+    this.visualState = this.#captureStructState('mjVisual');
+    this.statisticState = this.#captureStructState('mjStatistic');
 
     const abi = this.#readAbi();
     this.#emitLog('direct: forge module ready', {
@@ -462,7 +518,15 @@ class DirectBackend {
     this.labelMode = 0;
     this.frameMode = 0;
     this.cameraMode = 0;
-    this.#emitMessage({ kind: 'ready', abi, dt: this.dt, ngeom: this.sim.ngeom?.() | 0, optionSupport: this.optionSupport });
+    this.#emitMessage({
+      kind: 'ready',
+      abi,
+      dt: this.dt,
+      ngeom: this.sim.ngeom?.() | 0,
+      optionSupport: this.optionSupport,
+      visual: this.visualState || null,
+      statistic: this.statisticState || null,
+    });
     this.#emitOptions();
     this.#snapshot();
     this.#emitRenderAssets();

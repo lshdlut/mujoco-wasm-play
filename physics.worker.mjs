@@ -2,6 +2,8 @@
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite, createLocalModule } from './bridge.mjs';
 import { writeOptionField, readOptionStruct, detectOptionSupport } from '../../viewer_option_struct.mjs';
+import { writeVisualField, readVisualStruct } from '../../viewer_visual_struct.mjs';
+import { writeStatisticField, readStatisticStruct } from '../../viewer_stat_struct.mjs';
 import installForgeAbiCompat from './forge_abi_compat.js';
 import { createSceneSnap } from './snapshots.mjs';
 
@@ -62,6 +64,27 @@ const snapshotDebug = (() => {
 })();
 
 const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
+
+function readStructState(scope) {
+  if (!mod || !(h > 0)) return null;
+  try {
+    if (scope === 'mjVisual') {
+      return readVisualStruct(mod, h);
+    }
+    if (scope === 'mjStatistic') {
+      return readStatisticStruct(mod, h);
+    }
+  } catch {}
+  return null;
+}
+
+function emitStructState(scope) {
+  const value = readStructState(scope);
+  if (!value) return;
+  try {
+    postMessage({ kind: 'struct_state', scope, value });
+  } catch {}
+}
 
 function wasmUrl(rel) { return new URL(rel, import.meta.url).href; }
 
@@ -753,7 +776,17 @@ onmessage = async (ev) => {
       labelMode = 0;
       frameMode = 0;
       cameraMode = 0;
-      postMessage({ kind:'ready', abi, dt, ngeom, optionSupport: (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] } });
+      const visualState = readStructState('mjVisual');
+      const statisticState = readStructState('mjStatistic');
+      postMessage({
+        kind: 'ready',
+        abi,
+        dt,
+        ngeom,
+        optionSupport: (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] },
+        visual: visualState || null,
+        statistic: statisticState || null,
+      });
       try { postMessage({ kind: 'options', voptFlags: [...voptFlags], sceneFlags: [...sceneFlags], labelMode, frameMode, cameraMode }); } catch {}
       // Send joint/geom mapping meta for picking->joint association (optional)
       try {
@@ -877,6 +910,28 @@ onmessage = async (ev) => {
           }
         } catch (err) {
           postMessage({ kind: 'log', message: 'worker: setField (mjOption) failed', extra: String(err) });
+        }
+      } else if (target === 'mjVisual') {
+        try {
+          const ok = writeVisualField(mod, h, Array.isArray(msg.path) ? msg.path : [], msg.kind, msg.value, msg.size);
+          if (ok) {
+            emitStructState('mjVisual');
+          } else if (snapshotDebug) {
+            postMessage({ kind: 'log', message: 'worker: setField (mjVisual) unsupported', extra: String(msg.path || []) });
+          }
+        } catch (err) {
+          postMessage({ kind: 'log', message: 'worker: setField (mjVisual) failed', extra: String(err) });
+        }
+      } else if (target === 'mjStatistic') {
+        try {
+          const ok = writeStatisticField(mod, h, Array.isArray(msg.path) ? msg.path : [], msg.kind, msg.value, msg.size);
+          if (ok) {
+            emitStructState('mjStatistic');
+          } else if (snapshotDebug) {
+            postMessage({ kind: 'log', message: 'worker: setField (mjStatistic) unsupported', extra: String(msg.path || []) });
+          }
+        } catch (err) {
+          postMessage({ kind: 'log', message: 'worker: setField (mjStatistic) failed', extra: String(err) });
         }
       }
     } else if (msg.cmd === 'applyForce') {

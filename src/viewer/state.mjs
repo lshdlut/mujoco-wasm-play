@@ -53,6 +53,8 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   },
   model: {
     opt: {},
+    vis: {},
+    stat: {},
     ctrl: [],
     optSupport: { supported: false, pointers: [] },
   },
@@ -117,6 +119,20 @@ function cloneState(state) {
   return JSON.parse(JSON.stringify(state));
 }
 
+function cloneStruct(value) {
+  if (!value) return null;
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(value);
+    } catch {}
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
 function deepMerge(target, patch) {
   const output = Array.isArray(target) ? [...target] : { ...target };
   if (!patch) return output;
@@ -157,6 +173,35 @@ function resolveStructPath(target, pathSegments) {
     current = current?.[segment];
   }
   return current;
+}
+
+function assignStructPath(target, pathSegments, value) {
+  if (!target || !Array.isArray(pathSegments) || !pathSegments.length) return;
+  let cursor = target;
+  for (let i = 0; i < pathSegments.length; i += 1) {
+    const segment = pathSegments[i];
+    const match = typeof segment === 'string' ? segment.match(/^(.*)\[(\d+)\]$/) : null;
+    const key = match ? match[1] : segment;
+    const hasIndex = !!match;
+    const index = hasIndex ? Number(match[2]) : -1;
+    if (i === pathSegments.length - 1) {
+      if (hasIndex) {
+        cursor[key] = Array.isArray(cursor[key]) ? cursor[key] : [];
+        cursor[key][index] = value;
+      } else {
+        cursor[key] = value;
+      }
+      return;
+    }
+    if (hasIndex) {
+      cursor[key] = Array.isArray(cursor[key]) ? cursor[key] : [];
+      cursor[key][index] = cursor[key][index] || {};
+      cursor = cursor[key][index];
+    } else {
+      cursor[key] = cursor[key] || {};
+      cursor = cursor[key];
+    }
+  }
 }
 
 function resolveModelFileName(raw) {
@@ -331,6 +376,14 @@ function mergeBackendSnapshot(draft, snapshot) {
       ...snapshot.options,
     };
   }
+  if (snapshot.visual) {
+    if (!draft.model) draft.model = {};
+    draft.model.vis = deepMerge(draft.model.vis || {}, snapshot.visual);
+  }
+  if (snapshot.statistic) {
+    if (!draft.model) draft.model = {};
+    draft.model.stat = deepMerge(draft.model.stat || {}, snapshot.statistic);
+  }
   if (snapshot.ctrl && mirrorCtrl) {
     if (!draft.model) draft.model = {};
     draft.model.ctrl = Array.isArray(snapshot.ctrl)
@@ -435,6 +488,27 @@ function applyBinding(draft, binding, value, control) {
   if (binding?.startsWith('Simulate::enableactuator[')) {
     const name = control?.label ?? control?.name ?? binding;
     draft.physics.actuatorGroups[name] = bool(value);
+    return true;
+  }
+  return false;
+}
+
+function applyStructBindingToModel(draft, scope, pathSegments, value) {
+  if (!scope || !Array.isArray(pathSegments)) return false;
+  if (!draft.model) draft.model = {};
+  if (scope === 'mjOption') {
+    draft.model.opt = draft.model.opt || {};
+    assignStructPath(draft.model.opt, pathSegments, value);
+    return true;
+  }
+  if (scope === 'mjVisual') {
+    draft.model.vis = draft.model.vis || {};
+    assignStructPath(draft.model.vis, pathSegments, value);
+    return true;
+  }
+  if (scope === 'mjStatistic') {
+    draft.model.stat = draft.model.stat || {};
+    assignStructPath(draft.model.stat, pathSegments, value);
     return true;
   }
   return false;
@@ -555,6 +629,14 @@ function readBindingValue(state, binding, control) {
       const value = resolveStructPath(state.model?.opt, path);
       return value;
     }
+    if (scope === 'mjVisual') {
+      const value = resolveStructPath(state.model?.vis, path);
+      return value;
+    }
+    if (scope === 'mjStatistic') {
+      const value = resolveStructPath(state.model?.stat, path);
+      return value;
+    }
   }
   const voptMatch = binding?.match(/^mjvOption::flags\[(\d+)\]$/);
   if (voptMatch) {
@@ -640,6 +722,9 @@ export async function applySpecAction(store, backend, control, rawValue) {
 
   store.update((draft) => {
     applyControl(draft, control, value);
+    if (prepared) {
+      applyStructBindingToModel(draft, prepared.meta.scope, prepared.meta.path, prepared.value);
+    }
     if (snapshot) {
       mergeBackendSnapshot(draft, snapshot);
     }
@@ -768,6 +853,8 @@ function resolveSnapshot(state) {
     ctrl: state.ctrl ? Array.from(state.ctrl) : null,
     frameId: Number.isFinite(state.frameId) ? (state.frameId | 0) : null,
     optionSupport: state.optionSupport ? { ...state.optionSupport } : null,
+    visual: cloneStruct(state.visual),
+    statistic: cloneStruct(state.statistic),
     xpos: viewOrNull(state.xpos, Float64Array),
     xmat: viewOrNull(state.xmat, Float64Array),
     gsize: viewOrNull(state.gsize, Float64Array),
@@ -868,6 +955,8 @@ export async function createBackend(options = {}) {
     options: null,
     ctrl: null,
     optionSupport: { supported: false, pointers: [] },
+    visual: null,
+    statistic: null,
   };
   let lastFrameId = -1;
   let messageHandler = null;
@@ -1033,6 +1122,12 @@ export async function createBackend(options = {}) {
         if (data.optionSupport) {
           lastSnapshot.optionSupport = data.optionSupport;
         }
+        if (data.visual) {
+          lastSnapshot.visual = data.visual;
+        }
+        if (data.statistic) {
+          lastSnapshot.statistic = data.statistic;
+        }
         updateGeometryCaches(data);
         if (data.gesture) {
           lastSnapshot.gesture = {
@@ -1062,6 +1157,15 @@ export async function createBackend(options = {}) {
         applyOptionSnapshot(data);
         notifyListeners();
         break;
+      case 'struct_state': {
+        if (data.scope === 'mjVisual') {
+          lastSnapshot.visual = data.value || null;
+        } else if (data.scope === 'mjStatistic') {
+          lastSnapshot.statistic = data.value || null;
+        }
+        notifyListeners();
+        break;
+      }
       case 'meta': {
         try {
           // Actuator metadata for dynamic control UI
