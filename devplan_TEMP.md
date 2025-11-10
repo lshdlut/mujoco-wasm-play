@@ -1,28 +1,102 @@
-# Temporary Dev Plan
+Dev Plan — MuJoCo WASM Play: Simulate Parity Roadmap
 
-## Objective
-Track the immediate follow-up items from the helper-ABI investigation: ensure mesh payload changes stay verified, document the remaining `t = 0` anomaly, and outline the quick validation path requested by the user.
+Scope
+- Goal: Reach near feature parity with MuJoCo “simulate” for interactive viewing and control, running on Forge/WASM 3.3.7.
+- Non‑goals: Full native UI replication, offscreen GPU features, persistence/cloud features.
 
-## Plan
-1. Confirm the critical information collected so far (mesh fix in `physics.worker.mjs`, helper-pointer behaviour, required cwrap usage).
-2. Record the recommended diagnostic steps for reproducing/isolating the `t = 0` issue directly against the forge module.
-3. Keep a lightweight task log so we know what has already been validated versus what still needs escalation to forge.
+Assumptions
+- Forge artifacts available at `local_tools/forge/dist/3.3.7/mujoco-3.3.7.{js,wasm}`.
+- Viewer runs from repo root via `scripts/dev_server.py` and Playwright e2e tests.
+- Current code paths: Worker or Direct backend, three.js renderer, UI spec‐driven panels/hotkeys.
 
-## Key Information Confirmed
-- `physics.worker.mjs:382` now passes `renderAssets?.meshes` into `createSceneSnap`, ensuring mesh data reaches the viewer.
-- The stagnating simulation time stems from invoking `mjwf_mj_step` with incorrect parameters or mismatched module bindings; helper pointers themselves should reflect stepped state because they target the same `g_pool[h]` memory as the rest of the ABI.
-- Proper usage requires binding `mjwf_helper_*`, `mjwf_model_*`, `mjwf_data_*`, and `mjwf_mj_*` via `cwrap` (without leading underscores) on the same `Module` instance, then reading double values through `HEAPF64` using `ptr >> 3`.
+Milestones & Deliverables
+M0 — Baseline (DONE)
+- Commit current baseline before plan (tracked).
 
-## Diagnostic Checklist
-- Use a single `mod` instance to cwrap:
-  - `mjwf_helper_make_from_xml`, `mjwf_helper_model_ptr`, `mjwf_helper_data_ptr`, `mjwf_data_time_ptr`, `mjwf_mj_step`.
-- After creating `h`, derive `modelPtr`/`dataPtr` and call `mjwf_mj_step(modelPtr, dataPtr)` in a loop; verify `HEAPF64[timePtr >> 3]` increases by `opt.timestep`.
-- If the time value remains zero, log the cwrap signatures, pointer values, and the outputs of `mjwf_helper_errno_last(_global)` for escalation.
+M1 — Options Editing: mjVisual + mjStatistic write‑through
+- Add structure layouts for `mjVisual` and `mjStatistic` similar to `viewer_option_struct.mjs`.
+- Extend backends (`physics.worker.mjs`, `direct_backend.mjs`) setField to support targets: `mjOption` (existing), `mjVisual`, `mjStatistic`.
+- Enable related UI controls: Visualization (global, headlight, map, scale, rgba…), Statistic (center, extent, meansize).
+- Tests: e2e edits reflect in backend options snapshot; renderer responds to key toggles.
 
-## Task Log
-- Confirmed mesh-transfer fix already lands in worker snapshot output.
-- Documented the suspected root causes for the zero-time issue and the precise cwrap/HEAP usage expected by forge.
-- Prepared this temporary plan to keep the investigation path explicit until forge feedback arrives.
-- Ran `local_tools/tmp_helper_diag.mjs` with `local_tools/bin/node.exe`; helper pointers plus `_mjwf_mj_step` advanced `time` from `0` to `2.0` after 1000 steps (dt=0.002), confirming the ABI path works end-to-end in Node.
-- Instrumented `bridge.mjs`/`physics.worker.mjs` so `MjSimLite.pointerDiagnostics()` and the worker log stream dump module IDs, helper pointers, and live `time/timestep` readings right after load and on the first snapshot.
-- Switched `MjSimLite` to build handles via the helper ABI, drive stepping through `_mjwf_mj_step`, and expose pointer-derived `time/timestep`; validated via `local_tools/tmp_simlite_diag.mjs` that helper handles now yield non-zero pointers and `time` advances to `2.0` after 1000 steps.
+M2 — Camera Modes: Free / Tracking / Fixed (model cameras)
+- Enumerate model cameras from Forge exports; maintain camera list in render context.
+- Implement mode switching in backend state and apply in `viewer_renderer.mjs` + `viewer_camera.mjs`.
+- Tracking mode targets bounds center; Fixed modes use model‑defined poses.
+- Tests: hotkeys/select change camera, HUD reflects mode, image difference tolerances.
+
+M3 — Groups & Visibility
+- Wire `mjvOption::*group[]` to renderer visibility: geom/site/joint/tendon/actuator/flex/skin.
+- Update renderer to hide/show meshes by group efficiently.
+- Tests: toggling groups affects drawn count and pixels.
+
+M4 — Contacts & Debug Overlays
+- Render contact points and (optionally) force arrows; draw frame axes and labels based on label/frame modes.
+- Use `contacts` payload from backend; add simple geometry pools.
+- Tests: enabling contact flags renders primitives; snapshot contains expected overlays.
+
+M5 — Picking & Perturbation
+- Raycast to geom; map to joint/body; feed `applyForce`/perturb hooks in backend.
+- UI feedback: selection highlight, simple HUD messages.
+- Tests: click applies force (state changes), selection toggles.
+
+M6 — History / Keyframe / Watch
+- Backend ring buffer of states for scrub; implement key load/save and copy; implement watch value probe (qpos/qvel/… ).
+- Tests: scrub freezes time; key save/load changes state deterministically; watch updates live.
+
+M7 — Rendering Polish & Parity Nits
+- Environment controls (fog/haze/skybox/reflection), grid policy, light/shadow tuning, PBR export‑quality screenshot.
+- Ensure vopt/scene flag defaults match simulate feel.
+- Tests: visual toggles flip renderer state; export PNG is consistent.
+
+M8 — E2E Coverage & CI Hooks
+- Extend `scripts/e2e/simulate_parity.spec.ts` with new cases (camera modes, contacts, groups, options edits, picking).
+- Add golden image sampling for a small stable model with tolerance.
+
+Work Breakdown (File‑level)
+- Backends
+  - `physics.worker.mjs`: setField support for `mjVisual`/`mjStatistic`; continue posting `options` snapshot; expose camera meta and group flags as needed; keep applyForce.
+  - `direct_backend.mjs`: mirror worker behavior for debug mode; keep in‑thread stepping.
+  - New: `viewer_visual_struct.mjs`, `viewer_stat_struct.mjs` (pointer maps, read/write helpers like `viewer_option_struct.mjs`).
+- Viewer State / Controls
+  - `src/viewer/state.mjs`: merge backend snapshots (new `options` fields), handle cameraMode semantics, track group flags.
+  - `viewer_controls.mjs`: enable/disable controls based on pointer support; hook radio/select/slider to new setField paths.
+- Renderer
+  - `viewer_renderer.mjs`:
+    - Camera list + switching, tracking camera behavior.
+    - Group visibility masking.
+    - Contact/force vectors, frame axes, basic labels.
+    - Keep pooled materials/geometries; ensure performance.
+
+Test Plan
+- Local server: `python scripts/dev_server.py --root . --port 8080`.
+- Manual:
+  - Worker: `http://localhost:8080/index.html?ver=3.3.7&debug=1`  
+  - Direct: `http://localhost:8080/index.html?ver=3.3.7&mode=direct&nofallback=1&debug=1`
+- E2E: `npm i && npm run ci` or `npx playwright test --reporter=list --timeout=90000`.
+- Worker harness: `python scripts/worker_debug.py --python C:\\Users\\63427\\miniforge3\\envs\\myconda\\python.exe --port 8080 --wait 3`.
+
+Acceptance Checklist (update as we go)
+- [ ] M1: Edit mjVisual/mjStatistic fields reflect in snapshot and view.
+- [ ] M2: Camera modes switch with UI and hotkeys; fixed cameras visible.
+- [ ] M3: Group toggles affect visibility and drawn counts.
+- [ ] M4: Contact points/forces/frames render when flags set.
+- [ ] M5: Picking applies forces; selection feedback works.
+- [ ] M6: History/keyframe/watch operate; scrub stable.
+- [ ] M7: Rendering polish: fog/haze/skybox/reflection toggles; screenshot consistent.
+- [ ] M8: E2E tests extended; greens locally.
+
+Engineering Notes
+- Keep artifacts/logs out of VCS (use `%TEMP%` or `/tmp`).
+- Prefer `worker` backend for consistency; ensure `direct` stays functional for debugging.
+- Cache bust `.wasm` via `version.json` (sha tag) when present.
+- Add instrumentation logs only under debug flags; throttle logs in production.
+
+Risks & Mitigations
+- Pointer export variance across Forge builds → gate UI with `optionSupport` and new visual/stat support flags.
+- Performance regressions → keep geometry/material pools; avoid per‑frame allocations; batch overlay updates.
+- Cross‑browser differences → cap DPR to 2; conservative shadow configs.
+
+Journal (fill as each milestone completes)
+- [M0] 2025‑11‑10 Baseline committed before plan.
+- [M1] …
