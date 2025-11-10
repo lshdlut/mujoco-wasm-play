@@ -76,6 +76,73 @@ function computeGeomRadius(type, sx, sy, sz) {
   }
 }
 
+function clampUnit(value) {
+  if (!Number.isFinite(value)) return 0;
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
+}
+
+function rgbFromArray(arr, fallback = [1, 1, 1]) {
+  if (Array.isArray(arr) && arr.length >= 3) {
+    return [
+      clampUnit(Number(arr[0])),
+      clampUnit(Number(arr[1])),
+      clampUnit(Number(arr[2])),
+    ];
+  }
+  return fallback.slice();
+}
+
+function averageRGB(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return 0;
+  return arr.reduce((acc, v) => acc + (Number(v) || 0), 0) / arr.length;
+}
+
+function applyVisualLighting(ctx, vis) {
+  if (!vis || !ctx) return;
+  const head = vis.headlight || {};
+  const diffuseRGB = rgbFromArray(head.diffuse, [1, 1, 1]);
+  const ambientRGB = rgbFromArray(head.ambient, [0.2, 0.2, 0.2]);
+  const active = (head.active ?? 1) !== 0;
+  const diffuseStrength = Math.max(0.05, averageRGB(diffuseRGB) * 3);
+  const ambientStrength = Math.max(0.01, averageRGB(ambientRGB));
+  if (ctx.light) {
+    ctx.light.intensity = active ? diffuseStrength : 0;
+    ctx.light.color.setRGB(diffuseRGB[0], diffuseRGB[1], diffuseRGB[2]);
+  }
+  if (ctx.fill) {
+    ctx.fill.intensity = active ? diffuseStrength * 0.35 : 0;
+    ctx.fill.color.setRGB(diffuseRGB[0], diffuseRGB[1], diffuseRGB[2]);
+  }
+  if (ctx.ambient) {
+    ctx.ambient.intensity = ambientStrength;
+    ctx.ambient.color.setRGB(ambientRGB[0], ambientRGB[1], ambientRGB[2]);
+  }
+}
+
+function applyVisualFog(ctx, vis, stat, bounds) {
+  if (!ctx?.scene?.fog || !vis?.map) return;
+  const map = vis.map;
+  const extent = Math.max(
+    0.1,
+    Number(stat?.extent) || Number(bounds?.radius) || 1
+  );
+  const fogStart = Number(map.fogstart);
+  const fogEnd = Number(map.fogend);
+  if (Number.isFinite(fogStart) && Number.isFinite(fogEnd)) {
+    const near = Math.max(0.001, extent * fogStart);
+    const far = Math.max(near + 0.1, extent * fogEnd);
+    ctx.scene.fog.near = near;
+    ctx.scene.fog.far = far;
+  }
+  const fogColor = vis?.rgba?.fog;
+  if (fogColor && ctx.scene.fog?.color) {
+    const color = rgbFromArray(fogColor, [0.84, 0.9, 0.96]);
+    ctx.scene.fog.color.setRGB(color[0], color[1], color[2]);
+  }
+}
+
 function computeBoundsFromSnapshot(snapshot) {
   const n = snapshot?.ngeom | 0;
   const xpos = snapshot?.xpos;
@@ -1017,6 +1084,13 @@ export function createRendererManager({
     }
     if (typeof ensureEnvIfNeeded === 'function') {
       ensureEnvIfNeeded(context, state);
+    }
+
+    const visStruct = state.model?.vis || null;
+    const statStruct = state.model?.stat || null;
+    if (visStruct) {
+      applyVisualLighting(context, visStruct);
+      applyVisualFog(context, visStruct, statStruct, context.bounds);
     }
 
     const defaults = getDefaultVopt(context, state);

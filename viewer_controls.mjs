@@ -757,14 +757,20 @@ function registerShortcutHandlers(shortcutSpec, handler) {
         if (value === undefined || value === null) return;
         if (mode === 'text') {
           input.value = value == null ? '' : String(value);
+          return;
+        }
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          input.value = '';
+          return;
+        }
+        const clamped = Math.min(range.max, Math.max(range.min, numeric));
+        if (mode === 'int') {
+          input.value = String(clamped | 0);
+        } else if (mode === 'float') {
+          input.value = formatNumber(clamped);
         } else {
-          const numeric = Number(value);
-          if (Number.isFinite(numeric)) {
-            const clamped = Math.min(range.max, Math.max(range.min, numeric));
-            input.value = String(clamped);
-          } else {
-            input.value = '';
-          }
+          input.value = String(clamped);
         }
       },
     });
@@ -784,7 +790,13 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       } else {
         const numeric = Number(input.value);
         raw = Number.isFinite(numeric) ? Math.min(range.max, Math.max(range.min, numeric)) : range.min;
-        input.value = String(raw);
+        if (mode === 'float') {
+          input.value = formatNumber(raw);
+        } else if (mode === 'int') {
+          input.value = String(raw | 0);
+        } else {
+          input.value = String(raw);
+        }
       }
       await applySpecAction(store, backend, control, raw);
     });
