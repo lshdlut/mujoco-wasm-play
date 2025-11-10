@@ -416,24 +416,29 @@ class MaterialPool {
     if (this.cache.has(key)) return this.cache.get(key);
     const T = this.THREE;
     let mat;
+    const forceBasic = (typeof window !== 'undefined') && (window.location?.search?.includes('forceBasic=1'));
     if (spec.kind === 'standard') {
-      mat = new T.MeshStandardMaterial({
-        color: spec.color ?? 0xffffff,
-        roughness: spec.roughness ?? 0.55,
-        metalness: spec.metalness ?? 0.0,
-        wireframe: !!spec.wireframe,
-      });
+      mat = forceBasic
+        ? new T.MeshBasicMaterial({ color: spec.color ?? 0xffffff, wireframe: !!spec.wireframe })
+        : new T.MeshStandardMaterial({
+            color: spec.color ?? 0xffffff,
+            roughness: spec.roughness ?? 0.55,
+            metalness: spec.metalness ?? 0.0,
+            wireframe: !!spec.wireframe,
+          });
     } else {
-      mat = new T.MeshPhysicalMaterial({
-        color: spec.color ?? 0xffffff,
-        roughness: spec.roughness ?? 0.55,
-        metalness: spec.metalness ?? 0.0,
-        clearcoat: 0.2,
-        clearcoatRoughness: 0.15,
-        specularIntensity: 0.25,
-        ior: 1.5,
-        wireframe: !!spec.wireframe,
-      });
+      mat = forceBasic
+        ? new T.MeshBasicMaterial({ color: spec.color ?? 0xffffff, wireframe: !!spec.wireframe })
+        : new T.MeshPhysicalMaterial({
+            color: spec.color ?? 0xffffff,
+            roughness: spec.roughness ?? 0.55,
+            metalness: spec.metalness ?? 0.0,
+            clearcoat: 0.2,
+            clearcoatRoughness: 0.15,
+            specularIntensity: 0.25,
+            ior: 1.5,
+            wireframe: !!spec.wireframe,
+          });
     }
     mat.userData = mat.userData || {};
     mat.userData.pooled = true;
@@ -746,6 +751,13 @@ export function createRendererManager({
       if (!ctx.initialized || !ctx.renderer || !ctx.scene || !ctx.camera) return;
       // Background/environment is managed by environment manager (ensureEnvIfNeeded)
       ctx.renderer.render(ctx.scene, ctx.camera);
+      // Expose a simple frame counter for headless readiness checks
+      try {
+        ctx._frameCounter = (ctx._frameCounter || 0) + 1;
+        if (typeof window !== 'undefined') {
+          window.__frameCounter = ctx._frameCounter;
+        }
+      } catch {}
     };
     ctx.frameId = window.requestAnimationFrame(step);
     if (!ctx.loopCleanup) {
@@ -777,11 +789,17 @@ export function createRendererManager({
   function initRenderer() {
     if (ctx.initialized || !canvas) return ctx;
 
+    const wantPreserve = (typeof window !== 'undefined') && (
+      window.PLAY_SNAPSHOT_DEBUG === true || window.PLAY_SNAPSHOT_DEBUG === 1 || window.PLAY_SNAPSHOT_DEBUG === '1' ||
+      window.__snapshot === 1 || window.__snapshot === true ||
+      (typeof window.location?.search === 'string' && window.location.search.includes('snapshot=1'))
+    );
     const renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
       alpha: false,
       powerPreference: 'high-performance',
+      preserveDrawingBuffer: wantPreserve,
     });
     if (typeof window !== 'undefined') {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -795,6 +813,100 @@ export function createRendererManager({
     renderer.setClearColor(0xd6dce4, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
+
+    // Snapshot helpers: readiness + PBR export of final frame
+    if (typeof window !== 'undefined' && (!window.exportPNG || !window.whenReady)) {
+      try {
+        window.whenReady = async () => {
+          try {
+            const r = renderer;
+            const scn = scene;
+            const cam = (ctx && ctx.camera) ? ctx.camera : camera;
+            if (!r || !scn || !cam) return false;
+            const texReady = () => {
+              try { return !!scn.environment && !!scn.environment.isTexture && scn.environment.isRenderTargetTexture !== true; } catch { return false; }
+            };
+            const drew = () => {
+              try { return (r.info?.render?.triangles || 0) > 0 || (window.__drawnCount || 0) > 3; } catch { return false; }
+            };
+            const compiled = () => {
+              try { return Array.isArray(r.info?.programs) ? r.info.programs.length > 0 : true; } catch { return true; }
+            };
+            for (let i = 0; i < 120; i += 1) {
+              await new Promise((res) => requestAnimationFrame(res));
+              if (texReady() && drew() && compiled()) break;
+            }
+            window.__ready = true;
+            return true;
+          } catch { window.__ready = true; return false; }
+        };
+
+        // Export exactly the current frame as seen on screen (no state changes)
+        window.exportExactPNG = async () => {
+          try {
+            await (window.whenReady ? window.whenReady() : Promise.resolve());
+            const r = renderer;
+            const scn = scene;
+            const cam = (ctx && ctx.camera) ? ctx.camera : camera;
+            if (!r || !scn || !cam) return null;
+            r.setRenderTarget?.(null);
+            r.render(scn, cam);
+            const url = r.domElement && typeof r.domElement.toDataURL === 'function'
+              ? r.domElement.toDataURL('image/png')
+              : null;
+            if (typeof window !== 'undefined') {
+              window.__viewerCanvasDataUrlLength = url ? url.length : 0;
+            }
+            return url || null;
+          } catch (err) {
+            try { console.warn('[render] exportExactPNG failed', err); } catch {}
+            return null;
+          }
+        };
+
+        window.exportPNG = async () => {
+          try {
+            await (window.whenReady ? window.whenReady() : Promise.resolve());
+            const r = renderer;
+            const scn = scene;
+            const cam = (ctx && ctx.camera) ? ctx.camera : camera;
+            if (!r || !scn || !cam) return null;
+            // Ensure depth/alpha consistent for the frame
+            try {
+              const gl = r.getContext?.();
+              if (gl) { gl.enable(gl.DEPTH_TEST); gl.depthMask(true); }
+            } catch {}
+            const saved = [];
+            try {
+              scn.traverse((o) => {
+                if (o && o.isMesh && o.material) {
+                  saved.push([o, {
+                    dt: !!o.material.depthTest,
+                    dw: !!o.material.depthWrite,
+                    tr: !!o.material.transparent,
+                    ro: Number(o.renderOrder || 0),
+                  }]);
+                  if ('depthTest' in o.material) o.material.depthTest = true;
+                  if ('depthWrite' in o.material) o.material.depthWrite = true;
+                  if ('transparent' in o.material) o.material.transparent = false;
+                  o.renderOrder = 0;
+                }
+              });
+            } catch {}
+            r.setRenderTarget?.(null);
+            r.render(scn, cam);
+            const url = r.domElement?.toDataURL?.('image/png');
+            window.__viewerCanvasDataUrlLength = url ? url.length : 0;
+            // restore
+            try { for (const [o, m] of saved) { o.material.depthTest = m.dt; o.material.depthWrite = m.dw; o.material.transparent = m.tr; o.renderOrder = m.ro; } } catch {}
+            return url || null;
+          } catch (err) {
+            try { console.warn('[render] exportPNG failed', err); } catch {}
+            return null;
+          }
+        };
+      } catch {}
+    }
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog(0xd6dce4, 12, 48);
@@ -895,6 +1007,7 @@ export function createRendererManager({
     if (!snapshot || !state) return;
     const context = initRenderer();
     if (!context.initialized) return;
+    const renderer = context.renderer;
 
     const assets = state.rendering?.assets || null;
     syncRendererAssets(context, assets);
@@ -1020,6 +1133,12 @@ export function createRendererManager({
       t: typeof snapshot.t === 'number' ? snapshot.t : null,
     };
     setRenderStats(stats);
+    try {
+      if (typeof window !== 'undefined') {
+        window.__drawnCount = drawn;
+        window.__ngeom = ngeom;
+      }
+    } catch {}
 
     if (typeof context.envIntensity === 'number' && context.envIntensity !== context.lastEnvIntensity) {
       const intensity = context.envIntensity;
@@ -1163,6 +1282,46 @@ export function createRendererManager({
           copyState.seq === context.copySeq
         ));
     context.grid.visible = gridVisible;
+
+    const gl = renderer && typeof renderer.getContext === 'function' ? renderer.getContext() : null;
+    if (typeof debugMode !== 'undefined' && debugMode && gl && !context.__debugMagentaTested) {
+      try {
+        if (typeof renderer?.setRenderTarget === 'function') {
+          renderer.setRenderTarget(null);
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.disable(gl.SCISSOR_TEST);
+        gl.colorMask(true, true, true, true);
+        gl.depthMask(true);
+        const prevClear = gl.getParameter(gl.COLOR_CLEAR_VALUE);
+        // Also capture renderer clear color as a robust fallback
+        const prevRendererColor = (() => {
+          try {
+            const c = renderer.getClearColor(new THREE.Color());
+            const a = renderer.getClearAlpha?.() ?? 1;
+            return [c.r, c.g, c.b, a];
+          } catch { return null; }
+        })();
+        gl.clearColor(1, 0, 1, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        const pixels = new Uint8Array(4);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        console.log('[render] magenta test sample', Array.from(pixels));
+        const restore = (arr) => { try { gl.clearColor(arr[0], arr[1], arr[2], arr[3]); } catch {} };
+        if (Array.isArray(prevClear) && prevClear.length === 4) {
+          restore(prevClear);
+        } else if (Array.isArray(prevRendererColor) && prevRendererColor.length === 4) {
+          restore(prevRendererColor);
+        } else {
+          // Final fallback to the light UI background
+          const c = new THREE.Color(0xd6dce4);
+          restore([c.r, c.g, c.b, 1]);
+        }
+      } catch (err) {
+        console.warn('[render] magenta test failed', err);
+      }
+      context.__debugMagentaTested = true;
+    }
   }
 
   function setup() {
@@ -1177,6 +1336,9 @@ export function createRendererManager({
     updateViewport: () => updateRendererViewport(),
   };
 }
+
+
+
 
 
 

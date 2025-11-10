@@ -4,6 +4,8 @@ import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, r
 import { writeOptionField, readOptionStruct, detectOptionSupport } from '../../viewer_option_struct.mjs';
 import installForgeAbiCompat from './forge_abi_compat.js';
 import { createSceneSnap } from './snapshots.mjs';
+
+const FORCE_EPS = 1e-9;
 // Minimal local getView to avoid path issues in buildless mode
 function getView(mod, ptr, dtype, len) {
   if (!ptr || !len) {
@@ -216,6 +218,28 @@ function captureBounds() {
   return computeBoundsFromPositions(view, n);
 }
 
+function summariseForceArray(arr, nbody) {
+  if (!(arr instanceof Float64Array) && !Array.isArray(arr)) return null;
+  const bodyCount = Math.max(0, Number(nbody) | 0);
+  if (!(bodyCount > 0)) return null;
+  let active = 0;
+  let maxMagSq = 0;
+  for (let body = 0; body < bodyCount; body += 1) {
+    const base = body * 6;
+    if (base + 5 >= arr.length) break;
+    let magSq = 0;
+    for (let i = 0; i < 6; i += 1) {
+      const v = Number(arr[base + i]) || 0;
+      magSq += v * v;
+    }
+    if (magSq > FORCE_EPS) {
+      active += 1;
+      if (magSq > maxMagSq) maxMagSq = magSq;
+    }
+  }
+  return { activeBodies: active, maxMagnitude: Math.sqrt(maxMagSq || 0) };
+}
+
 function captureCopyState(precision) {
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const nq = readModelCount('nq');
@@ -385,6 +409,7 @@ async function loadXmlWithFallback(xmlText) {
 function snapshot() {
   if (!sim || !(sim.h > 0)) return;
   const n = sim.ngeom?.() | 0;
+  const nbodyLocal = sim.nbody?.() | 0;
   const xposView = sim.geomXposView?.();
   const xmatView = sim.geomXmatView?.();
   const xpos = xposView ? new Float64Array(xposView) : new Float64Array(0);
@@ -395,6 +420,9 @@ function snapshot() {
   const gdataidView = sim.geomDataidView?.();
   const matRgbaView = sim.matRgbaView?.();
   const ctrlView = sim.ctrlView?.();
+  const xfrcView = sim.xfrcAppliedView?.();
+  const qfrcView = sim.qfrcAppliedView?.();
+  const sensordataView = sim.sensordataView?.();
   const tSim = sim.time?.() || 0;
   if (!diagStagesLogged.has('first_snapshot')) {
     logSimPointers('first_snapshot');
@@ -459,6 +487,7 @@ function snapshot() {
     ngeom: n,
     nq,
     nv,
+    nbody: nbodyLocal,
     xpos,
     xmat,
     gesture,
@@ -477,11 +506,33 @@ function snapshot() {
   if (optionsStruct) {
     msg.options = optionsStruct;
   }
-  if (gsizeView) { const gsize = new Float64Array(gsizeView); msg.gsize = gsize; transfers.push(gsize.buffer); }
-  if (gtypeView) { const gtype = new Int32Array(gtypeView); msg.gtype = gtype; transfers.push(gtype.buffer); }
-  if (gmatidView) { const gmatid = new Int32Array(gmatidView); msg.gmatid = gmatid; transfers.push(gmatid.buffer); }
-  if (gdataidView) { const gdataid = new Int32Array(gdataidView); msg.gdataid = gdataid; transfers.push(gdataid.buffer); }
-  if (matRgbaView) { const matrgba = new Float32Array(matRgbaView); msg.matrgba = matrgba; transfers.push(matrgba.buffer); }
+  if (gsizeView) {
+    if (snapshotDebug) console.log('[worker] gsize view len', gsizeView.length);
+    const gsize = new Float64Array(gsizeView);
+    msg.gsize = gsize;
+    transfers.push(gsize.buffer);
+  }
+  if (gtypeView) {
+    if (snapshotDebug) console.log('[worker] gtype view len', gtypeView.length);
+    const gtype = new Int32Array(gtypeView);
+    msg.gtype = gtype;
+    transfers.push(gtype.buffer);
+  }
+  if (gmatidView) {
+    const gmatid = new Int32Array(gmatidView);
+    msg.gmatid = gmatid;
+    transfers.push(gmatid.buffer);
+  }
+  if (gdataidView) {
+    const gdataid = new Int32Array(gdataidView);
+    msg.gdataid = gdataid;
+    transfers.push(gdataid.buffer);
+  }
+  if (matRgbaView) {
+    const matrgba = new Float32Array(matRgbaView);
+    msg.matrgba = matrgba;
+    transfers.push(matrgba.buffer);
+  }
   if (ctrl) {
     msg.ctrl = ctrl;
     transfers.push(ctrl.buffer);
@@ -490,11 +541,76 @@ function snapshot() {
       try { postMessage({ kind:'log', message:'worker: ctrl sample', extra:{ len: ctrl.length, sample: Array.from(ctrl.slice(0, Math.min(4, ctrl.length))) } }); } catch {}
     }
   }
-  msg.contacts = null;
+  if (xfrcView) {
+    const xfrc = new Float64Array(xfrcView);
+    msg.xfrc_applied = xfrc;
+    transfers.push(xfrc.buffer);
+    const summary = summariseForceArray(xfrc, nbodyLocal);
+    if (summary) msg.force_meta = summary;
+  }
+  if (qfrcView) {
+    const qfrc = new Float64Array(qfrcView);
+    msg.qfrc_applied = qfrc;
+    transfers.push(qfrc.buffer);
+  }
+  if (sensordataView) {
+    const sens = new Float64Array(sensordataView);
+    msg.sensordata = sens;
+    transfers.push(sens.buffer);
+  }
+  let contacts = null;
+  try {
+    const ncon = sim.ncon?.() | 0;
+    if (ncon > 0) {
+      const posView = sim.contactPosView?.();
+      if (posView) {
+        contacts = { n: ncon };
+        const pos = new Float64Array(posView);
+        contacts.pos = pos;
+        transfers.push(pos.buffer);
+        const frameView = sim.contactFrameView?.();
+        if (frameView) {
+          const frame = new Float64Array(frameView);
+          contacts.frame = frame;
+          transfers.push(frame.buffer);
+        }
+        const geom1View = sim.contactGeom1View?.();
+        if (geom1View) {
+          const geom1 = new Int32Array(geom1View);
+          contacts.geom1 = geom1;
+          transfers.push(geom1.buffer);
+        }
+        const geom2View = sim.contactGeom2View?.();
+        if (geom2View) {
+          const geom2 = new Int32Array(geom2View);
+          contacts.geom2 = geom2;
+          transfers.push(geom2.buffer);
+        }
+        const distView = sim.contactDistView?.();
+        if (distView) {
+          const dist = new Float64Array(distView);
+          contacts.dist = dist;
+          transfers.push(dist.buffer);
+        }
+        const fricView = sim.contactFrictionView?.();
+        if (fricView) {
+          const fric = new Float64Array(fricView);
+          contacts.fric = fric;
+          transfers.push(fric.buffer);
+        }
+      }
+    }
+  } catch (err) {
+    if (snapshotDebug) {
+      try { postMessage({ kind: 'log', message: 'worker: contact extraction failed', extra: String(err) }); } catch {}
+    }
+  }
+  msg.contacts = contacts || null;
   if (scenePayload) {
     msg.scene_snapshot = { source: 'sim', frame: snapshotState.frame - 1, snap: scenePayload };
   }
   try {
+    if (snapshotDebug) console.log('[worker] snapshot keys', Object.keys(msg));
     postMessage(msg, transfers);
   } catch (err) {
     try { postMessage({ kind:'error', message: `snapshot postMessage failed: ${err}` }); } catch {}

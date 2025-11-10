@@ -96,6 +96,16 @@ const MODEL_ALIASES = {
   rkob: 'RKOB_simplified_upper_with_marker_CAMS.xml',
 };
 
+const SNAPSHOT_DEBUG_FLAG = (() => {
+  try {
+    if (typeof location !== 'undefined' && location?.href) {
+      const url = new URL(location.href);
+      return url.searchParams.get('snapshot') === '1';
+    }
+  } catch {}
+  return false;
+})();
+
 function ctrlMirrorEnabled() {
   return false;
 }
@@ -864,7 +874,8 @@ export async function createBackend(options = {}) {
 
   async function spawnWorkerBackend() {
     const workerUrl = new URL(WORKER_URL.href);
-    if (snapshotDebug) workerUrl.searchParams.set('snapshot', '1');
+    if (SNAPSHOT_DEBUG_FLAG) workerUrl.searchParams.set('snapshot', '1');
+    workerUrl.searchParams.set('cb', String(Date.now()));
     const worker = new Worker(workerUrl, { type: 'module' });
     return worker;
   }
