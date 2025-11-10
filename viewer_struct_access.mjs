@@ -127,17 +127,27 @@ export function setStructPath(target, pathSegments, value) {
   }
 }
 
+function selectArrayConfig(prefix, kind) {
+  if (kind === 'int' || kind === 'enum' || kind === 'bool') {
+    return { arrayType: Int32Array, coerceInt: true };
+  }
+  if (prefix === 'vis') {
+    return { arrayType: Float32Array, coerceInt: false };
+  }
+  return { arrayType: Float64Array, coerceInt: false };
+}
+
 export function writeStructField(mod, handle, prefix, pathSegments, kind, size, rawValue) {
   const ptr = getFieldPtr(mod, handle, prefix, pathSegments);
   if (!ptr) return false;
   const count = Math.max(1, Number(size) || 1);
+  const { arrayType, coerceInt } = selectArrayConfig(prefix, kind);
   switch (kind) {
     case 'float':
-      return writeTyped(mod, ptr, Float64Array, 1, rawValue);
     case 'float_vec': {
-      const values = toArrayValue(rawValue, count);
+      const values = toArrayValue(rawValue, count, { coerceInt });
       if (!values) return false;
-      return writeTyped(mod, ptr, Float64Array, count, values);
+      return writeTyped(mod, ptr, arrayType, count, values, { coerceInt });
     }
     case 'int':
     case 'enum': {
@@ -173,12 +183,11 @@ export function readStructSnapshot(mod, handle, prefix, descriptors) {
     if (!ptr) continue;
     const count = Math.max(1, Number(size) || 1);
     let raw = null;
+    const { arrayType, coerceInt } = selectArrayConfig(prefix, kind);
     switch (kind) {
       case 'float':
-        raw = readTyped(mod, ptr, Float64Array, 1);
-        break;
       case 'float_vec':
-        raw = readTyped(mod, ptr, Float64Array, count);
+        raw = readTyped(mod, ptr, arrayType, count, { coerceInt });
         break;
       case 'int':
       case 'enum':
