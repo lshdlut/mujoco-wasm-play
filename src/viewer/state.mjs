@@ -55,6 +55,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     opt: {},
     vis: {},
     stat: {},
+    visDefaults: {},
     ctrl: [],
     optSupport: { supported: false, pointers: [] },
   },
@@ -379,6 +380,10 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (snapshot.visual) {
     if (!draft.model) draft.model = {};
     draft.model.vis = deepMerge(draft.model.vis || {}, snapshot.visual);
+  }
+  if (snapshot.visualDefaults) {
+    if (!draft.model) draft.model = {};
+    draft.model.visDefaults = deepMerge(draft.model.visDefaults || {}, snapshot.visualDefaults);
   }
   if (snapshot.statistic) {
     if (!draft.model) draft.model = {};
@@ -855,6 +860,7 @@ function resolveSnapshot(state) {
     optionSupport: state.optionSupport ? { ...state.optionSupport } : null,
     visual: cloneStruct(state.visual),
     statistic: cloneStruct(state.statistic),
+    visualDefaults: cloneStruct(state.visualDefaults),
     xpos: viewOrNull(state.xpos, Float64Array),
     xmat: viewOrNull(state.xmat, Float64Array),
     gsize: viewOrNull(state.gsize, Float64Array),
@@ -925,6 +931,7 @@ export async function createBackend(options = {}) {
   let kind = 'direct';
   let paused = false;
   let rate = 1;
+  let visualOverrideApplied = false;
   let lastSnapshot = {
     t: 0,
     rate: 1,
@@ -957,6 +964,7 @@ export async function createBackend(options = {}) {
     optionSupport: { supported: false, pointers: [] },
     visual: null,
     statistic: null,
+    visualDefaults: null,
   };
   let lastFrameId = -1;
   let messageHandler = null;
@@ -1073,6 +1081,25 @@ export async function createBackend(options = {}) {
     }
   }
 
+  function applyVisualOverrides() {
+    if (visualOverrideApplied || typeof client?.postMessage !== 'function') return;
+    for (const entry of VISUAL_OVERRIDE_PRESET) {
+      try {
+        client.postMessage({
+          cmd: 'setField',
+          target: 'mjVisual',
+          path: entry.path,
+          kind: entry.kind,
+          size: entry.size,
+          value: entry.value,
+        });
+      } catch (err) {
+        if (debug) console.warn('[backend vis override] failed', entry.path, err);
+      }
+    }
+    visualOverrideApplied = true;
+  }
+
   function updateGeometryCaches(data = {}) {
     const makeView = (value, fallback, Ctor) => {
       if (ArrayBuffer.isView(value)) {
@@ -1123,12 +1150,14 @@ export async function createBackend(options = {}) {
           lastSnapshot.optionSupport = data.optionSupport;
         }
         if (data.visual) {
-          lastSnapshot.visual = data.visual;
+          lastSnapshot.visual = cloneStruct(data.visual);
+          lastSnapshot.visualDefaults = cloneStruct(data.visual);
         }
         if (data.statistic) {
-          lastSnapshot.statistic = data.statistic;
+          lastSnapshot.statistic = cloneStruct(data.statistic);
         }
         updateGeometryCaches(data);
+        applyVisualOverrides();
         if (data.gesture) {
           lastSnapshot.gesture = {
             ...(lastSnapshot.gesture || {}),
@@ -1337,6 +1366,8 @@ export async function createBackend(options = {}) {
   let initialXml = await loadDefaultXml();
   if (typeof client.postMessage === 'function') {
     try {
+      visualOverrideApplied = false;
+      lastSnapshot.visualDefaults = null;
       client.postMessage({ cmd: 'load', rate, xmlText: initialXml });
       client.postMessage({ cmd: 'snapshot' });
     } catch (err) {
@@ -1596,3 +1627,49 @@ export {
   cameraLabelFromIndex,
   mergeBackendSnapshot,
 };
+const VISUAL_OVERRIDE_PRESET = [
+  { path: ['headlight', 'active'], kind: 'enum', size: 1, value: 1 },
+  { path: ['headlight', 'ambient'], kind: 'float_vec', size: 3, value: [0.1, 0.1, 0.1] },
+  { path: ['headlight', 'diffuse'], kind: 'float_vec', size: 3, value: [0.4, 0.4, 0.4] },
+  { path: ['headlight', 'specular'], kind: 'float_vec', size: 3, value: [0.5, 0.5, 0.5] },
+  { path: ['map', 'stiffness'], kind: 'float', size: 1, value: 100 },
+  { path: ['map', 'stiffnessrot'], kind: 'float', size: 1, value: 500 },
+  { path: ['map', 'force'], kind: 'float', size: 1, value: 0.005 },
+  { path: ['map', 'torque'], kind: 'float', size: 1, value: 0.1 },
+  { path: ['map', 'alpha'], kind: 'float', size: 1, value: 0.3 },
+  { path: ['map', 'fogstart'], kind: 'float', size: 1, value: 3 },
+  { path: ['map', 'fogend'], kind: 'float', size: 1, value: 10 },
+  { path: ['map', 'znear'], kind: 'float', size: 1, value: 0.01 },
+  { path: ['map', 'zfar'], kind: 'float', size: 1, value: 50 },
+  { path: ['map', 'haze'], kind: 'float', size: 1, value: 0.3 },
+  { path: ['map', 'shadowclip'], kind: 'float', size: 1, value: 1 },
+  { path: ['map', 'shadowscale'], kind: 'float', size: 1, value: 0.6 },
+  { path: ['scale', 'forcewidth'], kind: 'float', size: 1, value: 0.1 },
+  { path: ['scale', 'contactwidth'], kind: 'float', size: 1, value: 0.3 },
+  { path: ['scale', 'contactheight'], kind: 'float', size: 1, value: 0.1 },
+  { path: ['scale', 'connect'], kind: 'float', size: 1, value: 0.2 },
+  { path: ['scale', 'com'], kind: 'float', size: 1, value: 0.4 },
+  { path: ['scale', 'camera'], kind: 'float', size: 1, value: 0.3 },
+  { path: ['scale', 'light'], kind: 'float', size: 1, value: 0.3 },
+  { path: ['scale', 'selectpoint'], kind: 'float', size: 1, value: 0.2 },
+  { path: ['scale', 'jointlength'], kind: 'float', size: 1, value: 1 },
+  { path: ['scale', 'jointwidth'], kind: 'float', size: 1, value: 0.1 },
+  { path: ['scale', 'actuatorlength'], kind: 'float', size: 1, value: 0.7 },
+  { path: ['scale', 'actuatorwidth'], kind: 'float', size: 1, value: 0.2 },
+  { path: ['scale', 'framelength'], kind: 'float', size: 1, value: 1 },
+  { path: ['scale', 'framewidth'], kind: 'float', size: 1, value: 0.1 },
+  { path: ['scale', 'constraint'], kind: 'float', size: 1, value: 0.1 },
+  { path: ['scale', 'slidercrank'], kind: 'float', size: 1, value: 0.2 },
+  { path: ['rgba', 'fog'], kind: 'float_vec', size: 4, value: [0, 0, 0, 1] },
+  { path: ['rgba', 'haze'], kind: 'float_vec', size: 4, value: [1, 1, 1, 1] },
+  { path: ['rgba', 'force'], kind: 'float_vec', size: 4, value: [1, 0.5, 0.5, 1] },
+  { path: ['rgba', 'inertia'], kind: 'float_vec', size: 4, value: [0.8, 0.2, 0.2, 0.6] },
+  { path: ['rgba', 'joint'], kind: 'float_vec', size: 4, value: [0.2, 0.6, 0.8, 1] },
+  { path: ['rgba', 'actuator'], kind: 'float_vec', size: 4, value: [0.2, 0.25, 0.2, 1] },
+  { path: ['rgba', 'actuatornegative'], kind: 'float_vec', size: 4, value: [0.2, 0.6, 0.9, 1] },
+  { path: ['rgba', 'actuatorpositive'], kind: 'float_vec', size: 4, value: [0.9, 0.4, 0.2, 1] },
+  { path: ['rgba', 'com'], kind: 'float_vec', size: 4, value: [0.9, 0.9, 0.9, 1] },
+  { path: ['rgba', 'camera'], kind: 'float_vec', size: 4, value: [0.6, 0.9, 0.6, 1] },
+  { path: ['rgba', 'light'], kind: 'float_vec', size: 4, value: [0.6, 0.6, 0.9, 1] },
+  { path: ['rgba', 'selectpoint'], kind: 'float_vec', size: 4, value: [0.9, 0.9, 0.1, 1] },
+];
