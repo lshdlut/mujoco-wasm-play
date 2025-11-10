@@ -1012,8 +1012,18 @@ export function createRendererManager({
     const root = new THREE.Group();
     scene.add(root);
 
-    const grid = new THREE.GridHelper(12, 24, 0x2a2f3d, 0x222733);
+    const grid = new THREE.GridHelper(12, 24, 0xdfe6f4, 0xdfe6f4);
     grid.rotation.x = Math.PI / 2;
+    const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
+    for (const mat of gridMaterials) {
+      if (!mat) continue;
+      if ('color' in mat && typeof mat.color?.set === 'function') {
+        mat.color.set(0xdfe6f4);
+      }
+      mat.transparent = true;
+      mat.opacity = 0.08;
+      mat.depthWrite = false;
+    }
     scene.add(grid);
 
     const axes = new THREE.AxesHelper(0.4);
