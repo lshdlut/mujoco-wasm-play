@@ -13,11 +13,12 @@ Milestones & Deliverables
 M0 — Baseline (DONE)
 - Commit current baseline before plan (tracked).
 
-M1 — Options Editing: mjVisual + mjStatistic write‑through
+M1 — Options Editing: mjVisual + mjStatistic write-through
 - Add structure layouts for `mjVisual` and `mjStatistic` similar to `viewer_option_struct.mjs`.
 - Extend backends (`physics.worker.mjs`, `direct_backend.mjs`) setField to support targets: `mjOption` (existing), `mjVisual`, `mjStatistic`.
 - Enable related UI controls: Visualization (global, headlight, map, scale, rgba…), Statistic (center, extent, meansize).
 - Tests: e2e edits reflect in backend options snapshot; renderer responds to key toggles.
+- As an interim usability aid, allow overriding XML defaults with our preset values (e.g., fog/haze/light) before user tweaks, while renderer continues to reflect the actual struct state.
 
 M2 — Camera Modes: Free / Tracking / Fixed (model cameras)
 - Enumerate model cameras from Forge exports; maintain camera list in render context.
@@ -99,7 +100,7 @@ Risks & Mitigations
 
 Journal (fill as each milestone completes)
 - [M0] 2025-11-10 Baseline committed before plan.
-- [M1] 2025-11-10 Enabled mjVisual/mjStatistic read/write via viewer_struct_access (worker/direct backends emit struct_state updates, UI now syncs controls). Expected effect: Visualization/Statistic controls update immediately, worker logs show `struct_state` messages, and snapshots carry `visual/statistic` structs. User verification: tweak headlight/map/scale sliders and confirm rendering changes & no console errors.
+- [M1] 2025-11-10 Enabled mjVisual/mjStatistic read/write via viewer_struct_access (worker/direct backends emit struct_state updates, UI now syncs controls). Expected effect: Visualization/Statistic controls update immediately, worker logs show `struct_state` messages, and snapshots carry `visual/statistic` structs. User verification: tweak headlight/map/scale sliders and confirm rendering changes & no console errors. Follow-up: visualization knobs still tricky—stage defaults that override XML via local copy before writing new values, while renderer still reads live struct fields.
 
 Verification Expectations
 - After each milestone, I will summarize (a) the expected observable effects and (b) exactly what you need to verify (routes to click, toggles to try, screenshots/logs if needed). Please confirm those after each summary so we keep the devplan truthful.
