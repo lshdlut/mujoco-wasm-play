@@ -13,3 +13,6 @@ FORGE_REFERENCE.md
 AGENTS.md
 tmp_*
 backups/
+worker_debug_direct.txt
+
+worker_debug_last.txt
