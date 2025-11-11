@@ -1213,9 +1213,45 @@ function registerShortcutHandlers(shortcutSpec, handler) {
 
     sectionEl.append(header, body);
 
-    const resetTargets = [];
+        const resetTargets = [];
+    // Subgroup (collapsible within section) support based on 'separator' items
+    let currentGroup = null;
+    const createSubgroup = (labelText) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'ui-subgroup';
+      const hdr = document.createElement('div');
+      hdr.className = 'subgroup-header';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'subgroup-toggle';
+      btn.textContent = labelText || 'Group';
+      const chevron = document.createElement('span');
+      chevron.className = 'subgroup-chevron';
+      chevron.setAttribute('aria-hidden', 'true');
+      hdr.append(btn, chevron);
+      const grpBody = document.createElement('div');
+      grpBody.className = 'subgroup-body';
+      const setCollapsed = (collapsed) => {
+        wrap.classList.toggle('is-collapsed', collapsed);
+        btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        grpBody.style.display = collapsed ? 'none' : '';
+      };
+      setCollapsed(true);
+      const toggleCollapsed = () => setCollapsed(!wrap.classList.contains('is-collapsed'));
+      btn.addEventListener('click', toggleCollapsed);
+      hdr.addEventListener('click', (evt) => { if (evt.target !== btn) toggleCollapsed(); });
+      wrap.append(hdr, grpBody);
+      body.append(wrap);
+      return { wrap, body: grpBody };
+    };
+
     for (const item of section.items ?? []) {
-      renderControl(body, item);
+      if (String(item?.type).toLowerCase() === 'separator') {
+        currentGroup = createSubgroup(item.label || item.name || 'Group');
+        continue;
+      }
+      const targetContainer = currentGroup ? currentGroup.body : body;
+      renderControl(targetContainer, item);
       if (!item?.item_id) continue;
       const resetValue = resolveResetValue(item);
       if (resetValue !== undefined) {
@@ -1479,3 +1515,4 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       return Math.max(1, cameraPresets.length || 1);
     }
   };
+
