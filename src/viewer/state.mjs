@@ -108,6 +108,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     fps: 0,
     rate: 1,
     ngeom: 0,
+    contacts: 0,
     pausedSource: 'backend',
     rateSource: 'backend',
   },
@@ -328,6 +329,11 @@ function mergeBackendSnapshot(draft, snapshot) {
   }
   if (typeof snapshot.ngeom === 'number' && Number.isFinite(snapshot.ngeom)) {
     draft.hud.ngeom = snapshot.ngeom | 0;
+  }
+  if (snapshot.contacts && typeof snapshot.contacts.n === 'number') {
+    draft.hud.contacts = snapshot.contacts.n | 0;
+  } else {
+    draft.hud.contacts = 0;
   }
   if (typeof snapshot.pausedSource === 'string') {
     draft.hud.pausedSource = snapshot.pausedSource;

@@ -33,6 +33,13 @@ const POINTER_ALIASES = {
   _mjwf_qvel_ptr: '_mjwf_data_qvel_ptr',
   _mjwf_ctrl_ptr: '_mjwf_data_ctrl_ptr',
   _mjwf_xfrc_applied_ptr: '_mjwf_data_xfrc_applied_ptr',
+  // Contacts (data views)
+  _mjwf_contact_pos_ptr: '_mjwf_data_contact_pos_ptr',
+  _mjwf_contact_frame_ptr: '_mjwf_data_contact_frame_ptr',
+  _mjwf_contact_geom1_ptr: '_mjwf_data_contact_geom1_ptr',
+  _mjwf_contact_geom2_ptr: '_mjwf_data_contact_geom2_ptr',
+  _mjwf_contact_dist_ptr: '_mjwf_data_contact_dist_ptr',
+  _mjwf_contact_friction_ptr: '_mjwf_data_contact_friction_ptr',
   _mjwf_body_jntadr_ptr: '_mjwf_model_body_jntadr_ptr',
   _mjwf_body_jntnum_ptr: '_mjwf_model_body_jntnum_ptr',
   _mjwf_jnt_qposadr_ptr: '_mjwf_model_jnt_qposadr_ptr',

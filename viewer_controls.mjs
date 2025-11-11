@@ -599,8 +599,21 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     });
 
     const commitToggle = guardBinding(binding, async (nextValue) => {
-      binding.setValue(!!nextValue);
-      await applySpecAction(store, backend, control, !!nextValue);
+      const active = !!nextValue;
+      binding.setValue(active);
+      await applySpecAction(store, backend, control, active);
+      // UX hint: if enabling Contact Point but there are no contacts yet, show a brief tip
+      try {
+        if (active && control?.binding === 'mjvOption::flags[14]') {
+          const hud = store.get()?.hud || {};
+          const n = Number(hud.contacts ?? 0);
+          if (!(n > 0)) {
+            store.update((draft) => {
+              draft.toast = { message: 'No contacts right now', ts: Date.now() };
+            });
+          }
+        }
+      } catch {}
     });
 
     input.addEventListener(
@@ -725,15 +738,18 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     select.id = inputId;
     const isCameraModeSelect = control.item_id === 'rendering.camera_mode';
     const isTrackingGeomSelect = control.item_id === 'rendering.tracking_geom';
+    const isLabelModeSelect = control.binding === 'mjvOption::label';
+    const isFrameModeSelect = control.binding === 'mjvOption::frame';
+    const isNumericSelect = isLabelModeSelect || isFrameModeSelect;
     const options = isCameraModeSelect || isTrackingGeomSelect ? [] : normaliseOptions(control.options);
     if (isCameraModeSelect) {
       syncCameraSelectOptions(select, control);
     } else if (isTrackingGeomSelect) {
       syncTrackingGeomSelectOptions(select, control);
     } else {
-      options.forEach((opt) => {
+      options.forEach((opt, idx) => {
         const option = document.createElement('option');
-        option.value = opt;
+        option.value = isNumericSelect ? String(idx) : opt;
         option.textContent = opt;
         select.appendChild(option);
       });
@@ -753,6 +769,9 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           syncTrackingGeomSelectOptions(select, control);
           return toNumber(select.value);
         }
+        if (isNumericSelect) {
+          return Math.max(0, Math.trunc(toNumber(select.value)));
+        }
         return select.value;
       },
       applyValue: (value) => {
@@ -768,6 +787,10 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           const match = entries.find((entry) => entry.value === String(numericValue));
           const fallbackValue = entries[0]?.value ?? '-1';
           select.value = match ? match.value : fallbackValue;
+        } else if (isNumericSelect) {
+          const numericValue = Math.max(0, Math.trunc(toNumber(value)));
+          const clamped = Math.min(numericValue, Math.max(0, options.length - 1));
+          select.value = String(clamped);
         } else if (value == null) {
           select.value = options[0] ?? '';
         } else {
@@ -788,6 +811,8 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           ? Math.max(0, Math.trunc(toNumber(select.value)))
           : isTrackingGeomSelect
             ? Math.trunc(toNumber(select.value))
+            : isNumericSelect
+              ? Math.max(0, Math.trunc(toNumber(select.value)))
             : select.value;
         await applySpecAction(store, backend, control, value);
       }),

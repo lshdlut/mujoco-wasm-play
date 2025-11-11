@@ -842,11 +842,14 @@ class DirectBackend {
       try {
         const ncon = this.sim.ncon?.() | 0;
         if (ncon > 0) {
+          contacts = { n: ncon };
           const pos = this.sim.contactPosView?.();
           if (pos) {
-            contacts = { n: ncon, pos: cloneArray(pos, Float64Array) || new Float64Array(pos) };
-            const frame = this.sim.contactFrameView?.();
-            if (frame) contacts.frame = cloneArray(frame, Float64Array) || new Float64Array(frame);
+            contacts.pos = cloneArray(pos, Float64Array) || new Float64Array(pos);
+          }
+          const frame = this.sim.contactFrameView?.();
+          if (frame) {
+            contacts.frame = cloneArray(frame, Float64Array) || new Float64Array(frame);
           }
         }
       } catch {}

@@ -11,6 +11,49 @@ const MJ_GEOM = {
   MESH: 7,
 };
 const FIXED_CAMERA_OFFSET = 2;
+const LABEL_MODES = {
+  NONE: 0,
+  BODY: 1,
+  JOINT: 2,
+  GEOM: 3,
+  SITE: 4,
+  CAMERA: 5,
+  LIGHT: 6,
+  TENDON: 7,
+  ACTUATOR: 8,
+  CONSTRAINT: 9,
+  FLEX: 10,
+  SKIN: 11,
+  SELECTION: 12,
+  SEL_POINT: 13,
+  CONTACT: 14,
+  FORCE: 15,
+  ISLAND: 16,
+};
+const FRAME_MODES = {
+  NONE: 0,
+  BODY: 1,
+  GEOM: 2,
+  SITE: 3,
+  CAMERA: 4,
+  LIGHT: 5,
+  CONTACT: 6,
+  WORLD: 7,
+};
+const LABEL_TEXTURE_CACHE = new Map();
+const LABEL_TEXTURE_VERSION = 3;
+const LABEL_DEFAULT_HEIGHT = 0.08;
+const LABEL_DEFAULT_OFFSET = 0.04;
+const LABEL_LOD_NEAR = 2.0;
+const LABEL_LOD_MID = 4.5;
+const LABEL_LOD_FACTORS = { near: 2, mid: 1.4, far: 1 };
+const __TMP_VEC3 = new THREE.Vector3();
+const LABEL_MODE_WARNINGS = new Set();
+const FRAME_MODE_WARNINGS = new Set();
+const LABEL_DPR_CAP = 2;
+const LABEL_GEOM_LIMIT = 120;
+const FRAME_GEOM_LIMIT = 80;
+const TEMP_MAT4 = new THREE.Matrix4();
 
 function mat3ToQuat(m) {
   const m00 = m[0] ?? 1;
@@ -390,6 +433,302 @@ function computeBoundsFromSnapshot(snapshot, { ignoreStatic = false } = {}) {
     center: [cx, cy, cz],
     radius: Number.isFinite(radius) && radius > 0 ? radius : fallback,
   };
+}
+
+function overlayScale(radius, factor, min = 0.05, max = 2) {
+  const r = Number.isFinite(radius) && radius > 0 ? radius : 1;
+  return Math.min(max, Math.max(min, r * factor));
+}
+
+function warnOnce(cache, key, message) {
+  if (!key || cache.has(key)) return;
+  cache.add(key);
+  try {
+    console.warn(message);
+  } catch {}
+}
+
+function shouldDisplayGeom(index, options = {}) {
+  if (!Number.isFinite(index) || index < 0) return false;
+  if (options.hideAllGeometry) return false;
+  const mask = options.geomGroupMask;
+  const ids = options.geomGroupIds;
+  if (mask && ids && index < ids.length) {
+    const rawGroup = Number(ids[index]) || 0;
+    if (rawGroup >= 0 && rawGroup < mask.length && !mask[rawGroup]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function getLabelTexture(text, quality = 1) {
+  if (typeof document === 'undefined') return null;
+  const label = (text || '').toString();
+  const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, LABEL_DPR_CAP) : 1;
+  const q = Math.max(1, quality);
+  const cacheKey = `${LABEL_TEXTURE_VERSION}::${label}::q${q.toFixed(2)}::${dpr.toFixed(2)}`;
+  if (LABEL_TEXTURE_CACHE.has(cacheKey)) {
+    return LABEL_TEXTURE_CACHE.get(cacheKey);
+  }
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const baseFontPx = 18;
+  const fontPx = baseFontPx * dpr * q;
+  ctx.font = `400 ${fontPx}px "Inter", "Segoe UI", sans-serif`;
+  const metrics = ctx.measureText(label);
+  const paddingX = 10 * dpr * q;
+  const paddingY = 6 * dpr * q;
+  const textWidth = Math.max(metrics.width, 12 * dpr * q);
+  canvas.width = Math.ceil(textWidth + paddingX * 2);
+  canvas.height = Math.ceil(fontPx + paddingY * 2);
+  ctx.font = `400 ${fontPx}px "Inter", "Segoe UI", sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.lineWidth = Math.max(1.5 * dpr * q, 1);
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+  ctx.fillStyle = '#050608';
+  const centerY = canvas.height / 2 + 0.1 * fontPx;
+  ctx.strokeText(label, canvas.width / 2, centerY);
+  ctx.fillText(label, canvas.width / 2, centerY);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.anisotropy = 1;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  texture.generateMipmaps = false;
+  texture.userData = texture.userData || {};
+  texture.userData.aspect = canvas.width / Math.max(1, canvas.height);
+  LABEL_TEXTURE_CACHE.set(cacheKey, texture);
+  return texture;
+}
+
+function createLabelSprite() {
+  const material = new THREE.SpriteMaterial({
+    map: null,
+    color: 0xffffff,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.visible = false;
+  sprite.renderOrder = 999;
+  sprite.center.set(0.5, 0);
+  sprite.frustumCulled = false;
+  return sprite;
+}
+
+function ensureLabelGroup(context) {
+  if (!context.labelGroup) {
+    context.labelGroup = new THREE.Group();
+    context.labelGroup.name = 'overlay:labels';
+    context.scene.add(context.labelGroup);
+    context.labelPool = [];
+  }
+  return context.labelGroup;
+}
+
+function hideLabelGroup(context) {
+  if (Array.isArray(context?.labelPool)) {
+    for (const sprite of context.labelPool) {
+      if (sprite) sprite.visible = false;
+    }
+  }
+  if (context?.labelGroup) {
+    context.labelGroup.visible = false;
+  }
+}
+
+function updateLabelOverlays(context, snapshot, state, options = {}) {
+  const mode = Number(state.rendering?.labelMode) | 0;
+  if (mode === LABEL_MODES.NONE) {
+    hideLabelGroup(context);
+    return;
+  }
+  if (mode !== LABEL_MODES.GEOM) {
+    hideLabelGroup(context);
+    warnOnce(LABEL_MODE_WARNINGS, mode, '[render] Label mode not yet supported in viewer (pending data)');
+    return;
+  }
+  const ngeom = snapshot.ngeom | 0;
+  const xpos = snapshot.xpos;
+  if (!(ngeom > 0) || !xpos) {
+    hideLabelGroup(context);
+    return;
+  }
+  const geomsMeta = Array.isArray(state.model?.geoms) ? state.model.geoms : [];
+  const nameByIndex = new Map();
+  for (const geom of geomsMeta) {
+    const idx = Number(geom?.index);
+    if (Number.isFinite(idx)) {
+      nameByIndex.set(idx, (geom?.name || `Geom ${idx}`).trim());
+    }
+  }
+  const labelGroup = ensureLabelGroup(context);
+  const pool = context.labelPool;
+  const radius = options.bounds?.radius ?? context.bounds?.radius ?? 1;
+  const labelHeight = LABEL_DEFAULT_HEIGHT;
+  const verticalOffset = LABEL_DEFAULT_OFFSET;
+  const typeView = options.typeView;
+  let used = 0;
+  const limit = Math.min(ngeom, LABEL_GEOM_LIMIT);
+  const camera = context.camera;
+  for (let i = 0; i < limit; i += 1) {
+    if (!shouldDisplayGeom(i, options)) continue;
+    const base = 3 * i;
+    const px = Number(xpos[base + 0]);
+    const py = Number(xpos[base + 1]);
+    const pz = Number(xpos[base + 2]);
+    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
+    const geomType = Number(typeView?.[i]);
+    if (geomType === MJ_GEOM.PLANE || geomType === MJ_GEOM.HFIELD) continue;
+    const label = nameByIndex.get(i) || `Geom ${i}`;
+    let quality = LABEL_LOD_FACTORS.far;
+    if (camera) {
+      const dist = camera.position.distanceTo(__TMP_VEC3.set(px, py, pz));
+      if (dist < LABEL_LOD_NEAR) quality = LABEL_LOD_FACTORS.near;
+      else if (dist < LABEL_LOD_MID) quality = LABEL_LOD_FACTORS.mid;
+    }
+    const texture = getLabelTexture(label, quality);
+    if (!texture) continue;
+    let sprite = pool[used];
+    if (!sprite) {
+      sprite = createLabelSprite();
+      pool[used] = sprite;
+      labelGroup.add(sprite);
+    }
+    sprite.material.map = texture;
+    sprite.material.needsUpdate = true;
+    const aspect = Number(texture.userData?.aspect) || 3;
+    const width = LABEL_DEFAULT_HEIGHT * aspect;
+    sprite.scale.set(width, LABEL_DEFAULT_HEIGHT, 1);
+    sprite.position.set(px, py, pz + verticalOffset);
+    sprite.visible = true;
+    used += 1;
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  labelGroup.visible = used > 0;
+}
+
+function createFrameHelper() {
+  const helper = new THREE.AxesHelper(1);
+  helper.visible = false;
+  helper.renderOrder = 600;
+  if (helper.material) {
+    helper.material.depthTest = true;
+    helper.material.depthWrite = false;
+    helper.material.transparent = false;
+  }
+  return helper;
+}
+
+function ensureFrameGroup(context) {
+  if (!context.frameGroup) {
+    context.frameGroup = new THREE.Group();
+    context.frameGroup.name = 'overlay:frames';
+    context.scene.add(context.frameGroup);
+    context.framePool = [];
+  }
+  return context.frameGroup;
+}
+
+function hideFrameGroup(context) {
+  if (Array.isArray(context?.framePool)) {
+    for (const helper of context.framePool) {
+      if (helper) helper.visible = false;
+    }
+  }
+  if (context?.frameGroup) {
+    context.frameGroup.visible = false;
+  }
+}
+
+function updateFrameOverlays(context, snapshot, state, options = {}) {
+  const mode = Number(state.rendering?.frameMode) | 0;
+  if (mode === FRAME_MODES.NONE) {
+    hideFrameGroup(context);
+    return;
+  }
+  const frameGroup = ensureFrameGroup(context);
+  const pool = context.framePool;
+  const bounds = options.bounds || context.bounds || null;
+  const radius = Number.isFinite(bounds?.radius) ? bounds.radius : 1;
+  let used = 0;
+  const addHelper = () => {
+    let helper = pool[used];
+    if (!helper) {
+      helper = createFrameHelper();
+      pool[used] = helper;
+      frameGroup.add(helper);
+    }
+    helper.visible = true;
+    used += 1;
+    return helper;
+  };
+  if (mode === FRAME_MODES.GEOM) {
+    const ngeom = snapshot.ngeom | 0;
+    const xpos = snapshot.xpos;
+    const xmat = snapshot.xmat;
+    if (!(ngeom > 0) || !xpos || !xmat) {
+      hideFrameGroup(context);
+      return;
+    }
+    const typeView = options.typeView;
+    const limit = Math.min(ngeom, FRAME_GEOM_LIMIT);
+    for (let i = 0; i < limit; i += 1) {
+      if (!shouldDisplayGeom(i, options)) continue;
+      const base = 3 * i;
+      const px = Number(xpos[base + 0]);
+      const py = Number(xpos[base + 1]);
+      const pz = Number(xpos[base + 2]);
+      if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
+      const geomType = Number(typeView?.[i]);
+      if (geomType === MJ_GEOM.PLANE || geomType === MJ_GEOM.HFIELD) continue;
+      const helper = addHelper();
+      helper.position.set(px, py, pz);
+      const matBase = 9 * i;
+      const rot = [
+        xmat?.[matBase + 0] ?? 1,
+        xmat?.[matBase + 1] ?? 0,
+        xmat?.[matBase + 2] ?? 0,
+        xmat?.[matBase + 3] ?? 0,
+        xmat?.[matBase + 4] ?? 1,
+        xmat?.[matBase + 5] ?? 0,
+        xmat?.[matBase + 6] ?? 0,
+        xmat?.[matBase + 7] ?? 0,
+        xmat?.[matBase + 8] ?? 1,
+      ];
+      TEMP_MAT4.set(
+        rot[0], rot[1], rot[2], 0,
+        rot[3], rot[4], rot[5], 0,
+        rot[6], rot[7], rot[8], 0,
+        0, 0, 0, 1,
+      );
+      helper.quaternion.setFromRotationMatrix(TEMP_MAT4);
+      const axisScale = overlayScale(radius, 0.12, 0.1, 3) * 0.25;
+      helper.scale.set(axisScale, axisScale, axisScale);
+    }
+  } else if (mode === FRAME_MODES.WORLD) {
+    const helper = addHelper();
+    helper.position.set(0, 0, 0);
+    helper.quaternion.set(0, 0, 0, 1);
+    const axisScale = overlayScale(radius, 0.25, 0.5, 5);
+    helper.scale.set(axisScale, axisScale, axisScale);
+  } else {
+    hideFrameGroup(context);
+    warnOnce(FRAME_MODE_WARNINGS, mode, '[render] Frame mode not yet supported in viewer (pending data)');
+    return;
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  frameGroup.visible = used > 0;
 }
 
 function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
@@ -1227,14 +1566,6 @@ export function createRendererManager({
     }
     scene.add(grid);
 
-    const axes = new THREE.AxesHelper(0.4);
-    axes.position.set(0, 0, 0.01);
-    if (axes.material) {
-      axes.material.depthTest = true;
-      axes.material.depthWrite = true;
-    }
-    scene.add(axes);
-
     Object.assign(ctx, {
       initialized: true,
       renderer,
@@ -1242,7 +1573,6 @@ export function createRendererManager({
       camera,
       root,
       grid,
-      axes,
       light: keyLight,
       lightTarget,
       fill,
@@ -1337,6 +1667,9 @@ export function createRendererManager({
     // contactForceEnabled exists in UI, but backend snapshot currently lacks explicit force vector;
     // we start with points only to keep behavior deterministic.
     const contacts = snapshot.contacts || null;
+    if (contactPointEnabled && contacts && typeof contacts.n === 'number' && !contacts.pos) {
+      try { console.warn('[render] contact points enabled but no position array in snapshot; n=', contacts.n); } catch {}
+    }
     if (contactPointEnabled && contacts && contacts.pos && typeof contacts.n === 'number') {
       // Ensure overlay group
       if (!context.contactGroup) {
@@ -1453,6 +1786,16 @@ export function createRendererManager({
     const sizeView = snapshot.gsize || assets?.geoms?.size || null;
     const typeView = snapshot.gtype || assets?.geoms?.type || null;
     const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
+
+    const overlayOptions = {
+      geomGroupIds,
+      geomGroupMask,
+      hideAllGeometry,
+      typeView,
+      bounds: nextBounds || context.bounds || null,
+    };
+    updateFrameOverlays(context, snapshot, state, overlayOptions);
+    updateLabelOverlays(context, snapshot, state, overlayOptions);
 
     for (let i = 0; i < ngeom; i += 1) {
       const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;

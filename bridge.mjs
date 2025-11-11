@@ -637,8 +637,13 @@ export class MjSimLite {
 
   // --- Contacts (optional) ---
   ncon(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_ncon']; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
-  contactPosView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=m['_mjwf_contact_pos_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*3); }
-  contactFrameView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=m['_mjwf_contact_frame_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*9); }
+  _resolveFn(names){ const m=this.mod; for(const name of names){ const fn=m[name]; if(typeof fn==='function') return fn; } return null; }
+  contactPosView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_pos_ptr','_mjwf_data_contact_pos_ptr','_mjw_contact_pos_ptr','_mjw_data_contact_pos_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*3); }
+  contactFrameView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_frame_ptr','_mjwf_data_contact_frame_ptr','_mjw_contact_frame_ptr','_mjw_data_contact_frame_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*9); }
+  contactGeom1View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_geom1_ptr','_mjwf_data_contact_geom1_ptr','_mjw_contact_geom1_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
+  contactGeom2View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_geom2_ptr','_mjwf_data_contact_geom2_ptr','_mjw_contact_geom2_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
+  contactDistView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_dist_ptr','_mjwf_data_contact_dist_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n); }
+  contactFrictionView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_friction_ptr','_mjwf_data_contact_friction_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*5); }
 
   // --- Actuator metadata (optional) ---
   actuatorNameOf(i){

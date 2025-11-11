@@ -163,11 +163,12 @@ function updateHud(state) {
   if (simStatusEl) {
     const status = state.simulation.run ? 'running' : 'paused';
     const ngeom = state.hud?.ngeom ?? 0;
+    const contacts = state.hud?.contacts ?? 0;
     const rate = Number.isFinite(state.hud?.rate) ? state.hud.rate : 1;
     const drawn = renderStats.drawn ?? 0;
     const pausedSource = state.hud?.pausedSource ?? 'backend';
     const rateSource = state.hud?.rateSource ?? 'backend';
-    simStatusEl.textContent = `${status} | ngeom=${ngeom} (visible ${drawn}) | rate=${rate.toFixed(2)}x [${rateSource}] | pause:${pausedSource}`;
+    simStatusEl.textContent = `${status} | ngeom=${ngeom} (visible ${drawn}) | contacts=${contacts} | rate=${rate.toFixed(2)}x [${rateSource}] | pause:${pausedSource}`;
   }
   if (cameraSummaryEl) {
     cameraSummaryEl.textContent = `camera: ${state.runtime.cameraLabel}`;

@@ -1,6 +1,7 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite, createLocalModule } from './bridge.mjs';
+import { withCacheTag } from './paths.mjs';
 import { writeOptionField, readOptionStruct, detectOptionSupport } from '../../viewer_option_struct.mjs';
 import { writeVisualField, readVisualStruct } from '../../viewer_visual_struct.mjs';
 import { writeStatisticField, readStatisticStruct } from '../../viewer_stat_struct.mjs';
@@ -470,10 +471,12 @@ async function loadModule() {
   let vTag = '';
   try { const vinfoUrl = new URL('version.json', distBase); vinfoUrl.searchParams.set('cb', String(Date.now())); const r = await fetch(vinfoUrl.href, { cache:'no-store' }); if (r.ok) { const j = await r.json(); const s = String(j.sha256||j.git_sha||j.mujoco_git_sha||''); vTag = s.slice(0,8); } } catch {}
   try {
-    const loaderMod = await import(/* @vite-ignore */ jsAbs.href);
+    const jsHref = withCacheTag(jsAbs.href, vTag);
+    const wasmHref = withCacheTag(wasmAbs.href, vTag);
+    const loaderMod = await import(/* @vite-ignore */ jsHref);
     const load_mujoco = loaderMod.default;
-    const wasmUrl = new URL(wasmAbs.href);
-    if (vTag) wasmUrl.searchParams.set('v', vTag); else wasmUrl.searchParams.set('cb', String(Date.now()));
+    const wasmUrl = new URL(wasmHref);
+    if (!vTag) wasmUrl.searchParams.set('cb', String(Date.now()));
     mod = await load_mujoco({ locateFile: (p) => (p.endsWith('.wasm') ? wasmUrl.href : p) });
     try { installForgeAbiCompat(mod); } catch {}
   } catch (e) {
@@ -516,6 +519,14 @@ async function loadModule() {
     });
     const geomKeys = Object.keys(mod || {}).filter((k) => k.includes('_geom_')).slice(0, 16);
     postMessage({ kind: 'log', message: 'worker: geom export sample', extra: geomKeys });
+    const contactKeys = Object.keys(mod || {})
+      .filter((k) => k.includes('_contact') || k.includes('_data_contact'))
+      .slice(0, 24);
+    if (contactKeys.length > 0) {
+      postMessage({ kind: 'log', message: 'worker: contact export sample', extra: contactKeys });
+    } else {
+      postMessage({ kind: 'log', message: 'worker: no contact exports detected' });
+    }
   } catch {}
   return mod;
 }
@@ -722,42 +733,42 @@ function snapshot() {
   try {
     const ncon = sim.ncon?.() | 0;
     if (ncon > 0) {
+      contacts = { n: ncon };
       const posView = sim.contactPosView?.();
       if (posView) {
-        contacts = { n: ncon };
         const pos = new Float64Array(posView);
         contacts.pos = pos;
         transfers.push(pos.buffer);
-        const frameView = sim.contactFrameView?.();
-        if (frameView) {
-          const frame = new Float64Array(frameView);
-          contacts.frame = frame;
-          transfers.push(frame.buffer);
-        }
-        const geom1View = sim.contactGeom1View?.();
-        if (geom1View) {
-          const geom1 = new Int32Array(geom1View);
-          contacts.geom1 = geom1;
-          transfers.push(geom1.buffer);
-        }
-        const geom2View = sim.contactGeom2View?.();
-        if (geom2View) {
-          const geom2 = new Int32Array(geom2View);
-          contacts.geom2 = geom2;
-          transfers.push(geom2.buffer);
-        }
-        const distView = sim.contactDistView?.();
-        if (distView) {
-          const dist = new Float64Array(distView);
-          contacts.dist = dist;
-          transfers.push(dist.buffer);
-        }
-        const fricView = sim.contactFrictionView?.();
-        if (fricView) {
-          const fric = new Float64Array(fricView);
-          contacts.fric = fric;
-          transfers.push(fric.buffer);
-        }
+      }
+      const frameView = sim.contactFrameView?.();
+      if (frameView) {
+        const frame = new Float64Array(frameView);
+        contacts.frame = frame;
+        transfers.push(frame.buffer);
+      }
+      const geom1View = sim.contactGeom1View?.();
+      if (geom1View) {
+        const geom1 = new Int32Array(geom1View);
+        contacts.geom1 = geom1;
+        transfers.push(geom1.buffer);
+      }
+      const geom2View = sim.contactGeom2View?.();
+      if (geom2View) {
+        const geom2 = new Int32Array(geom2View);
+        contacts.geom2 = geom2;
+        transfers.push(geom2.buffer);
+      }
+      const distView = sim.contactDistView?.();
+      if (distView) {
+        const dist = new Float64Array(distView);
+        contacts.dist = dist;
+        transfers.push(dist.buffer);
+      }
+      const fricView = sim.contactFrictionView?.();
+      if (fricView) {
+        const fric = new Float64Array(fricView);
+        contacts.fric = fric;
+        transfers.push(fric.buffer);
       }
     }
   } catch (err) {

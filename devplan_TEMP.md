@@ -82,6 +82,7 @@ Acceptance Checklist (update as we go)
 - [x] M2: Camera modes switch with UI and hotkeys; fixed cameras visible.
 - [x] M3: Group toggles affect visibility and drawn counts.
 - [ ] M4: Contact points/forces/frames render when flags set.
+  - Contact Point: UNBLOCKED (Forge 3.3.7 derived AoS exports present). Points render from `snapshot.contacts.pos` in both worker/direct.
 - [ ] M5: Picking applies forces; selection feedback works.
 - [ ] M6: History/keyframe/watch operate; scrub stable.
 - [ ] M7: Rendering polish: fog/haze/skybox/reflection toggles; screenshot consistent.
@@ -97,6 +98,37 @@ Risks & Mitigations
 - Pointer export variance across Forge builds → gate UI with `optionSupport` and new visual/stat support flags.
 - Performance regressions → keep geometry/material pools; avoid per‑frame allocations; batch overlay updates.
 - Cross‑browser differences → cap DPR to 2; conservative shadow configs.
+
+
+M4 Journal (Contacts & Overlays)
+  - Implemented
+    - Contact Point overlay in renderer gated by `mjvOption::flags[14]` and `snapshot.contacts.pos`.
+    - Backends: worker/direct 统一发出 `contacts`，含 `n`（始终）与可选 `pos`、`frame`（有导出时）。
+    - ABI 兼容：为 Forge 3.3.7 增加 contact 指针别名（`_mjwf_contact_*_ptr` → `_mjwf_data_contact_*_ptr`）。
+    - HUD shows `contacts=<n>`; when enabling Contact Point with no contacts, a toast hints “No contacts right now”.
+    - Frame/Label overlays（Geoms）：`Frame=Geom` 现在为可见 geom 绘制三轴辅助线，`Frame=World` 提供世界系参考；`Label=Geom` 渲染轻量 sprite 文本，跟随 `geom group` mask 与当前姿态。其他 label/frame 模式缺少底层数据时会记录一次性告警，等待后续接入。
+  - How to Verify
+    - Open with worker: `index.html?ver=3.3.7&debug=1` or direct: `index.html?ver=3.3.7&mode=direct&nofallback=1&debug=1`.
+    - In Rendering → Option, toggle “Contact Point”.
+    - Expected results:
+      - HUD status includes `contacts=…` and updates while sim runs.
+      - When contacts exist, small yellow points appear at contact locations.
+      - If toggled on with zero contacts, a toast “No contacts right now” appears briefly.
+    - Frame/Label overlays:
+      - Set Rendering → Frame = “Geom” (or “World”) and Label = “Geom”.
+      - Expected: axes helpers appear on each visible geom (respecting group enables) and name labels hover slightly above them; switching Frame to “World” leaves a single origin gizmo, and toggling Group masks hides corresponding overlays.
+  - User Checklist
+    - Confirm points appear for models that generate contacts (e.g., demo_box on plane after a short drop).
+    - Confirm HUD `contacts` increases/decreases appropriately.
+    - Confirm worker and direct backends behave identically.
+    - If HUD n>0 but no points: reload with `?log=1` and check console for `[render] contact points enabled but no position array` — indicates Forge build missing contact position pointer; backends will still report counts.
+  - Current status (2025-11-11): Forge 3.3.7 build in use lacks `_mjwf_data_contact_pos_ptr` (and related) exports, so snapshots only contain `n` without coordinates; renderer logs the warning above. Blocked on Forge fix (contacts team investigating).
+
+M4 Next Steps (pending Forge fix)
+- Contact Force overlay (mjvOption::flags[16]): draw arrows using contact frame/force once pointers exist.
+- Frame/Label overlays: respect `mjvOption::frame`/`label` modes using existing geom/scene data.
+- Once Forge exposes contact pos, re-test HUD + point rendering and extend to forces.
+ - SDF vector labels: replace Canvas/Sprite bitmap labels with MSDF/SDF text rendering for crisp, scalable labels without per-distance texture rebuild; introduce a lightweight shader/material and a small font atlas asset.
 
 Journal (fill as each milestone completes)
 - [M0] 2025-11-10 Baseline committed before plan.
