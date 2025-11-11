@@ -194,18 +194,14 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
   const radius = Math.max(baseRadius != null ? baseRadius : fallbackRadius, 0.6);
   if (!ctx.trackingOffset) {
     ctx.trackingOffset = new THREE.Vector3(radius * 2.6, -radius * 2.6, radius * 1.7);
-    ctx.trackingRadius = radius;
+    ctx.trackingRadius = ctx.trackingOffset.length();
   }
-  const offsetRadius = Math.max(ctx.trackingRadius || radius, 1e-6);
-  tempVecB
-    .copy(ctx.trackingOffset)
-    .multiplyScalar(radius / offsetRadius);
-  ctx.camera.position.copy(center.clone().add(tempVecB));
+  ctx.camera.position.copy(center.clone().add(ctx.trackingOffset));`r`n  ctx.trackingRadius = ctx.trackingOffset.length();
   ctx.camera.lookAt(center);
   target.copy(center);
-  ctx.trackingRadius = radius;
+  ctx.trackingRadius = ctx.trackingOffset.length();
   ctx.fixedCameraActive = false;
-  const desiredFar = Math.max(100, radius * 10);
+  const desiredFar = Math.max(100, Math.max(radius, ctx.trackingRadius || radius) * 10);
   if (ctx.camera.far < desiredFar) {
     ctx.camera.far = desiredFar;
     if (typeof ctx.camera.updateProjectionMatrix === 'function') {
@@ -1546,7 +1542,7 @@ export function createRendererManager({
         context.camera.position.copy(focus.clone().add(offset));
         context.camera.lookAt(focus);
         context.cameraTarget.copy(focus);
-        const desiredFar = Math.max(100, radius * 10);
+        const desiredFar = Math.max(100, Math.max(radius, ctx.trackingRadius || radius) * 10);
         if (context.camera.far < desiredFar) {
           context.camera.far = desiredFar;
           if (typeof context.camera.updateProjectionMatrix === 'function') {
@@ -1680,6 +1676,7 @@ export function createRendererManager({
     updateViewport: () => updateRendererViewport(),
   };
 }
+
 
 
 
