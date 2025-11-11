@@ -24,6 +24,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   runtime: {
     cameraIndex: 0,
     cameraLabel: 'Free',
+    trackingGeom: -1,
     lastAction: 'idle',
     gesture: {
       mode: 'idle',
@@ -57,6 +58,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     stat: {},
     visDefaults: {},
     cameras: [],
+    geoms: [],
     ctrl: [],
     optSupport: { supported: false, pointers: [] },
   },
@@ -398,6 +400,14 @@ function mergeBackendSnapshot(draft, snapshot) {
     if (!draft.model) draft.model = {};
     draft.model.cameras = Array.isArray(snapshot.cameras) ? snapshot.cameras.slice() : [];
   }
+  if (snapshot.geoms) {
+    if (!draft.model) draft.model = {};
+    draft.model.geoms = Array.isArray(snapshot.geoms) ? snapshot.geoms.slice() : [];
+    const maxGeom = draft.model.geoms.length - 1;
+    if (typeof draft.runtime.trackingGeom === 'number' && draft.runtime.trackingGeom > maxGeom) {
+      draft.runtime.trackingGeom = maxGeom >= 0 ? maxGeom : -1;
+    }
+  }
   if (snapshot.statistic) {
     if (!draft.model) draft.model = {};
     draft.model.stat = deepMerge(draft.model.stat || {}, snapshot.statistic);
@@ -481,6 +491,11 @@ function applyBinding(draft, binding, value, control) {
       const idx = Math.max(0, Math.trunc(toNumber(value)));
       draft.runtime.cameraIndex = idx;
       draft.runtime.cameraLabel = cameraLabelFromIndex(idx, draft.model?.cameras);
+      return true;
+    }
+    case 'Simulate::tracking_geom': {
+      const geomIdx = Math.trunc(toNumber(value));
+      draft.runtime.trackingGeom = Number.isFinite(geomIdx) ? geomIdx : -1;
       return true;
     }
     case 'Simulate::scrub_index':
@@ -620,6 +635,8 @@ function readBindingValue(state, binding, control) {
       return state.simulation.run;
     case 'Simulate::camera':
       return state.runtime.cameraIndex | 0;
+    case 'Simulate::tracking_geom':
+      return Number.isFinite(state.runtime.trackingGeom) ? state.runtime.trackingGeom : -1;
     case 'Simulate::scrub_index':
       return state.simulation.scrubIndex | 0;
     case 'Simulate::key':
@@ -870,6 +887,7 @@ function resolveSnapshot(state) {
     options: state.options ?? null,
     ctrl: state.ctrl ? Array.from(state.ctrl) : null,
     cameras: Array.isArray(state.cameras) ? state.cameras.slice() : null,
+    geoms: Array.isArray(state.geoms) ? state.geoms.slice() : null,
     frameId: Number.isFinite(state.frameId) ? (state.frameId | 0) : null,
     optionSupport: state.optionSupport ? { ...state.optionSupport } : null,
     visual: cloneStruct(state.visual),
@@ -1221,6 +1239,11 @@ export async function createBackend(options = {}) {
         notifyListeners();
         break;
       }
+      case 'meta_geoms': {
+        lastSnapshot.geoms = Array.isArray(data.geoms) ? data.geoms : [];
+        notifyListeners();
+        break;
+      }
       case 'meta': {
         try {
           // Actuator metadata for dynamic control UI
@@ -1466,6 +1489,11 @@ export async function createBackend(options = {}) {
       try { client.postMessage?.({ cmd: 'setCameraMode', mode: modeValue }); } catch (err) {
         if (debug) console.warn('[backend camera] post failed', err);
       }
+      notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (binding === 'Simulate::tracking_geom') {
+      lastSnapshot.trackingGeom = Math.trunc(toNumber(value));
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }

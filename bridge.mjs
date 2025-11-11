@@ -653,6 +653,9 @@ export class MjSimLite {
   cameraNameOf(i){
     return this._nameFromAdr(i, '_mjwf_model_name_camadr_ptr', '_mjwf_ncam') || '';
   }
+  geomNameOf(i){
+    return this._nameFromAdr(i, '_mjwf_model_name_geomadr_ptr', '_mjwf_ngeom') || '';
+  }
   
   // --- Apply/clear external force (xfrc_applied) ---
   applyXfrcByGeom(geomIndex, force3, torque3, point3){

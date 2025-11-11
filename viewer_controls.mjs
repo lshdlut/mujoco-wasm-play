@@ -236,6 +236,59 @@ function syncCameraSelectOptions(select, control) {
   return entries;
 }
 
+function resolveTrackingGeomEntries() {
+  const entries = [
+    { value: '-1', label: 'Scene center' },
+  ];
+  try {
+    const geoms = store.get()?.model?.geoms || [];
+    if (Array.isArray(geoms)) {
+      geoms.forEach((geom, idx) => {
+        const label =
+          typeof geom?.name === 'string' && geom.name.trim().length > 0
+            ? geom.name.trim()
+            : `Geom ${idx}`;
+        const value = Number.isFinite(geom?.index) ? String(geom.index | 0) : String(idx);
+        entries.push({ value, label });
+      });
+    }
+  } catch {}
+  return entries;
+}
+
+function syncTrackingGeomSelectOptions(select, control) {
+  if (!select) return [];
+  const entries = resolveTrackingGeomEntries();
+  const prevValue = select.value;
+  let dirty = select.options.length !== entries.length;
+  if (!dirty) {
+    for (let i = 0; i < entries.length; i += 1) {
+      const option = select.options[i];
+      const entry = entries[i];
+      if (!option || option.value !== entry.value || option.textContent !== entry.label) {
+        dirty = true;
+        break;
+      }
+    }
+  }
+  if (dirty) {
+    select.innerHTML = '';
+    entries.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.value;
+      option.textContent = entry.label;
+      select.appendChild(option);
+    });
+    if (!entries.some((entry) => entry.value === prevValue)) {
+      select.value = entries[0]?.value ?? '-1';
+    } else if (prevValue) {
+      select.value = prevValue;
+    }
+  }
+  control.options = entries.map((entry) => entry.label);
+  return entries;
+}
+
 const MOD_KEYS = new Set(['ctrl', 'control', 'meta', 'cmd', 'win', 'shift', 'alt', 'option']);
 
 function resolveResetValue(control) {
@@ -657,9 +710,12 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     select.setAttribute('data-testid', control.item_id);
     select.id = inputId;
     const isCameraModeSelect = control.item_id === 'rendering.camera_mode';
-    const options = isCameraModeSelect ? [] : normaliseOptions(control.options);
+    const isTrackingGeomSelect = control.item_id === 'rendering.tracking_geom';
+    const options = isCameraModeSelect || isTrackingGeomSelect ? [] : normaliseOptions(control.options);
     if (isCameraModeSelect) {
       syncCameraSelectOptions(select, control);
+    } else if (isTrackingGeomSelect) {
+      syncTrackingGeomSelectOptions(select, control);
     } else {
       options.forEach((opt) => {
         const option = document.createElement('option');
@@ -679,6 +735,10 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           syncCameraSelectOptions(select, control);
           return toNumber(select.value);
         }
+        if (isTrackingGeomSelect) {
+          syncTrackingGeomSelectOptions(select, control);
+          return toNumber(select.value);
+        }
         return select.value;
       },
       applyValue: (value) => {
@@ -687,6 +747,12 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           const numericValue = Math.max(0, Math.trunc(toNumber(value)));
           const match = entries.find((entry) => entry.value === String(numericValue));
           const fallbackValue = entries[0]?.value ?? '0';
+          select.value = match ? match.value : fallbackValue;
+        } else if (isTrackingGeomSelect) {
+          const entries = syncTrackingGeomSelectOptions(select, control);
+          const numericValue = Math.trunc(toNumber(value));
+          const match = entries.find((entry) => entry.value === String(numericValue));
+          const fallbackValue = entries[0]?.value ?? '-1';
           select.value = match ? match.value : fallbackValue;
         } else if (value == null) {
           select.value = options[0] ?? '';
@@ -706,7 +772,9 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       guardBinding(binding, async () => {
         const value = isCameraModeSelect
           ? Math.max(0, Math.trunc(toNumber(select.value)))
-          : select.value;
+          : isTrackingGeomSelect
+            ? Math.trunc(toNumber(select.value))
+            : select.value;
         await applySpecAction(store, backend, control, value);
       }),
     );
@@ -1198,6 +1266,17 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       } catch {}
       binding.setValue?.(value);
     }
+    try {
+      const trackingSelect = document.querySelector('[data-testid="rendering.tracking_geom"]');
+      if (trackingSelect) {
+        const isTracking = (state.runtime?.cameraIndex | 0) === 1;
+        const row = trackingSelect.closest('.control-row');
+        trackingSelect.disabled = !isTracking || trackingSelect.options.length <= 1;
+        if (row) {
+          row.classList.toggle('is-disabled', !isTracking);
+        }
+      }
+    } catch {}
   }
 
   async function toggleControl(id, overrideValue) {

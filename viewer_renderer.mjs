@@ -174,27 +174,32 @@ function restoreFreeCameraPose(ctx) {
   return true;
 }
 
-function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }) {
+function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverride = null) {
   if (!ctx?.camera) return false;
   const target = ensureCameraTarget(ctx);
   const sourceBounds = bounds || ctx.bounds || null;
-  const radius = Math.max(
-    Number(sourceBounds?.radius) || ctx.trackingRadius || 0.6,
-    0.6
-  );
-  const center = tempVecA.set(
-    Number(sourceBounds?.center?.[0] ?? target.x) || 0,
-    Number(sourceBounds?.center?.[1] ?? target.y) || 0,
-    Number(sourceBounds?.center?.[2] ?? target.z) || 0
-  );
+  const center = trackingOverride?.position
+    ? tempVecA.set(
+        Number(trackingOverride.position[0]) || 0,
+        Number(trackingOverride.position[1]) || 0,
+        Number(trackingOverride.position[2]) || 0,
+      )
+    : tempVecA.set(
+        Number(sourceBounds?.center?.[0] ?? target.x) || 0,
+        Number(sourceBounds?.center?.[1] ?? target.y) || 0,
+        Number(sourceBounds?.center?.[2] ?? target.z) || 0,
+      );
+  const baseRadius = Number.isFinite(trackingOverride?.radius) ? Number(trackingOverride.radius) : null;
+  const fallbackRadius = Number(sourceBounds?.radius) || ctx.trackingRadius || 0.6;
+  const radius = Math.max(baseRadius != null ? baseRadius : fallbackRadius, 0.6);
   if (!ctx.trackingOffset) {
     ctx.trackingOffset = new THREE.Vector3(radius * 2.6, -radius * 2.6, radius * 1.7);
     ctx.trackingRadius = radius;
   }
-  const baseRadius = Math.max(ctx.trackingRadius || radius, 1e-6);
+  const offsetRadius = Math.max(ctx.trackingRadius || radius, 1e-6);
   tempVecB
     .copy(ctx.trackingOffset)
-    .multiplyScalar(radius / baseRadius);
+    .multiplyScalar(radius / offsetRadius);
   ctx.camera.position.copy(center.clone().add(tempVecB));
   ctx.camera.lookAt(center);
   target.copy(center);
@@ -210,7 +215,7 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }) {
   return true;
 }
 
-function syncCameraPoseFromMode(ctx, state, bounds, helpers, trackingBounds = null) {
+function syncCameraPoseFromMode(ctx, state, bounds, helpers, trackingCtx = {}) {
   if (!ctx?.camera || !state) return;
   const runtimeMode = Number(state.runtime?.cameraIndex ?? 0) | 0;
   const cameraList = Array.isArray(state.model?.cameras) ? state.model.cameras : [];
@@ -237,7 +242,7 @@ function syncCameraPoseFromMode(ctx, state, bounds, helpers, trackingBounds = nu
     return;
   }
   if (desired === 1) {
-    applyTrackingCamera(ctx, trackingBounds || bounds, helpers);
+    applyTrackingCamera(ctx, trackingCtx.trackingBounds || bounds, helpers, trackingCtx.trackingOverride || null);
     return;
   }
   ctx.fixedCameraActive = false;
@@ -1346,7 +1351,38 @@ export function createRendererManager({
     const ngeom = snapshot.ngeom | 0;
     const nextBounds = ngeom > 0 ? computeBoundsFromSnapshot(snapshot) : null;
     const trackingBounds = ngeom > 0 ? (computeBoundsFromSnapshot(snapshot, { ignoreStatic: true }) || nextBounds) : nextBounds;
-    syncCameraPoseFromMode(context, state, nextBounds, { tempVecA, tempVecB, tempVecC, tempVecD }, trackingBounds);
+    const trackingGeomSelection = Number.isFinite(state.runtime?.trackingGeom) ? (state.runtime.trackingGeom | 0) : -1;
+    const trackingOverride = (() => {
+      if (!(trackingGeomSelection >= 0) || !(ngeom > 0)) return null;
+      if (!snapshot.xpos || trackingGeomSelection >= ngeom) return null;
+      const base = trackingGeomSelection * 3;
+      const px = Number(snapshot.xpos[base + 0]);
+      const py = Number(snapshot.xpos[base + 1]);
+      const pz = Number(snapshot.xpos[base + 2]);
+      if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return null;
+      let radius = null;
+      try {
+        const sizeView = snapshot.gsize || null;
+        const typeView = snapshot.gtype || null;
+        const sx = sizeView ? Number(sizeView[base + 0]) : 0.1;
+        const sy = sizeView ? Number(sizeView[base + 1]) : sx;
+        const sz = sizeView ? Number(sizeView[base + 2]) : sx;
+        const gType = typeView ? (typeView[trackingGeomSelection] ?? MJ_GEOM.BOX) : MJ_GEOM.BOX;
+        radius = computeGeomRadius(gType, sx, sy, sz);
+      } catch {}
+      return {
+        index: trackingGeomSelection,
+        position: [px, py, pz],
+        radius: Number.isFinite(radius) ? radius : null,
+      };
+    })();
+    syncCameraPoseFromMode(
+      context,
+      state,
+      nextBounds,
+      { tempVecA, tempVecB, tempVecC, tempVecD },
+      { trackingBounds, trackingOverride },
+    );
     const planeExtentHint = (() => {
       const radiusSource =
         nextBounds?.radius ?? context.bounds?.radius ?? 0;

@@ -823,6 +823,14 @@
           "options": "Free, Tracking + fixed cameras"
         },
         {
+          "item_id": "rendering.tracking_geom",
+          "type": "select",
+          "label": "Tracking geom",
+          "binding": "Simulate::tracking_geom",
+          "default": -1,
+          "options": "Scene center"
+        },
+        {
           "item_id": "rendering.label_mode",
           "type": "select",
           "label": "Label",

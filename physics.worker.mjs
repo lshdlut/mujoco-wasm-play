@@ -152,6 +152,31 @@ function emitCameraMeta() {
   }
 }
 
+function collectGeomMeta() {
+  const count = sim?.ngeom?.() | 0;
+  const geoms = [];
+  if (!(count > 0) || !sim) return geoms;
+  for (let i = 0; i < count; i += 1) {
+    const name =
+      typeof sim.geomNameOf === 'function'
+        ? sim.geomNameOf(i) || `Geom ${i}`
+        : `Geom ${i}`;
+    geoms.push({ index: i, name });
+  }
+  return geoms;
+}
+
+function emitGeomMeta() {
+  try {
+    const geoms = collectGeomMeta();
+    postMessage({ kind: 'meta_geoms', geoms });
+  } catch (err) {
+    if (snapshotDebug) {
+      postMessage({ kind: 'log', message: 'worker: geom meta failed', extra: String(err) });
+    }
+  }
+}
+
 function wasmUrl(rel) { return new URL(rel, import.meta.url).href; }
 
 // Boot log for diagnostics
@@ -887,6 +912,7 @@ onmessage = async (ev) => {
         postMessage({ kind:'meta', actuators: acts });
       } catch {}
       emitCameraMeta();
+      emitGeomMeta();
       snapshot();
       emitRenderAssets();
     } else if (msg.cmd === 'reset') {

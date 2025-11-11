@@ -103,6 +103,7 @@ class DirectBackend {
     this.visualState = null;
     this.statisticState = null;
     this.cameraList = [];
+    this.geomList = [];
   }
 
   #computeBoundsFromPositions(view, n) {
@@ -246,6 +247,30 @@ class DirectBackend {
       this.#emitMessage({ kind: 'meta_cameras', cameras });
     } catch (err) {
       this.#emitLog('direct: camera meta failed', { error: String(err) });
+    }
+  }
+
+  #collectGeomMeta() {
+    const count = this.sim?.ngeom?.() | 0;
+    const geoms = [];
+    if (!(count > 0) || !this.sim) return geoms;
+    for (let i = 0; i < count; i += 1) {
+      const name =
+        typeof this.sim.geomNameOf === 'function'
+          ? this.sim.geomNameOf(i) || `Geom ${i}`
+          : `Geom ${i}`;
+      geoms.push({ index: i, name });
+    }
+    return geoms;
+  }
+
+  #emitGeomMeta() {
+    try {
+      const geoms = this.#collectGeomMeta();
+      this.geomList = geoms;
+      this.#emitMessage({ kind: 'meta_geoms', geoms });
+    } catch (err) {
+      this.#emitLog('direct: geom meta failed', { error: String(err) });
     }
   }
 
@@ -599,6 +624,7 @@ class DirectBackend {
 
     this.#sendMeta();
     this.#emitCameraMeta();
+    this.#emitGeomMeta();
 
     this.#startLoops();
   }
