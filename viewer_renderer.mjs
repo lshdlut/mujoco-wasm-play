@@ -48,6 +48,8 @@ const LABEL_LOD_NEAR = 2.0;
 const LABEL_LOD_MID = 4.5;
 const LABEL_LOD_FACTORS = { near: 2, mid: 1.4, far: 1 };
 const __TMP_VEC3 = new THREE.Vector3();
+const CONTACT_UP = new THREE.Vector3(0, 0, 1);
+const CONTACT_TMP_NORMAL = new THREE.Vector3();
 const LABEL_MODE_WARNINGS = new Set();
 const FRAME_MODE_WARNINGS = new Set();
 const LABEL_DPR_CAP = 2;
@@ -1683,14 +1685,30 @@ export function createRendererManager({
       const n = Math.max(0, contacts.n | 0);
       // Contact visual size: small fraction of bounds radius
       const r = Math.max(0.5, (context.bounds?.radius || 1));
-      const sz = Math.max(0.01, Math.min(0.05, r * 0.02));
-      // Prepare a shared sphere geometry/material for simplicity
-      if (!group.userData.geometry || group.userData.geometry.parameters?.radius !== sz) {
-        try { group.userData.geometry?.dispose?.(); } catch {}
-        group.userData.geometry = new THREE.SphereGeometry(sz, 12, 8);
+      const radius = Math.max(0.012, Math.min(0.04, r * 0.014));
+      const thickness = Math.max(0.2 * radius, 0.01);
+      // Prepare a shared cylinder geometry/material
+      const currentGeom = group.userData.geometry;
+      if (
+        !currentGeom
+        || currentGeom.parameters?.radiusTop !== radius
+        || currentGeom.parameters?.height !== thickness
+      ) {
+        try { currentGeom?.dispose?.(); } catch {}
+        const cyl = new THREE.CylinderGeometry(radius * 0.85, radius * 0.85, thickness, 24, 1);
+        cyl.rotateX(Math.PI / 2);
+        group.userData.geometry = cyl;
+        for (const mesh of pool) {
+          if (mesh) mesh.geometry = cyl;
+        }
       }
       if (!group.userData.material) {
-        group.userData.material = new THREE.MeshBasicMaterial({ color: 0xffc04d });
+        group.userData.material = new THREE.MeshBasicMaterial({
+          color: 0xffc04d,
+          side: THREE.DoubleSide,
+          transparent: false,
+          depthTest: true,
+        });
       }
       // Grow pool if needed
       for (let i = pool.length; i < n; i += 1) {
@@ -1702,6 +1720,8 @@ export function createRendererManager({
       }
       // Update positions
       const pos = contacts.pos;
+      const frame = ArrayBuffer.isView(contacts.frame) ? contacts.frame : null;
+      const offsetScale = Math.max(thickness * 0.5, 0.003);
       for (let i = 0; i < pool.length; i += 1) {
         const mesh = pool[i];
         if (i < n) {
@@ -1710,7 +1730,20 @@ export function createRendererManager({
           const y = Number(pos[base + 1]) || 0;
           const z = Number(pos[base + 2]) || 0;
           mesh.visible = true;
-          mesh.position.set(x, y, z);
+          const normal = CONTACT_TMP_NORMAL.set(0, 0, 1);
+          if (frame && frame.length >= 9 * (i + 1)) {
+            const rotBase = 9 * i;
+            normal.set(
+              Number(frame[rotBase + 0]) || 0,
+              Number(frame[rotBase + 1]) || 0,
+              Number(frame[rotBase + 2]) || 0,
+            ).normalize();
+          }
+          mesh.quaternion.setFromUnitVectors(CONTACT_UP, normal);
+          const ox = x + normal.x * offsetScale;
+          const oy = y + normal.y * offsetScale;
+          const oz = z + normal.z * offsetScale;
+          mesh.position.set(ox, oy, oz);
         } else {
           mesh.visible = false;
         }
