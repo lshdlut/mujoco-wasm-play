@@ -12,6 +12,25 @@ import installForgeAbiCompat from './forge_abi_compat.js';
 
 const TICK_INTERVAL_MS = 8;   // matches physics.worker.mjs stepping cadence
 const SNAP_INTERVAL_MS = 16;  // ~60 Hz snapshot stream
+const GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'skin'];
+const MJ_GROUP_COUNT = 6;
+
+function createGroupState(initial = 1) {
+  const state = {};
+  for (const type of GROUP_TYPES) {
+    state[type] = Array.from({ length: MJ_GROUP_COUNT }, () => (initial ? 1 : 0));
+  }
+  return state;
+}
+
+function cloneGroupState(source) {
+  const out = {};
+  for (const type of GROUP_TYPES) {
+    const arr = Array.isArray(source?.[type]) ? source[type] : [];
+    out[type] = Array.from({ length: MJ_GROUP_COUNT }, (_, idx) => (arr[idx] ? 1 : 0));
+  }
+  return out;
+}
 
 function getView(mod, ptr, dtype, len) {
   if (!mod || !ptr || !(len > 0)) return null;
@@ -93,6 +112,10 @@ class DirectBackend {
     this.labelMode = 0;
     this.frameMode = 0;
     this.cameraMode = 0;
+    this.groupState = createGroupState();
+    this.groupState = createGroupState();
+    this.groupState = createGroupState();
+    this.groupState = createGroupState();
     this.renderAssets = null;
     this.lastBounds = { center: [0, 0, 0], radius: 0 };
     this.alignSeq = 0;
@@ -449,6 +472,19 @@ class DirectBackend {
         const mode = Number(msg.mode) || 0;
         this.cameraMode = mode | 0;
         this.#emitOptions();
+        break;
+      }
+      case 'setGroupState': {
+        const type = typeof msg.group === 'string' ? msg.group.toLowerCase() : '';
+        const idx = Number(msg.index) | 0;
+        const enabled = !!msg.enabled;
+        if (GROUP_TYPES.includes(type) && idx >= 0 && idx < MJ_GROUP_COUNT) {
+          if (!this.groupState[type]) {
+            this.groupState[type] = Array.from({ length: MJ_GROUP_COUNT }, () => 1);
+          }
+          this.groupState[type][idx] = enabled ? 1 : 0;
+          this.#emitOptions();
+        }
         break;
       }
       case 'setField': {
@@ -949,6 +985,7 @@ class DirectBackend {
       labelMode: this.labelMode | 0,
       frameMode: this.frameMode | 0,
       cameraMode: this.cameraMode | 0,
+      groups: cloneGroupState(this.groupState),
     });
   }
 

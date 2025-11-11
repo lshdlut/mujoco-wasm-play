@@ -43,6 +43,9 @@ let sceneFlags = Array.from({ length: 8 }, () => 0);
 let labelMode = 0;
 let frameMode = 0;
 let cameraMode = 0;
+const GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'skin'];
+const MJ_GROUP_COUNT = 6;
+let groupState = createGroupState();
 let lastBounds = { center: [0, 0, 0], radius: 0 };
 let alignSeq = 0;
 let copySeq = 0;
@@ -63,6 +66,18 @@ const snapshotDebug = (() => {
   return false;
 })();
 
+const verboseWorkerLogs = (() => {
+  try {
+    const url = new URL(import.meta.url);
+    if (url.searchParams.get('verbose') === '1') return true;
+  } catch {}
+  try {
+    if (typeof self !== 'undefined' && self.PLAY_VERBOSE_DEBUG === true) return true;
+  } catch {}
+  return false;
+})();
+const snapshotLogEnabled = snapshotDebug && verboseWorkerLogs;
+
 const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
 
 function readStructState(scope) {
@@ -76,6 +91,37 @@ function readStructState(scope) {
     }
   } catch {}
   return null;
+}
+
+function createGroupState(initial = 1) {
+  const state = {};
+  for (const type of GROUP_TYPES) {
+    state[type] = Array.from({ length: MJ_GROUP_COUNT }, () => (initial ? 1 : 0));
+  }
+  return state;
+}
+
+function cloneGroupState(source = groupState) {
+  const out = {};
+  for (const type of GROUP_TYPES) {
+    const values = Array.isArray(source?.[type]) ? source[type] : null;
+    out[type] = Array.from({ length: MJ_GROUP_COUNT }, (_, idx) => (values && values[idx] ? 1 : 0));
+  }
+  return out;
+}
+
+function emitOptionState() {
+  try {
+    postMessage({
+      kind: 'options',
+      voptFlags: Array.isArray(voptFlags) ? [...voptFlags] : [],
+      sceneFlags: Array.isArray(sceneFlags) ? [...sceneFlags] : [],
+      labelMode,
+      frameMode,
+      cameraMode,
+      groups: cloneGroupState(),
+    });
+  } catch {}
 }
 
 function emitStructState(scope) {
@@ -621,13 +667,13 @@ function snapshot() {
     msg.options = optionsStruct;
   }
   if (gsizeView) {
-    if (snapshotDebug) console.log('[worker] gsize view len', gsizeView.length);
+    if (snapshotLogEnabled) console.log('[worker] gsize view len', gsizeView.length);
     const gsize = new Float64Array(gsizeView);
     msg.gsize = gsize;
     transfers.push(gsize.buffer);
   }
   if (gtypeView) {
-    if (snapshotDebug) console.log('[worker] gtype view len', gtypeView.length);
+    if (snapshotLogEnabled) console.log('[worker] gtype view len', gtypeView.length);
     const gtype = new Int32Array(gtypeView);
     msg.gtype = gtype;
     transfers.push(gtype.buffer);
@@ -724,7 +770,7 @@ function snapshot() {
     msg.scene_snapshot = { source: 'sim', frame: snapshotState.frame - 1, snap: scenePayload };
   }
   try {
-    if (snapshotDebug) console.log('[worker] snapshot keys', Object.keys(msg));
+    if (snapshotLogEnabled) console.log('[worker] snapshot keys', Object.keys(msg));
     postMessage(msg, transfers);
   } catch (err) {
     try { postMessage({ kind:'error', message: `snapshot postMessage failed: ${err}` }); } catch {}
@@ -878,7 +924,7 @@ onmessage = async (ev) => {
         visual: visualState || null,
         statistic: statisticState || null,
       });
-      try { postMessage({ kind: 'options', voptFlags: [...voptFlags], sceneFlags: [...sceneFlags], labelMode, frameMode, cameraMode }); } catch {}
+      emitOptionState();
       // Send joint/geom mapping meta for picking->joint association (optional)
       try {
         const geomBody = sim?.geomBodyIdView?.();
@@ -924,6 +970,7 @@ onmessage = async (ev) => {
         labelMode = 0;
         frameMode = 0;
         cameraMode = 0;
+        groupState = createGroupState();
         snapshot();
         emitRenderAssets();
       }
@@ -969,7 +1016,7 @@ onmessage = async (ev) => {
       if (!Array.isArray(voptFlags)) voptFlags = Array.from({ length: 32 }, () => 0);
       if (idx >= 0 && idx < voptFlags.length) {
         voptFlags[idx] = enabled ? 1 : 0;
-        try { postMessage({ kind: 'options', voptFlags: [...voptFlags], sceneFlags: [...sceneFlags], labelMode, frameMode, cameraMode }); } catch {}
+        emitOptionState();
       }
     } else if (msg.cmd === 'setSceneFlag') {
       const idx = Number(msg.index) | 0;
@@ -977,20 +1024,31 @@ onmessage = async (ev) => {
       if (!Array.isArray(sceneFlags)) sceneFlags = Array.from({ length: 8 }, () => 0);
       if (idx >= 0 && idx < sceneFlags.length) {
         sceneFlags[idx] = enabled ? 1 : 0;
-        try { postMessage({ kind: 'options', voptFlags: [...voptFlags], sceneFlags: [...sceneFlags], labelMode, frameMode, cameraMode }); } catch {}
+        emitOptionState();
       }
     } else if (msg.cmd === 'setLabelMode') {
       const modeVal = Number(msg.mode) || 0;
       labelMode = modeVal | 0;
-      try { postMessage({ kind: 'options', voptFlags: [...voptFlags], sceneFlags: [...sceneFlags], labelMode, frameMode, cameraMode }); } catch {}
+      emitOptionState();
     } else if (msg.cmd === 'setFrameMode') {
       const modeVal = Number(msg.mode) || 0;
       frameMode = modeVal | 0;
-      try { postMessage({ kind: 'options', voptFlags: [...voptFlags], sceneFlags: [...sceneFlags], labelMode, frameMode, cameraMode }); } catch {}
+      emitOptionState();
     } else if (msg.cmd === 'setCameraMode') {
       const modeVal = Number(msg.mode) || 0;
       cameraMode = modeVal | 0;
-      try { postMessage({ kind: 'options', voptFlags: [...voptFlags], sceneFlags: [...sceneFlags], labelMode, frameMode, cameraMode }); } catch {}
+      emitOptionState();
+    } else if (msg.cmd === 'setGroupState') {
+      const type = typeof msg.group === 'string' ? msg.group.toLowerCase() : '';
+      const idx = Number(msg.index) | 0;
+      const enabled = !!msg.enabled;
+      if (GROUP_TYPES.includes(type) && idx >= 0 && idx < MJ_GROUP_COUNT) {
+        if (!groupState[type]) {
+          groupState[type] = Array.from({ length: MJ_GROUP_COUNT }, () => 1);
+        }
+        groupState[type][idx] = enabled ? 1 : 0;
+        emitOptionState();
+      }
     } else if (msg.cmd === 'setField') {
       const target = msg.target;
       if (target === 'mjOption') {

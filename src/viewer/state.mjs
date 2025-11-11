@@ -4,6 +4,29 @@ import { prepareBindingUpdate, splitBinding } from './bindings.mjs';
 // Runtime implementation lives in JS so it can be consumed directly by the
 // buildless viewer. Type definitions are provided separately in state.ts.
 
+const MJ_GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'skin'];
+const MJ_GROUP_COUNT = 6;
+
+function createViewerGroupState(initial = true) {
+  const state = {};
+  for (const type of MJ_GROUP_TYPES) {
+    state[type] = Array.from({ length: MJ_GROUP_COUNT }, () => !!initial);
+  }
+  return state;
+}
+
+function normaliseGroupState(input) {
+  const output = {};
+  for (const type of MJ_GROUP_TYPES) {
+    const source = Array.isArray(input?.[type]) ? input[type] : null;
+    output[type] = Array.from(
+      { length: MJ_GROUP_COUNT },
+      (_, idx) => (source && idx < source.length ? !!source[idx] : true),
+    );
+  }
+  return output;
+}
+
 const DEFAULT_VIEWER_STATE = Object.freeze({
   overlays: {
     help: false,
@@ -77,6 +100,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     labelMode: 0,
     frameMode: 0,
     assets: null,
+    groups: createViewerGroupState(true),
   },
   hud: {
     time: 0,
@@ -111,6 +135,20 @@ const SNAPSHOT_DEBUG_FLAG = (() => {
   } catch {}
   return false;
 })();
+
+const VERBOSE_DEBUG_LOGS = (() => {
+  try {
+    if (typeof window !== 'undefined') {
+      if (window.PLAY_VERBOSE_DEBUG === true) return true;
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('log') === '1') return true;
+    }
+  } catch {}
+  return false;
+})();
+if (typeof window !== 'undefined') {
+  try { window.PLAY_VERBOSE_DEBUG = VERBOSE_DEBUG_LOGS; } catch {}
+}
 
 function ctrlMirrorEnabled() {
   return false;
@@ -365,6 +403,10 @@ function mergeBackendSnapshot(draft, snapshot) {
     const rendering = ensureRenderingState(draft);
     rendering.sceneFlags = snapshot.sceneFlags.map((flag) => !!flag);
   }
+  if (snapshot.groups) {
+    const rendering = ensureRenderingState(draft);
+    rendering.groups = normaliseGroupState(snapshot.groups);
+  }
   if (typeof snapshot.labelMode === 'number' && Number.isFinite(snapshot.labelMode)) {
     const rendering = ensureRenderingState(draft);
     rendering.labelMode = Math.max(0, snapshot.labelMode | 0);
@@ -436,6 +478,7 @@ function ensureRenderingState(target) {
       sceneFlags: Array.from({ length: 8 }, () => false),
       labelMode: 0,
       frameMode: 0,
+      groups: createViewerGroupState(true),
     };
   } else {
     if (!Array.isArray(target.rendering.voptFlags)) {
@@ -449,6 +492,11 @@ function ensureRenderingState(target) {
     }
     if (typeof target.rendering.frameMode !== 'number') {
       target.rendering.frameMode = 0;
+    }
+    if (!target.rendering.groups) {
+      target.rendering.groups = createViewerGroupState(true);
+    } else {
+      target.rendering.groups = normaliseGroupState(target.rendering.groups);
     }
   }
   return target.rendering;
@@ -506,6 +554,20 @@ function applyBinding(draft, binding, value, control) {
       return true;
     default:
       break;
+  }
+
+  const groupMatch = binding?.match(/^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/);
+  if (groupMatch) {
+    const type = groupMatch[1];
+    const idx = Math.max(0, Math.trunc(toNumber(groupMatch[2])));
+    if (idx < MJ_GROUP_COUNT) {
+      const rendering = ensureRenderingState(draft);
+      if (!Array.isArray(rendering.groups?.[type])) {
+        rendering.groups[type] = Array.from({ length: MJ_GROUP_COUNT }, () => true);
+      }
+      rendering.groups[type][idx] = bool(value);
+    }
+    return true;
   }
 
   if (binding?.startsWith('Simulate::disable[')) {
@@ -645,6 +707,19 @@ function readBindingValue(state, binding, control) {
       break;
   }
 
+  const groupMatch = binding?.match(/^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/);
+  if (groupMatch) {
+    const type = groupMatch[1];
+    const idx = Math.max(0, Math.trunc(toNumber(groupMatch[2])));
+    const groups = state.rendering?.groups;
+    const arr = Array.isArray(groups?.[type]) ? groups[type] : null;
+    if (!arr) return true;
+    if (idx >= 0 && idx < arr.length) {
+      return !!arr[idx];
+    }
+    return true;
+  }
+
   if (binding?.startsWith('Simulate::disable[')) {
     const name = control?.label ?? control?.name ?? binding;
     return !!state.physics.disableFlags[name];
@@ -746,6 +821,7 @@ export function createViewerStore(initialState) {
 export async function applySpecAction(store, backend, control, rawValue) {
   if (!control) return;
   const value = normaliseControlValue(control, rawValue);
+  const prepared = await prepareBindingUpdate(control, value);
   let snapshot = null;
   if (backend && typeof backend.apply === 'function') {
     try {
@@ -940,6 +1016,7 @@ function resolveSnapshot(state) {
       : null,
     options: state.options ?? null,
     renderAssets: state.renderAssets ?? null,
+    groups: state.groups ? normaliseGroupState(state.groups) : null,
   };
 }
 
@@ -980,6 +1057,7 @@ export async function createBackend(options = {}) {
     labelMode: 0,
     frameMode: 0,
     cameraMode: 0,
+    groups: createViewerGroupState(true),
     align: null,
     copyState: null,
     xpos: new Float64Array(0),
@@ -1005,6 +1083,7 @@ export async function createBackend(options = {}) {
   async function spawnWorkerBackend() {
     const workerUrl = new URL(WORKER_URL.href);
     if (SNAPSHOT_DEBUG_FLAG) workerUrl.searchParams.set('snapshot', '1');
+     if (VERBOSE_DEBUG_LOGS) workerUrl.searchParams.set('verbose', '1');
     workerUrl.searchParams.set('cb', String(Date.now()));
     const worker = new Worker(workerUrl, { type: 'module' });
     return worker;
@@ -1112,6 +1191,9 @@ export async function createBackend(options = {}) {
     if (typeof data.cameraMode === 'number' && Number.isFinite(data.cameraMode)) {
       lastSnapshot.cameraMode = data.cameraMode | 0;
     }
+    if (data.groups && typeof data.groups === 'object') {
+      lastSnapshot.groups = normaliseGroupState(data.groups);
+    }
   }
 
   function applyVisualOverrides() {
@@ -1159,7 +1241,7 @@ export async function createBackend(options = {}) {
   function handleMessage(event) {
     const data = event?.data ?? event;
     if (!data || typeof data !== 'object') return;
-    if (debug) {
+    if (debug && VERBOSE_DEBUG_LOGS) {
       const key = '__backendLogCounter';
       handleMessage[key] = handleMessage[key] || { snapshot: 0 };
       if (data.kind === 'snapshot') {
@@ -1494,6 +1576,25 @@ export async function createBackend(options = {}) {
     }
     if (binding === 'Simulate::tracking_geom') {
       lastSnapshot.trackingGeom = Math.trunc(toNumber(value));
+      notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+    const groupMatch = binding?.match(/^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/);
+    if (groupMatch) {
+      const type = groupMatch[1];
+      const idx = Math.max(0, Math.trunc(toNumber(groupMatch[2])));
+      if (!lastSnapshot.groups) {
+        lastSnapshot.groups = createViewerGroupState(true);
+      }
+      if (!Array.isArray(lastSnapshot.groups[type])) {
+        lastSnapshot.groups[type] = Array.from({ length: MJ_GROUP_COUNT }, () => true);
+      }
+      if (idx < MJ_GROUP_COUNT) {
+        lastSnapshot.groups[type][idx] = bool(value);
+      }
+      try { client.postMessage?.({ cmd: 'setGroupState', group: type, index: idx, enabled: bool(value) }); } catch (err) {
+        if (debug) console.warn('[backend group] post failed', err);
+      }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }

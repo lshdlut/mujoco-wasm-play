@@ -1292,6 +1292,8 @@ export function createRendererManager({
 
     const assets = state.rendering?.assets || null;
     syncRendererAssets(context, assets);
+    const geomGroupIds = assets?.geoms?.group || null;
+    const geomGroupMask = Array.isArray(state.rendering?.groups?.geom) ? state.rendering.groups.geom : null;
 
     if (typeof applyFallbackAppearance === 'function') {
       applyFallbackAppearance(context, state);
@@ -1427,6 +1429,15 @@ export function createRendererManager({
       let visible = mesh.visible;
       if (hideAllGeometry) {
         visible = false;
+      }
+      if (visible && geomGroupMask) {
+        const rawGroup = geomGroupIds && i < geomGroupIds.length ? geomGroupIds[i] : 0;
+        const groupIdx = Number.isFinite(rawGroup) ? (rawGroup | 0) : 0;
+        if (groupIdx >= 0 && groupIdx < geomGroupMask.length) {
+          if (!geomGroupMask[groupIdx]) {
+            visible = false;
+          }
+        }
       }
 
       if (highlightGeometry) {

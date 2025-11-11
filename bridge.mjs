@@ -162,6 +162,7 @@ export function collectRenderAssetsFromModule(mod, handle) {
     const matidView = readView(mod, ensureFunc('_mjwf_geom_matid_ptr'), handle, ngeom, heapViewI32);
     const bodyIdView = readView(mod, ensureFunc('_mjwf_geom_bodyid_ptr'), handle, ngeom, heapViewI32);
     const dataIdView = readView(mod, ensureFunc('_mjwf_geom_dataid_ptr'), handle, ngeom, heapViewI32);
+    const groupView = readView(mod, ensureFunc('_mjwf_geom_group_ptr'), handle, ngeom, heapViewI32);
     assets.geoms = {
       count: ngeom,
       size: cloneTyped(sizeView, Float64Array),
@@ -169,6 +170,7 @@ export function collectRenderAssetsFromModule(mod, handle) {
       matid: cloneTyped(matidView, Int32Array),
       bodyid: cloneTyped(bodyIdView, Int32Array),
       dataid: cloneTyped(dataIdView, Int32Array),
+      group: cloneTyped(groupView, Int32Array),
     };
   }
   const nmat = typeof mod._mjwf_nmat === 'function' ? (mod._mjwf_nmat(handle) | 0) : 0;

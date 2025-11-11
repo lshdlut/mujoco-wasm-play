@@ -10,6 +10,7 @@ const POINTER_ALIASES = {
   _mjwf_geom_bodyid_ptr: '_mjwf_model_geom_bodyid_ptr',
   _mjwf_geom_dataid_ptr: '_mjwf_model_geom_dataid_ptr',
   _mjwf_geom_matid_ptr: '_mjwf_model_geom_matid_ptr',
+  _mjwf_geom_group_ptr: '_mjwf_model_geom_group_ptr',
   _mjwf_geom_size_ptr: '_mjwf_model_geom_size_ptr',
   _mjwf_geom_type_ptr: '_mjwf_model_geom_type_ptr',
   _mjwf_geom_xmat_ptr: '_mjwf_data_geom_xmat_ptr',

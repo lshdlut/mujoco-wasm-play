@@ -586,23 +586,37 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     row.append(label);
     container.append(row);
 
+    let current = false;
     const binding = createBinding(control, {
-      getValue: () => input.checked,
+      getValue: () => current,
       applyValue: (value) => {
         const active = coerceBoolean(value);
-        input.checked = active;
+        current = active;
+        input.checked = !!active;
         input.setAttribute('aria-checked', active ? 'true' : 'false');
-        label.classList.toggle('is-active', active);
+        label.classList.toggle('is-active', !!active);
       },
+    });
+
+    const commitToggle = guardBinding(binding, async (nextValue) => {
+      binding.setValue(!!nextValue);
+      await applySpecAction(store, backend, control, !!nextValue);
     });
 
     input.addEventListener(
       'change',
-      guardBinding(binding, async () => {
+      (event) => {
+        event.stopPropagation();
         const next = !binding.getValue();
-        await applySpecAction(store, backend, control, next);
-      }),
+        commitToggle(next);
+      },
     );
+
+    label.addEventListener('click', (event) => {
+      event.preventDefault();
+      const next = !binding.getValue();
+      commitToggle(next);
+    });
 
     input.addEventListener('focus', () => {
       label.classList.add('has-focus');
