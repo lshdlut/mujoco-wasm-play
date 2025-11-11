@@ -13,6 +13,7 @@ export function createControlManager({
   const eventCleanup = [];
   let shortcutsInstalled = false;
   const shortcutHandlers = new Map();
+  const CAMERA_FALLBACK_PRESETS = ['Free', 'Tracking'];
 
   function sanitiseName(name) {
     return (
@@ -79,6 +80,12 @@ function coerceBoolean(value) {
     return lowered === '1' || lowered === 'true' || lowered === 'run' || lowered === 'on' || lowered === 'yes';
   }
   return !!value;
+}
+
+function toNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function clamp01(x) {
@@ -169,6 +176,64 @@ function denormaliseFromRange(t, range) {
     value = min + steps * step;
   }
   return Math.min(max, Math.max(min, value));
+}
+
+function resolveCameraModeEntries() {
+  const baseList =
+    Array.isArray(cameraPresets) && cameraPresets.length >= CAMERA_FALLBACK_PRESETS.length
+      ? cameraPresets
+      : CAMERA_FALLBACK_PRESETS;
+  const entries = baseList.map((label, idx) => ({
+    value: String(idx),
+    label: label || `Camera ${idx}`,
+  }));
+  const modelCameras = store.get()?.model?.cameras || [];
+  if (Array.isArray(modelCameras) && modelCameras.length > 0) {
+    modelCameras.forEach((cam, idx) => {
+      const name =
+        typeof cam?.name === 'string' && cam.name.trim().length > 0
+          ? cam.name.trim()
+          : `Camera ${idx + 1}`;
+      entries.push({
+        value: String(idx + baseList.length),
+        label: name,
+      });
+    });
+  }
+  return entries;
+}
+
+function syncCameraSelectOptions(select, control) {
+  if (!select) return [];
+  const entries = resolveCameraModeEntries();
+  const prevValue = select.value;
+  let dirty = select.options.length !== entries.length;
+  if (!dirty) {
+    for (let i = 0; i < entries.length; i += 1) {
+      const option = select.options[i];
+      const entry = entries[i];
+      if (!option || option.value !== entry.value || option.textContent !== entry.label) {
+        dirty = true;
+        break;
+      }
+    }
+  }
+  if (dirty) {
+    select.innerHTML = '';
+    entries.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.value;
+      option.textContent = entry.label;
+      select.appendChild(option);
+    });
+    if (!entries.some((entry) => entry.value === prevValue)) {
+      select.value = entries[0]?.value ?? '0';
+    } else if (prevValue) {
+      select.value = prevValue;
+    }
+  }
+  control.options = entries.map((entry) => entry.label);
+  return entries;
 }
 
 const MOD_KEYS = new Set(['ctrl', 'control', 'meta', 'cmd', 'win', 'shift', 'alt', 'option']);
@@ -591,26 +656,47 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     const select = document.createElement('select');
     select.setAttribute('data-testid', control.item_id);
     select.id = inputId;
-    const options = normaliseOptions(control.options);
-    options.forEach((opt) => {
-      const option = document.createElement('option');
-      option.value = opt;
-      option.textContent = opt;
-      select.appendChild(option);
-    });
+    const isCameraModeSelect = control.item_id === 'rendering.camera_mode';
+    const options = isCameraModeSelect ? [] : normaliseOptions(control.options);
+    if (isCameraModeSelect) {
+      syncCameraSelectOptions(select, control);
+    } else {
+      options.forEach((opt) => {
+        const option = document.createElement('option');
+        option.value = opt;
+        option.textContent = opt;
+        select.appendChild(option);
+      });
+    }
     field.append(select);
     container.append(row);
 
     applyOptionAvailability(control, select);
 
     const binding = createBinding(control, {
-      getValue: () => select.value,
+      getValue: () => {
+        if (isCameraModeSelect) {
+          syncCameraSelectOptions(select, control);
+          return toNumber(select.value);
+        }
+        return select.value;
+      },
       applyValue: (value) => {
-        if (typeof value === 'string') {
-          select.value = value;
-        } else if (typeof value === 'number' && Number.isFinite(value)) {
-          const idx = Math.max(0, Math.min(options.length - 1, Math.round(value)));
-          select.value = options[idx];
+        if (isCameraModeSelect) {
+          const entries = syncCameraSelectOptions(select, control);
+          const numericValue = Math.max(0, Math.trunc(toNumber(value)));
+          const match = entries.find((entry) => entry.value === String(numericValue));
+          const fallbackValue = entries[0]?.value ?? '0';
+          select.value = match ? match.value : fallbackValue;
+        } else if (value == null) {
+          select.value = options[0] ?? '';
+        } else {
+          const next = String(value);
+          if (!options.includes(next) && options.length > 0) {
+            select.value = options[0];
+          } else {
+            select.value = next;
+          }
         }
       },
     });
@@ -618,7 +704,9 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     select.addEventListener(
       'change',
       guardBinding(binding, async () => {
-        const value = select.value;
+        const value = isCameraModeSelect
+          ? Math.max(0, Math.trunc(toNumber(select.value)))
+          : select.value;
         await applySpecAction(store, backend, control, value);
       }),
     );
@@ -1143,7 +1231,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     const control = controlById.get('rendering.camera_mode');
     if (!control) return;
     const current = store.get().runtime.cameraIndex | 0;
-    const total = cameraPresets.length || 1;
+    const total = getCameraModeCount();
     const next = (current + delta + total) % total;
     await applySpecAction(store, backend, control, next);
   }
@@ -1291,3 +1379,10 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     dispose,
   };
 }
+  const getCameraModeCount = () => {
+    try {
+      return Math.max(1, 2 + (store.get()?.model?.cameras?.length || 0));
+    } catch {
+      return Math.max(1, cameraPresets.length || 1);
+    }
+  };

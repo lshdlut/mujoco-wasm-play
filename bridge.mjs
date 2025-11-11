@@ -475,6 +475,7 @@ export class MjSimLite {
   nv(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nv']; if (typeof d==='function') return (d.call(m,h)|0)||0; try{ return (m.ccall(pref+'_nv','number',['number'],[h])|0)||0;}catch{return 0;} }
   nu(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nu']; if (typeof d==='function') return (d.call(m,h)|0)||0; try{ return (m.ccall(pref+'_nu','number',['number'],[h])|0)||0;}catch{return 0;} }
   njnt(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_njnt']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
+  ncam(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_ncam']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
 
   // --- State views ---
   qposView(){ const m=this.mod; const h=this.h|0; const n=this.nq(); if(!n)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_qpos_ptr']; let p=0; if (typeof d==='function') p=d.call(m,h)|0; else { try{ p=m.ccall(pref+'_qpos_ptr','number',['number'],[h])|0; }catch{ p=0; } } if(!p)return; return heapViewF64(m,p,n); }
@@ -648,6 +649,9 @@ export class MjSimLite {
       } catch {}
     }
     return this._nameFromAdr(idx, '_mjwf_model_name_actuatoradr_ptr', '_mjwf_model_nu') || '';
+  }
+  cameraNameOf(i){
+    return this._nameFromAdr(i, '_mjwf_model_name_camadr_ptr', '_mjwf_ncam') || '';
   }
   
   // --- Apply/clear external force (xfrc_applied) ---

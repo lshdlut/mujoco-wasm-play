@@ -102,6 +102,7 @@ class DirectBackend {
     this.optionSupport = { supported: false, pointers: [] };
     this.visualState = null;
     this.statisticState = null;
+    this.cameraList = [];
   }
 
   #computeBoundsFromPositions(view, n) {
@@ -180,6 +181,71 @@ class DirectBackend {
       return this.#computeBoundsFromPositions(posView, ngeom);
     } catch {
       return { center: [0, 0, 0], radius: 0 };
+    }
+  }
+
+  #collectCameraMeta() {
+    if (!this.sim || !this.mod) return [];
+    const count = typeof this.sim.ncam === 'function' ? (this.sim.ncam() | 0) : 0;
+    if (!(count > 0)) return [];
+    const readFloat = (field, stride = 1) => {
+      if (typeof this.sim._readModelPtr !== 'function') return null;
+      const ptr = this.sim._readModelPtr(field);
+      if (!ptr) return null;
+      const len = stride * count;
+      if (!(len > 0)) return null;
+      const view = heapViewF64(this.mod, ptr, len);
+      if (!view) return null;
+      return Array.from(view);
+    };
+    const readInt = (field) => {
+      if (typeof this.sim._readModelPtr !== 'function') return null;
+      const ptr = this.sim._readModelPtr(field);
+      if (!ptr) return null;
+      const len = count;
+      const view = heapViewI32(this.mod, ptr, len);
+      if (!view) return null;
+      return Array.from(view);
+    };
+    const pos0 = readFloat('cam_pos0', 3) || [];
+    const mat0 = readFloat('cam_mat0', 9) || [];
+    const fovy = readFloat('cam_fovy', 1) || [];
+    const ortho = readInt('cam_orthographic') || [];
+    const mode = readInt('cam_mode') || [];
+    const bodyId = readInt('cam_bodyid') || [];
+    const targetId = readInt('cam_targetbodyid') || [];
+    const cameras = [];
+    for (let i = 0; i < count; i += 1) {
+      const entry = {
+        index: i,
+        name: typeof this.sim.cameraNameOf === 'function' ? this.sim.cameraNameOf(i) || `Camera ${i + 1}` : `Camera ${i + 1}`,
+      };
+      if (pos0.length >= (i + 1) * 3) {
+        entry.pos = pos0.slice(i * 3, i * 3 + 3);
+      }
+      if (mat0.length >= (i + 1) * 9) {
+        const slice = mat0.slice(i * 9, i * 9 + 9);
+        entry.mat = slice;
+        entry.up = [slice[3], slice[4], slice[5]];
+        entry.forward = [slice[6], slice[7], slice[8]];
+      }
+      if (fovy.length > i) entry.fovy = fovy[i];
+      if (Array.isArray(ortho) && ortho.length > i) entry.orthographic = !!ortho[i];
+      if (Array.isArray(mode) && mode.length > i) entry.mode = mode[i] | 0;
+      if (Array.isArray(bodyId) && bodyId.length > i) entry.bodyId = bodyId[i] | 0;
+      if (Array.isArray(targetId) && targetId.length > i) entry.targetBodyId = targetId[i] | 0;
+      cameras.push(entry);
+    }
+    return cameras;
+  }
+
+  #emitCameraMeta() {
+    try {
+      const cameras = this.#collectCameraMeta();
+      this.cameraList = cameras;
+      this.#emitMessage({ kind: 'meta_cameras', cameras });
+    } catch (err) {
+      this.#emitLog('direct: camera meta failed', { error: String(err) });
     }
   }
 
@@ -532,6 +598,7 @@ class DirectBackend {
     this.#emitRenderAssets();
 
     this.#sendMeta();
+    this.#emitCameraMeta();
 
     this.#startLoops();
   }

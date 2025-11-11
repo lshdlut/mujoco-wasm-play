@@ -56,6 +56,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     vis: {},
     stat: {},
     visDefaults: {},
+    cameras: [],
     ctrl: [],
     optSupport: { supported: false, pointers: [] },
   },
@@ -89,7 +90,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   scene: null,
 });
 
-const CAMERA_PRESETS = ['Free', 'Tracking', 'Fixed 1', 'Fixed 2', 'Fixed 3'];
+const CAMERA_BASE_LABELS = ['Free', 'Tracking'];
 let latestHudTime = 0;
 const TIME_RESET_EPSILON = 1e-6;
 const MODEL_ALIASES = {
@@ -257,9 +258,17 @@ function normaliseControlValue(control, raw) {
   }
 }
 
-function cameraLabelFromIndex(index) {
+function cameraLabelFromIndex(index, cameras = []) {
   const i = index | 0;
-  return CAMERA_PRESETS[i] ?? `Fixed ${i}`;
+  if (i < CAMERA_BASE_LABELS.length) {
+    return CAMERA_BASE_LABELS[i];
+  }
+  const list = Array.isArray(cameras) ? cameras : [];
+  const cam = list[i - CAMERA_BASE_LABELS.length];
+  if (cam && typeof cam.name === 'string' && cam.name.length) {
+    return cam.name;
+  }
+  return `Camera ${i - CAMERA_BASE_LABELS.length + 1}`;
 }
 
 function mergeBackendSnapshot(draft, snapshot) {
@@ -344,7 +353,7 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const idx = snapshot.cameraMode | 0;
     draft.runtime.cameraIndex = idx;
-    draft.runtime.cameraLabel = cameraLabelFromIndex(idx);
+    draft.runtime.cameraLabel = cameraLabelFromIndex(idx, draft.model?.cameras);
   }
   if (Array.isArray(snapshot.voptFlags)) {
     const rendering = ensureRenderingState(draft);
@@ -385,6 +394,10 @@ function mergeBackendSnapshot(draft, snapshot) {
     if (!draft.model) draft.model = {};
     draft.model.visDefaults = deepMerge(draft.model.visDefaults || {}, snapshot.visualDefaults);
   }
+  if (snapshot.cameras) {
+    if (!draft.model) draft.model = {};
+    draft.model.cameras = Array.isArray(snapshot.cameras) ? snapshot.cameras.slice() : [];
+  }
   if (snapshot.statistic) {
     if (!draft.model) draft.model = {};
     draft.model.stat = deepMerge(draft.model.stat || {}, snapshot.statistic);
@@ -402,7 +415,7 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const mode = snapshot.cameraMode | 0;
     draft.runtime.cameraIndex = mode;
-    draft.runtime.cameraLabel = cameraLabelFromIndex(mode);
+    draft.runtime.cameraLabel = cameraLabelFromIndex(mode, draft.model?.cameras);
   }
 }
 
@@ -467,7 +480,7 @@ function applyBinding(draft, binding, value, control) {
     case 'Simulate::camera': {
       const idx = Math.max(0, Math.trunc(toNumber(value)));
       draft.runtime.cameraIndex = idx;
-      draft.runtime.cameraLabel = cameraLabelFromIndex(idx);
+      draft.runtime.cameraLabel = cameraLabelFromIndex(idx, draft.model?.cameras);
       return true;
     }
     case 'Simulate::scrub_index':
@@ -856,6 +869,7 @@ function resolveSnapshot(state) {
     scene: state.scene ?? null,
     options: state.options ?? null,
     ctrl: state.ctrl ? Array.from(state.ctrl) : null,
+    cameras: Array.isArray(state.cameras) ? state.cameras.slice() : null,
     frameId: Number.isFinite(state.frameId) ? (state.frameId | 0) : null,
     optionSupport: state.optionSupport ? { ...state.optionSupport } : null,
     visual: cloneStruct(state.visual),
@@ -965,6 +979,7 @@ export async function createBackend(options = {}) {
     visual: null,
     statistic: null,
     visualDefaults: null,
+    cameras: [],
   };
   let lastFrameId = -1;
   let messageHandler = null;
@@ -1191,6 +1206,17 @@ export async function createBackend(options = {}) {
           lastSnapshot.visual = data.value || null;
         } else if (data.scope === 'mjStatistic') {
           lastSnapshot.statistic = data.value || null;
+        }
+        notifyListeners();
+        break;
+      }
+      case 'meta_cameras': {
+        lastSnapshot.cameras = Array.isArray(data.cameras) ? data.cameras : [];
+        const totalModes = Math.max(1, 2 + (lastSnapshot.cameras?.length || 0));
+        const mode = lastSnapshot.cameraMode | 0;
+        if (mode >= totalModes) {
+          lastSnapshot.cameraMode = 0;
+          try { client.postMessage?.({ cmd: 'setCameraMode', mode: 0 }); } catch {}
         }
         notifyListeners();
         break;
@@ -1434,7 +1460,8 @@ export async function createBackend(options = {}) {
     const { id, value, control } = payload;
     const binding = typeof control?.binding === 'string' ? control.binding : null;
     if (binding === 'Simulate::camera') {
-      const modeValue = Math.max(0, Math.trunc(toNumber(value)));
+      const totalModes = Math.max(1, 2 + (lastSnapshot.cameras?.length || 0));
+      const modeValue = Math.max(0, Math.min(totalModes - 1, Math.trunc(toNumber(value))));
       lastSnapshot.cameraMode = modeValue;
       try { client.postMessage?.({ cmd: 'setCameraMode', mode: modeValue }); } catch (err) {
         if (debug) console.warn('[backend camera] post failed', err);

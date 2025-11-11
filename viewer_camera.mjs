@@ -63,6 +63,16 @@ export function createCameraController({
   let warnedUpDrift = false;
   let warnedApplyGesture = false;
 
+  const cameraModeIndex = () => {
+    try {
+      return store.get()?.runtime?.cameraIndex ?? 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  const isInteractiveCamera = () => cameraModeIndex() <= 1;
+
   function currentCtrl(event) {
     return !!event?.ctrlKey || modifierState.ctrl;
   }
@@ -259,6 +269,9 @@ export function createCameraController({
       }
     }
 
+    if (cameraModeIndex() === 1) {
+      syncTrackingOffsetFromCamera();
+    }
     if (debugMode) {
       try {
         console.log('[camera] gesture', {
@@ -272,7 +285,18 @@ export function createCameraController({
     }
   }
 
+  function syncTrackingOffsetFromCamera() {
+    if (cameraModeIndex() !== 1) return;
+    if (!renderCtx?.camera || !renderCtx.cameraTarget) return;
+    if (!renderCtx.trackingOffset) {
+      renderCtx.trackingOffset = new THREE_NS.Vector3();
+    }
+    renderCtx.trackingOffset.copy(renderCtx.camera.position).sub(renderCtx.cameraTarget);
+    renderCtx.trackingRadius = Math.max(1e-6, renderCtx.trackingOffset.length());
+  }
+
   function beginGesture(event) {
+    if (!isInteractiveCamera()) return;
     pointerState.id = typeof event.pointerId === 'number' ? event.pointerId : null;
     pointerState.mode = resolveGestureMode(event);
     pointerState.lastX = event.clientX ?? 0;
@@ -285,7 +309,7 @@ export function createCameraController({
         canvas.setPointerCapture(event.pointerId);
       } catch {}
     }
-    if (applyGesture) {
+    if (applyGesture && isInteractiveCamera()) {
       if (!warnedApplyGesture) {
         try { console.warn('[camera] applyGesture is deprecated; prefer onGesture(event)'); } catch {}
         warnedApplyGesture = true;
@@ -306,7 +330,7 @@ export function createCameraController({
   }
 
   function moveGesture(event) {
-    if (!pointerState.active) return;
+    if (!pointerState.active || !isInteractiveCamera()) return;
     if (typeof event.pointerId === 'number' && pointerState.id !== null && event.pointerId !== pointerState.id) {
       return;
     }
@@ -317,7 +341,7 @@ export function createCameraController({
     pointerState.lastX = currentX;
     pointerState.lastY = currentY;
     applyCameraGesture(pointerState.mode, currentX - prevX, currentY - prevY);
-    if (applyGesture) {
+    if (applyGesture && isInteractiveCamera()) {
       applyGesture(store, backend, {
         mode: pointerState.mode,
         phase: 'move',
@@ -353,7 +377,7 @@ export function createCameraController({
     const currentY =
       typeof event?.clientY === 'number' ? event.clientY : pointerState.lastY ?? 0;
 
-    if (applyGesture) {
+    if (applyGesture && isInteractiveCamera()) {
       applyGesture(store, backend, {
         mode: pointerState.mode,
         phase: 'end',
@@ -463,6 +487,7 @@ export function createCameraController({
     cleanup.push(() => canvas.removeEventListener('lostpointercapture', lostPointerCapture));
 
     const wheelHandler = (event) => {
+      if (!isInteractiveCamera()) return;
       if (!renderCtx?.camera) return;
       event.preventDefault();
       const DOM_DELTA = { 0: 1, 1: wheelLineFactor, 2: wheelPageFactor };

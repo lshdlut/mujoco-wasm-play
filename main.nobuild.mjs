@@ -18,7 +18,7 @@ import { createControlManager } from './viewer_controls.mjs';
 import { createCameraController } from './viewer_camera.mjs';
 import { createRendererManager } from './viewer_renderer.mjs';
 
-const CAMERA_PRESETS = ['Free', 'Tracking', 'Fixed 1', 'Fixed 2', 'Fixed 3'];
+const CAMERA_PRESETS = ['Free', 'Tracking'];
 const MJ_GEOM = {
   PLANE: 0,
   HFIELD: 1,

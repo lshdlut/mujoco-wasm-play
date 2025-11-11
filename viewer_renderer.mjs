@@ -10,6 +10,7 @@ const MJ_GEOM = {
   BOX: 6,
   MESH: 7,
 };
+const FIXED_CAMERA_OFFSET = 2;
 
 function mat3ToQuat(m) {
   const m00 = m[0] ?? 1;
@@ -99,6 +100,149 @@ function averageRGB(arr) {
   return arr.reduce((acc, v) => acc + (Number(v) || 0), 0) / arr.length;
 }
 
+function ensureCameraTarget(ctx) {
+  if (!ctx) return null;
+  if (!ctx.cameraTarget) {
+    ctx.cameraTarget = new THREE.Vector3(0, 0, 0);
+  }
+  return ctx.cameraTarget;
+}
+
+function ensureFreeCameraPose(ctx) {
+  if (!ctx) return null;
+  if (!ctx.freeCameraPose) {
+    ctx.freeCameraPose = {
+      position: new THREE.Vector3(),
+      target: new THREE.Vector3(),
+      up: new THREE.Vector3(0, 0, 1),
+      fov: 45,
+      valid: false,
+      autoAligned: false,
+    };
+  }
+  ensureCameraTarget(ctx);
+  return ctx.freeCameraPose;
+}
+
+function cacheTrackingPoseFromCurrent(ctx, bounds) {
+  if (!ctx?.camera) return;
+  const target = ensureCameraTarget(ctx);
+  if (!ctx.trackingOffset) {
+    ctx.trackingOffset = new THREE.Vector3();
+  }
+  ctx.trackingOffset.copy(ctx.camera.position).sub(target);
+  const radiusSource =
+    bounds?.radius ??
+    ctx.bounds?.radius ??
+    ctx.trackingRadius ??
+    Math.max(0.6, target.length());
+  ctx.trackingRadius = Math.max(0.1, Number(radiusSource) || 0.6);
+}
+
+function rememberFreeCameraPose(ctx, bounds) {
+  if (!ctx?.camera) return;
+  const pose = ensureFreeCameraPose(ctx);
+  const target = ensureCameraTarget(ctx);
+  pose.position.copy(ctx.camera.position);
+  pose.target.copy(target);
+  pose.up.copy(ctx.camera.up);
+  pose.fov = Number.isFinite(ctx.camera.fov) ? ctx.camera.fov : pose.fov;
+  pose.valid = true;
+  pose.autoAligned = !!ctx.autoAligned;
+  cacheTrackingPoseFromCurrent(ctx, bounds);
+}
+
+function restoreFreeCameraPose(ctx) {
+  if (!ctx?.camera || !ctx.freeCameraPose || !ctx.freeCameraPose.valid) return false;
+  const pose = ctx.freeCameraPose;
+  const target = ensureCameraTarget(ctx);
+  ctx.camera.position.copy(pose.position);
+  target.copy(pose.target);
+  ctx.camera.lookAt(target);
+  ctx.camera.up.copy(pose.up);
+  if (Number.isFinite(pose.fov) && ctx.camera.fov !== pose.fov) {
+    ctx.camera.fov = pose.fov;
+    if (typeof ctx.camera.updateProjectionMatrix === 'function') {
+      ctx.camera.updateProjectionMatrix();
+    }
+  }
+  if (pose.autoAligned) {
+    ctx.autoAligned = true;
+  }
+  cacheTrackingPoseFromCurrent(ctx, ctx.bounds || null);
+  ctx.fixedCameraActive = false;
+  return true;
+}
+
+function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }) {
+  if (!ctx?.camera) return false;
+  const target = ensureCameraTarget(ctx);
+  const sourceBounds = bounds || ctx.bounds || null;
+  const radius = Math.max(
+    Number(sourceBounds?.radius) || ctx.trackingRadius || 0.6,
+    0.6
+  );
+  const center = tempVecA.set(
+    Number(sourceBounds?.center?.[0] ?? target.x) || 0,
+    Number(sourceBounds?.center?.[1] ?? target.y) || 0,
+    Number(sourceBounds?.center?.[2] ?? target.z) || 0
+  );
+  if (!ctx.trackingOffset) {
+    ctx.trackingOffset = new THREE.Vector3(radius * 2.6, -radius * 2.6, radius * 1.7);
+    ctx.trackingRadius = radius;
+  }
+  const baseRadius = Math.max(ctx.trackingRadius || radius, 1e-6);
+  tempVecB
+    .copy(ctx.trackingOffset)
+    .multiplyScalar(radius / baseRadius);
+  ctx.camera.position.copy(center.clone().add(tempVecB));
+  ctx.camera.lookAt(center);
+  target.copy(center);
+  ctx.trackingRadius = radius;
+  ctx.fixedCameraActive = false;
+  const desiredFar = Math.max(100, radius * 10);
+  if (ctx.camera.far < desiredFar) {
+    ctx.camera.far = desiredFar;
+    if (typeof ctx.camera.updateProjectionMatrix === 'function') {
+      ctx.camera.updateProjectionMatrix();
+    }
+  }
+  return true;
+}
+
+function syncCameraPoseFromMode(ctx, state, bounds, helpers, trackingBounds = null) {
+  if (!ctx?.camera || !state) return;
+  const runtimeMode = Number(state.runtime?.cameraIndex ?? 0) | 0;
+  const cameraList = Array.isArray(state.model?.cameras) ? state.model.cameras : [];
+  const maxMode = FIXED_CAMERA_OFFSET + cameraList.length - 1;
+  const desired = Math.max(
+    0,
+    maxMode >= 0 ? Math.min(runtimeMode, Math.max(0, maxMode)) : runtimeMode
+  );
+  const previous =
+    typeof ctx.currentCameraMode === 'number' ? ctx.currentCameraMode : 0;
+  if (desired !== previous) {
+    if (previous === 0) {
+      rememberFreeCameraPose(ctx, bounds);
+    }
+    if (desired === 0 && previous !== 0) {
+      restoreFreeCameraPose(ctx);
+    }
+    ctx.currentCameraMode = desired;
+  }
+  if (desired >= FIXED_CAMERA_OFFSET) {
+    if (!applyFixedCameraPreset(ctx, state, helpers)) {
+      ctx.fixedCameraActive = false;
+    }
+    return;
+  }
+  if (desired === 1) {
+    applyTrackingCamera(ctx, trackingBounds || bounds, helpers);
+    return;
+  }
+  ctx.fixedCameraActive = false;
+}
+
 function applyVisualLighting(ctx, vis) {
   if (!vis || !ctx) return;
   const head = vis.headlight || {};
@@ -138,12 +282,60 @@ function applyVisualFog(ctx, vis, stat, bounds) {
   }
   const fogColor = vis?.rgba?.fog;
   if (fogColor && ctx.scene.fog?.color) {
-    const color = rgbFromArray(fogColor, [0.84, 0.9, 0.96]);
+    const color = rgbFromArray(fogColor, [0.7, 0.75, 0.85]);
     ctx.scene.fog.color.setRGB(color[0], color[1], color[2]);
   }
 }
 
-function computeBoundsFromSnapshot(snapshot) {
+function applyFixedCameraPreset(ctx, state, { tempVecA, tempVecB, tempVecC, tempVecD }) {
+  if (!ctx || !ctx.camera) return false;
+  const mode = state.runtime?.cameraIndex | 0;
+  if (mode < FIXED_CAMERA_OFFSET) {
+    ctx.fixedCameraActive = false;
+    return false;
+  }
+  const list = Array.isArray(state.model?.cameras) ? state.model.cameras : [];
+  const preset = list[mode - FIXED_CAMERA_OFFSET];
+  if (!preset || !Array.isArray(preset.pos) || preset.pos.length < 3) {
+    ctx.fixedCameraActive = false;
+    return false;
+  }
+  tempVecA.set(
+    Number(preset.pos[0]) || 0,
+    Number(preset.pos[1]) || 0,
+    Number(preset.pos[2]) || 0,
+  );
+  ctx.camera.position.copy(tempVecA);
+  const up = Array.isArray(preset.up) ? preset.up : (Array.isArray(preset.mat) ? [preset.mat[3], preset.mat[4], preset.mat[5]] : null);
+  if (up) {
+    tempVecB.set(Number(up[0]) || 0, Number(up[1]) || 0, Number(up[2]) || 1);
+    if (tempVecB.lengthSq() > 1e-9) {
+      ctx.camera.up.copy(tempVecB.normalize());
+    }
+  }
+  const forward = Array.isArray(preset.forward)
+    ? preset.forward
+    : (Array.isArray(preset.mat) ? [preset.mat[6], preset.mat[7], preset.mat[8]] : null);
+  tempVecC.set(
+    Number(forward?.[0]) || 0,
+    Number(forward?.[1]) || 0,
+    Number(forward?.[2]) || -1,
+  );
+  if (tempVecC.lengthSq() < 1e-9) tempVecC.set(0, 0, -1);
+  tempVecC.normalize();
+  const target = tempVecD.copy(ctx.camera.position).add(tempVecC);
+  ctx.camera.lookAt(target);
+  ensureCameraTarget(ctx)?.copy(target);
+  const fovy = Number(preset.fovy);
+  if (Number.isFinite(fovy) && ctx.camera.fov !== fovy) {
+    ctx.camera.fov = fovy;
+    ctx.camera.updateProjectionMatrix();
+  }
+  ctx.fixedCameraActive = true;
+  return true;
+}
+
+function computeBoundsFromSnapshot(snapshot, { ignoreStatic = false } = {}) {
   const n = snapshot?.ngeom | 0;
   const xpos = snapshot?.xpos;
   if (!xpos || n <= 0) return null;
@@ -155,6 +347,7 @@ function computeBoundsFromSnapshot(snapshot) {
   let maxx = Number.NEGATIVE_INFINITY;
   let maxy = Number.NEGATIVE_INFINITY;
   let maxz = Number.NEGATIVE_INFINITY;
+  let used = 0;
   for (let i = 0; i < n; i += 1) {
     const base = 3 * i;
     const x = Number(xpos[base + 0]) || 0;
@@ -164,6 +357,9 @@ function computeBoundsFromSnapshot(snapshot) {
     const sy = gsize?.[base + 1] ?? sx;
     const sz = gsize?.[base + 2] ?? sx;
     const type = gtype?.[i] ?? MJ_GEOM.BOX;
+    if (ignoreStatic && (type === MJ_GEOM.PLANE || type === MJ_GEOM.HFIELD)) {
+      continue;
+    }
     const radius = computeGeomRadius(type, sx, sy, sz);
     const pxMin = x - radius;
     const pyMin = y - radius;
@@ -177,8 +373,9 @@ function computeBoundsFromSnapshot(snapshot) {
     if (pxMax > maxx) maxx = pxMax;
     if (pyMax > maxy) maxy = pyMax;
     if (pzMax > maxz) maxz = pzMax;
+    used += 1;
   }
-  if (!Number.isFinite(minx) || !Number.isFinite(maxx)) return null;
+  if (used === 0 || !Number.isFinite(minx) || !Number.isFinite(maxx)) return null;
   const cx = (minx + maxx) / 2;
   const cy = (miny + maxy) / 2;
   const cz = (minz + maxz) / 2;
@@ -780,6 +977,8 @@ export function createRendererManager({
   ctx._shadow = ctx._shadow || { lastCenter: null, lastRadius: 0 };
   ctx._frameCounter = ctx._frameCounter || 0;
   ctx.boundsEvery = typeof ctx.boundsEvery === 'number' && ctx.boundsEvery > 0 ? ctx.boundsEvery : 2;
+  ctx.currentCameraMode = typeof ctx.currentCameraMode === 'number' ? ctx.currentCameraMode : 0;
+  ctx.fixedCameraActive = !!ctx.fixedCameraActive;
 
   const cleanup = [];
   const tempVecA = new THREE.Vector3();
@@ -1146,6 +1345,8 @@ export function createRendererManager({
 
     const ngeom = snapshot.ngeom | 0;
     const nextBounds = ngeom > 0 ? computeBoundsFromSnapshot(snapshot) : null;
+    const trackingBounds = ngeom > 0 ? (computeBoundsFromSnapshot(snapshot, { ignoreStatic: true }) || nextBounds) : nextBounds;
+    syncCameraPoseFromMode(context, state, nextBounds, { tempVecA, tempVecB, tempVecC, tempVecD }, trackingBounds);
     const planeExtentHint = (() => {
       const radiusSource =
         nextBounds?.radius ?? context.bounds?.radius ?? 0;
@@ -1287,7 +1488,11 @@ export function createRendererManager({
     const bounds = nextBounds;
     if (bounds) {
       context.bounds = bounds;
-      if (!context.autoAligned && context.camera) {
+      if (
+        context.currentCameraMode === 0 &&
+        !context.autoAligned &&
+        context.camera
+      ) {
         const radius = Math.max(bounds.radius || 0, 0.6);
         const focus = tempVecA.set(bounds.center[0], bounds.center[1], bounds.center[2]);
         const offset = tempVecB.set(radius * 2.6, -radius * 2.6, radius * 1.7);
@@ -1305,6 +1510,9 @@ export function createRendererManager({
         if (debugMode) {
           console.log('[render] auto align', { radius, center: bounds.center });
         }
+      }
+      if (context.currentCameraMode === 0) {
+        cacheTrackingPoseFromCurrent(context, bounds);
       }
       if (context.light) {
         const radius = Math.max(bounds.radius || 0, 0.6);
@@ -1332,7 +1540,11 @@ export function createRendererManager({
     }
 
     const alignState = state.runtime?.lastAlign;
-    if (alignState && alignState.seq > context.alignSeq) {
+    if (
+      context.currentCameraMode === 0 &&
+      alignState &&
+      alignState.seq > context.alignSeq
+    ) {
       context.alignSeq = alignState.seq;
       const center = alignState.center || [0, 0, 0];
       const radius = Math.max(
@@ -1346,6 +1558,7 @@ export function createRendererManager({
       );
       context.camera.lookAt(target);
       context.cameraTarget.copy(target);
+      cacheTrackingPoseFromCurrent(context, { radius, center });
       if (debugMode) {
         console.log('[render] align', { radius, center });
       }
