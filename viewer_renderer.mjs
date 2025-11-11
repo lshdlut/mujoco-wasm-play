@@ -196,7 +196,8 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
     ctx.trackingOffset = new THREE.Vector3(radius * 2.6, -radius * 2.6, radius * 1.7);
     ctx.trackingRadius = ctx.trackingOffset.length();
   }
-  ctx.camera.position.copy(center.clone().add(ctx.trackingOffset));`r`n  ctx.trackingRadius = ctx.trackingOffset.length();
+  ctx.camera.position.copy(center.clone().add(ctx.trackingOffset));
+  ctx.trackingRadius = ctx.trackingOffset.length();
   ctx.camera.lookAt(center);
   target.copy(center);
   ctx.trackingRadius = ctx.trackingOffset.length();
@@ -1328,6 +1329,64 @@ export function createRendererManager({
       const fillLight = sceneFlags[0] ? 0.6 : 0.35;
       context.hemi.intensity = fillLight;
       context.hemi.groundColor.set(sceneFlags[0] ? 0x111622 : 0x161b29);
+    }
+
+    // --- Overlays: contacts (controlled by vopt flags) ---
+    const vopt = state.rendering?.voptFlags || [];
+    const contactPointEnabled = !!vopt[14];
+    // contactForceEnabled exists in UI, but backend snapshot currently lacks explicit force vector;
+    // we start with points only to keep behavior deterministic.
+    const contacts = snapshot.contacts || null;
+    if (contactPointEnabled && contacts && contacts.pos && typeof contacts.n === 'number') {
+      // Ensure overlay group
+      if (!context.contactGroup) {
+        context.contactGroup = new THREE.Group();
+        context.contactGroup.name = 'overlay:contacts';
+        context.scene.add(context.contactGroup);
+        context.contactPool = [];
+      }
+      const group = context.contactGroup;
+      const pool = context.contactPool || [];
+      const n = Math.max(0, contacts.n | 0);
+      // Contact visual size: small fraction of bounds radius
+      const r = Math.max(0.5, (context.bounds?.radius || 1));
+      const sz = Math.max(0.01, Math.min(0.05, r * 0.02));
+      // Prepare a shared sphere geometry/material for simplicity
+      if (!group.userData.geometry || group.userData.geometry.parameters?.radius !== sz) {
+        try { group.userData.geometry?.dispose?.(); } catch {}
+        group.userData.geometry = new THREE.SphereGeometry(sz, 12, 8);
+      }
+      if (!group.userData.material) {
+        group.userData.material = new THREE.MeshBasicMaterial({ color: 0xffc04d });
+      }
+      // Grow pool if needed
+      for (let i = pool.length; i < n; i += 1) {
+        const m = new THREE.Mesh(group.userData.geometry, group.userData.material);
+        m.matrixAutoUpdate = true;
+        m.frustumCulled = false;
+        pool.push(m);
+        group.add(m);
+      }
+      // Update positions
+      const pos = contacts.pos;
+      for (let i = 0; i < pool.length; i += 1) {
+        const mesh = pool[i];
+        if (i < n) {
+          const base = 3 * i;
+          const x = Number(pos[base + 0]) || 0;
+          const y = Number(pos[base + 1]) || 0;
+          const z = Number(pos[base + 2]) || 0;
+          mesh.visible = true;
+          mesh.position.set(x, y, z);
+        } else {
+          mesh.visible = false;
+        }
+      }
+      // Update references
+      context.contactPool = pool;
+      group.visible = true;
+    } else {
+      if (context.contactGroup) context.contactGroup.visible = false;
     }
 
     let hideAllGeometry = !!hideAllGeometryDefault;
