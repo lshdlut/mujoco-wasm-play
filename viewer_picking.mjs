@@ -57,7 +57,10 @@ export function createPickingController({
     mode: 'idle',
     lastX: 0,
     lastY: 0,
+    shiftKey: false,
+    payload: null,
   };
+  let perturbRaf = null;
   const cleanup = [];
 
   function hasSelection() {
@@ -239,42 +242,37 @@ export function createPickingController({
   function computeWorldDrag(dx, dy) {
     const camera = renderCtx.camera;
     if (!camera) return null;
-    const target = renderCtx.cameraTarget
-      ? tempVecC.copy(renderCtx.cameraTarget)
-      : tempVecC.set(0, 0, 0);
-    const rect = canvas.getBoundingClientRect();
-    const width = Math.max(1, rect.width);
-    const height = Math.max(1, rect.height);
-    const shortEdge = Math.max(1, Math.min(width, height));
-    const distance = camera.position.distanceTo(target);
-    const fovRad = THREE_NS.MathUtils.degToRad(typeof camera.fov === 'number' ? camera.fov : 45);
-    const panScale = distance * Math.tan(fovRad / 2);
-    const moveX = (-2 * dx * panScale) / shortEdge;
-    const moveY = (2 * -dy * panScale) / shortEdge;
+    const boundsRadius = Math.max(0.2, renderCtx.bounds?.radius || 1);
+    const dragScale = boundsRadius * 0.04;
     const forward = tempVecA;
     camera.getWorldDirection(forward).normalize();
-    const up = tempVecB.copy(camera.up).normalize();
-    if (up.lengthSq() === 0) {
-      up.copy(globalUp).normalize();
+    const up = tempVecB.copy(globalUp).normalize();
+    const right = tempVecC.copy(forward).cross(up).normalize();
+    const move = new THREE_NS.Vector3();
+    move.addScaledVector(right, -dx * dragScale);
+    move.addScaledVector(up, dy * dragScale);
+    if (dragState.shiftKey) {
+      move.addScaledVector(forward, -dy * dragScale * 0.6);
     }
-    const right = tempVecD.copy(forward).cross(up).normalize();
-    return right.multiplyScalar(moveX).add(up.multiplyScalar(moveY));
+    return move;
   }
 
   function computeTorque(dx, dy) {
     const camera = renderCtx.camera;
     if (!camera) return null;
-    const boundsRadius = Math.max(0.1, renderCtx.bounds?.radius || 1);
-    const torqueScale = boundsRadius * 8;
+    const boundsRadius = Math.max(0.2, renderCtx.bounds?.radius || 1);
+    const torqueScale = boundsRadius * 2.5;
     const forward = tempVecA;
     camera.getWorldDirection(forward).normalize();
-    const up = tempVecB.copy(camera.up).normalize();
-    if (up.lengthSq() === 0) up.copy(globalUp).normalize();
+    const up = tempVecB.copy(globalUp).normalize();
     const right = tempVecC.copy(forward).cross(up).normalize();
-    const torque = tempVecD.set(0, 0, 0);
-    torque.add(up.clone().multiplyScalar(dx * torqueScale));
-    torque.add(right.multiplyScalar(-dy * torqueScale));
-    return torque.clone();
+    const torque = new THREE_NS.Vector3();
+    torque.addScaledVector(up, -dx * torqueScale);
+    torque.addScaledVector(right, -dy * torqueScale);
+    if (dragState.shiftKey) {
+      torque.addScaledVector(forward, -dx * torqueScale * 0.5);
+    }
+    return torque;
   }
 
   function setPerturbState(mode, active) {
@@ -292,6 +290,29 @@ export function createPickingController({
     });
   }
 
+  function ensurePerturbLoop() {
+    if (perturbRaf !== null) return;
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      return;
+    }
+    const step = () => {
+      if (!dragState.active || !dragState.payload) {
+        perturbRaf = null;
+        return;
+      }
+      backend.applyForce?.(dragState.payload);
+      perturbRaf = window.requestAnimationFrame(step);
+    };
+    perturbRaf = window.requestAnimationFrame(step);
+  }
+
+  function stopPerturbLoop() {
+    if (perturbRaf !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(perturbRaf);
+    }
+    perturbRaf = null;
+  }
+
   function applyPerturb(deltaX, deltaY) {
     const selection = currentSelection();
     if (!selection || selection.geom < 0) return;
@@ -301,28 +322,34 @@ export function createPickingController({
       : null;
     if (!worldPoint) return;
     const boundsRadius = Math.max(0.1, renderCtx.bounds?.radius || 1);
+    let payload = null;
     if (dragState.mode === 'translate') {
       const delta = computeWorldDrag(deltaX, deltaY);
       if (!delta) return;
-      const force = clampVector(delta.clone().multiplyScalar(boundsRadius * 60), boundsRadius * 200);
-      backend.applyForce?.({
+      const forceVec = clampVector(delta.multiplyScalar(boundsRadius * 160), boundsRadius * 480);
+      payload = {
         geomIndex,
-        force: [force.x, force.y, force.z],
+        force: [forceVec.x, forceVec.y, forceVec.z],
         torque: [0, 0, 0],
         point: [worldPoint.x, worldPoint.y, worldPoint.z],
-      });
+      };
       setPerturbState('translate', true);
     } else if (dragState.mode === 'rotate') {
       const torque = computeTorque(deltaX, deltaY);
       if (!torque) return;
-      const limited = clampVector(torque, boundsRadius * 80);
-      backend.applyForce?.({
+      const limited = clampVector(torque.multiplyScalar(boundsRadius * 6), boundsRadius * 260);
+      payload = {
         geomIndex,
         force: [0, 0, 0],
         torque: [limited.x, limited.y, limited.z],
         point: [worldPoint.x, worldPoint.y, worldPoint.z],
-      });
+      };
       setPerturbState('rotate', true);
+    }
+    if (payload) {
+      dragState.payload = payload;
+      backend.applyForce?.(payload);
+      ensurePerturbLoop();
     }
   }
 
@@ -332,6 +359,8 @@ export function createPickingController({
     dragState.mode = mode;
     dragState.lastX = event.clientX;
     dragState.lastY = event.clientY;
+    dragState.shiftKey = !!event.shiftKey;
+    dragState.payload = null;
     backend.clearForces?.();
     if (typeof dragState.pointerId === 'number' && canvas.setPointerCapture) {
       try {
@@ -344,6 +373,8 @@ export function createPickingController({
   function endPerturb() {
     if (!dragState.active) return;
     backend.clearForces?.();
+    dragState.payload = null;
+    stopPerturbLoop();
     if (typeof dragState.pointerId === 'number' && canvas.releasePointerCapture) {
       try {
         canvas.releasePointerCapture(dragState.pointerId);
@@ -378,7 +409,11 @@ export function createPickingController({
     if (!hasSelection()) {
       return;
     }
-    const mode = event.button === 0 ? 'rotate' : event.button === 2 ? 'translate' : null;
+    const mode = event.button === 0 && !event.altKey
+      ? 'rotate'
+      : (event.button === 2 || (event.button === 0 && event.altKey))
+        ? 'translate'
+        : null;
     if (!mode) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -396,6 +431,7 @@ export function createPickingController({
     }
     event.preventDefault();
     event.stopImmediatePropagation();
+    dragState.shiftKey = !!event.shiftKey;
     const deltaX = event.clientX - dragState.lastX;
     const deltaY = event.clientY - dragState.lastY;
     dragState.lastX = event.clientX;

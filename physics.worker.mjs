@@ -1145,7 +1145,7 @@ onmessage = async (ev) => {
         const tx=+msg.torque?.[0]||0, ty=+msg.torque?.[1]||0, tz=+msg.torque?.[2]||0;
         const px=+msg.point?.[0]||0, py=+msg.point?.[1]||0, pz=+msg.point?.[2]||0;
         const gi=msg.geomIndex|0;
-        if (!sim?.applyXfrcByGeom?.(gi, fx, fy, fz, tx, ty, tz) && snapshotDebug) {
+        if (!sim?.applyXfrcByGeom?.(gi, [fx, fy, fz], [tx, ty, tz], [px, py, pz]) && snapshotDebug) {
           postMessage({ kind:'log', message:'worker: applyForce unsupported in current mode' });
         }
       } catch {}

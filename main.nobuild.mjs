@@ -141,17 +141,30 @@ function updateOverlay(card, visible) {
   card.classList.toggle('visible', !!visible);
 }
 
+const TOAST_HIDE_MS = 2200;
+
 function updateToast(state) {
   if (!toastEl) return;
   const message = state.toast?.message;
   if (message) {
     toastEl.textContent = message;
     toastEl.classList.add('visible');
-    clearTimeout(updateToast._timer);
-    updateToast._timer = setTimeout(() => {
+    clearTimeout(updateToast._hideTimer);
+    clearTimeout(updateToast._clearTimer);
+    updateToast._hideTimer = setTimeout(() => {
       toastEl.classList.remove('visible');
-    }, 1800);
-  } else {
+      toastEl.textContent = '';
+    }, TOAST_HIDE_MS);
+    updateToast._clearTimer = setTimeout(() => {
+      if (store && typeof store.update === 'function') {
+        store.update((draft) => {
+          if (draft.toast?.message === message) {
+            draft.toast = null;
+          }
+        });
+      }
+    }, TOAST_HIDE_MS + 200);
+  } else if (!toastEl.textContent) {
     toastEl.classList.remove('visible');
   }
 }
@@ -175,7 +188,9 @@ function updateHud(state) {
     cameraSummaryEl.textContent = `camera: ${state.runtime.cameraLabel}`;
   }
   if (gestureEl) {
-    const action = state.runtime.lastAction || 'idle';
+    const action = state.runtime.perturb?.active
+      ? (state.runtime.perturb.mode === 'translate' ? 'perturb-translate' : 'perturb-rotate')
+      : (state.runtime.lastAction || 'idle');
     const selection = state.runtime.selection;
     const selLabel = selection && selection.geom >= 0
       ? (selection.name || `geom ${selection.geom}`)

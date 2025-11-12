@@ -376,10 +376,9 @@ function mergeBackendSnapshot(draft, snapshot) {
       ...current,
       ...gesture,
     };
-    if (typeof gesture.mode === 'string' && gesture.mode.length > 0 && gesture.mode !== 'idle') {
-      draft.runtime.lastAction = gesture.mode;
-    } else if (!draft.runtime.lastAction) {
-      draft.runtime.lastAction = 'idle';
+    if (!draft.runtime?.perturb?.active) {
+      const mode = typeof gesture.mode === 'string' ? gesture.mode : 'idle';
+      draft.runtime.lastAction = mode !== 'idle' ? mode : (draft.runtime.lastAction || 'idle');
     }
   }
   if (snapshot.drag) {
@@ -917,19 +916,16 @@ export function applyGesture(store, backend, payload) {
   const drag = payload.drag ?? (pointer ? { dx: pointer.dx, dy: pointer.dy } : null);
   store.update((draft) => {
     const perturbActive = !!draft.runtime?.perturb?.active;
-    if (phase !== 'end') {
-      if (!perturbActive) {
-        draft.runtime.lastAction = mode;
-      }
-    } else if (!perturbActive) {
-      draft.runtime.lastAction = 'idle';
-    }
+    const nextMode = phase === 'end' ? 'idle' : mode;
     draft.runtime.gesture = {
       ...(draft.runtime.gesture || {}),
-      mode: phase === 'end' ? 'idle' : mode,
+      mode: nextMode,
       phase,
       pointer,
     };
+    if (!perturbActive) {
+      draft.runtime.lastAction = nextMode;
+    }
     if (drag) {
       draft.runtime.drag = {
         dx: Number(drag.dx) || 0,
