@@ -295,7 +295,7 @@ const cameraController = createCameraController({
   canvas,
   store,
   backend,
-  applyGesture,
+  onGesture: (payload) => applyGesture(store, backend, payload),
   renderCtx,
   debugMode,
   globalUp: new THREE.Vector3(0, 0, 1),

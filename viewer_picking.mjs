@@ -98,6 +98,7 @@ export function createPickingController({
 
   function updateSelection(pick) {
     if (!pick) return;
+    const ts = Date.now();
     store.update((draft) => {
       if (!draft.runtime) draft.runtime = {};
       const seq = (draft.runtime.selection?.seq || 0) + 1;
@@ -111,10 +112,10 @@ export function createPickingController({
         localPoint: [pick.localPoint.x, pick.localPoint.y, pick.localPoint.z],
         normal: [pick.worldNormal.x, pick.worldNormal.y, pick.worldNormal.z],
         seq,
-        timestamp: Date.now(),
+        timestamp: ts,
       };
       draft.runtime.lastAction = 'select';
-      draft.toast = { message: `Selected ${pick.geomName}`, ts: Date.now() };
+      draft.toast = { message: `Selected ${pick.geomName}`, ts };
     });
   }
 
@@ -244,7 +245,7 @@ export function createPickingController({
     const camera = renderCtx.camera;
     if (!camera) return null;
     const boundsRadius = Math.max(0.25, renderCtx.bounds?.radius || 1);
-    const dragScale = boundsRadius * 0.012;
+    const dragScale = boundsRadius * 0.02;
     const forward = tempVecA;
     camera.getWorldDirection(forward).normalize();
     const up = tempVecB.copy(globalUp).normalize();
@@ -253,7 +254,7 @@ export function createPickingController({
     move.addScaledVector(right, dx * dragScale);
     move.addScaledVector(up, -dy * dragScale);
     if (dragState.shiftKey) {
-      move.addScaledVector(forward, -dy * dragScale * 0.8);
+      move.addScaledVector(forward, -dy * dragScale * 1.1);
     }
     return move;
   }
@@ -262,7 +263,7 @@ export function createPickingController({
     const camera = renderCtx.camera;
     if (!camera) return null;
     const boundsRadius = Math.max(0.25, renderCtx.bounds?.radius || 1);
-    const torqueScale = boundsRadius * 0.015;
+    const torqueScale = boundsRadius * 0.02;
     const forward = tempVecA;
     camera.getWorldDirection(forward).normalize();
     const up = tempVecB.copy(globalUp).normalize();
@@ -275,6 +276,8 @@ export function createPickingController({
     }
     return torque;
   }
+  const TRANSLATION_GAIN = 500;
+  const ROTATION_GAIN = 30;
 
   function setPerturbState(mode, active) {
     store.update((draft) => {
@@ -327,8 +330,7 @@ export function createPickingController({
     if (dragState.mode === 'translate') {
       const delta = computeWorldDrag(deltaX, deltaY);
       if (!delta) return;
-      const translationGain = Math.max(40, boundsRadius * 220);
-      const forceVec = clampVector(delta.clone().multiplyScalar(translationGain), boundsRadius * 900);
+      const forceVec = clampVector(delta.clone().multiplyScalar(TRANSLATION_GAIN), TRANSLATION_GAIN * 1.2);
       payload = {
         geomIndex,
         force: [forceVec.x, forceVec.y, forceVec.z],
@@ -339,8 +341,7 @@ export function createPickingController({
     } else if (dragState.mode === 'rotate') {
       const torque = computeTorque(deltaX, deltaY);
       if (!torque) return;
-      const rotationGain = Math.max(10, boundsRadius * 70);
-      const limited = clampVector(torque.clone().multiplyScalar(rotationGain), boundsRadius * 220);
+      const limited = clampVector(torque.clone().multiplyScalar(ROTATION_GAIN), ROTATION_GAIN * 4);
       payload = {
         geomIndex,
         force: [0, 0, 0],

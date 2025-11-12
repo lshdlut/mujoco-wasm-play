@@ -11,14 +11,13 @@
  * - wheelLineFactor / wheelPageFactor: DOM_DELTA normalization constants.
  * - minOrthoZoom / maxOrthoZoom: zoom clamps for orthographic cameras.
  *
- * Deprecated: applyGesture(store, backend, event) — prefer onGesture(event) at call site.
  */
 export function createCameraController({
   THREE_NS,
   canvas,
   store,
   backend,
-  applyGesture,
+  onGesture,
   renderCtx,
   debugMode = false,
   globalUp = new THREE_NS.Vector3(0, 0, 1),
@@ -308,8 +307,8 @@ export function createCameraController({
         canvas.setPointerCapture(event.pointerId);
       } catch {}
     }
-    if (applyGesture && isInteractiveCamera()) {
-      applyGesture(store, backend, {
+    if (typeof onGesture === 'function' && isInteractiveCamera()) {
+      onGesture({
         mode: pointerState.mode,
         phase: 'start',
         pointer: {
@@ -336,8 +335,8 @@ export function createCameraController({
     pointerState.lastX = currentX;
     pointerState.lastY = currentY;
     applyCameraGesture(pointerState.mode, currentX - prevX, currentY - prevY);
-    if (applyGesture && isInteractiveCamera()) {
-      applyGesture(store, backend, {
+    if (typeof onGesture === 'function' && isInteractiveCamera()) {
+      onGesture({
         mode: pointerState.mode,
         phase: 'move',
         pointer: {
@@ -372,8 +371,8 @@ export function createCameraController({
     const currentY =
       typeof event?.clientY === 'number' ? event.clientY : pointerState.lastY ?? 0;
 
-    if (applyGesture && isInteractiveCamera()) {
-      applyGesture(store, backend, {
+    if (typeof onGesture === 'function' && isInteractiveCamera()) {
+      onGesture({
         mode: pointerState.mode,
         phase: 'end',
         pointer: {
