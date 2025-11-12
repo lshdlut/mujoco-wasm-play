@@ -851,6 +851,57 @@ class DirectBackend {
           if (frame) {
             contacts.frame = cloneArray(frame, Float64Array) || new Float64Array(frame);
           }
+          const geom1 = this.sim.contactGeom1View?.();
+          if (geom1) {
+            contacts.geom1 = cloneArray(geom1, Int32Array) || new Int32Array(geom1);
+          }
+          const geom2 = this.sim.contactGeom2View?.();
+          if (geom2) {
+            contacts.geom2 = cloneArray(geom2, Int32Array) || new Int32Array(geom2);
+          }
+          const dist = this.sim.contactDistView?.();
+          if (dist) {
+            contacts.dist = cloneArray(dist, Float64Array) || new Float64Array(dist);
+          }
+          const fric = this.sim.contactFrictionView?.();
+          if (fric) {
+            contacts.fric = cloneArray(fric, Float64Array) || new Float64Array(fric);
+          }
+          try {
+            const forceLocal = this.sim.contactForceBuffer?.();
+            if (forceLocal instanceof Float64Array && forceLocal.length >= (3 * ncon)) {
+              let forceOut = forceLocal;
+              if (contacts.frame && contacts.frame.length >= (9 * ncon)) {
+                forceOut = new Float64Array(forceLocal.length);
+                for (let i = 0; i < ncon; i += 1) {
+                  const base = 3 * i;
+                  const rot = 9 * i;
+                  const fx = forceLocal[base + 0] || 0;
+                  const fy = forceLocal[base + 1] || 0;
+                  const fz = forceLocal[base + 2] || 0;
+                  const c0 = contacts.frame[rot + 0] || 0;
+                  const c1 = contacts.frame[rot + 1] || 0;
+                  const c2 = contacts.frame[rot + 2] || 0;
+                  const c3 = contacts.frame[rot + 3] || 0;
+                  const c4 = contacts.frame[rot + 4] || 0;
+                  const c5 = contacts.frame[rot + 5] || 0;
+                  const c6 = contacts.frame[rot + 6] || 0;
+                  const c7 = contacts.frame[rot + 7] || 0;
+                  const c8 = contacts.frame[rot + 8] || 0;
+                  forceOut[base + 0] = c0 * fx + c3 * fy + c6 * fz;
+                  forceOut[base + 1] = c1 * fx + c4 * fy + c7 * fz;
+                  forceOut[base + 2] = c2 * fx + c5 * fy + c8 * fz;
+                }
+              }
+              contacts.force = forceOut;
+            }
+          } catch (err) {
+            this.#emitMessage({
+              kind: 'log',
+              message: 'direct: contact force failed',
+              extra: { error: String(err?.message || err), stack: err?.stack || null },
+            });
+          }
         }
       } catch {}
       const gesture = this.gesture

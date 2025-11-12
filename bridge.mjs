@@ -256,6 +256,7 @@ export class MjSimLite {
     this.h = 0;
     this.pref = null;
     this.mode = 'handle';
+    this.contactForceScratch = null;
     const heapBuf = resolveHeapBuffer(mod);
     if (heapBuf) {
       mod.__heapBuffer = heapBuf;
@@ -554,6 +555,67 @@ export class MjSimLite {
   _readModelPtr(name){ return this._readPtr('model', name); }
   _readDataPtr(name){ return this._readPtr('data', name); }
 
+  _ensureContactForceScratch(){
+    if (this.contactForceScratch?.ptr) return this.contactForceScratch;
+    const mod = this.mod;
+    if (!mod || typeof mod._malloc !== 'function') return null;
+    const bytes = 6 * Float64Array.BYTES_PER_ELEMENT;
+    let ptr = 0;
+    try { ptr = mod._malloc(bytes) | 0; } catch { ptr = 0; }
+    if (!(ptr > 0)) return null;
+    this.contactForceScratch = { ptr, bytes, view: null };
+    return this.contactForceScratch;
+  }
+
+  _acquireContactForceScratch(){
+    const mod = this.mod;
+    if (!mod) return null;
+    const owned = this._ensureContactForceScratch();
+    if (owned?.ptr) {
+      if (!owned.view || owned.view.length < 3) {
+        owned.view = heapViewF64(mod, owned.ptr, 6);
+      }
+      if (!owned.view || owned.view.length < 3) return null;
+      return { ptr: owned.ptr | 0, view: owned.view, release: () => {} };
+    }
+    if (typeof mod.stackSave === 'function' && typeof mod.stackAlloc === 'function' && typeof mod.stackRestore === 'function') {
+      const bytes = 6 * Float64Array.BYTES_PER_ELEMENT;
+      let sp = 0;
+      try { sp = mod.stackSave(); } catch { sp = 0; }
+      let ptr = 0;
+      try { ptr = mod.stackAlloc(bytes) | 0; } catch { ptr = 0; }
+      if (!(ptr > 0)) {
+        if (sp) {
+          try { mod.stackRestore(sp); } catch {}
+        }
+        return null;
+      }
+      const view = heapViewF64(mod, ptr, 6);
+      if (!view || view.length < 3) {
+        try { mod.stackRestore(sp); } catch {}
+        return null;
+      }
+      return {
+        ptr,
+        view,
+        release: () => {
+          try { mod.stackRestore(sp); } catch {}
+        },
+      };
+    }
+    return null;
+  }
+
+  _freeContactForceScratch(){
+    if (!this.contactForceScratch) return;
+    const mod = this.mod;
+    const ptr = this.contactForceScratch.ptr | 0;
+    if (ptr && mod && typeof mod._free === 'function') {
+      try { mod._free(ptr); } catch {}
+    }
+    this.contactForceScratch = null;
+  }
+
   _nameFromAdr(index, adrExport, countExport){
     const m=this.mod; const h=this.h|0;
     const namesPtrFn = m?._mjwf_model_names_ptr;
@@ -644,6 +706,30 @@ export class MjSimLite {
   contactGeom2View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_geom2_ptr','_mjwf_data_contact_geom2_ptr','_mjw_contact_geom2_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
   contactDistView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_dist_ptr','_mjwf_data_contact_dist_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n); }
   contactFrictionView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_friction_ptr','_mjwf_data_contact_friction_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*5); }
+  contactForceBuffer(target){
+    const m=this.mod;
+    const n=this.ncon();
+    if (!(m && (n>0))) return null;
+    const d=this._resolveFn(['_mjwf_mj_contactForce','_mjw_mj_contactForce','_mj_contactForce']);
+    if(!d) return null;
+    const scratch=this._acquireContactForceScratch();
+    if(!scratch) return null;
+    this.ensurePointers();
+    const scratchView=scratch.view;
+    const length=3*n;
+    const out = target instanceof Float64Array && target.length>=length ? target : new Float64Array(length);
+    for(let i=0;i<n;i+=1){
+      d.call(m,this.modelPtr|0,this.dataPtr|0,i|0,scratch.ptr|0);
+      const base=3*i;
+      out[base+0]=Number(scratchView[0])||0;
+      out[base+1]=Number(scratchView[1])||0;
+      out[base+2]=Number(scratchView[2])||0;
+    }
+    if (typeof scratch.release === 'function') {
+      scratch.release();
+    }
+    return out;
+  }
 
   // --- Actuator metadata (optional) ---
   actuatorNameOf(i){
@@ -693,6 +779,7 @@ export class MjSimLite {
   reset(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_reset']; if (typeof d==='function') return ((d.call(m,h)|0)===1); try{ return ((m.ccall(pref+'_reset','number',['number'],[h])|0)===1);}catch{return false;} }
   term(){
     const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf';
+    this._freeContactForceScratch();
     if (h) {
       if (typeof m?._mjwf_helper_free === 'function') {
         try { m._mjwf_helper_free(h); } catch {}

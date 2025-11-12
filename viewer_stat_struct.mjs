@@ -21,6 +21,13 @@ export const STAT_FIELD_DESCRIPTORS = [
     ],
     "kind": "float",
     "size": 1
+  },
+  {
+    "path": [
+      "meanmass"
+    ],
+    "kind": "float",
+    "size": 1
   }
 ];
 

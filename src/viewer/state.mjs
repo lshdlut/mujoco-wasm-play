@@ -991,6 +991,7 @@ function resolveSnapshot(state) {
             geom2: viewOrNull(state.contacts.geom2, Int32Array),
             dist: viewOrNull(state.contacts.dist, Float64Array),
             fric: viewOrNull(state.contacts.fric, Float64Array),
+            force: viewOrNull(state.contacts.force, Float64Array),
           }
         : null,
     align: state.align
@@ -1831,6 +1832,8 @@ const VISUAL_OVERRIDE_PRESET = [
   { path: ['rgba', 'actuatornegative'], kind: 'float_vec', size: 4, value: [0.2, 0.6, 0.9, 1] },
   { path: ['rgba', 'actuatorpositive'], kind: 'float_vec', size: 4, value: [0.9, 0.4, 0.2, 1] },
   { path: ['rgba', 'com'], kind: 'float_vec', size: 4, value: [0.9, 0.9, 0.9, 1] },
+  { path: ['rgba', 'contact'], kind: 'float_vec', size: 4, value: [1, 0.55, 0, 0.85] },
+  { path: ['rgba', 'contactforce'], kind: 'float_vec', size: 4, value: [0.302, 0.486, 1, 0.8] },
   { path: ['rgba', 'camera'], kind: 'float_vec', size: 4, value: [0.6, 0.9, 0.6, 1] },
   { path: ['rgba', 'light'], kind: 'float_vec', size: 4, value: [0.6, 0.6, 0.9, 1] },
   { path: ['rgba', 'selectpoint'], kind: 'float_vec', size: 4, value: [0.9, 0.9, 0.1, 1] },

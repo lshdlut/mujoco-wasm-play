@@ -770,6 +770,48 @@ function snapshot() {
         contacts.fric = fric;
         transfers.push(fric.buffer);
       }
+      try {
+        const forceLocal = sim.contactForceBuffer?.();
+        if (forceLocal instanceof Float64Array && forceLocal.length >= (3 * ncon)) {
+          let forceOut = forceLocal;
+          const frameArray = contacts.frame || null;
+          if (frameArray && frameArray.length >= (9 * ncon)) {
+            forceOut = new Float64Array(forceLocal.length);
+            for (let i = 0; i < ncon; i += 1) {
+              const base = 3 * i;
+              const rot = 9 * i;
+              const fx = forceLocal[base + 0] || 0;
+              const fy = forceLocal[base + 1] || 0;
+              const fz = forceLocal[base + 2] || 0;
+              const c0 = frameArray[rot + 0] || 0;
+              const c1 = frameArray[rot + 1] || 0;
+              const c2 = frameArray[rot + 2] || 0;
+              const c3 = frameArray[rot + 3] || 0;
+              const c4 = frameArray[rot + 4] || 0;
+              const c5 = frameArray[rot + 5] || 0;
+              const c6 = frameArray[rot + 6] || 0;
+              const c7 = frameArray[rot + 7] || 0;
+              const c8 = frameArray[rot + 8] || 0;
+              forceOut[base + 0] = c0 * fx + c3 * fy + c6 * fz;
+              forceOut[base + 1] = c1 * fx + c4 * fy + c7 * fz;
+              forceOut[base + 2] = c2 * fx + c5 * fy + c8 * fz;
+            }
+          }
+          contacts.force = forceOut;
+          transfers.push(forceOut.buffer);
+        }
+      } catch (err) {
+        if (typeof console !== 'undefined') {
+          console.error('[worker] contact force compute failed', err);
+        }
+        try {
+          postMessage({
+            kind: 'log',
+            message: 'worker: contact force failed',
+            extra: { error: String(err?.message || err), stack: err?.stack || null },
+          });
+        } catch {}
+      }
     }
   } catch (err) {
     if (snapshotDebug) {

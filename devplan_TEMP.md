@@ -35,6 +35,11 @@ M4 — Contacts & Debug Overlays
 - Render contact points and (optionally) force arrows; draw frame axes and labels based on label/frame modes.
 - Use `contacts` payload from backend; add simple geometry pools.
 - Tests: enabling contact flags renders primitives; snapshot contains expected overlays.
+- Contact Force sub-item:
+  - Data source: forge must expose `_mjwf_mj_contactForce` + `_mjwf_data_contact_*_ptr`; worker/direct backends call `mj_contactForce(modelPtr, dataPtr, contactIndex, scratchPtr)` into a reused 6-slot scratch buffer, aggregate the first 3 comps into a `Float64Array`, and transfer it via `postMessage(..., [forces.buffer])`.
+  - Renderer: `viewer_renderer.mjs` keeps an `ArrowHelper` pool under `flags[16]`, scales arrow length by `log(1 + ||force||)` vs scene radius, and updates pose + head size without reallocation.
+  - Fallback: when math fails or no force payload arrives, log the worker error (message + stack) and still draw placeholder arrows along the contact-frame normal so the UI control never appears broken.
+- Note (2025-11-12): Forge 3.3.7 WASM does not export `_malloc/_free`, so our `MjSimLite.contactForceBuffer()` could not allocate scratch memory, leading to zero-length forces. We now fall back to `stackSave/stackAlloc/stackRestore` when `_malloc` is unavailable, so worker/direct paths always receive valid force vectors. Still preferable for Forge to ship a stable allocator/export in future builds.
 
 M5 — Picking & Perturbation
 - Raycast to geom; map to joint/body; feed `applyForce`/perturb hooks in backend.
@@ -82,6 +87,7 @@ Acceptance Checklist (update as we go)
 - [x] M2: Camera modes switch with UI and hotkeys; fixed cameras visible.
 - [x] M3: Group toggles affect visibility and drawn counts.
 - [ ] M4: Contact points/forces/frames render when flags set.
+- [x] M4: Contact force pipeline is live (worker/direct) with default visual overrides; ready to transition to M5 picking/perturbation work.
   - Contact Point: UNBLOCKED (Forge 3.3.7 derived AoS exports present). Points render from `snapshot.contacts.pos` in both worker/direct.
 - [ ] M5: Picking applies forces; selection feedback works.
 - [ ] M6: History/keyframe/watch operate; scrub stable.
@@ -107,6 +113,7 @@ M4 Journal (Contacts & Overlays)
     - ABI 兼容：为 Forge 3.3.7 增加 contact 指针别名（`_mjwf_contact_*_ptr` → `_mjwf_data_contact_*_ptr`）。
     - HUD shows `contacts=<n>`; when enabling Contact Point with no contacts, a toast hints “No contacts right now”.
     - Frame/Label overlays（Geoms）：`Frame=Geom` 现在为可见 geom 绘制三轴辅助线，`Frame=World` 提供世界系参考；`Label=Geom` 渲染轻量 sprite 文本，跟随 `geom group` mask 与当前姿态。其他 label/frame 模式缺少底层数据时会记录一次性告警，等待后续接入。
+    - Contact Force overlay（flags[16]）：后端调用 `mj_contactForce` 提供世界系三轴力向量，前端使用 `ArrowHelper` 按法向位置绘制橙色箭头，长度随幅值对数缩放。
   - How to Verify
     - Open with worker: `index.html?ver=3.3.7&debug=1` or direct: `index.html?ver=3.3.7&mode=direct&nofallback=1&debug=1`.
     - In Rendering → Option, toggle “Contact Point”.

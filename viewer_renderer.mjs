@@ -50,6 +50,15 @@ const LABEL_LOD_FACTORS = { near: 2, mid: 1.4, far: 1 };
 const __TMP_VEC3 = new THREE.Vector3();
 const CONTACT_UP = new THREE.Vector3(0, 0, 1);
 const CONTACT_TMP_NORMAL = new THREE.Vector3();
+const CONTACT_FORCE_DIR = new THREE.Vector3();
+const CONTACT_FORCE_NORMAL = new THREE.Vector3();
+const CONTACT_FORCE_AXIS = new THREE.Vector3(0, 1, 0);
+const CONTACT_FORCE_TMP_QUAT = new THREE.Quaternion();
+const CONTACT_FORCE_FALLBACK_COLOR = 0x4d7cfe;
+const CONTACT_POINT_FALLBACK_COLOR = 0xff8a2b;
+const CONTACT_FORCE_EPS = 1e-9;
+const CONTACT_FORCE_SHAFT_GEOMETRY = new THREE.CylinderGeometry(1, 1, 1, 20, 1, false);
+const CONTACT_FORCE_HEAD_GEOMETRY = new THREE.ConeGeometry(1, 1, 24, 1, false);
 const LABEL_MODE_WARNINGS = new Set();
 const FRAME_MODE_WARNINGS = new Set();
 const LABEL_DPR_CAP = 2;
@@ -138,6 +147,23 @@ function rgbFromArray(arr, fallback = [1, 1, 1]) {
     ];
   }
   return fallback.slice();
+}
+
+function rgbaToHex(color, fallback = 0xffffff) {
+  if (!Array.isArray(color) || color.length < 3) return fallback;
+  const [r, g, b] = rgbFromArray(color);
+  const toByte = (value) => Math.max(0, Math.min(255, Math.round(value * 255)));
+  return (toByte(r) << 16) | (toByte(g) << 8) | toByte(b);
+}
+
+function alphaFromArray(color, fallback = 1) {
+  if (Array.isArray(color) && color.length >= 4) {
+    const a = Number(color[3]);
+    if (Number.isFinite(a)) {
+      return clampUnit(a);
+    }
+  }
+  return clampUnit(fallback);
 }
 
 function averageRGB(arr) {
@@ -1666,8 +1692,8 @@ export function createRendererManager({
     // --- Overlays: contacts (controlled by vopt flags) ---
     const vopt = state.rendering?.voptFlags || [];
     const contactPointEnabled = !!vopt[14];
-    // contactForceEnabled exists in UI, but backend snapshot currently lacks explicit force vector;
-    // we start with points only to keep behavior deterministic.
+    const contactForceEnabled = !!vopt[16];
+    // Contact overlays: points (flags[14]) and force arrows (flags[16]).
     const contacts = snapshot.contacts || null;
     if (contactPointEnabled && contacts && typeof contacts.n === 'number' && !contacts.pos) {
       try { console.warn('[render] contact points enabled but no position array in snapshot; n=', contacts.n); } catch {}
@@ -1702,13 +1728,24 @@ export function createRendererManager({
           if (mesh) mesh.geometry = cyl;
         }
       }
+      const visStruct = state?.model?.vis || {};
+      const rgbaContact = visStruct?.rgba?.contact;
+      const contactColorHex = rgbaToHex(rgbaContact, CONTACT_POINT_FALLBACK_COLOR);
+      const contactOpacity = alphaFromArray(rgbaContact, 0.85);
       if (!group.userData.material) {
         group.userData.material = new THREE.MeshBasicMaterial({
-          color: 0xffc04d,
+          color: contactColorHex,
           side: THREE.DoubleSide,
-          transparent: false,
+          transparent: contactOpacity < 0.999,
+          opacity: contactOpacity,
           depthTest: true,
+          depthWrite: false,
         });
+      } else {
+        group.userData.material.color.setHex(contactColorHex);
+        group.userData.material.opacity = contactOpacity;
+        group.userData.material.transparent = contactOpacity < 0.999;
+        group.userData.material.depthWrite = false;
       }
       // Grow pool if needed
       for (let i = pool.length; i < n; i += 1) {
@@ -1753,6 +1790,160 @@ export function createRendererManager({
       group.visible = true;
     } else {
       if (context.contactGroup) context.contactGroup.visible = false;
+    }
+
+    if (contactForceEnabled && contacts && typeof contacts.n === 'number' && contacts.n > 0) {
+      const pos = ArrayBuffer.isView(contacts.pos) ? contacts.pos : null;
+      if (!pos) {
+        if (context.contactForceGroup) context.contactForceGroup.visible = false;
+      } else {
+        if (!context.contactForceGroup) {
+          context.contactForceGroup = new THREE.Group();
+          context.contactForceGroup.name = 'overlay:contactForces';
+          context.scene.add(context.contactForceGroup);
+          context.contactForcePool = [];
+        }
+        const group = context.contactForceGroup;
+        const pool = Array.isArray(context.contactForcePool) ? context.contactForcePool : [];
+        const visStruct = state?.model?.vis || {};
+        const statStruct = state?.model?.stat || state?.statistic || {};
+        const meanSize = (() => {
+          const value = Number(statStruct?.meansize);
+          if (Number.isFinite(value) && value > 1e-6) return value;
+          const radius = context.bounds?.radius;
+          if (Number.isFinite(radius) && radius > 0) return radius;
+          return 1;
+        })();
+        const meanMass = (() => {
+          const value = Number(statStruct?.meanmass);
+          if (Number.isFinite(value) && value > 1e-9) return value;
+          return 1;
+        })();
+        const mapForce = (() => {
+          const value = Number(visStruct?.map?.force);
+          if (Number.isFinite(value) && value > 0) return value;
+          return 0.005;
+        })();
+        const forceWidthScale = (() => {
+          const value = Number(visStruct?.scale?.forcewidth);
+          if (Number.isFinite(value) && value > 0) return value;
+          return 0.1;
+        })();
+        const shaftRadius = Math.max(meanSize * 0.015, forceWidthScale * meanSize * 0.5, 0.008);
+        const minLength = Math.max(shaftRadius * 2.5, meanSize * 0.02);
+        const fallbackLength = Math.max(minLength, shaftRadius * 3);
+        const maxLength = Math.max(meanSize * 6, (context.bounds?.radius || meanSize) * 8);
+        const lengthScale = mapForce / meanMass;
+        const frame = ArrayBuffer.isView(contacts.frame) ? contacts.frame : null;
+        const force = ArrayBuffer.isView(contacts.force) ? contacts.force : null;
+        const rgbaContactForce = visStruct?.rgba?.contactforce;
+        const colorHex = rgbaToHex(rgbaContactForce, CONTACT_FORCE_FALLBACK_COLOR);
+        const colorOpacity = alphaFromArray(rgbaContactForce, 0.8);
+        if (!context.contactForceMaterial) {
+          context.contactForceMaterial = new THREE.MeshBasicMaterial({
+            color: colorHex,
+            transparent: colorOpacity < 0.999,
+            opacity: colorOpacity,
+            depthWrite: false,
+            toneMapped: false,
+          });
+        } else {
+          context.contactForceMaterial.color.setHex(colorHex);
+          context.contactForceMaterial.opacity = colorOpacity;
+          context.contactForceMaterial.transparent = colorOpacity < 0.999;
+          context.contactForceMaterial.depthWrite = false;
+        }
+        const material = context.contactForceMaterial;
+        const n = Math.max(0, contacts.n | 0);
+        while (pool.length < n) {
+          const shaft = new THREE.Mesh(CONTACT_FORCE_SHAFT_GEOMETRY, material);
+          shaft.matrixAutoUpdate = true;
+          shaft.frustumCulled = false;
+          const head = new THREE.Mesh(CONTACT_FORCE_HEAD_GEOMETRY, material);
+          head.matrixAutoUpdate = true;
+          head.frustumCulled = false;
+          const node = new THREE.Group();
+          node.matrixAutoUpdate = true;
+          node.frustumCulled = false;
+          node.add(shaft);
+          node.add(head);
+          pool.push({ node, shaft, head });
+          group.add(node);
+        }
+        for (let i = 0; i < pool.length; i += 1) {
+          const arrow = pool[i];
+          if (i < n) {
+            const base = 3 * i;
+            const x = Number(pos[base + 0]) || 0;
+            const y = Number(pos[base + 1]) || 0;
+            const z = Number(pos[base + 2]) || 0;
+            arrow.node.visible = true;
+            arrow.node.position.set(x, y, z);
+            let magnitude = 0;
+            if (force && force.length >= base + 3) {
+              const wx = Number(force[base + 0]) || 0;
+              const wy = Number(force[base + 1]) || 0;
+              const wz = Number(force[base + 2]) || 0;
+              CONTACT_FORCE_DIR.set(wx, wy, wz);
+              magnitude = CONTACT_FORCE_DIR.length();
+            } else {
+              CONTACT_FORCE_DIR.set(0, 0, 0);
+            }
+            let directionReady = false;
+            if (magnitude > CONTACT_FORCE_EPS) {
+              CONTACT_FORCE_DIR.multiplyScalar(1 / magnitude);
+              directionReady = true;
+            }
+            const rotBase = 9 * i;
+            if (!directionReady) {
+              if (frame && frame.length >= (rotBase + 9)) {
+                CONTACT_FORCE_NORMAL.set(
+                  Number(frame[rotBase + 0]) || 0,
+                  Number(frame[rotBase + 1]) || 0,
+                  Number(frame[rotBase + 2]) || 0,
+                );
+                if (CONTACT_FORCE_NORMAL.lengthSq() <= CONTACT_FORCE_EPS) {
+                  CONTACT_FORCE_NORMAL.copy(CONTACT_UP);
+                } else {
+                  CONTACT_FORCE_NORMAL.normalize();
+                }
+              } else {
+                CONTACT_FORCE_NORMAL.copy(CONTACT_UP);
+              }
+              CONTACT_FORCE_DIR.copy(CONTACT_FORCE_NORMAL);
+            }
+            CONTACT_FORCE_TMP_QUAT.setFromUnitVectors(CONTACT_FORCE_AXIS, CONTACT_FORCE_DIR);
+            arrow.node.quaternion.copy(CONTACT_FORCE_TMP_QUAT);
+            const scaledLength = magnitude > CONTACT_FORCE_EPS
+              ? magnitude * lengthScale
+              : fallbackLength;
+            const length = Math.min(maxLength, Math.max(minLength, scaledLength));
+            let headLength = Math.max(length * 0.3, shaftRadius * 3);
+            headLength = Math.min(headLength, length * 0.6);
+            const headRadius = Math.max(shaftRadius * 1.6, headLength * 0.4);
+            let rawShaft = Math.max(length - headLength, shaftRadius * 1.5);
+            const totalRaw = rawShaft + headLength;
+            const scaleFactor = totalRaw > CONTACT_FORCE_EPS ? (length / totalRaw) : 1;
+            rawShaft *= scaleFactor;
+            const finalHeadLength = headLength * scaleFactor;
+            arrow.shaft.scale.set(shaftRadius, rawShaft, shaftRadius);
+            arrow.shaft.position.set(0, rawShaft / 2, 0);
+            arrow.head.scale.set(headRadius, finalHeadLength, headRadius);
+            arrow.head.position.set(0, rawShaft + finalHeadLength / 2, 0);
+          } else if (arrow?.node) {
+            arrow.node.visible = false;
+          }
+        }
+        context.contactForcePool = pool;
+        group.visible = true;
+      }
+    } else if (context.contactForceGroup) {
+      context.contactForceGroup.visible = false;
+      if (Array.isArray(context.contactForcePool)) {
+        for (const arrow of context.contactForcePool) {
+          if (arrow?.node) arrow.node.visible = false;
+        }
+      }
     }
 
     let hideAllGeometry = !!hideAllGeometryDefault;
