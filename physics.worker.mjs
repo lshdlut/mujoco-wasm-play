@@ -1,7 +1,7 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite, createLocalModule } from './bridge.mjs';
-
+import { withCacheTag } from './paths.mjs';
 import { writeOptionField, readOptionStruct, detectOptionSupport } from '../../viewer_option_struct.mjs';
 import { writeVisualField, readVisualStruct } from '../../viewer_visual_struct.mjs';
 import { writeStatisticField, readStatisticStruct } from '../../viewer_stat_struct.mjs';
@@ -448,7 +448,6 @@ function captureCopyState(precision) {
 }
 
 async function loadModule() {
-\n  function withCacheTag(u, vTag) {\n    try {\n      const url = new URL(u, (typeof self!== 'undefined' && self.location) ? (self.location.href || self.location) : (typeof location!=='undefined'?location.href:''));\n      if (vTag) url.searchParams.set('v', String(vTag));\n      else url.searchParams.set('cb', String(Date.now()));\n      return url.href;\n    } catch {\n      return u;\n    }\n  }\n
   // If explicitly forced to local shim, build a minimal module and return immediately.
   try {
     const u = new URL(import.meta.url);
@@ -771,7 +770,6 @@ function snapshot() {
         contacts.fric = fric;
         transfers.push(fric.buffer);
       }
-      try {\n        const forces = sim.contactForceVector?.();\n        if (forces) {\n          contacts.force = forces;\n          transfers.push(forces.buffer);\n          if (snapshotDebug && !snapshotState.__loggedForceLen) {\n            try { postMessage({ kind: 'log', message: 'worker: contact force len', extra: { len: forces.length } }); } catch {}\n            snapshotState.__loggedForceLen = true;\n          }\n        }\n      } catch (e) {\n        if (snapshotDebug) {\n          try { postMessage({ kind: 'log', message: 'worker: contact force calc failed', extra: String(e) }); } catch {}\n        }\n      }
     }
   } catch (err) {
     if (snapshotDebug) {
