@@ -43,6 +43,7 @@ const simTimeEl = document.querySelector('[data-testid="sim-time"]');
 const simStatusEl = document.querySelector('[data-testid="sim-status"]');
 const cameraSummaryEl = document.querySelector('[data-testid="camera-summary"]');
 const gestureEl = document.querySelector('[data-testid="perturb-state"]');
+let viewerStoreRef = null;
 
 let latestSnapshot = null;
 let renderStats = { drawn: 0, hidden: 0 };
@@ -94,6 +95,7 @@ const backendMode =
   requestedMode === 'worker' || requestedMode === 'direct' ? requestedMode : 'auto';
 const backend = await createBackend({ mode: backendMode, debug: debugMode, model: requestedModel });
 const store = createViewerStore({});
+viewerStoreRef = store;
 if (typeof window !== 'undefined') {
   window.__viewerStore = store;
 }
@@ -145,27 +147,35 @@ const TOAST_HIDE_MS = 2200;
 
 function updateToast(state) {
   if (!toastEl) return;
-  const message = state.toast?.message;
+  const toast = state.toast;
+  const message = toast?.message;
   if (message) {
-    toastEl.textContent = message;
-    toastEl.classList.add('visible');
-    clearTimeout(updateToast._hideTimer);
-    clearTimeout(updateToast._clearTimer);
-    updateToast._hideTimer = setTimeout(() => {
-      toastEl.classList.remove('visible');
-      toastEl.textContent = '';
-    }, TOAST_HIDE_MS);
-    updateToast._clearTimer = setTimeout(() => {
-      if (store && typeof store.update === 'function') {
-        store.update((draft) => {
-          if (draft.toast?.message === message) {
-            draft.toast = null;
-          }
-        });
-      }
-    }, TOAST_HIDE_MS + 200);
-  } else if (!toastEl.textContent) {
+    const id = toast.ts ?? toast.message;
+    if (updateToast._currentId !== id) {
+      toastEl.textContent = message;
+      toastEl.classList.add('visible');
+      updateToast._currentId = id;
+      clearTimeout(updateToast._hideTimer);
+      clearTimeout(updateToast._clearTimer);
+      updateToast._hideTimer = setTimeout(() => {
+        toastEl.classList.remove('visible');
+        toastEl.textContent = '';
+      }, TOAST_HIDE_MS);
+      updateToast._clearTimer = setTimeout(() => {
+        if (viewerStoreRef && typeof viewerStoreRef.update === 'function') {
+          viewerStoreRef.update((draft) => {
+            const currentId = draft.toast ? (draft.toast.ts ?? draft.toast.message) : null;
+            if (currentId === id) {
+              draft.toast = null;
+            }
+          });
+        }
+      }, TOAST_HIDE_MS + 50);
+    }
+  } else {
     toastEl.classList.remove('visible');
+    toastEl.textContent = '';
+    updateToast._currentId = null;
   }
 }
 

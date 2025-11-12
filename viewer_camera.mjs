@@ -61,7 +61,6 @@ export function createCameraController({
   let upNormalised = new THREE_NS.Vector3().copy(globalUp).normalize();
   let up0 = upNormalised.clone();
   let warnedUpDrift = false;
-  let warnedApplyGesture = false;
 
   const cameraModeIndex = () => {
     try {
@@ -310,10 +309,6 @@ export function createCameraController({
       } catch {}
     }
     if (applyGesture && isInteractiveCamera()) {
-      if (!warnedApplyGesture) {
-        try { console.warn('[camera] applyGesture is deprecated; prefer onGesture(event)'); } catch {}
-        warnedApplyGesture = true;
-      }
       applyGesture(store, backend, {
         mode: pointerState.mode,
         phase: 'start',

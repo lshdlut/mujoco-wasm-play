@@ -83,15 +83,16 @@ export function createPickingController({
       draft.runtime.selection = { ...defaultSelection(), seq: prevSeq, timestamp: Date.now() };
       draft.runtime.lastAction = 'select-none';
       if (toast) {
-        draft.toast = { message: 'Selection cleared' };
+        draft.toast = { message: 'Selection cleared', ts: Date.now() };
       }
     });
   }
 
   function showToast(message) {
     if (!message) return;
+    const ts = Date.now();
     store.update((draft) => {
-      draft.toast = { message };
+      draft.toast = { message, ts };
     });
   }
 
@@ -113,7 +114,7 @@ export function createPickingController({
         timestamp: Date.now(),
       };
       draft.runtime.lastAction = 'select';
-      draft.toast = { message: `Selected ${pick.geomName}` };
+      draft.toast = { message: `Selected ${pick.geomName}`, ts: Date.now() };
     });
   }
 
@@ -242,17 +243,17 @@ export function createPickingController({
   function computeWorldDrag(dx, dy) {
     const camera = renderCtx.camera;
     if (!camera) return null;
-    const boundsRadius = Math.max(0.2, renderCtx.bounds?.radius || 1);
-    const dragScale = boundsRadius * 0.04;
+    const boundsRadius = Math.max(0.25, renderCtx.bounds?.radius || 1);
+    const dragScale = boundsRadius * 0.012;
     const forward = tempVecA;
     camera.getWorldDirection(forward).normalize();
     const up = tempVecB.copy(globalUp).normalize();
     const right = tempVecC.copy(forward).cross(up).normalize();
     const move = new THREE_NS.Vector3();
-    move.addScaledVector(right, -dx * dragScale);
-    move.addScaledVector(up, dy * dragScale);
+    move.addScaledVector(right, dx * dragScale);
+    move.addScaledVector(up, -dy * dragScale);
     if (dragState.shiftKey) {
-      move.addScaledVector(forward, -dy * dragScale * 0.6);
+      move.addScaledVector(forward, -dy * dragScale * 0.8);
     }
     return move;
   }
@@ -260,17 +261,17 @@ export function createPickingController({
   function computeTorque(dx, dy) {
     const camera = renderCtx.camera;
     if (!camera) return null;
-    const boundsRadius = Math.max(0.2, renderCtx.bounds?.radius || 1);
-    const torqueScale = boundsRadius * 2.5;
+    const boundsRadius = Math.max(0.25, renderCtx.bounds?.radius || 1);
+    const torqueScale = boundsRadius * 0.015;
     const forward = tempVecA;
     camera.getWorldDirection(forward).normalize();
     const up = tempVecB.copy(globalUp).normalize();
     const right = tempVecC.copy(forward).cross(up).normalize();
     const torque = new THREE_NS.Vector3();
-    torque.addScaledVector(up, -dx * torqueScale);
-    torque.addScaledVector(right, -dy * torqueScale);
+    torque.addScaledVector(up, dx * torqueScale);
+    torque.addScaledVector(right, dy * torqueScale);
     if (dragState.shiftKey) {
-      torque.addScaledVector(forward, -dx * torqueScale * 0.5);
+      torque.addScaledVector(forward, dy * torqueScale * 0.5);
     }
     return torque;
   }
@@ -326,7 +327,8 @@ export function createPickingController({
     if (dragState.mode === 'translate') {
       const delta = computeWorldDrag(deltaX, deltaY);
       if (!delta) return;
-      const forceVec = clampVector(delta.multiplyScalar(boundsRadius * 160), boundsRadius * 480);
+      const translationGain = Math.max(40, boundsRadius * 220);
+      const forceVec = clampVector(delta.clone().multiplyScalar(translationGain), boundsRadius * 900);
       payload = {
         geomIndex,
         force: [forceVec.x, forceVec.y, forceVec.z],
@@ -337,7 +339,8 @@ export function createPickingController({
     } else if (dragState.mode === 'rotate') {
       const torque = computeTorque(deltaX, deltaY);
       if (!torque) return;
-      const limited = clampVector(torque.multiplyScalar(boundsRadius * 6), boundsRadius * 260);
+      const rotationGain = Math.max(10, boundsRadius * 70);
+      const limited = clampVector(torque.clone().multiplyScalar(rotationGain), boundsRadius * 220);
       payload = {
         geomIndex,
         force: [0, 0, 0],
