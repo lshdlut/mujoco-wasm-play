@@ -1168,6 +1168,8 @@ onmessage = async (ev) => {
       const payload = captureCopyState(precision);
       payload.source = msg.source || 'backend';
       try { postMessage(payload); } catch {}
+    } else if (msg.cmd === 'clearForces') {
+      try { sim?.clearAllXfrc?.(); } catch {}
     } else if (msg.cmd === 'setCtrl') {
       // Write a single actuator control value if pointers available
       try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch {}

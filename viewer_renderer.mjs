@@ -1243,6 +1243,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
     mesh.userData.geomDataId = gtype === MJ_GEOM.MESH ? dataId : -1;
     mesh.userData.geomSizeKey = gtype === MJ_GEOM.MESH ? null : sizeKey;
     mesh.userData.ownGeometry = geometryInfo.ownGeometry !== false;
+    mesh.userData.geomIndex = index;
     ctx.root.add(mesh);
     ctx.meshes[index] = mesh;
   }
@@ -2080,6 +2081,8 @@ export function createRendererManager({
       }
     }
 
+    updateSelectionOverlay(context, snapshot, state);
+
     const stats = {
       drawn,
       hidden: Math.max(0, ngeom - drawn),
@@ -2309,3 +2312,100 @@ export function createRendererManager({
 
 
 
+
+function ensureSelectionHelpers(ctx) {
+  if (!ctx.scene) return;
+  if (!ctx.selectionHelper) {
+    const geometry = new THREE.SphereGeometry(1, 20, 14);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffd35c,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.65,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const helper = new THREE.Mesh(geometry, material);
+    helper.visible = false;
+    helper.renderOrder = 50;
+    helper.userData = { pickable: false };
+    ctx.scene.add(helper);
+    ctx.selectionHelper = helper;
+  }
+  if (!ctx.selectionPoint) {
+    const geometry = new THREE.SphereGeometry(0.05, 18, 14);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xfff176,
+      transparent: true,
+      opacity: 0.9,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const point = new THREE.Mesh(geometry, material);
+    point.visible = false;
+    point.renderOrder = 51;
+    point.userData = { pickable: false };
+    ctx.scene.add(point);
+    ctx.selectionPoint = point;
+  }
+}
+
+function updateSelectionOverlay(ctx, snapshot, state) {
+  const selection = state?.runtime?.selection;
+  if (!selection || selection.geom < 0) {
+    if (ctx.selectionHelper) ctx.selectionHelper.visible = false;
+    if (ctx.selectionPoint) ctx.selectionPoint.visible = false;
+    return;
+  }
+  ensureSelectionHelpers(ctx);
+  const helper = ctx.selectionHelper;
+  const pointMarker = ctx.selectionPoint;
+  if (!helper || !pointMarker) return;
+  const mesh = Array.isArray(ctx.meshes) ? ctx.meshes[selection.geom] : null;
+  if (!mesh) {
+    helper.visible = false;
+    pointMarker.visible = false;
+    return;
+  }
+  const worldPoint = helper.position;
+  if (Array.isArray(selection.localPoint) && selection.localPoint.length >= 3) {
+    worldPoint.set(selection.localPoint[0], selection.localPoint[1], selection.localPoint[2]);
+    mesh.localToWorld(worldPoint);
+  } else if (Array.isArray(selection.point) && selection.point.length >= 3) {
+    worldPoint.set(selection.point[0], selection.point[1], selection.point[2]);
+  } else {
+    worldPoint.copy(mesh.position);
+  }
+  const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[selection.geom] : null;
+  let type = snapshot.gtype ? (snapshot.gtype[selection.geom] ?? MJ_GEOM.BOX) : MJ_GEOM.BOX;
+  let sizeVec = null;
+  if (sceneGeom) {
+    type = sceneTypeToEnum(sceneGeom.type);
+    if (Array.isArray(sceneGeom.size) && sceneGeom.size.length >= 1) {
+      sizeVec = [
+        Number(sceneGeom.size[0]) || 0.1,
+        Number(sceneGeom.size[1] ?? sceneGeom.size[0]) || 0.1,
+        Number(sceneGeom.size[2] ?? sceneGeom.size[0]) || 0.1,
+      ];
+    }
+  }
+  if (!sizeVec && snapshot.gsize) {
+    const base = selection.geom * 3;
+    sizeVec = [
+      snapshot.gsize[base + 0] ?? 0.1,
+      snapshot.gsize[base + 1] ?? 0.1,
+      snapshot.gsize[base + 2] ?? 0.1,
+    ];
+  }
+  const radius = sizeVec
+    ? computeGeomRadius(type, sizeVec[0], sizeVec[1], sizeVec[2])
+    : Math.max(0.05, (ctx.bounds?.radius || 1) * 0.05);
+  const helperScale = Math.max(0.05, radius * 1.6);
+  const pointScale = Math.max(0.01, radius * 0.35);
+  helper.visible = true;
+  helper.scale.setScalar(helperScale);
+  helper.position.copy(worldPoint);
+  pointMarker.visible = true;
+  pointMarker.scale.setScalar(pointScale);
+  pointMarker.position.copy(worldPoint);
+}

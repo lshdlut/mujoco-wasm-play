@@ -575,6 +575,14 @@ class DirectBackend {
         }
         break;
       }
+      case 'clearForces': {
+        try {
+          this.sim?.clearAllXfrc?.();
+        } catch (err) {
+          if (this.debug) this.#emitLog('direct: clearForces failed', String(err));
+        }
+        break;
+      }
       case 'snapshot': {
         this.#snapshot();
         break;
@@ -1009,6 +1017,7 @@ class DirectBackend {
       const out = { kind: 'meta_joints', ngeom, njnt };
       if (ngeom > 0 && gbidPtr) out.geom_bodyid = cloneArray(getView(mod, gbidPtr, 'i32', ngeom), Int32Array);
       const nbody = typeof mod._mjwf_model_nbody === 'function' ? (mod._mjwf_model_nbody(h) | 0) : 0;
+      if (nbody > 0) out.nbody = nbody;
       if (nbody > 0 && bjadrPtr) out.body_jntadr = cloneArray(getView(mod, bjadrPtr, 'i32', nbody), Int32Array);
       if (nbody > 0 && bjnumPtr) out.body_jntnum = cloneArray(getView(mod, bjnumPtr, 'i32', nbody), Int32Array);
       if (njnt > 0 && jtypePtr) out.jtype = cloneArray(getView(mod, jtypePtr, 'i32', njnt), Int32Array);

@@ -137,6 +137,24 @@ M4 Next Steps (pending Forge fix)
 - Once Forge exposes contact pos, re-test HUD + point rendering and extend to forces.
  - SDF vector labels: replace Canvas/Sprite bitmap labels with MSDF/SDF text rendering for crisp, scalable labels without per-distance texture rebuild; introduce a lightweight shader/material and a small font atlas asset.
 
+M5 Journal (Picking & Perturbation)
+- **Selection flow**
+  - Added Three.js raycaster path tied to canvas double-click. We raycast against the live mesh list, resolve the owning geom index, and capture hit point + normal.
+  - Viewer runtime now tracks `selection` metadata (geom/body/joint ids, world/local hit point, seq/timestamp) so the renderer and HUD can react.
+  - Renderer overlays draw a non-pickable sphere/wireframe halo around the selected geom using live pose/size; HUD gesture badge now shows the active selection label.
+  - Backend streams geom→body/joint metadata (worker + direct) so the UI can compute `pert.select` equivalents without extra wasm calls.
+- **Perturb hooks**
+  - New picking controller intercepts `Ctrl+Left/Right` drags when a selection exists. Right-drag applies a translate force, left-drag applies torque, both routed through `backend.applyForce`.
+  - Forces are scaled to scene bounds and emitted as `applyForce`/`clearForces` commands to worker/direct backends (MjSimLite now zeroes xfrc rows instead of accumulating).
+  - Selection toast + gesture text keep the user informed; releasing Ctrl or the pointer clears external forces immediately.
+- **UX polish**
+  - HUD gesture label now stays on `perturb-…` from mouse-down until release, so no more flicker between idle/perturb states.
+  - Static/world geoms (e.g., ground plane) are filtered out of the picking pool so perturb attempts always target movable bodies; a toast explains why when users double-click the floor.
+- **Verification**
+  1. Load worker viewer, double-click a geom (e.g., RKOB forearm) → toast shows the geom name, HUD `gesture` badge echoes `sel: forearm`, and a golden wire sphere hugs the selection as it animates.
+  2. Hold `Ctrl+Right` and drag: the body should react (force applied) and the last-action HUD label switches to `perturb-translate`. Release → motion stops and toast stays quiet (forces cleared).
+  3. Repeat in `mode=direct` to ensure parity; confirm console logs show `meta_joints` payloads on load.
+
 Journal (fill as each milestone completes)
 - [M0] 2025-11-10 Baseline committed before plan.
 - [M1] 2025-11-10 Enabled mjVisual/mjStatistic read/write via viewer_struct_access (worker/direct backends emit struct_state updates, UI now syncs controls). Expected effect: Visualization/Statistic controls update immediately, worker logs show `struct_state` messages, and snapshots carry `visual/statistic` structs. User verification: tweak headlight/map/scale sliders and confirm rendering changes & no console errors. Follow-up: visualization knobs still tricky—stage defaults that override XML via local copy before writing new values, while renderer still reads live struct fields.

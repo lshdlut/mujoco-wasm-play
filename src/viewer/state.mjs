@@ -27,6 +27,26 @@ function normaliseGroupState(input) {
   return output;
 }
 
+function createDefaultSelectionState() {
+  return {
+    geom: -1,
+    body: -1,
+    joint: -1,
+    name: '',
+    kind: 'geom',
+    point: [0, 0, 0],
+    localPoint: [0, 0, 0],
+    normal: [0, 0, 1],
+    seq: 0,
+    timestamp: 0,
+  };
+}
+
+function resetSelectionState(runtime) {
+  if (!runtime) return;
+  runtime.selection = createDefaultSelectionState();
+}
+
 const DEFAULT_VIEWER_STATE = Object.freeze({
   overlays: {
     help: false,
@@ -56,6 +76,11 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     drag: {
       dx: 0,
       dy: 0,
+    },
+    selection: createDefaultSelectionState(),
+    perturb: {
+      mode: 'idle',
+      active: false,
     },
     lastAlign: {
       seq: 0,
@@ -455,6 +480,33 @@ function mergeBackendSnapshot(draft, snapshot) {
     if (typeof draft.runtime.trackingGeom === 'number' && draft.runtime.trackingGeom > maxGeom) {
       draft.runtime.trackingGeom = maxGeom >= 0 ? maxGeom : -1;
     }
+    if (draft.runtime?.selection && draft.runtime.selection.geom > maxGeom) {
+      resetSelectionState(draft.runtime);
+    }
+  }
+  if (snapshot.geom_bodyid) {
+    if (!draft.model) draft.model = {};
+    draft.model.geomBodyId = snapshot.geom_bodyid;
+  }
+  if (snapshot.body_jntadr) {
+    if (!draft.model) draft.model = {};
+    draft.model.bodyJntAdr = snapshot.body_jntadr;
+  }
+  if (snapshot.body_jntnum) {
+    if (!draft.model) draft.model = {};
+    draft.model.bodyJntNum = snapshot.body_jntnum;
+  }
+  if (snapshot.jtype) {
+    if (!draft.model) draft.model = {};
+    draft.model.jntType = snapshot.jtype;
+  }
+  if (typeof snapshot.nbody === 'number') {
+    if (!draft.model) draft.model = {};
+    draft.model.nbody = snapshot.nbody | 0;
+  }
+  if (typeof snapshot.njnt === 'number') {
+    if (!draft.model) draft.model = {};
+    draft.model.njnt = snapshot.njnt | 0;
   }
   if (snapshot.statistic) {
     if (!draft.model) draft.model = {};
@@ -864,8 +916,13 @@ export function applyGesture(store, backend, payload) {
     : null;
   const drag = payload.drag ?? (pointer ? { dx: pointer.dx, dy: pointer.dy } : null);
   store.update((draft) => {
+    const perturbActive = !!draft.runtime?.perturb?.active;
     if (phase !== 'end') {
-      draft.runtime.lastAction = mode;
+      if (!perturbActive) {
+        draft.runtime.lastAction = mode;
+      }
+    } else if (!perturbActive) {
+      draft.runtime.lastAction = 'idle';
     }
     draft.runtime.gesture = {
       ...(draft.runtime.gesture || {}),
@@ -980,6 +1037,10 @@ function resolveSnapshot(state) {
     gsize: viewOrNull(state.gsize, Float64Array),
     gtype: viewOrNull(state.gtype, Int32Array),
     gmatid: viewOrNull(state.gmatid, Int32Array),
+    geom_bodyid: viewOrNull(state.geom_bodyid, Int32Array),
+    body_jntadr: viewOrNull(state.body_jntadr, Int32Array),
+    body_jntnum: viewOrNull(state.body_jntnum, Int32Array),
+    jtype: viewOrNull(state.jtype, Int32Array),
     matrgba: viewOrNull(state.matrgba, Float32Array),
     contacts:
       state.contacts && typeof state.contacts === 'object'
@@ -1024,6 +1085,8 @@ function resolveSnapshot(state) {
     options: state.options ?? null,
     renderAssets: state.renderAssets ?? null,
     groups: state.groups ? normaliseGroupState(state.groups) : null,
+    nbody: Number.isFinite(state.nbody) ? (state.nbody | 0) : null,
+    njnt: Number.isFinite(state.njnt) ? (state.njnt | 0) : null,
   };
 }
 
@@ -1330,6 +1393,33 @@ export async function createBackend(options = {}) {
       }
       case 'meta_geoms': {
         lastSnapshot.geoms = Array.isArray(data.geoms) ? data.geoms : [];
+        notifyListeners();
+        break;
+      }
+      case 'meta_joints': {
+        const toI32 = (value) => {
+          if (!value) return null;
+          if (ArrayBuffer.isView(value)) {
+            try { return new Int32Array(value); } catch { return null; }
+          }
+          if (value instanceof ArrayBuffer) {
+            try { return new Int32Array(value); } catch { return null; }
+          }
+          if (Array.isArray(value)) {
+            try { return Int32Array.from(value); } catch { return null; }
+          }
+          return null;
+        };
+        const geomBody = toI32(data.geom_bodyid);
+        if (geomBody) lastSnapshot.geom_bodyid = geomBody;
+        const bodyAdr = toI32(data.body_jntadr);
+        if (bodyAdr) lastSnapshot.body_jntadr = bodyAdr;
+        const bodyNum = toI32(data.body_jntnum);
+        if (bodyNum) lastSnapshot.body_jntnum = bodyNum;
+        const jtype = toI32(data.jtype);
+        if (jtype) lastSnapshot.jtype = jtype;
+        if (typeof data.nbody === 'number') lastSnapshot.nbody = data.nbody | 0;
+        if (typeof data.njnt === 'number') lastSnapshot.njnt = data.njnt | 0;
         notifyListeners();
         break;
       }
@@ -1761,6 +1851,45 @@ export async function createBackend(options = {}) {
     return resolveSnapshot(lastSnapshot);
   }
 
+  const toVec3 = (value) => {
+    if (Array.isArray(value)) {
+      return [
+        Number(value[0]) || 0,
+        Number(value[1]) || 0,
+        Number(value[2]) || 0,
+      ];
+    }
+    return [0, 0, 0];
+  };
+
+  async function applyForceCommand(options = {}) {
+    const geomIndex = Number(options.geomIndex);
+    if (!Number.isFinite(geomIndex) || geomIndex < 0) {
+      return resolveSnapshot(lastSnapshot);
+    }
+    try {
+      client.postMessage?.({
+        cmd: 'applyForce',
+        geomIndex: geomIndex | 0,
+        force: toVec3(options.force),
+        torque: toVec3(options.torque),
+        point: toVec3(options.point),
+      });
+    } catch (err) {
+      if (debug) console.warn('[backend applyForce] failed', err);
+    }
+    return resolveSnapshot(lastSnapshot);
+  }
+
+  async function clearForcesCommand() {
+    try {
+      client.postMessage?.({ cmd: 'clearForces' });
+    } catch (err) {
+      if (debug) console.warn('[backend clearForces] failed', err);
+    }
+    return resolveSnapshot(lastSnapshot);
+  }
+
   function dispose() {
     if (messageHandler) {
       try { client.removeEventListener?.('message', messageHandler); } catch {}
@@ -1779,6 +1908,8 @@ export async function createBackend(options = {}) {
     subscribe,
     step,
     setCameraIndex,
+    applyForce: applyForceCommand,
+    clearForces: clearForcesCommand,
     dispose,
   };
 }

@@ -17,6 +17,7 @@ import {
 import { createControlManager } from './viewer_controls.mjs';
 import { createCameraController } from './viewer_camera.mjs';
 import { createRendererManager } from './viewer_renderer.mjs';
+import { createPickingController } from './viewer_picking.mjs';
 
 const CAMERA_PRESETS = ['Free', 'Tracking'];
 const MJ_GEOM = {
@@ -175,7 +176,11 @@ function updateHud(state) {
   }
   if (gestureEl) {
     const action = state.runtime.lastAction || 'idle';
-    gestureEl.textContent = `gesture: ${action}`;
+    const selection = state.runtime.selection;
+    const selLabel = selection && selection.geom >= 0
+      ? (selection.name || `geom ${selection.geom}`)
+      : 'none';
+    gestureEl.textContent = `gesture: ${action} | sel: ${selLabel}`;
   }
 }
 
@@ -271,6 +276,16 @@ const cameraController = createCameraController({
   globalUp: new THREE.Vector3(0, 0, 1),
 });
 cameraController.setup();
+
+const pickingController = createPickingController({
+  THREE_NS: THREE,
+  canvas,
+  store,
+  backend,
+  renderCtx,
+  debugMode,
+});
+pickingController.setup();
 
 window.addEventListener('keydown', async (event) => {
   switch (event.key) {
