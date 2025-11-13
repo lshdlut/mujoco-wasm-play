@@ -495,8 +495,8 @@ export function createPickingController({
   }
 const TRANSLATION_GAIN = 750;
 const ROTATION_GAIN = 30;
-const FORCE_LERP_ALPHA = 0.12;
-const TORQUE_LERP_ALPHA = 0.12;
+const FORCE_LERP_ALPHA = 0.05;
+const TORQUE_LERP_ALPHA = 0.06;
   function setPerturbState(mode, active) {
     store.update((draft) => {
       if (!draft.runtime) draft.runtime = {};

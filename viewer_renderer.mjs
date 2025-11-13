@@ -74,7 +74,7 @@ const PERTURB_TEMP_AXIS = new THREE.Vector3();
 const PERTURB_TEMP_RADIAL = new THREE.Vector3();
 const PERTURB_TEMP_TANGENT = new THREE.Vector3();
 const PERTURB_TEMP_QUAT = new THREE.Quaternion();
-const SELECTION_OVERLAY_COLOR = new THREE.Color(0xd6ffea);
+const SELECTION_OVERLAY_COLOR = new THREE.Color(0x91ffcb);
 const LABEL_MODE_WARNINGS = new Set();
 const FRAME_MODE_WARNINGS = new Set();
 const LABEL_DPR_CAP = 2;
@@ -775,14 +775,20 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
   frameGroup.visible = used > 0;
 }
 
-function createPerturbArrowNode(colorHex) {
-  const material = new THREE.MeshBasicMaterial({
-    color: colorHex,
-    transparent: true,
-    opacity: 0.9,
-    depthTest: true,
-    depthWrite: false,
-  });
+function createPerturbArrowNode(colorHex, { lit = false } = {}) {
+  const material = lit
+    ? new THREE.MeshStandardMaterial({
+        color: colorHex,
+        metalness: 0.55,
+        roughness: 0.25,
+      })
+    : new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity: 0.9,
+        depthTest: true,
+        depthWrite: false,
+      });
   const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, material);
   const head = new THREE.Mesh(PERTURB_HEAD_GEOMETRY, material);
   const node = new THREE.Group();
@@ -851,8 +857,8 @@ function ensurePerturbHelpers(ctx) {
     ring.renderOrder = 61;
     ctx.perturbGroup.add(ring);
 
-    const arrowPrimary = createPerturbArrowNode(PERTURB_COLOR_ROTATE);
-    const arrowSecondary = createPerturbArrowNode(PERTURB_COLOR_ROTATE);
+    const arrowPrimary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { lit: true });
+    const arrowSecondary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { lit: true });
     ctx.perturbGroup.add(arrowPrimary.node);
     ctx.perturbGroup.add(arrowSecondary.node);
 
@@ -930,13 +936,13 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
       radialPlane.copy(PERTURB_RADIAL_DEFAULT).applyQuaternion(quat);
     }
     const radialDir = radialPlane.normalize();
-    const primaryRadial = radialDir.clone().applyAxisAngle(axis, Math.PI);
+    const primaryRadial = radialDir.clone();
     const oppositeRadial = primaryRadial.clone().multiplyScalar(-1);
-    const tangential = PERTURB_TEMP_TANGENT.copy(primaryRadial).cross(axis);
-    if (tangential.lengthSq() < 1e-8) {
-      tangential.copy(PERTURB_AXIS_DEFAULT).applyQuaternion(quat);
+    const tangentialBase = PERTURB_TEMP_TANGENT.copy(axis).cross(primaryRadial);
+    if (tangentialBase.lengthSq() < 1e-8) {
+      tangentialBase.copy(PERTURB_AXIS_DEFAULT).applyQuaternion(quat);
     } else {
-      tangential.normalize();
+      tangentialBase.normalize();
     }
     const arrowLenBase = 2 * Math.max(
       0.05 * radius,
@@ -948,7 +954,7 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
       0.0008 * sceneRadius,
       Math.min(0.01 * sceneRadius, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.3)) * 0.003 * sceneRadius),
     );
-    const tangents = [tangential.clone(), tangential.clone().multiplyScalar(-1)];
+    const tangents = [tangentialBase.clone(), tangentialBase.clone().multiplyScalar(-1)];
     const radials = [primaryRadial, oppositeRadial];
     const arrows = rotate.arrows || [];
     radials.forEach((radialVec, idx) => {
@@ -2584,20 +2590,24 @@ function clearSelectionHighlight(ctx) {
 }
 
 function createSelectionGlow(mesh) {
-  const material = new THREE.MeshBasicMaterial({
+  const material = new THREE.MeshStandardMaterial({
     color: SELECTION_OVERLAY_COLOR,
+    emissive: SELECTION_OVERLAY_COLOR.clone(),
+    emissiveIntensity: 0.8,
+    metalness: 0.2,
+    roughness: 0.35,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.85,
     side: THREE.DoubleSide,
     depthWrite: false,
-    depthTest: false,
+    depthTest: true,
     blending: THREE.AdditiveBlending,
   });
   const glow = new THREE.Mesh(mesh.geometry, material);
   glow.renderOrder = (mesh.renderOrder || 0) + 0.5;
   glow.frustumCulled = false;
   glow.userData = { selectionGlow: true };
-  glow.scale.setScalar(1.01);
+  glow.scale.setScalar(1.04);
   return { glow, material };
 }
 
