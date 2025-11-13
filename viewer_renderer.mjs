@@ -901,8 +901,8 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
     }
     const axis = torqueVec.normalize();
     const radius = Math.max(
-      0.08 * sceneRadius,
-      Math.min(sceneRadius * 0.9, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.1)) * sceneRadius * 0.25),
+      0.04 * sceneRadius,
+      Math.min(sceneRadius * 0.5, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.2)) * sceneRadius * 0.12),
     );
     const quat = PERTURB_TEMP_QUAT.setFromUnitVectors(PERTURB_RING_NORMAL, axis);
     rotate.ring.visible = true;
@@ -919,7 +919,13 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
     const ringPoint = anchor.clone().add(radialDir.clone().multiplyScalar(radius));
     rotate.arrow.visible = true;
     rotate.arrow.position.copy(ringPoint);
-    rotate.arrow.setDirection(radialDir);
+    const tangent = PERTURB_TEMP_TANGENT.copy(axis).cross(radialDir);
+    if (tangent.lengthSq() < 1e-8) {
+      tangent.copy(PERTURB_AXIS_DEFAULT).applyQuaternion(quat);
+    } else {
+      tangent.normalize();
+    }
+    rotate.arrow.setDirection(tangent);
     const arrowLenBase = Math.max(
       0.12 * radius,
       Math.min(radius * 0.4, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.1)) * radius * 0.3),

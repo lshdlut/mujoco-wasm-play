@@ -531,11 +531,11 @@ const ROTATION_GAIN = 30;
       return;
     }
     const step = () => {
-      if (!dragState.active || !dragState.payload) {
+      if (!dragState.active) {
         perturbRaf = null;
         return;
       }
-      dispatchPayload(dragState.payload);
+      applyPerturb(true);
       perturbRaf = window.requestAnimationFrame(step);
     };
     perturbRaf = window.requestAnimationFrame(step);
@@ -557,12 +557,12 @@ const ROTATION_GAIN = 30;
     }
   }
 
-  function applyPerturb() {
+  function applyPerturb(fromLoop = false) {
     const selection = currentSelection();
-    if (!selection || selection.geom < 0) return;
+    if (!selection || selection.geom < 0) return false;
     const geomIndex = selection.geom | 0;
     const camera = renderCtx.camera;
-    if (!camera) return;
+    if (!camera) return false;
     const boundsRadius = Math.max(0.1, renderCtx.bounds?.radius || 1);
     let payload = null;
     const bodyCapable = Number.isFinite(dragState.bodyId) && dragState.bodyId >= 0 && refreshBodyPose(dragState.bodyId);
@@ -619,9 +619,10 @@ const ROTATION_GAIN = 30;
           force: payload.force ? { x: payload.force[0], y: payload.force[1], z: payload.force[2] } : null,
           torque: payload.torque ? { x: payload.torque[0], y: payload.torque[1], z: payload.torque[2] } : null,
         });
-        ensurePerturbLoop();
+        if (!fromLoop) ensurePerturbLoop();
+        return true;
       }
-      return;
+      return false;
     }
 
     const anchor = dragState.anchorPoint;
@@ -629,7 +630,7 @@ const ROTATION_GAIN = 30;
     dragState.scale = computePerturbScale(anchor);
     samplePointerFromScreen();
     const target = dragState.pointerTarget;
-    if (!target) return;
+    if (!target) return false;
     const displacement = tempVecB.copy(target).sub(anchor);
     if (dragState.mode === 'translate') {
       const baseVec = displacement.clone();
@@ -676,8 +677,10 @@ const ROTATION_GAIN = 30;
         force: payload.force ? { x: payload.force[0], y: payload.force[1], z: payload.force[2] } : null,
         torque: payload.torque ? { x: payload.torque[0], y: payload.torque[1], z: payload.torque[2] } : null,
       });
-      ensurePerturbLoop();
+      if (!fromLoop) ensurePerturbLoop();
+      return true;
     }
+    return false;
   }
 
   function beginPerturb(event, mode) {
