@@ -73,6 +73,8 @@ export function createPickingController({
     scale: 1,
     planeNormal: new THREE_NS.Vector3(),
     planePoint: new THREE_NS.Vector3(),
+    lastForceVec: new THREE_NS.Vector3(),
+    lastTorqueVec: new THREE_NS.Vector3(),
   };
   let perturbRaf = null;
   const cleanup = [];
@@ -493,6 +495,8 @@ export function createPickingController({
   }
 const TRANSLATION_GAIN = 500;
 const ROTATION_GAIN = 30;
+const FORCE_SMOOTHING = 0.3;
+const TORQUE_SMOOTHING = 0.35;
   function setPerturbState(mode, active) {
     store.update((draft) => {
       if (!draft.runtime) draft.runtime = {};
@@ -582,6 +586,12 @@ const ROTATION_GAIN = 30;
         const forceVec = baseVec.clone().multiplyScalar(TRANSLATION_GAIN);
         const maxForce = TRANSLATION_GAIN * boundsRadius * 1.2;
         if (forceVec.length() > maxForce) forceVec.setLength(maxForce);
+        if (dragState.lastForceVec.lengthSq() > 0) {
+          dragState.lastForceVec.lerp(forceVec, 1 - FORCE_SMOOTHING);
+        } else {
+          dragState.lastForceVec.copy(forceVec);
+        }
+        forceVec.copy(dragState.lastForceVec);
         const lever = tempVecE.copy(dragState.anchorPoint).sub(tempBodyCom);
         const torqueFromForce = lever.clone().cross(forceVec);
         payload = {
@@ -601,6 +611,12 @@ const ROTATION_GAIN = 30;
         }
         const maxTorque = ROTATION_GAIN * boundsRadius * 1.5;
         if (torqueVec.length() > maxTorque) torqueVec.setLength(maxTorque);
+        if (dragState.lastTorqueVec.lengthSq() > 0) {
+          dragState.lastTorqueVec.lerp(torqueVec, 1 - TORQUE_SMOOTHING);
+        } else {
+          dragState.lastTorqueVec.copy(torqueVec);
+        }
+        torqueVec.copy(dragState.lastTorqueVec);
         payload = {
           bodyId: dragState.bodyId,
           force: [0, 0, 0],
@@ -637,6 +653,12 @@ const ROTATION_GAIN = 30;
       const forceVec = baseVec.multiplyScalar(TRANSLATION_GAIN);
       const maxForce = TRANSLATION_GAIN * boundsRadius * 1.2;
       if (forceVec.length() > maxForce) forceVec.setLength(maxForce);
+      if (dragState.lastForceVec.lengthSq() > 0) {
+        dragState.lastForceVec.lerp(forceVec, 1 - FORCE_SMOOTHING);
+      } else {
+        dragState.lastForceVec.copy(forceVec);
+      }
+      forceVec.copy(dragState.lastForceVec);
       payload = {
         geomIndex,
         force: [forceVec.x, forceVec.y, forceVec.z],
@@ -658,6 +680,12 @@ const ROTATION_GAIN = 30;
       }
       const maxTorque = ROTATION_GAIN * boundsRadius * 1.5;
       if (torqueVec.length() > maxTorque) torqueVec.setLength(maxTorque);
+      if (dragState.lastTorqueVec.lengthSq() > 0) {
+        dragState.lastTorqueVec.lerp(torqueVec, 1 - TORQUE_SMOOTHING);
+      } else {
+        dragState.lastTorqueVec.copy(torqueVec);
+      }
+      torqueVec.copy(dragState.lastTorqueVec);
       payload = {
         geomIndex,
         force: [0, 0, 0],
@@ -717,10 +745,14 @@ const ROTATION_GAIN = 30;
     if (!dragState.active) return;
     backend.clearForces?.();
     dragState.payload = null;
+    dragState.lastForceVec.set(0, 0, 0);
+    dragState.lastTorqueVec.set(0, 0, 0);
     stopPerturbLoop();
     dragState.pointerTarget.copy(dragState.anchorPoint);
     dragState.planeNormal.set(0, 0, 0);
     dragState.planePoint.set(0, 0, 0);
+    dragState.lastForceVec.set(0, 0, 0);
+    dragState.lastTorqueVec.set(0, 0, 0);
     if (typeof dragState.pointerId === 'number' && canvas.releasePointerCapture) {
       try {
         canvas.releasePointerCapture(dragState.pointerId);

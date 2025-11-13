@@ -74,6 +74,8 @@ const PERTURB_TEMP_AXIS = new THREE.Vector3();
 const PERTURB_TEMP_RADIAL = new THREE.Vector3();
 const PERTURB_TEMP_TANGENT = new THREE.Vector3();
 const PERTURB_TEMP_QUAT = new THREE.Quaternion();
+const SELECTION_HIGHLIGHT_COLOR = new THREE.Color(0xfff2b0);
+const SELECTION_EMISSIVE_COLOR = new THREE.Color(0xffd15c);
 const LABEL_MODE_WARNINGS = new Set();
 const FRAME_MODE_WARNINGS = new Set();
 const LABEL_DPR_CAP = 2;
@@ -832,21 +834,23 @@ function ensurePerturbHelpers(ctx) {
     ring.renderOrder = 61;
     ctx.perturbGroup.add(ring);
 
-    const arrow = new THREE.ArrowHelper(
-      new THREE.Vector3(0, 1, 0),
-      new THREE.Vector3(),
-      1,
-      PERTURB_COLOR_ROTATE,
-    );
-    arrow.visible = false;
-    arrow.cone.material.transparent = true;
-    arrow.cone.material.opacity = 0.9;
-    arrow.line.material.transparent = true;
-    arrow.line.material.opacity = 0.9;
-    arrow.renderOrder = 62;
-    ctx.perturbGroup.add(arrow);
+    const material = new THREE.MeshBasicMaterial({
+      color: PERTURB_COLOR_ROTATE,
+      transparent: true,
+      opacity: 0.9,
+      depthTest: true,
+      depthWrite: false,
+    });
+    const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, material);
+    const head = new THREE.Mesh(PERTURB_HEAD_GEOMETRY, material);
+    const node = new THREE.Group();
+    node.add(shaft);
+    node.add(head);
+    node.visible = false;
+    node.renderOrder = 62;
+    ctx.perturbGroup.add(node);
 
-    ctx.perturbRotate = { ring, arrow };
+    ctx.perturbRotate = { ring, arrow: { node, shaft, head, material } };
   }
 }
 
@@ -857,7 +861,7 @@ function hidePerturbTranslate(ctx) {
 
 function hidePerturbRotate(ctx) {
   if (ctx?.perturbRotate?.ring) ctx.perturbRotate.ring.visible = false;
-  if (ctx?.perturbRotate?.arrow) ctx.perturbRotate.arrow.visible = false;
+  if (ctx?.perturbRotate?.arrow?.node) ctx.perturbRotate.arrow.node.visible = false;
 }
 
 function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
@@ -901,8 +905,8 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
     }
     const axis = torqueVec.normalize();
     const radius = Math.max(
-      0.04 * sceneRadius,
-      Math.min(sceneRadius * 0.5, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.2)) * sceneRadius * 0.12),
+      0.02 * sceneRadius,
+      Math.min(sceneRadius * 0.25, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.3)) * sceneRadius * 0.06),
     );
     const quat = PERTURB_TEMP_QUAT.setFromUnitVectors(PERTURB_RING_NORMAL, axis);
     rotate.ring.visible = true;
@@ -916,22 +920,35 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
       radialPlane.copy(PERTURB_RADIAL_DEFAULT).applyQuaternion(quat);
     }
     const radialDir = radialPlane.normalize();
-    const ringPoint = anchor.clone().add(radialDir.clone().multiplyScalar(radius));
-    rotate.arrow.visible = true;
-    rotate.arrow.position.copy(ringPoint);
-    const tangent = PERTURB_TEMP_TANGENT.copy(axis).cross(radialDir);
+    const arrowRadial = radialDir.clone().applyAxisAngle(axis, Math.PI * 3 / 2);
+    const ringPoint = anchor.clone().add(arrowRadial.clone().multiplyScalar(radius));
+    const tangent = PERTURB_TEMP_TANGENT.copy(axis).cross(arrowRadial);
     if (tangent.lengthSq() < 1e-8) {
       tangent.copy(PERTURB_AXIS_DEFAULT).applyQuaternion(quat);
     } else {
       tangent.normalize();
     }
-    rotate.arrow.setDirection(tangent);
-    const arrowLenBase = Math.max(
-      0.12 * radius,
-      Math.min(radius * 0.4, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.1)) * radius * 0.3),
-    );
-    rotate.arrow.setLength(arrowLenBase, arrowLenBase * 0.4, arrowLenBase * 0.3);
-    rotate.arrow.setColor(new THREE.Color(PERTURB_COLOR_ROTATE));
+    const arrow = rotate.arrow;
+    if (arrow) {
+      arrow.node.visible = true;
+      arrow.material.color.setHex(PERTURB_COLOR_ROTATE);
+      arrow.node.position.copy(ringPoint);
+      arrow.node.quaternion.copy(PERTURB_TEMP_QUAT.setFromUnitVectors(PERTURB_AXIS_DEFAULT, tangent));
+      const arrowLenBase = Math.max(
+        0.05 * radius,
+        Math.min(radius * 0.25, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.2)) * radius * 0.2),
+      );
+      const headLen = Math.max(arrowLenBase * 0.35, 0.02 * sceneRadius);
+      const shaftLen = Math.max(1e-4, arrowLenBase - headLen);
+      const shaftRadius = Math.max(
+        0.0008 * sceneRadius,
+        Math.min(0.01 * sceneRadius, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.3)) * 0.003 * sceneRadius),
+      );
+      arrow.shaft.scale.set(shaftRadius, shaftLen, shaftRadius);
+      arrow.shaft.position.set(0, shaftLen / 2, 0);
+      arrow.head.scale.set(shaftRadius * 1.8, headLen, shaftRadius * 1.8);
+      arrow.head.position.set(0, shaftLen + headLen / 2, 0);
+    }
   } else {
     hidePerturbRotate(ctx);
     const translate = ctx.perturbTranslate;
@@ -951,17 +968,17 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
         )
       : null;
     const forceMag = forceVec ? forceVec.length() : distance;
-    const thicknessScale = Math.log(1 + forceMag / Math.max(1e-6, sceneRadius * 0.15));
-      const shaftRadius = Math.max(
-        0.002 * sceneRadius,
-        Math.min(0.03 * sceneRadius, thicknessScale * 0.008 * sceneRadius),
-      );
-      let headLength = Math.min(
-        Math.max(0.03 * sceneRadius, distance * 0.2),
-        Math.max(distance * 0.45, 0.08 * sceneRadius),
-      );
-      headLength = Math.min(headLength, Math.max(0.12 * distance, distance * 0.6));
-      const shaftLength = Math.max(1e-4, distance - headLength);
+    const thicknessScale = Math.max(0.15, Math.log(1 + forceMag / Math.max(1e-6, sceneRadius * 0.15)));
+    const shaftRadius = Math.max(
+      0.0005 * sceneRadius,
+      Math.min(0.0075 * sceneRadius, thicknessScale * 0.002 * sceneRadius),
+    );
+    let headLength = Math.min(
+      Math.max(0.03 * sceneRadius, distance * 0.2),
+      Math.max(distance * 0.45, 0.08 * sceneRadius),
+    );
+    headLength = Math.min(headLength, Math.max(0.12 * distance, distance * 0.6));
+    const shaftLength = Math.max(1e-4, distance - headLength);
     translate.node.visible = true;
     translate.material.color.setHex(PERTURB_COLOR_TRANSLATE);
     translate.node.position.copy(anchor);
@@ -2536,99 +2553,81 @@ export function createRendererManager({
 
 
 
-function ensureSelectionHelpers(ctx) {
-  if (!ctx.scene) return;
-  if (!ctx.selectionHelper) {
-    const geometry = new THREE.SphereGeometry(1, 20, 14);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xffd35c,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.65,
-      depthTest: false,
-      depthWrite: false,
-    });
-    const helper = new THREE.Mesh(geometry, material);
-    helper.visible = false;
-    helper.renderOrder = 50;
-    helper.userData = { pickable: false };
-    ctx.scene.add(helper);
-    ctx.selectionHelper = helper;
+function clearSelectionHighlight(ctx) {
+  if (!ctx?.selectionHighlight?.mesh) return;
+  const { mesh, originalMaterial, highlightMaterial } = ctx.selectionHighlight;
+  try {
+    if (mesh) {
+      if (highlightMaterial) {
+        const disposeMaterial = (mat) => {
+          if (mat && typeof mat.dispose === 'function') {
+            try { mat.dispose(); } catch {}
+          }
+        };
+        if (Array.isArray(highlightMaterial)) {
+          highlightMaterial.forEach(disposeMaterial);
+        } else {
+          disposeMaterial(highlightMaterial);
+        }
+      }
+      mesh.material = originalMaterial;
+    }
+  } catch {}
+  ctx.selectionHighlight = null;
+}
+
+function applySelectionHighlight(ctx, mesh) {
+  if (!mesh) {
+    clearSelectionHighlight(ctx);
+    return;
   }
-  if (!ctx.selectionPoint) {
-    const geometry = new THREE.SphereGeometry(0.05, 18, 14);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xfff176,
-      transparent: true,
-      opacity: 0.9,
-      depthTest: false,
-      depthWrite: false,
-    });
-    const point = new THREE.Mesh(geometry, material);
-    point.visible = false;
-    point.renderOrder = 51;
-    point.userData = { pickable: false };
-    ctx.scene.add(point);
-    ctx.selectionPoint = point;
+  if (ctx.selectionHighlight?.mesh === mesh) {
+    if (ctx.selectionHighlight.highlightMaterial && mesh.material !== ctx.selectionHighlight.highlightMaterial) {
+      mesh.material = ctx.selectionHighlight.highlightMaterial;
+    }
+    return;
   }
+  clearSelectionHighlight(ctx);
+  const originalMaterial = mesh.material;
+  const cloneMaterial = (mat) => {
+    if (mat && typeof mat.clone === 'function') {
+      const cloned = mat.clone();
+      if ('emissive' in cloned && cloned.emissive?.setHex) {
+        cloned.emissive = cloned.emissive.clone();
+        cloned.emissive.copy(SELECTION_EMISSIVE_COLOR);
+        cloned.emissiveIntensity = Math.max(1.8, cloned.emissiveIntensity ?? 1.2);
+      } else if ('color' in cloned && cloned.color?.setHex) {
+        cloned.color = cloned.color.clone();
+        cloned.color.lerp(SELECTION_HIGHLIGHT_COLOR, 0.75);
+      }
+      if ('metalness' in cloned) {
+        cloned.metalness = Math.max(0, Math.min(1, (cloned.metalness ?? 0) * 0.6));
+      }
+      if ('roughness' in cloned) {
+        cloned.roughness = Math.max(0, Math.min(1, (cloned.roughness ?? 0) * 0.8));
+      }
+      cloned.opacity = Math.min(1, (cloned.opacity ?? 1) + 0.1);
+      return cloned;
+    }
+    return mat;
+  };
+  const highlightMaterial = Array.isArray(originalMaterial)
+    ? originalMaterial.map((mat) => cloneMaterial(mat))
+    : cloneMaterial(originalMaterial);
+  mesh.material = highlightMaterial;
+  ctx.selectionHighlight = { mesh, originalMaterial, highlightMaterial };
 }
 
 function updateSelectionOverlay(ctx, snapshot, state) {
   const selection = state?.runtime?.selection;
   if (!selection || selection.geom < 0) {
-    if (ctx.selectionHelper) ctx.selectionHelper.visible = false;
-    if (ctx.selectionPoint) ctx.selectionPoint.visible = false;
+    clearSelectionHighlight(ctx);
     return;
   }
-  ensureSelectionHelpers(ctx);
-  const helper = ctx.selectionHelper;
-  const pointMarker = ctx.selectionPoint;
-  if (!helper || !pointMarker) return;
   const mesh = Array.isArray(ctx.meshes) ? ctx.meshes[selection.geom] : null;
   if (!mesh) {
-    helper.visible = false;
-    pointMarker.visible = false;
+    clearSelectionHighlight(ctx);
     return;
   }
-  const worldPoint = helper.position;
-  if (Array.isArray(selection.localPoint) && selection.localPoint.length >= 3) {
-    worldPoint.set(selection.localPoint[0], selection.localPoint[1], selection.localPoint[2]);
-    mesh.localToWorld(worldPoint);
-  } else if (Array.isArray(selection.point) && selection.point.length >= 3) {
-    worldPoint.set(selection.point[0], selection.point[1], selection.point[2]);
-  } else {
-    worldPoint.copy(mesh.position);
-  }
-  const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[selection.geom] : null;
-  let type = snapshot.gtype ? (snapshot.gtype[selection.geom] ?? MJ_GEOM.BOX) : MJ_GEOM.BOX;
-  let sizeVec = null;
-  if (sceneGeom) {
-    type = sceneTypeToEnum(sceneGeom.type);
-    if (Array.isArray(sceneGeom.size) && sceneGeom.size.length >= 1) {
-      sizeVec = [
-        Number(sceneGeom.size[0]) || 0.1,
-        Number(sceneGeom.size[1] ?? sceneGeom.size[0]) || 0.1,
-        Number(sceneGeom.size[2] ?? sceneGeom.size[0]) || 0.1,
-      ];
-    }
-  }
-  if (!sizeVec && snapshot.gsize) {
-    const base = selection.geom * 3;
-    sizeVec = [
-      snapshot.gsize[base + 0] ?? 0.1,
-      snapshot.gsize[base + 1] ?? 0.1,
-      snapshot.gsize[base + 2] ?? 0.1,
-    ];
-  }
-  const radius = sizeVec
-    ? computeGeomRadius(type, sizeVec[0], sizeVec[1], sizeVec[2])
-    : Math.max(0.05, (ctx.bounds?.radius || 1) * 0.05);
-  const helperScale = Math.max(0.05, radius * 1.6);
-  const pointScale = Math.max(0.01, radius * 0.35);
-  helper.visible = true;
-  helper.scale.setScalar(helperScale);
-  helper.position.copy(worldPoint);
-  pointMarker.visible = true;
-  pointMarker.scale.setScalar(pointScale);
-  pointMarker.position.copy(worldPoint);
+  applySelectionHighlight(ctx, mesh);
 }
