@@ -910,17 +910,16 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
     rotate.ring.quaternion.copy(quat);
     rotate.ring.scale.setScalar(radius);
 
-    const radialWorld = PERTURB_TEMP_RADIAL.copy(PERTURB_RADIAL_DEFAULT).multiplyScalar(radius).applyQuaternion(quat);
-    const ringPoint = anchor.clone().add(radialWorld);
+    const radialRaw = PERTURB_TEMP_RADIAL.copy(cursor).sub(anchor);
+    const radialPlane = radialRaw.clone().sub(axis.clone().multiplyScalar(radialRaw.dot(axis)));
+    if (radialPlane.lengthSq() < 1e-8) {
+      radialPlane.copy(PERTURB_RADIAL_DEFAULT).applyQuaternion(quat);
+    }
+    const radialDir = radialPlane.normalize();
+    const ringPoint = anchor.clone().add(radialDir.clone().multiplyScalar(radius));
     rotate.arrow.visible = true;
     rotate.arrow.position.copy(ringPoint);
-    const tangent = PERTURB_TEMP_TANGENT.copy(axis).cross(radialWorld.clone().normalize());
-    if (tangent.lengthSq() < 1e-10) {
-      tangent.copy(PERTURB_AXIS_DEFAULT).applyQuaternion(quat);
-    } else {
-      tangent.normalize();
-    }
-    rotate.arrow.setDirection(tangent);
+    rotate.arrow.setDirection(radialDir);
     const arrowLenBase = Math.max(
       0.12 * radius,
       Math.min(radius * 0.4, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.1)) * radius * 0.3),
@@ -947,16 +946,16 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
       : null;
     const forceMag = forceVec ? forceVec.length() : distance;
     const thicknessScale = Math.log(1 + forceMag / Math.max(1e-6, sceneRadius * 0.15));
-    const shaftRadius = Math.max(
-      0.004 * sceneRadius,
-      Math.min(0.05 * sceneRadius, thicknessScale * 0.015 * sceneRadius),
-    );
-    let headLength = Math.min(
-      Math.max(0.05 * sceneRadius, distance * 0.3),
-      Math.max(distance * 0.6, 0.12 * sceneRadius),
-    );
-    headLength = Math.min(headLength, Math.max(0.15 * distance, distance * 0.8));
-    const shaftLength = Math.max(1e-4, distance - headLength);
+      const shaftRadius = Math.max(
+        0.002 * sceneRadius,
+        Math.min(0.03 * sceneRadius, thicknessScale * 0.008 * sceneRadius),
+      );
+      let headLength = Math.min(
+        Math.max(0.03 * sceneRadius, distance * 0.2),
+        Math.max(distance * 0.45, 0.08 * sceneRadius),
+      );
+      headLength = Math.min(headLength, Math.max(0.12 * distance, distance * 0.6));
+      const shaftLength = Math.max(1e-4, distance - headLength);
     translate.node.visible = true;
     translate.material.color.setHex(PERTURB_COLOR_TRANSLATE);
     translate.node.position.copy(anchor);

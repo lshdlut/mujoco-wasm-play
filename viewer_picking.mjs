@@ -46,6 +46,9 @@ export function createPickingController({
   }
   const raycaster = new THREE_NS.Raycaster();
   const pointerNdc = new THREE_NS.Vector2();
+  const pointerRaycaster = new THREE_NS.Raycaster();
+  const pointerPlane = new THREE_NS.Plane();
+  const pointerHit = new THREE_NS.Vector3();
   const normalMatrix = new THREE_NS.Matrix3();
   const tempVecA = new THREE_NS.Vector3();
   const tempVecB = new THREE_NS.Vector3();
@@ -68,6 +71,8 @@ export function createPickingController({
     pointerTarget: new THREE_NS.Vector3(),
     bodyId: -1,
     scale: 1,
+    planeNormal: new THREE_NS.Vector3(),
+    planePoint: new THREE_NS.Vector3(),
   };
   let perturbRaf = null;
   const cleanup = [];
@@ -101,6 +106,8 @@ export function createPickingController({
       }
     });
     dragState.bodyId = -1;
+    dragState.planeNormal.set(0, 0, 0);
+    dragState.planePoint.set(0, 0, 0);
   }
 
   function showToast(message) {
@@ -258,6 +265,24 @@ export function createPickingController({
       return true;
     }
     return false;
+  }
+
+  function pointerToWorldTarget(clientX, clientY, referencePoint, overrideNormal = null) {
+    if (!renderCtx.camera || !canvas || !referencePoint) return null;
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(1, rect.width || canvas.width || 1);
+    const height = Math.max(1, rect.height || canvas.height || 1);
+    pointerNdc.x = ((clientX - rect.left) / width) * 2 - 1;
+    pointerNdc.y = -(((clientY - rect.top) / height) * 2 - 1);
+    pointerRaycaster.setFromCamera(pointerNdc, renderCtx.camera);
+    const normal = overrideNormal
+      ? tempVecA.copy(overrideNormal).normalize()
+      : tempVecA.copy(renderCtx.camera.getWorldDirection(new THREE_NS.Vector3())).normalize();
+    pointerPlane.setFromNormalAndCoplanarPoint(normal, referencePoint);
+    if (!pointerRaycaster.ray.intersectPlane(pointerPlane, pointerHit)) {
+      return null;
+    }
+    return pointerHit.clone();
   }
 
   function refreshBodyPose(bodyId) {
@@ -428,6 +453,27 @@ export function createPickingController({
     return true;
   }
 
+  function samplePointerFromScreen() {
+    if (!dragState.active || typeof dragState.lastClientX !== 'number') return false;
+    const planePoint = dragState.planePoint.lengthSq() > 0
+      ? dragState.planePoint
+      : dragState.anchorPoint;
+    const planeNormal = dragState.planeNormal.lengthSq() > 0
+      ? dragState.planeNormal
+      : (renderCtx.camera?.getWorldDirection(new THREE_NS.Vector3()).normalize() || globalUp.clone());
+    const target = pointerToWorldTarget(
+      dragState.lastClientX,
+      dragState.lastClientY,
+      planePoint,
+      planeNormal,
+    );
+    if (target) {
+      dragState.pointerTarget.copy(target);
+      return true;
+    }
+    return false;
+  }
+
   function computeTorque(dx, dy) {
     const camera = renderCtx.camera;
     if (!camera) return null;
@@ -525,6 +571,7 @@ const ROTATION_GAIN = 30;
       applyRotation(tempBodyRot, dragState.anchorLocal, dragState.anchorPoint);
       dragState.anchorPoint.add(tempBodyPos);
       dragState.scale = computePerturbScale(dragState.anchorPoint);
+      samplePointerFromScreen();
       const target = dragState.pointerTarget;
       const displacement = tempVecB.copy(target).sub(dragState.anchorPoint);
       const baseVec = displacement.clone();
@@ -580,6 +627,7 @@ const ROTATION_GAIN = 30;
     const anchor = dragState.anchorPoint;
     if (!resolveSelectionWorldPoint(selection, anchor)) return;
     dragState.scale = computePerturbScale(anchor);
+    samplePointerFromScreen();
     const target = dragState.pointerTarget;
     if (!target) return;
     const displacement = tempVecB.copy(target).sub(anchor);
@@ -646,7 +694,12 @@ const ROTATION_GAIN = 30;
       resolveSelectionWorldPoint(currentSelection(), dragState.anchorPoint);
     }
     dragState.scale = computePerturbScale(dragState.anchorPoint);
-    dragState.pointerTarget.copy(dragState.anchorPoint);
+    const cameraForward = renderCtx.camera?.getWorldDirection(new THREE_NS.Vector3()).normalize() || globalUp.clone();
+    dragState.planeNormal.copy(cameraForward);
+    dragState.planePoint.copy(dragState.anchorPoint);
+    if (!samplePointerFromScreen()) {
+      dragState.pointerTarget.copy(dragState.anchorPoint);
+    }
     backend.clearForces?.();
     if (typeof dragState.pointerId === 'number' && canvas.setPointerCapture) {
       try {
@@ -663,6 +716,8 @@ const ROTATION_GAIN = 30;
     dragState.payload = null;
     stopPerturbLoop();
     dragState.pointerTarget.copy(dragState.anchorPoint);
+    dragState.planeNormal.set(0, 0, 0);
+    dragState.planePoint.set(0, 0, 0);
     if (typeof dragState.pointerId === 'number' && canvas.releasePointerCapture) {
       try {
         canvas.releasePointerCapture(dragState.pointerId);
@@ -720,14 +775,21 @@ const ROTATION_GAIN = 30;
     }
     event.preventDefault();
     event.stopImmediatePropagation();
-    const deltaX = event.clientX - dragState.lastClientX;
-    const deltaY = event.clientY - dragState.lastClientY;
     dragState.shiftKey = !!event.shiftKey;
+    const prevX = dragState.lastX;
+    const prevY = dragState.lastY;
     dragState.lastX = event.clientX;
     dragState.lastY = event.clientY;
     dragState.lastClientX = event.clientX;
     dragState.lastClientY = event.clientY;
-    applyPointerDelta(deltaX, deltaY);
+    if (renderCtx.camera) {
+      dragState.planeNormal.copy(renderCtx.camera.getWorldDirection(new THREE_NS.Vector3()).normalize());
+    }
+    if (!samplePointerFromScreen()) {
+      const deltaX = Number.isFinite(prevX) ? event.clientX - prevX : 0;
+      const deltaY = Number.isFinite(prevY) ? event.clientY - prevY : 0;
+      applyPointerDelta(deltaX, deltaY);
+    }
     applyPerturb();
   }
 
