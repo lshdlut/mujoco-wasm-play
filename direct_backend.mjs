@@ -14,6 +14,10 @@ const TICK_INTERVAL_MS = 8;   // matches physics.worker.mjs stepping cadence
 const SNAP_INTERVAL_MS = 16;  // ~60 Hz snapshot stream
 const GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'skin'];
 const MJ_GROUP_COUNT = 6;
+const HISTORY_DEFAULT_CAPTURE_HZ = 30;
+const HISTORY_DEFAULT_CAPACITY = 900;
+const KEYFRAME_CAPACITY = 16;
+const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata'];
 
 function createGroupState(initial = 1) {
   const state = {};
@@ -127,6 +131,11 @@ class DirectBackend {
     this.statisticState = null;
     this.cameraList = [];
     this.geomList = [];
+    this.historyConfig = { captureHz: HISTORY_DEFAULT_CAPTURE_HZ, capacity: HISTORY_DEFAULT_CAPACITY };
+    this.history = null;
+    this.keyframes = null;
+    this.watch = null;
+    this.keySliderIndex = -1;
   }
 
   #computeBoundsFromPositions(view, n) {
@@ -206,6 +215,356 @@ class DirectBackend {
     } catch {
       return { center: [0, 0, 0], radius: 0 };
     }
+  }
+
+  #resetHistory(nq = 0, nv = 0) {
+    const capacity = Math.max(0, this.historyConfig.capacity | 0);
+    if (!(capacity > 0) || !(nq > 0)) {
+      this.history = {
+        enabled: false,
+        captureHz: this.historyConfig.captureHz,
+        capacity,
+        samples: [],
+        head: 0,
+        count: 0,
+        scrubIndex: 0,
+        scrubActive: false,
+        nq,
+        nv,
+      };
+      return;
+    }
+    const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
+    this.history = {
+      enabled: true,
+      captureHz,
+      capacity,
+      captureIntervalMs: 1000 / captureHz,
+      samples: Array.from({ length: capacity }, () => ({
+        qpos: new Float64Array(nq),
+        qvel: nv > 0 ? new Float64Array(nv) : null,
+        time: 0,
+        seq: 0,
+      })),
+      head: 0,
+      count: 0,
+      lastCaptureTs: 0,
+      scrubIndex: 0,
+      scrubActive: false,
+      resumeRun: true,
+      nq,
+      nv,
+    };
+  }
+
+  #serializeHistoryMeta() {
+    if (!this.history) {
+      return {
+        captureHz: this.historyConfig.captureHz || HISTORY_DEFAULT_CAPTURE_HZ,
+        capacity: this.historyConfig.capacity || HISTORY_DEFAULT_CAPACITY,
+        count: 0,
+        horizon: 0,
+        scrubIndex: 0,
+        live: true,
+      };
+    }
+    const captureHz = this.history.captureHz || HISTORY_DEFAULT_CAPTURE_HZ;
+    const horizon = captureHz > 0 ? this.history.count / captureHz : 0;
+    return {
+      captureHz,
+      capacity: this.history.capacity || this.historyConfig.capacity,
+      count: this.history.count || 0,
+      horizon,
+      scrubIndex: this.history.scrubIndex || 0,
+      live: this.history.scrubActive !== true,
+    };
+  }
+
+  #emitHistoryMeta() {
+    this.#emitMessage({ kind: 'history', ...this.#serializeHistoryMeta(), keyIndex: this.keySliderIndex });
+  }
+
+  #captureHistorySample(force = false) {
+    if (!this.history || !this.history.enabled || !this.sim) return;
+    if (!(this.history.samples?.length > 0)) return;
+    const now = performance.now();
+    if (!force && this.history.captureIntervalMs > 0) {
+      if ((now - this.history.lastCaptureTs) < this.history.captureIntervalMs) return;
+    }
+    this.history.lastCaptureTs = now;
+    const qposView = this.sim.qposView?.();
+    if (!qposView) return;
+    const slot = this.history.samples[this.history.head];
+    if (!slot) return;
+    if (slot.qpos.length !== qposView.length) {
+      slot.qpos = new Float64Array(qposView.length);
+    }
+    slot.qpos.set(qposView);
+    const qvelView = this.sim.qvelView?.();
+    if (slot.qvel && qvelView && slot.qvel.length === qvelView.length) {
+      slot.qvel.set(qvelView);
+    }
+    slot.time = this.sim.time?.() || 0;
+    slot.seq = this.frameSeq;
+    this.history.head = (this.history.head + 1) % this.history.capacity;
+    this.history.count = Math.min(this.history.count + 1, this.history.capacity);
+  }
+
+  #releaseHistoryScrub() {
+    if (!this.history) return;
+    this.history.scrubIndex = 0;
+    if (this.history.scrubActive) {
+      this.history.scrubActive = false;
+      this.running = this.history.resumeRun;
+    }
+  }
+
+  #loadHistoryOffset(offset) {
+    if (!this.history || !(this.history.count > 0) || !this.sim) {
+      this.#releaseHistoryScrub();
+      return false;
+    }
+    if (!(Number.isFinite(offset)) || offset >= 0) {
+      this.#releaseHistoryScrub();
+      return true;
+    }
+    const steps = Math.min(this.history.count, Math.abs(offset));
+    if (!(steps > 0)) {
+      this.#releaseHistoryScrub();
+      return false;
+    }
+    const idx = (this.history.head - steps + this.history.capacity) % this.history.capacity;
+    const slot = this.history.samples[idx];
+    if (!slot) return false;
+    const qposView = this.sim.qposView?.();
+    if (qposView && slot.qpos.length === qposView.length) {
+      qposView.set(slot.qpos);
+    }
+    const qvelView = this.sim.qvelView?.();
+    if (qvelView) {
+      if (slot.qvel && slot.qvel.length === qvelView.length) {
+        qvelView.set(slot.qvel);
+      } else {
+        for (let i = 0; i < qvelView.length; i += 1) qvelView[i] = 0;
+      }
+    }
+    try { this.sim.forward?.(); } catch {}
+    this.history.scrubIndex = -steps;
+    if (!this.history.scrubActive) {
+      this.history.scrubActive = true;
+      this.history.resumeRun = this.running;
+    }
+    this.running = false;
+    return true;
+  }
+
+  #applyHistoryConfig(partial = {}) {
+    const next = { ...this.historyConfig };
+    if (partial.captureHz !== undefined) {
+      const hz = Number(partial.captureHz);
+      if (Number.isFinite(hz) && hz > 0) {
+        next.captureHz = Math.max(5, Math.min(240, Math.round(hz)));
+      }
+    }
+    if (partial.capacity !== undefined) {
+      const cap = Number(partial.capacity);
+      if (Number.isFinite(cap) && cap > 0) {
+        next.capacity = Math.max(32, Math.min(3600, Math.round(cap)));
+      }
+    }
+    this.historyConfig = next;
+    this.#resetHistory(this.sim?.nq?.() | 0, this.sim?.nv?.() | 0);
+    this.#emitHistoryMeta();
+  }
+
+  #resetKeyframes(nq = 0, nv = 0) {
+    this.keyframes = {
+      capacity: KEYFRAME_CAPACITY,
+      entries: [],
+      nq,
+      nv,
+      lastSaved: -1,
+      lastLoaded: -1,
+    };
+  }
+
+  #serializeKeyframes() {
+    if (!this.keyframes) {
+      return { capacity: KEYFRAME_CAPACITY, count: 0, labels: [], lastSaved: -1, lastLoaded: -1 };
+    }
+    return {
+      capacity: this.keyframes.capacity,
+      count: this.keyframes.entries.length,
+      labels: this.keyframes.entries.map((entry, idx) => entry.label || `Key ${idx + 1}`),
+      lastSaved: this.keyframes.lastSaved ?? -1,
+      lastLoaded: this.keyframes.lastLoaded ?? -1,
+    };
+  }
+
+  #emitKeyframeMeta() {
+    this.#emitMessage({ kind: 'keyframes', ...this.#serializeKeyframes(), keyIndex: this.keySliderIndex });
+  }
+
+  #ensureKeyframeSlot(index) {
+    if (!this.keyframes) return null;
+    const target = Math.max(0, Math.min(index, this.keyframes.entries.length));
+    if (target === this.keyframes.entries.length) {
+      this.keyframes.entries.push({
+        qpos: new Float64Array(this.keyframes.nq),
+        qvel: this.keyframes.nv > 0 ? new Float64Array(this.keyframes.nv) : null,
+        time: 0,
+        label: '',
+        seq: 0,
+      });
+    }
+    return this.keyframes.entries[target];
+  }
+
+  #saveKeyframe(requestedIndex) {
+    if (!this.keyframes || !this.sim) return -1;
+    const qposView = this.sim.qposView?.();
+    if (!qposView) return -1;
+    let target = Number.isFinite(requestedIndex) && requestedIndex >= 0
+      ? requestedIndex
+      : this.keyframes.entries.length;
+    if (target > this.keyframes.entries.length) {
+      target = this.keyframes.entries.length;
+    }
+    if (this.keyframes.entries.length >= this.keyframes.capacity && target >= this.keyframes.capacity) {
+      this.keyframes.entries.shift();
+      target = this.keyframes.entries.length;
+    }
+    if (this.keyframes.entries.length >= this.keyframes.capacity) {
+      target = this.keyframes.capacity - 1;
+    }
+    const slot = this.#ensureKeyframeSlot(target);
+    if (!slot) return -1;
+    if (slot.qpos.length !== qposView.length) {
+      slot.qpos = new Float64Array(qposView.length);
+    }
+    slot.qpos.set(qposView);
+    const qvelView = this.sim.qvelView?.();
+    if (slot.qvel && qvelView && slot.qvel.length === qvelView.length) {
+      slot.qvel.set(qvelView);
+    }
+    slot.time = this.sim.time?.() || 0;
+    slot.seq = this.frameSeq;
+    slot.label = slot.label || `Key ${target + 1}`;
+    this.keyframes.lastSaved = target;
+    this.#emitKeyframeMeta();
+    return target;
+  }
+
+  #loadKeyframe(index) {
+    if (!this.keyframes || !this.sim) return false;
+    const entries = this.keyframes.entries || [];
+    if (!(index >= 0 && index < entries.length)) return false;
+    const slot = entries[index];
+    const qposView = this.sim.qposView?.();
+    if (!qposView || slot.qpos.length !== qposView.length) return false;
+    qposView.set(slot.qpos);
+    const qvelView = this.sim.qvelView?.();
+    if (qvelView) {
+      if (slot.qvel && slot.qvel.length === qvelView.length) {
+        qvelView.set(slot.qvel);
+      } else {
+        for (let i = 0; i < qvelView.length; i += 1) qvelView[i] = 0;
+      }
+    }
+    try { this.sim.forward?.(); } catch {}
+    this.keyframes.lastLoaded = index;
+    this.running = false;
+    this.#releaseHistoryScrub();
+    this.#emitKeyframeMeta();
+    return true;
+  }
+
+  #resetWatch() {
+    this.watch = {
+      field: 'qpos',
+      index: 0,
+      value: null,
+      min: null,
+      max: null,
+      samples: 0,
+      status: 'idle',
+      valid: false,
+    };
+  }
+
+  #normaliseWatchField(field) {
+    const token = String(field || '').trim().toLowerCase();
+    return WATCH_FIELDS.includes(token) ? token : 'qpos';
+  }
+
+  #updateWatchTarget(field, index, emit = false) {
+    if (!this.watch) this.#resetWatch();
+    if (field) {
+      this.watch.field = this.#normaliseWatchField(field);
+    }
+    if (Number.isFinite(index)) {
+      this.watch.index = Math.max(0, index | 0);
+    }
+    this.watch.value = null;
+    this.watch.min = null;
+    this.watch.max = null;
+    this.watch.samples = 0;
+    this.watch.status = 'pending';
+    this.watch.valid = false;
+    if (emit) this.#emitWatchState();
+  }
+
+  #readWatchView(field) {
+    const token = this.#normaliseWatchField(field);
+    switch (token) {
+      case 'qvel':
+        return this.sim?.qvelView?.();
+      case 'ctrl':
+        return this.sim?.ctrlView?.();
+      case 'sensordata':
+        return this.sim?.sensordataView?.();
+      default:
+        return this.sim?.qposView?.();
+    }
+  }
+
+  #sampleWatch() {
+    if (!this.watch || !this.sim) return null;
+    const view = this.#readWatchView(this.watch.field);
+    const idx = this.watch.index | 0;
+    if (view && idx >= 0 && idx < view.length) {
+      const val = Number(view[idx]) || 0;
+      this.watch.value = val;
+      this.watch.min = this.watch.min == null ? val : Math.min(this.watch.min, val);
+      this.watch.max = this.watch.max == null ? val : Math.max(this.watch.max, val);
+      this.watch.samples += 1;
+      this.watch.status = 'ok';
+      this.watch.valid = true;
+    } else {
+      this.watch.value = null;
+      this.watch.status = 'invalid';
+      this.watch.valid = false;
+    }
+    return {
+      field: this.watch.field,
+      index: this.watch.index,
+      value: this.watch.value,
+      min: this.watch.min,
+      max: this.watch.max,
+      samples: this.watch.samples,
+      status: this.watch.status,
+      valid: !!this.watch.valid,
+      summary:
+        this.watch.valid && typeof this.watch.value === 'number'
+          ? `${this.watch.field}[${this.watch.index}] = ${this.watch.value}`
+          : 'n/a',
+    };
+  }
+
+  #emitWatchState() {
+    const payload = this.#sampleWatch();
+    if (!payload) return;
+    this.#emitMessage({ kind: 'watch', ...payload });
   }
 
   #collectCameraMeta() {
@@ -386,6 +745,11 @@ class DirectBackend {
         if (this.sim) {
           const ok = this.sim.reset?.();
           if (ok) {
+            this.#resetHistory(this.sim.nq?.() | 0, this.sim.nv?.() | 0);
+            this.#resetWatch();
+            this.#captureHistorySample(true);
+            this.#emitHistoryMeta();
+            this.#emitWatchState();
             this.#snapshot();
             this.#emitRenderAssets();
           }
@@ -487,6 +851,38 @@ class DirectBackend {
         }
         break;
       }
+      case 'historyScrub': {
+        const offset = Number(msg.offset) || 0;
+        if (offset < 0) {
+          this.#loadHistoryOffset(offset);
+        } else {
+          this.#releaseHistoryScrub();
+        }
+        this.#emitHistoryMeta();
+        break;
+      }
+      case 'historyConfig': {
+        this.#applyHistoryConfig({ captureHz: msg.captureHz, capacity: msg.capacity });
+        break;
+      }
+      case 'keyframeSave': {
+        const used = this.#saveKeyframe(Number(msg.index));
+        if (used >= 0) {
+          this.keySliderIndex = used;
+        }
+        break;
+      }
+      case 'keyframeLoad': {
+        const idx = Math.max(0, Number(msg.index) | 0);
+        if (this.#loadKeyframe(idx)) {
+          this.keySliderIndex = idx;
+        }
+        break;
+      }
+      case 'setWatch': {
+        this.#updateWatchTarget(msg.field, msg.index, true);
+        break;
+      }
       case 'setField': {
         if (msg.target === 'mjOption') {
           try {
@@ -558,6 +954,12 @@ class DirectBackend {
       }
       case 'setPaused': {
         this.running = !msg.paused;
+        if (!this.running && this.history) {
+          this.history.resumeRun = false;
+        } else if (this.running && this.history?.scrubActive) {
+          this.#releaseHistoryScrub();
+          this.#emitHistoryMeta();
+        }
         break;
       }
       case 'applyForce': {
@@ -656,6 +1058,14 @@ class DirectBackend {
     this.lastSimNow = performance.now();
     this.visualState = this.#captureStructState('mjVisual');
     this.statisticState = this.#captureStructState('mjStatistic');
+    this.#resetHistory(this.sim.nq?.() | 0, this.sim.nv?.() | 0);
+    this.#resetKeyframes(this.sim.nq?.() | 0, this.sim.nv?.() | 0);
+    this.#resetWatch();
+    this.keySliderIndex = -1;
+    this.#captureHistorySample(true);
+    this.#emitHistoryMeta();
+    this.#emitKeyframeMeta();
+    this.#emitWatchState();
 
     const abi = this.#readAbi();
     this.#emitLog('direct: forge module ready', {
@@ -815,6 +1225,7 @@ class DirectBackend {
     if (!this.mod || !this.sim || !(this.handle > 0)) return;
     try {
       const ngeom = this.sim.ngeom?.() | 0;
+      this.#captureHistorySample();
       if (!(ngeom > 0)) {
         this.lastBounds = { center: [0, 0, 0], radius: 0 };
       }
@@ -984,7 +1395,17 @@ class DirectBackend {
         cameraMode: this.cameraMode | 0,
         frameId,
         optionSupport: this.optionSupport,
+        paused: !this.running,
+        pausedSource: this.history?.scrubActive ? 'history' : 'backend',
+        rate: this.rate,
       };
+      msg.history = this.#serializeHistoryMeta();
+      msg.keyframes = this.#serializeKeyframes();
+      const watchPayload = this.#sampleWatch();
+      if (watchPayload) msg.watch = watchPayload;
+      if (Number.isFinite(this.keySliderIndex)) {
+        msg.keyIndex = this.keySliderIndex | 0;
+      }
       const optionsStruct = this.optionSupport.supported ? readOptionStruct(this.mod, this.handle | 0) : null;
     if (optionsStruct) {
       msg.options = optionsStruct;

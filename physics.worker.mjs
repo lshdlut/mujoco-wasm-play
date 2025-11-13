@@ -81,6 +81,17 @@ const snapshotLogEnabled = snapshotDebug && verboseWorkerLogs;
 
 const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
 
+const HISTORY_DEFAULT_CAPTURE_HZ = 30;
+const HISTORY_DEFAULT_CAPACITY = 900;
+const KEYFRAME_CAPACITY = 16;
+const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata'];
+
+let historyConfig = { captureHz: HISTORY_DEFAULT_CAPTURE_HZ, capacity: HISTORY_DEFAULT_CAPACITY };
+let historyState = null;
+let keyframeState = null;
+let watchState = null;
+let keySliderIndex = -1;
+
 function readStructState(scope) {
   if (!mod || !(h > 0)) return null;
   try {
@@ -222,6 +233,364 @@ function emitGeomMeta() {
       postMessage({ kind: 'log', message: 'worker: geom meta failed', extra: String(err) });
     }
   }
+}
+
+function normaliseInt(value, fallback = 0) {
+  const num = Number(value);
+  return Number.isFinite(num) ? (num | 0) : fallback;
+}
+
+function clamp(value, lo, hi) {
+  return Math.max(lo, Math.min(hi, value));
+}
+
+function initHistoryBuffers(nq = 0, nv = 0) {
+  const capacity = Math.max(0, historyConfig.capacity | 0);
+  if (!(capacity > 0) || !(nq > 0)) {
+    historyState = {
+      enabled: false,
+      captureHz: historyConfig.captureHz,
+      capacity,
+      count: 0,
+      scrubIndex: 0,
+      scrubActive: false,
+      samples: [],
+      nq,
+      nv,
+    };
+    return;
+  }
+  const captureHz = Math.max(1, Number(historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
+  historyState = {
+    enabled: true,
+    captureHz,
+    capacity,
+    captureIntervalMs: 1000 / captureHz,
+    samples: Array.from({ length: capacity }, () => ({
+      qpos: new Float64Array(nq),
+      qvel: nv > 0 ? new Float64Array(nv) : null,
+      time: 0,
+      seq: 0,
+    })),
+    head: 0,
+    count: 0,
+    lastCaptureTs: 0,
+    scrubIndex: 0,
+    scrubActive: false,
+    resumeRun: true,
+    nq,
+    nv,
+  };
+}
+
+function serializeHistoryMeta() {
+  if (!historyState) {
+    return {
+      captureHz: historyConfig.captureHz || HISTORY_DEFAULT_CAPTURE_HZ,
+      capacity: historyConfig.capacity || HISTORY_DEFAULT_CAPACITY,
+      count: 0,
+      horizon: 0,
+      scrubIndex: 0,
+      live: true,
+    };
+  }
+  const captureHz = historyState.captureHz || HISTORY_DEFAULT_CAPTURE_HZ;
+  const horizon = captureHz > 0 ? historyState.count / captureHz : 0;
+  return {
+    captureHz,
+    capacity: historyState.capacity || historyConfig.capacity,
+    count: historyState.count || 0,
+    horizon,
+    scrubIndex: historyState.scrubIndex || 0,
+    live: historyState.scrubActive !== true,
+  };
+}
+
+function emitHistoryMeta() {
+  try {
+    postMessage({ kind: 'history', ...serializeHistoryMeta() });
+  } catch {}
+}
+
+function captureHistorySample(force = false) {
+  if (!historyState || !historyState.enabled || !sim) return;
+  if (!(historyState.samples?.length > 0)) return;
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  if (!force && historyState.captureIntervalMs > 0) {
+    if ((now - historyState.lastCaptureTs) < historyState.captureIntervalMs) return;
+  }
+  historyState.lastCaptureTs = now;
+  const qposView = sim.qposView?.();
+  if (!qposView || !qposView.length) return;
+  const slot = historyState.samples[historyState.head];
+  if (!slot) return;
+  slot.qpos.set(qposView);
+  if (slot.qvel) {
+    const qvelView = sim.qvelView?.();
+    if (qvelView && qvelView.length === slot.qvel.length) {
+      slot.qvel.set(qvelView);
+    }
+  }
+  slot.time = sim.time?.() || 0;
+  slot.seq = snapshotState.frame;
+  historyState.head = (historyState.head + 1) % historyState.capacity;
+  historyState.count = Math.min(historyState.count + 1, historyState.capacity);
+}
+
+function releaseHistoryScrub() {
+  if (!historyState) return;
+  historyState.scrubIndex = 0;
+  if (historyState.scrubActive) {
+    historyState.scrubActive = false;
+    running = historyState.resumeRun;
+  }
+}
+
+function loadHistoryOffset(offset) {
+  if (!historyState || !(historyState.count > 0) || !sim) {
+    releaseHistoryScrub();
+    return false;
+  }
+  if (!(Number.isFinite(offset)) || offset >= 0) {
+    releaseHistoryScrub();
+    return true;
+  }
+  const steps = Math.min(historyState.count, Math.abs(offset));
+  if (!(steps > 0)) {
+    releaseHistoryScrub();
+    return false;
+  }
+  const idx = (historyState.head - steps + historyState.capacity) % historyState.capacity;
+  const slot = historyState.samples[idx];
+  if (!slot) return false;
+  const qposView = sim.qposView?.();
+  if (qposView) {
+    qposView.set(slot.qpos);
+  }
+  const qvelView = sim.qvelView?.();
+  if (qvelView) {
+    if (slot.qvel && slot.qvel.length === qvelView.length) {
+      qvelView.set(slot.qvel);
+    } else {
+      for (let i = 0; i < qvelView.length; i += 1) qvelView[i] = 0;
+    }
+  }
+  try { sim.forward?.(); } catch {}
+  historyState.scrubIndex = -steps;
+  if (!historyState.scrubActive) {
+    historyState.scrubActive = true;
+    historyState.resumeRun = running;
+  }
+  running = false;
+  return true;
+}
+
+function applyHistoryConfig(partial = {}) {
+  const next = { ...historyConfig };
+  if (partial.captureHz !== undefined) {
+    const hz = Number(partial.captureHz);
+    if (Number.isFinite(hz) && hz > 0) {
+      next.captureHz = clamp(Math.round(hz), 5, 240);
+    }
+  }
+  if (partial.capacity !== undefined) {
+    const cap = Number(partial.capacity);
+    if (Number.isFinite(cap) && cap > 0) {
+      next.capacity = clamp(Math.round(cap), 32, 3600);
+    }
+  }
+  historyConfig = next;
+  initHistoryBuffers(sim?.nq?.() | 0, sim?.nv?.() | 0);
+  emitHistoryMeta();
+}
+
+function resetKeyframes(nq = 0, nv = 0) {
+  keyframeState = {
+    capacity: KEYFRAME_CAPACITY,
+    entries: [],
+    nq,
+    nv,
+    lastSaved: -1,
+    lastLoaded: -1,
+  };
+}
+
+function serializeKeyframeMeta() {
+  if (!keyframeState) {
+    return { capacity: KEYFRAME_CAPACITY, count: 0, labels: [], lastSaved: -1, lastLoaded: -1 };
+  }
+  return {
+    capacity: keyframeState.capacity,
+    count: keyframeState.entries.length,
+    labels: keyframeState.entries.map((entry, idx) => entry.label || `Key ${idx + 1}`),
+    lastSaved: keyframeState.lastSaved ?? -1,
+    lastLoaded: keyframeState.lastLoaded ?? -1,
+  };
+}
+
+function emitKeyframeMeta() {
+  try {
+    postMessage({ kind: 'keyframes', ...serializeKeyframeMeta(), keyIndex: keySliderIndex });
+  } catch {}
+}
+
+function ensureKeyframeSlot(index) {
+  if (!keyframeState) return null;
+  const target = clamp(index, 0, keyframeState.entries.length);
+  if (target === keyframeState.entries.length) {
+    keyframeState.entries.push({
+      qpos: new Float64Array(keyframeState.nq),
+      qvel: keyframeState.nv > 0 ? new Float64Array(keyframeState.nv) : null,
+      time: 0,
+      label: '',
+      seq: 0,
+    });
+  }
+  return keyframeState.entries[target];
+}
+
+function saveKeyframe(requestedIndex) {
+  if (!keyframeState || !(keyframeState.nq > 0) || !sim) return -1;
+  const qposView = sim.qposView?.();
+  if (!qposView) return -1;
+  let target = Number.isFinite(requestedIndex) && requestedIndex >= 0 ? requestedIndex : keyframeState.entries.length;
+  if (target > keyframeState.entries.length) {
+    target = keyframeState.entries.length;
+  }
+  if (keyframeState.entries.length >= keyframeState.capacity && target >= keyframeState.capacity) {
+    keyframeState.entries.shift();
+    target = keyframeState.entries.length;
+  }
+  if (keyframeState.entries.length >= keyframeState.capacity) {
+    // overwrite the last slot when at capacity
+    target = keyframeState.capacity - 1;
+  }
+  const slot = ensureKeyframeSlot(target);
+  if (!slot) return -1;
+  if (slot.qpos.length !== qposView.length) {
+    slot.qpos = new Float64Array(qposView.length);
+  }
+  slot.qpos.set(qposView);
+  const qvelView = sim.qvelView?.();
+  if (slot.qvel && qvelView && slot.qvel.length === qvelView.length) {
+    slot.qvel.set(qvelView);
+  }
+  slot.time = sim.time?.() || 0;
+  slot.seq = snapshotState.frame;
+  slot.label = slot.label || `Key ${target + 1}`;
+  keyframeState.lastSaved = target;
+  emitKeyframeMeta();
+  return target;
+}
+
+function loadKeyframe(index) {
+  if (!keyframeState || !sim) return false;
+  const entries = keyframeState.entries || [];
+  if (!(index >= 0 && index < entries.length)) return false;
+  const slot = entries[index];
+  const qposView = sim.qposView?.();
+  if (!qposView) return false;
+  if (slot.qpos.length !== qposView.length) return false;
+  qposView.set(slot.qpos);
+  const qvelView = sim.qvelView?.();
+  if (qvelView) {
+    if (slot.qvel && slot.qvel.length === qvelView.length) {
+      qvelView.set(slot.qvel);
+    } else {
+      for (let i = 0; i < qvelView.length; i += 1) qvelView[i] = 0;
+    }
+  }
+  try { sim.forward?.(); } catch {}
+  keyframeState.lastLoaded = index;
+  emitKeyframeMeta();
+  releaseHistoryScrub();
+  running = false;
+  return true;
+}
+
+function resetWatchState() {
+  watchState = {
+    field: 'qpos',
+    index: 0,
+    value: null,
+    min: null,
+    max: null,
+    samples: 0,
+    status: 'idle',
+    valid: false,
+  };
+}
+
+function normaliseWatchField(field) {
+  const token = String(field || '').trim().toLowerCase();
+  return WATCH_FIELDS.includes(token) ? token : 'qpos';
+}
+
+function updateWatchTarget(field, index) {
+  if (!watchState) resetWatchState();
+  watchState.field = normaliseWatchField(field || watchState?.field);
+  watchState.index = Math.max(0, normaliseInt(index, 0));
+  watchState.value = null;
+  watchState.min = null;
+  watchState.max = null;
+  watchState.samples = 0;
+  watchState.status = 'pending';
+  watchState.valid = false;
+}
+
+function readWatchView(field) {
+  const token = normaliseWatchField(field);
+  switch (token) {
+    case 'qvel':
+      return sim?.qvelView?.();
+    case 'ctrl':
+      return sim?.ctrlView?.();
+    case 'sensordata':
+      return sim?.sensordataView?.();
+    default:
+      return sim?.qposView?.();
+  }
+}
+
+function sampleWatch() {
+  if (!watchState || !sim) return null;
+  const view = readWatchView(watchState.field);
+  const idx = watchState.index | 0;
+  if (view && idx >= 0 && idx < view.length) {
+    const val = Number(view[idx]) || 0;
+    watchState.value = val;
+    watchState.min = watchState.min == null ? val : Math.min(watchState.min, val);
+    watchState.max = watchState.max == null ? val : Math.max(watchState.max, val);
+    watchState.samples += 1;
+    watchState.status = 'ok';
+    watchState.valid = true;
+  } else {
+    watchState.value = null;
+    watchState.status = 'invalid';
+    watchState.valid = false;
+  }
+  return {
+    field: watchState.field,
+    index: watchState.index,
+    value: watchState.value,
+    min: watchState.min,
+    max: watchState.max,
+    samples: watchState.samples,
+    status: watchState.status,
+    valid: !!watchState.valid,
+    summary:
+      watchState.valid && typeof watchState.value === 'number'
+        ? `${watchState.field}[${watchState.index}] = ${watchState.value}`
+        : 'n/a',
+  };
+}
+
+function emitWatchState() {
+  const payload = sampleWatch();
+  if (!payload) return;
+  try {
+    postMessage({ kind: 'watch', ...payload });
+  } catch {}
 }
 
 function wasmUrl(rel) { return new URL(rel, import.meta.url).href; }
@@ -579,6 +948,7 @@ async function loadXmlWithFallback(xmlText) {
 
 function snapshot() {
   if (!sim || !(sim.h > 0)) return;
+  captureHistorySample();
   const n = sim.ngeom?.() | 0;
   const nbodyLocal = sim.nbody?.() | 0;
   const xposView = sim.geomXposView?.();
@@ -670,12 +1040,24 @@ function snapshot() {
     cameraMode,
     frameId,
     optionSupport: (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] },
+    paused: !running,
+    pausedSource: historyState?.scrubActive ? 'history' : 'backend',
+    rate,
   };
   const transfers = [xpos.buffer, xmat.buffer];
   const optSup = (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] };
   const optionsStruct = optSup.supported ? readOptionStruct(mod, h) : null;
   if (optionsStruct) {
     msg.options = optionsStruct;
+  }
+  msg.history = serializeHistoryMeta();
+  msg.keyframes = serializeKeyframeMeta();
+  const watchPayload = sampleWatch();
+  if (watchPayload) {
+    msg.watch = watchPayload;
+  }
+  if (Number.isFinite(keySliderIndex)) {
+    msg.keyIndex = keySliderIndex | 0;
   }
   if (gsizeView) {
     if (snapshotLogEnabled) console.log('[worker] gsize view len', gsizeView.length);
@@ -957,6 +1339,14 @@ onmessage = async (ev) => {
       ngeom = sim?.ngeom?.() | 0;
       nu = sim?.nu?.() | 0;
       pendingCtrl.clear();
+      initHistoryBuffers(sim?.nq?.() | 0, sim?.nv?.() | 0);
+      resetKeyframes(sim?.nq?.() | 0, sim?.nv?.() | 0);
+      resetWatchState();
+      keySliderIndex = -1;
+      captureHistorySample(true);
+      emitHistoryMeta();
+      emitKeyframeMeta();
+      emitWatchState();
       running = true;
       rate = typeof msg.rate === 'number' ? msg.rate : 1.0;
       gestureState = { mode: 'idle', phase: 'idle', pointer: null };
@@ -1024,6 +1414,11 @@ onmessage = async (ev) => {
         frameMode = 0;
         cameraMode = 0;
         groupState = createGroupState();
+        initHistoryBuffers(sim?.nq?.() | 0, sim?.nv?.() | 0);
+        resetWatchState();
+        captureHistorySample(true);
+        emitHistoryMeta();
+        emitWatchState();
         snapshot();
         emitRenderAssets();
       }
@@ -1102,6 +1497,30 @@ onmessage = async (ev) => {
         groupState[type][idx] = enabled ? 1 : 0;
         emitOptionState();
       }
+    } else if (msg.cmd === 'historyScrub') {
+      const offset = Number(msg.offset) || 0;
+      if (offset < 0) {
+        loadHistoryOffset(offset);
+      } else {
+        releaseHistoryScrub();
+      }
+      emitHistoryMeta();
+    } else if (msg.cmd === 'historyConfig') {
+      applyHistoryConfig({ captureHz: msg.captureHz, capacity: msg.capacity });
+    } else if (msg.cmd === 'keyframeSave') {
+      const used = saveKeyframe(Number(msg.index));
+      if (used >= 0) {
+        keySliderIndex = used;
+      }
+    } else if (msg.cmd === 'keyframeLoad') {
+      const idx = Math.max(0, normaliseInt(msg.index, 0));
+      if (loadKeyframe(idx)) {
+        keySliderIndex = idx;
+      }
+    } else if (msg.cmd === 'setWatch') {
+      const field = typeof msg.field === 'string' ? msg.field : watchState?.field;
+      updateWatchTarget(field, msg.index);
+      emitWatchState();
     } else if (msg.cmd === 'setField') {
       const target = msg.target;
       if (target === 'mjOption') {
@@ -1186,6 +1605,12 @@ onmessage = async (ev) => {
       rate = Math.max(0.0625, Math.min(16, +msg.rate || 1));
     } else if (msg.cmd === 'setPaused') {
       running = !msg.paused;
+      if (!running) {
+        historyState && (historyState.resumeRun = false);
+      } else if (historyState?.scrubActive) {
+        releaseHistoryScrub();
+        emitHistoryMeta();
+      }
     } else if (msg.cmd === 'snapshot') {
       if (sim && h) snapshot();
     }

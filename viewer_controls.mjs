@@ -94,14 +94,30 @@ function clamp01(x) {
   return x;
 }
 
-function parseRange(control) {
-  const { range, min, max, step } = control || {};
-  const out = {
-    min: 0,
-    max: 1,
-    step: control?.type === 'slider_int' ? 1 : 0.01,
-    scale: 'lin',
+  const dynamicRangeResolvers = {
+    'simulation.history_scrubber': () => {
+      const hist = store.get()?.history;
+      const count = Math.max(1, hist?.count ?? hist?.capacity ?? 1);
+      return { min: 1 - count, max: 0, step: 1 };
+    },
+    'simulation.key_slider': () => {
+      const keyframes = store.get()?.keyframes;
+      const capacity = Math.max(1, keyframes?.capacity ?? 16);
+      return { min: 0, max: Math.max(0, capacity - 1), step: 1 };
+    },
   };
+
+  function parseRange(control) {
+    const { range, min, max, step } = control || {};
+    const isSlider = typeof control?.type === 'string' && control.type.startsWith('slider');
+    const defaultMin = isSlider ? 0 : Number.NEGATIVE_INFINITY;
+    const defaultMax = isSlider ? 1 : Number.POSITIVE_INFINITY;
+    const out = {
+      min: defaultMin,
+      max: defaultMax,
+      step: control?.type === 'slider_int' ? 1 : 0.01,
+      scale: 'lin',
+    };
   if (Array.isArray(range) && range.length >= 2) {
     const [rmin, rmax, rstep] = range;
     if (Number.isFinite(Number(rmin))) out.min = Number(rmin);
@@ -869,7 +885,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
   }
 
   function renderSlider(container, control) {
-    const range = parseRange(control);
+    const baseRange = parseRange(control);
     const { row, label, field } = createLabeledRow(control);
     const inputId = `${sanitiseName(control.item_id)}__slider`;
     label.setAttribute('for', inputId);
@@ -888,9 +904,43 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     field.append(input, valueLabel);
     container.append(row);
 
+    let resolvedRange = { ...baseRange };
+    const resolveRange = () => {
+      const range = { ...baseRange };
+      const resolver = dynamicRangeResolvers[control.item_id];
+      if (typeof resolver === 'function') {
+        try {
+          const dyn = resolver();
+          if (dyn && Number.isFinite(dyn.min) && Number.isFinite(dyn.max)) {
+            if (dyn.min === dyn.max) {
+              dyn.max = dyn.min + 1;
+            }
+            Object.assign(range, dyn);
+          }
+        } catch {}
+      }
+      if (!(range.max > range.min)) {
+        range.max = range.min + 1;
+      }
+      if (!(range.step > 0)) {
+        range.step = input.type === 'range' ? 0.001 : 1;
+      }
+      resolvedRange = range;
+      input.min = String(range.min);
+      input.max = String(range.max);
+      input.step = String(range.step);
+      return resolvedRange;
+    };
+
+    resolveRange();
+
     const binding = createBinding(control, {
-      getValue: () => denormaliseFromRange(Number(input.value), range),
+      getValue: () => {
+        resolveRange();
+        return denormaliseFromRange(Number(input.value), resolvedRange);
+      },
       applyValue: (value) => {
+        const range = resolveRange();
         const numeric = Number(value ?? range.min);
         const limited = Number.isFinite(numeric) ? Math.min(range.max, Math.max(range.min, numeric)) : range.min;
         const t = normaliseToRange(limited, range);
@@ -907,13 +957,14 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     input.addEventListener(
       'input',
       guardBinding(binding, async () => {
+        const range = resolveRange();
         const t = Number(input.value);
         const realValue = denormaliseFromRange(t, range);
         valueLabel.textContent = formatNumber(realValue);
         await applySpecAction(store, backend, control, realValue);
       }),
     );
-    valueLabel.textContent = formatNumber(denormaliseFromRange(Number(input.value), range));
+    valueLabel.textContent = formatNumber(denormaliseFromRange(Number(input.value), resolvedRange));
   }
 
   function renderEditInput(container, control, mode = 'text') {
@@ -1096,6 +1147,30 @@ function registerShortcutHandlers(shortcutSpec, handler) {
   }
 
   function renderStatic(container, control) {
+    if (control?.binding) {
+      const { row, label, field } = createLabeledRow(control);
+      const valueEl = document.createElement('span');
+      valueEl.className = 'static-value';
+      valueEl.textContent = '—';
+      field.append(valueEl);
+      container.append(row);
+      const binding = createBinding(control, {
+        getValue: () => valueEl.textContent,
+        applyValue: (value) => {
+          if (value === undefined || value === null || value === '') {
+            valueEl.textContent = '—';
+            valueEl.classList.add('is-muted');
+            return;
+          }
+          valueEl.classList.remove('is-muted');
+          valueEl.textContent = String(value);
+        },
+      });
+      if (control.default !== undefined) {
+        binding.setValue(control.default);
+      }
+      return;
+    }
     const row = createControlRow(control, { full: true });
     row.classList.add('control-static');
     row.textContent = control.label ?? control.name ?? '';

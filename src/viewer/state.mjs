@@ -7,6 +7,41 @@ import { prepareBindingUpdate, splitBinding } from './bindings.mjs';
 const MJ_GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'skin'];
 const MJ_GROUP_COUNT = 6;
 
+function createDefaultHistoryState() {
+  return {
+    captureHz: 0,
+    capacity: 0,
+    count: 0,
+    horizon: 0,
+    scrubIndex: 0,
+    live: true,
+  };
+}
+
+function createDefaultWatchState() {
+  return {
+    field: 'qpos',
+    index: 0,
+    value: null,
+    min: null,
+    max: null,
+    samples: 0,
+    status: 'idle',
+    summary: '',
+    valid: false,
+  };
+}
+
+function createDefaultKeyframeState() {
+  return {
+    capacity: 0,
+    count: 0,
+    labels: [],
+    lastSaved: -1,
+    lastLoaded: -1,
+  };
+}
+
 function createViewerGroupState(initial = true) {
   const state = {};
   for (const type of MJ_GROUP_TYPES) {
@@ -140,6 +175,9 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   toast: null,
   // Optional scene snapshot (mjvScene-like) carried by backend
   scene: null,
+  history: createDefaultHistoryState(),
+  watch: createDefaultWatchState(),
+  keyframes: createDefaultKeyframeState(),
 });
 
 const CAMERA_BASE_LABELS = ['Free', 'Tracking'];
@@ -420,6 +458,64 @@ function mergeBackendSnapshot(draft, snapshot) {
         : current.qvelPreview ?? [],
     };
   }
+  if (snapshot.history) {
+    const history = ensureHistoryState(draft);
+    history.captureHz = Number(snapshot.history.captureHz) || 0;
+    history.capacity = Math.max(0, Number(snapshot.history.capacity) || 0);
+    history.count = Math.max(0, Number(snapshot.history.count) || 0);
+    history.horizon = Number(snapshot.history.horizon) || 0;
+    history.scrubIndex = Number(snapshot.history.scrubIndex) || 0;
+    history.live = snapshot.history.live !== false;
+    draft.simulation.scrubIndex = history.scrubIndex | 0;
+  }
+  if (snapshot.keyframes) {
+    const keyframes = ensureKeyframeState(draft);
+    if (typeof snapshot.keyframes.capacity === 'number') {
+      keyframes.capacity = Math.max(0, snapshot.keyframes.capacity | 0);
+    }
+    if (typeof snapshot.keyframes.count === 'number') {
+      keyframes.count = Math.max(0, snapshot.keyframes.count | 0);
+    }
+    if (Array.isArray(snapshot.keyframes.labels)) {
+      keyframes.labels = snapshot.keyframes.labels.slice();
+    }
+    if (typeof snapshot.keyframes.lastSaved === 'number') {
+      keyframes.lastSaved = snapshot.keyframes.lastSaved | 0;
+    }
+    if (typeof snapshot.keyframes.lastLoaded === 'number') {
+      keyframes.lastLoaded = snapshot.keyframes.lastLoaded | 0;
+    }
+  }
+  if (typeof snapshot.keyIndex === 'number' && Number.isFinite(snapshot.keyIndex)) {
+    draft.simulation.keyIndex = snapshot.keyIndex | 0;
+  }
+  if (snapshot.watch) {
+    const watch = ensureWatchState(draft);
+    if (typeof snapshot.watch.field === 'string') {
+      watch.field = snapshot.watch.field;
+    }
+    if (typeof snapshot.watch.index === 'number' && Number.isFinite(snapshot.watch.index)) {
+      watch.index = snapshot.watch.index | 0;
+    }
+    if ('value' in snapshot.watch) {
+      const raw = Number(snapshot.watch.value);
+      watch.value = Number.isFinite(raw) ? raw : null;
+    }
+    const minVal = Number(snapshot.watch.min);
+    const maxVal = Number(snapshot.watch.max);
+    watch.min = Number.isFinite(minVal) ? minVal : null;
+    watch.max = Number.isFinite(maxVal) ? maxVal : null;
+    watch.samples = Math.max(0, Number(snapshot.watch.samples) || 0);
+    watch.valid = !!snapshot.watch.valid;
+    watch.status = snapshot.watch.status || (watch.valid ? 'ok' : 'invalid');
+    if (watch.valid && typeof watch.value === 'number') {
+      watch.summary = `${watch.field}[${watch.index}] = ${watch.value.toPrecision(6)}`;
+    } else if (typeof snapshot.watch.message === 'string') {
+      watch.summary = snapshot.watch.message;
+    } else {
+      watch.summary = '—';
+    }
+  }
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const idx = snapshot.cameraMode | 0;
     draft.runtime.cameraIndex = idx;
@@ -558,6 +654,27 @@ function ensureRenderingState(target) {
   }
   return target.rendering;
 }
+
+function ensureHistoryState(target) {
+  if (!target.history) {
+    target.history = createDefaultHistoryState();
+  }
+  return target.history;
+}
+
+function ensureWatchState(target) {
+  if (!target.watch) {
+    target.watch = createDefaultWatchState();
+  }
+  return target.watch;
+}
+
+function ensureKeyframeState(target) {
+  if (!target.keyframes) {
+    target.keyframes = createDefaultKeyframeState();
+  }
+  return target.keyframes;
+}
 function applyBinding(draft, binding, value, control) {
   switch (binding) {
     case 'Simulate::help':
@@ -605,10 +722,27 @@ function applyBinding(draft, binding, value, control) {
     }
     case 'Simulate::scrub_index':
       draft.simulation.scrubIndex = Math.trunc(toNumber(value));
+      {
+        const history = ensureHistoryState(draft);
+        history.scrubIndex = draft.simulation.scrubIndex;
+        history.live = history.scrubIndex === 0;
+      }
       return true;
     case 'Simulate::key':
       draft.simulation.keyIndex = Math.trunc(toNumber(value));
       return true;
+    case 'Simulate::field': {
+      const watch = ensureWatchState(draft);
+      watch.field = typeof value === 'string' ? value.trim() : String(value ?? '');
+      watch.status = 'pending';
+      return true;
+    }
+    case 'Simulate::index': {
+      const watch = ensureWatchState(draft);
+      watch.index = Math.max(0, Math.trunc(toNumber(value)));
+      watch.status = 'pending';
+      return true;
+    }
     default:
       break;
   }
@@ -686,6 +820,14 @@ function applyControl(draft, control, value) {
     draft.toast = { message: `State copied (${precision})`, ts: Date.now() };
     return true;
   }
+  if (control.item_id === 'simulation.save_key') {
+    draft.toast = { message: 'Saved keyframe', ts: Date.now() };
+    return true;
+  }
+  if (control.item_id === 'simulation.load_key') {
+    draft.toast = { message: 'Loaded keyframe', ts: Date.now() };
+    return true;
+  }
   if (control.item_id === 'file.screenshot') {
     draft.toast = { message: 'Screenshot captured', ts: Date.now() };
     return true;
@@ -760,6 +902,17 @@ function readBindingValue(state, binding, control) {
       return state.simulation.scrubIndex | 0;
     case 'Simulate::key':
       return state.simulation.keyIndex | 0;
+    case 'Simulate::field':
+      return state.watch?.field ?? 'qpos';
+    case 'Simulate::index':
+      return Number.isFinite(state.watch?.index) ? state.watch.index | 0 : 0;
+    case 'UpdateWatch': {
+      if (state.watch?.summary) return state.watch.summary;
+      if (typeof state.watch?.value === 'number' && Number.isFinite(state.watch.value)) {
+        return state.watch.value.toFixed(6);
+      }
+      return '—';
+    }
     default:
       break;
   }
@@ -1083,6 +1236,38 @@ function resolveSnapshot(state) {
     groups: state.groups ? normaliseGroupState(state.groups) : null,
     nbody: Number.isFinite(state.nbody) ? (state.nbody | 0) : null,
     njnt: Number.isFinite(state.njnt) ? (state.njnt | 0) : null,
+    history: state.history
+      ? {
+          captureHz: Number(state.history.captureHz) || 0,
+          capacity: Number(state.history.capacity) || 0,
+          count: Number(state.history.count) || 0,
+          horizon: Number(state.history.horizon) || 0,
+          scrubIndex: Number(state.history.scrubIndex) || 0,
+          live: state.history.live !== false,
+        }
+      : null,
+    keyframes: state.keyframes
+      ? {
+          capacity: Number(state.keyframes.capacity) || 0,
+          count: Number(state.keyframes.count) || 0,
+          labels: Array.isArray(state.keyframes.labels) ? state.keyframes.labels.slice() : [],
+          lastSaved: Number.isFinite(state.keyframes.lastSaved) ? (state.keyframes.lastSaved | 0) : -1,
+          lastLoaded: Number.isFinite(state.keyframes.lastLoaded) ? (state.keyframes.lastLoaded | 0) : -1,
+        }
+      : null,
+    watch: state.watch
+      ? {
+          field: state.watch.field || 'qpos',
+          index: Number.isFinite(state.watch.index) ? (state.watch.index | 0) : 0,
+          value: typeof state.watch.value === 'number' && Number.isFinite(state.watch.value) ? state.watch.value : null,
+          min: typeof state.watch.min === 'number' && Number.isFinite(state.watch.min) ? state.watch.min : null,
+          max: typeof state.watch.max === 'number' && Number.isFinite(state.watch.max) ? state.watch.max : null,
+          samples: Number(state.watch.samples) || 0,
+          summary: state.watch.summary || '',
+          status: state.watch.status || 'idle',
+          valid: !!state.watch.valid,
+        }
+      : null,
   };
 }
 
@@ -1102,6 +1287,10 @@ export async function createBackend(options = {}) {
   const modelKey = modelToken.toLowerCase();
   const modelFile = resolveModelFileName(modelToken);
   const listeners = new Set();
+  const normaliseInt = (value, fallback = 0) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? (num | 0) : fallback;
+  };
   let client = null;
   let kind = 'direct';
   let paused = false;
@@ -1142,6 +1331,10 @@ export async function createBackend(options = {}) {
     statistic: null,
     visualDefaults: null,
     cameras: [],
+    history: createDefaultHistoryState(),
+    keyframes: createDefaultKeyframeState(),
+    watch: createDefaultWatchState(),
+    keyIndex: -1,
   };
   let lastFrameId = -1;
   let messageHandler = null;
@@ -1324,6 +1517,10 @@ export async function createBackend(options = {}) {
     switch (data.kind) {
       case 'ready':
         lastFrameId = -1;
+        lastSnapshot.history = createDefaultHistoryState();
+        lastSnapshot.keyframes = createDefaultKeyframeState();
+        lastSnapshot.watch = createDefaultWatchState();
+        lastSnapshot.keyIndex = -1;
         if (typeof data.ngeom === 'number') lastSnapshot.ngeom = data.ngeom;
         if (typeof data.nq === 'number') lastSnapshot.nq = data.nq;
         if (typeof data.nv === 'number') lastSnapshot.nv = data.nv;
@@ -1471,6 +1668,57 @@ export async function createBackend(options = {}) {
         }
         if (data.optionSupport) {
           lastSnapshot.optionSupport = data.optionSupport;
+        }
+        if (data.history) {
+          lastSnapshot.history = lastSnapshot.history || createDefaultHistoryState();
+          lastSnapshot.history.captureHz = Number(data.history.captureHz) || 0;
+          lastSnapshot.history.capacity = Number(data.history.capacity) || 0;
+          lastSnapshot.history.count = Number(data.history.count) || 0;
+          lastSnapshot.history.horizon = Number(data.history.horizon) || 0;
+          lastSnapshot.history.scrubIndex = Number(data.history.scrubIndex) || 0;
+          lastSnapshot.history.live = data.history.live !== false;
+        }
+        if (data.keyframes) {
+          lastSnapshot.keyframes = lastSnapshot.keyframes || createDefaultKeyframeState();
+          if (typeof data.keyframes.capacity === 'number') {
+            lastSnapshot.keyframes.capacity = data.keyframes.capacity | 0;
+          }
+          if (typeof data.keyframes.count === 'number') {
+            lastSnapshot.keyframes.count = Math.max(0, data.keyframes.count | 0);
+          }
+          if (Array.isArray(data.keyframes.labels)) {
+            lastSnapshot.keyframes.labels = data.keyframes.labels.slice();
+          }
+          if (typeof data.keyframes.lastSaved === 'number') {
+            lastSnapshot.keyframes.lastSaved = data.keyframes.lastSaved | 0;
+          }
+          if (typeof data.keyframes.lastLoaded === 'number') {
+            lastSnapshot.keyframes.lastLoaded = data.keyframes.lastLoaded | 0;
+          }
+        }
+        if (data.watch) {
+          lastSnapshot.watch = lastSnapshot.watch || createDefaultWatchState();
+          if (typeof data.watch.field === 'string') {
+            lastSnapshot.watch.field = data.watch.field;
+          }
+          if (typeof data.watch.index === 'number') {
+            lastSnapshot.watch.index = data.watch.index | 0;
+          }
+          if ('value' in data.watch) {
+            const raw = Number(data.watch.value);
+            lastSnapshot.watch.value = Number.isFinite(raw) ? raw : null;
+          }
+          const minVal = Number(data.watch.min);
+          const maxVal = Number(data.watch.max);
+          lastSnapshot.watch.min = Number.isFinite(minVal) ? minVal : null;
+          lastSnapshot.watch.max = Number.isFinite(maxVal) ? maxVal : null;
+          lastSnapshot.watch.samples = Number(data.watch.samples) || 0;
+          lastSnapshot.watch.status = data.watch.status || lastSnapshot.watch.status || 'idle';
+          lastSnapshot.watch.summary = data.watch.summary || lastSnapshot.watch.summary || '';
+          lastSnapshot.watch.valid = !!data.watch.valid;
+        }
+        if (typeof data.keyIndex === 'number' && Number.isFinite(data.keyIndex)) {
+          lastSnapshot.keyIndex = data.keyIndex | 0;
         }
         if (data.gesture) {
           lastSnapshot.gesture = {
@@ -1687,6 +1935,72 @@ export async function createBackend(options = {}) {
       }
       try { client.postMessage?.({ cmd: 'setGroupState', group: type, index: idx, enabled: bool(value) }); } catch (err) {
         if (debug) console.warn('[backend group] post failed', err);
+      }
+      notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (id === 'simulation.history_scrubber') {
+      const offset = Math.min(0, normaliseInt(value, 0));
+      lastSnapshot.history = lastSnapshot.history || createDefaultHistoryState();
+      lastSnapshot.history.scrubIndex = offset;
+      lastSnapshot.history.live = offset === 0;
+      try { client.postMessage?.({ cmd: 'historyScrub', offset }); } catch (err) {
+        if (debug) console.warn('[backend history] post failed', err);
+      }
+      notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (id === 'simulation.key_slider') {
+      lastSnapshot.keyIndex = normaliseInt(value, -1);
+      notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (id === 'simulation.save_key') {
+      const index = normaliseInt(lastSnapshot.keyIndex ?? -1, -1);
+      try { client.postMessage?.({ cmd: 'keyframeSave', index }); } catch (err) {
+        if (debug) console.warn('[backend keyframe save] failed', err);
+      }
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (id === 'simulation.load_key') {
+      const index = Math.max(0, normaliseInt(lastSnapshot.keyIndex ?? 0, 0));
+      try { client.postMessage?.({ cmd: 'keyframeLoad', index }); } catch (err) {
+        if (debug) console.warn('[backend keyframe load] failed', err);
+      }
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (id === 'watch.field') {
+      const field = typeof value === 'string' ? value.trim() : '';
+      lastSnapshot.watch = lastSnapshot.watch || createDefaultWatchState();
+      if (field.length > 0) {
+        lastSnapshot.watch.field = field;
+      }
+      lastSnapshot.watch.status = 'pending';
+      try {
+        client.postMessage?.({
+          cmd: 'setWatch',
+          field: lastSnapshot.watch.field,
+          index: Number.isFinite(lastSnapshot.watch.index) ? (lastSnapshot.watch.index | 0) : 0,
+        });
+      } catch (err) {
+        if (debug) console.warn('[backend watch field] failed', err);
+      }
+      notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (id === 'watch.index') {
+      const target = Math.max(0, normaliseInt(value, 0));
+      lastSnapshot.watch = lastSnapshot.watch || createDefaultWatchState();
+      lastSnapshot.watch.index = target;
+      lastSnapshot.watch.status = 'pending';
+      try {
+        client.postMessage?.({
+          cmd: 'setWatch',
+          field: lastSnapshot.watch.field,
+          index: target,
+        });
+      } catch (err) {
+        if (debug) console.warn('[backend watch index] failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);

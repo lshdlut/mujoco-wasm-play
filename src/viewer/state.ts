@@ -58,6 +58,35 @@ export interface HudState {
   rateSource: string;
 }
 
+export interface HistoryState {
+  captureHz: number;
+  capacity: number;
+  count: number;
+  horizon: number;
+  scrubIndex: number;
+  live: boolean;
+}
+
+export interface WatchState {
+  field: string;
+  index: number;
+  value: number | null;
+  min: number | null;
+  max: number | null;
+  samples: number;
+  status: string;
+  valid: boolean;
+  summary: string;
+}
+
+export interface KeyframeState {
+  capacity: number;
+  count: number;
+  labels: string[];
+  lastSaved: number;
+  lastLoaded: number;
+}
+
 export interface ToastState {
   message: string;
   ts: number;
@@ -111,6 +140,9 @@ export interface ViewerState {
   rendering: RenderingState;
   hud: HudState;
   toast: ToastState | null;
+  history: HistoryState;
+  watch: WatchState;
+  keyframes: KeyframeState;
 }
 
 export interface UiControl {
@@ -164,6 +196,33 @@ export interface BackendSnapshot {
   cameraMode?: number;
   align?: AlignRuntimeState | null;
   copyState?: CopyRuntimeState | null;
+  history?: {
+    captureHz?: number;
+    capacity?: number;
+    count?: number;
+    horizon?: number;
+    scrubIndex?: number;
+    live?: boolean;
+  } | null;
+  keyframes?: {
+    capacity?: number;
+    count?: number;
+    labels?: string[];
+    lastSaved?: number;
+    lastLoaded?: number;
+  } | null;
+  watch?: {
+    field?: string;
+    index?: number;
+    value?: number | null;
+    min?: number | null;
+    max?: number | null;
+    samples?: number;
+    status?: string;
+    valid?: boolean;
+    summary?: string;
+  } | null;
+  keyIndex?: number;
 }
 
 export interface ViewerBackend {
