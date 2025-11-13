@@ -46,6 +46,43 @@ M5 — Picking & Perturbation
 - UI feedback: selection highlight, simple HUD messages.
 - Tests: click applies force (state changes), selection toggles.
 
+
+M5 development log (2025‑11‑13)
+- Selection/Highlight
+  - Implemented body mesh highlighting via cloned material (color + emissive boost) and a lightweight green overlay child mesh; base material transparency is unchanged to avoid a “glass” look.
+- Picking/Filter
+  - Exclude static/world geoms from perturb target set; a toast explains when ground is clicked.
+- Pointer→World mapping
+  - Use perspective fovy + depth to scale screen deltas; Shift enables depth axis; align vectors to camera basis consistent with simulate’s convert2D/alignToCamera.
+- Continuous perturbation
+  - While Ctrl+mouse is down, a RAF loop continues sampling (anchor, cursor) and applying forces; header state does not flicker.
+- Translation behavior
+  - World‑space spring: F ≈ K·(cursor−anchor), capped by scene radius; added stable damping (exponential decay + incremental accumulation) to reduce oscillation at high gains.
+  - Visual: thin line anchor→cursor + arrow head at cursor; thickness scales with scene radius.
+- Rotation behavior
+  - Ring around anchor with torque axis normal; symmetric double tangential arrows to show rotation direction; Lambert material keeps shading legible without metallic glare.
+- Snapshot/body data
+  - Backend streams body‑level bxpos/bxmat/xipos (COM) alongside geom data; lever arm computed from COM; selection overlay binds to mesh local transform.
+- World frame
+  - Raised world frame by 1 cm to avoid z‑fighting with ground.
+- Known nits
+  - Damping/gain constants are tunable; extreme models may still need per‑scene tweaks.
+
+M5 verification checklist
+1) Selection highlight: double‑click movable body → green tint + soft overlay; deselect restores material.
+2) Ctrl+Right (Translate): screen axes match; Shift adds depth; stopping cursor without release maintains steady force.
+3) Ctrl+Left (Rotate): two tangential arrows on ring; direction matches drag; torque scales with gain.
+4) Stability: with current gains, oscillations damp rather than amplify.
+5) World frame: Frame=World shows axes slightly above ground with no flicker.
+
+M6 �� History / Keyframe / Watch — plan details (prep)
+- Backend ring buffer: bounded states (qpos/qvel/xpos/xmat/time), scrub pointer, pause/resume.
+- Keyframes: save/load qpos subset + metadata; small list UI; copy to/from current state.
+- Watch: small panel for selected signals (qpos[i], qvel[i], body pose) with min/max/sparkline.
+- Messaging: extend snapshot with optional ring meta when capture is enabled; commands to set rate/horizon.
+- UI: scrubber with play/pause/step/live tail; keyboard shortcuts; auto‑capture toggle.
+- Perf: start 30–60 Hz snapshots; cap memory; reuse buffers; drop frames when busy.
+- Tests: scrub deterministic; key save/load round‑trip; watch reflects live.
 M6 — History / Keyframe / Watch
 - Backend ring buffer of states for scrub; implement key load/save and copy; implement watch value probe (qpos/qvel/… ).
 - Tests: scrub freezes time; key save/load changes state deterministically; watch updates live.
