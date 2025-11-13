@@ -495,8 +495,11 @@ export function createPickingController({
   }
 const TRANSLATION_GAIN = 750;
 const ROTATION_GAIN = 30;
-const FORCE_LERP_ALPHA = 0.025;
-const TORQUE_LERP_ALPHA = 0.03;
+// 简单稳定阻尼：指数衰减 + 渐进累加
+const FORCE_DECAY = 0.25;   // 每帧衰减 25%
+const FORCE_ACCUM = 0.08;   // 新目标力的累加系数
+const TORQUE_DECAY = 0.25;
+const TORQUE_ACCUM = 0.08;
   function setPerturbState(mode, active) {
     store.update((draft) => {
       if (!draft.runtime) draft.runtime = {};
@@ -586,11 +589,8 @@ const TORQUE_LERP_ALPHA = 0.03;
         const forceVec = baseVec.clone().multiplyScalar(TRANSLATION_GAIN);
         const maxForce = TRANSLATION_GAIN * boundsRadius * 1.2;
         if (forceVec.length() > maxForce) forceVec.setLength(maxForce);
-        if (dragState.lastForceVec.lengthSq() > 0) {
-          dragState.lastForceVec.lerp(forceVec, FORCE_LERP_ALPHA);
-        } else {
-          dragState.lastForceVec.copy(forceVec);
-        }
+        dragState.lastForceVec.multiplyScalar(1 - FORCE_DECAY);
+        dragState.lastForceVec.addScaledVector(forceVec, FORCE_ACCUM);
         forceVec.copy(dragState.lastForceVec);
         const lever = tempVecE.copy(dragState.anchorPoint).sub(tempBodyCom);
         const torqueFromForce = lever.clone().cross(forceVec);
@@ -611,11 +611,8 @@ const TORQUE_LERP_ALPHA = 0.03;
         }
         const maxTorque = ROTATION_GAIN * boundsRadius * 1.5;
         if (torqueVec.length() > maxTorque) torqueVec.setLength(maxTorque);
-        if (dragState.lastTorqueVec.lengthSq() > 0) {
-          dragState.lastTorqueVec.lerp(torqueVec, TORQUE_LERP_ALPHA);
-        } else {
-          dragState.lastTorqueVec.copy(torqueVec);
-        }
+        dragState.lastTorqueVec.multiplyScalar(1 - TORQUE_DECAY);
+        dragState.lastTorqueVec.addScaledVector(torqueVec, TORQUE_ACCUM);
         torqueVec.copy(dragState.lastTorqueVec);
         payload = {
           bodyId: dragState.bodyId,
@@ -653,11 +650,8 @@ const TORQUE_LERP_ALPHA = 0.03;
       const forceVec = baseVec.multiplyScalar(TRANSLATION_GAIN);
       const maxForce = TRANSLATION_GAIN * boundsRadius * 1.2;
       if (forceVec.length() > maxForce) forceVec.setLength(maxForce);
-      if (dragState.lastForceVec.lengthSq() > 0) {
-        dragState.lastForceVec.lerp(forceVec, FORCE_LERP_ALPHA);
-      } else {
-        dragState.lastForceVec.copy(forceVec);
-      }
+      dragState.lastForceVec.multiplyScalar(1 - FORCE_DECAY);
+      dragState.lastForceVec.addScaledVector(forceVec, FORCE_ACCUM);
       forceVec.copy(dragState.lastForceVec);
       payload = {
         geomIndex,
@@ -680,11 +674,8 @@ const TORQUE_LERP_ALPHA = 0.03;
       }
       const maxTorque = ROTATION_GAIN * boundsRadius * 1.5;
       if (torqueVec.length() > maxTorque) torqueVec.setLength(maxTorque);
-      if (dragState.lastTorqueVec.lengthSq() > 0) {
-        dragState.lastTorqueVec.lerp(torqueVec, TORQUE_LERP_ALPHA);
-      } else {
-        dragState.lastTorqueVec.copy(torqueVec);
-      }
+      dragState.lastTorqueVec.multiplyScalar(1 - TORQUE_DECAY);
+      dragState.lastTorqueVec.addScaledVector(torqueVec, TORQUE_ACCUM);
       torqueVec.copy(dragState.lastTorqueVec);
       payload = {
         geomIndex,

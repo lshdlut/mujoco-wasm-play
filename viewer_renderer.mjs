@@ -62,7 +62,7 @@ const CONTACT_FORCE_HEAD_GEOMETRY = new THREE.ConeGeometry(1, 1, 24, 1, false);
 const PERTURB_SHAFT_GEOMETRY = CONTACT_FORCE_SHAFT_GEOMETRY;
 const PERTURB_HEAD_GEOMETRY = CONTACT_FORCE_HEAD_GEOMETRY;
 const PERTURB_COLOR_TRANSLATE = 0x2b90d9;
-const PERTURB_COLOR_ROTATE = 0xff8a2b;
+const PERTURB_COLOR_ROTATE = 0xffd1a6;
 const PERTURB_AXIS_DEFAULT = new THREE.Vector3(0, 1, 0);
 const PERTURB_RING_NORMAL = new THREE.Vector3(0, 0, 1);
 const PERTURB_RADIAL_DEFAULT = new THREE.Vector3(1, 0, 0);
@@ -74,7 +74,29 @@ const PERTURB_TEMP_AXIS = new THREE.Vector3();
 const PERTURB_TEMP_RADIAL = new THREE.Vector3();
 const PERTURB_TEMP_TANGENT = new THREE.Vector3();
 const PERTURB_TEMP_QUAT = new THREE.Quaternion();
-const SELECTION_OVERLAY_COLOR = new THREE.Color(0x91ffcb);
+const SELECTION_HIGHLIGHT_COLOR = new THREE.Color(0x80ffc0);
+const SELECTION_EMISSIVE_COLOR = new THREE.Color(0x7bff7a);
+const SELECTION_OVERLAY_COLOR = new THREE.Color(0x9dffc8);
+
+function cloneHighlightMaterial(source) {
+  if (!source || typeof source.clone !== 'function') {
+    return source;
+  }
+  const cloned = source.clone();
+  if ('emissive' in cloned && cloned.emissive?.set) {
+    cloned.emissive = cloned.emissive.clone();
+    cloned.emissive.copy(SELECTION_EMISSIVE_COLOR);
+    cloned.emissiveIntensity = Math.max(1.4, cloned.emissiveIntensity ?? 1);
+  }
+  if ('color' in cloned && cloned.color?.lerp) {
+    cloned.color = cloned.color.clone();
+    cloned.color.lerp(SELECTION_HIGHLIGHT_COLOR, 0.65);
+  }
+  if ('metalness' in cloned) cloned.metalness = Math.max(0, Math.min(1, (cloned.metalness ?? 0) * 0.5));
+  if ('roughness' in cloned) cloned.roughness = Math.max(0, Math.min(1, (cloned.roughness ?? 0) * 0.7));
+  // 保持原始透明度与深度写入，避免“玻璃质感”
+  return cloned;
+}
 const LABEL_MODE_WARNINGS = new Set();
 const FRAME_MODE_WARNINGS = new Set();
 const LABEL_DPR_CAP = 2;
@@ -775,22 +797,13 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
   frameGroup.visible = used > 0;
 }
 
-function createPerturbArrowNode(colorHex, { transparent = true } = {}) {
-  const material = transparent
-    ? new THREE.MeshBasicMaterial({
-        color: colorHex,
-        transparent: true,
-        opacity: 0.9,
-        depthTest: true,
-        depthWrite: false,
-      })
-    : new THREE.MeshBasicMaterial({
-        color: colorHex,
-        transparent: true,
-        opacity: 0.9,
-        depthTest: true,
-        depthWrite: false,
-      });
+function createPerturbArrowNode(colorHex) {
+  const material = new THREE.MeshLambertMaterial({
+    color: colorHex,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+  });
   const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, material);
   const head = new THREE.Mesh(PERTURB_HEAD_GEOMETRY, material);
   const node = new THREE.Group();
@@ -859,8 +872,8 @@ function ensurePerturbHelpers(ctx) {
     ring.renderOrder = 61;
     ctx.perturbGroup.add(ring);
 
-    const arrowPrimary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { transparent: false });
-    const arrowSecondary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { transparent: false });
+    const arrowPrimary = createPerturbArrowNode(PERTURB_COLOR_ROTATE);
+    const arrowSecondary = createPerturbArrowNode(PERTURB_COLOR_ROTATE);
     ctx.perturbGroup.add(arrowPrimary.node);
     ctx.perturbGroup.add(arrowSecondary.node);
 
@@ -938,7 +951,7 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
       radialPlane.copy(PERTURB_RADIAL_DEFAULT).applyQuaternion(quat);
     }
     const radialDir = radialPlane.normalize();
-    const primaryRadial = radialDir.clone().applyAxisAngle(axis, Math.PI);
+    const primaryRadial = radialDir.clone();
     const oppositeRadial = primaryRadial.clone().multiplyScalar(-1);
     const tangentialBase = PERTURB_TEMP_TANGENT.copy(primaryRadial).cross(axis);
     if (tangentialBase.lengthSq() < 1e-8) {
@@ -956,7 +969,7 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
       0.0008 * sceneRadius,
       Math.min(0.01 * sceneRadius, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.3)) * 0.003 * sceneRadius),
     );
-    const tangents = [tangentialBase.clone(), tangentialBase.clone().multiplyScalar(-1)];
+    const tangents = [tangentialBase.clone().multiplyScalar(-1), tangentialBase.clone()];
     const radials = [primaryRadial, oppositeRadial];
     const arrows = rotate.arrows || [];
     radials.forEach((radialVec, idx) => {
@@ -2579,39 +2592,25 @@ export function createRendererManager({
 
 function clearSelectionHighlight(ctx) {
   const hl = ctx?.selectionHighlight;
-  if (!hl) return;
+  if (!hl?.mesh) return;
   try {
-    if (hl.glow && hl.glow.parent) {
-      hl.glow.parent.remove(hl.glow);
+    hl.mesh.material = hl.originalMaterial;
+    const dispose = (mat) => {
+      if (mat && typeof mat.dispose === 'function') {
+        try { mat.dispose(); } catch {}
+      }
+    };
+    if (Array.isArray(hl.highlightMaterial)) {
+      hl.highlightMaterial.forEach(dispose);
+    } else {
+      dispose(hl.highlightMaterial);
     }
-    if (hl.material && typeof hl.material.dispose === 'function') {
-      try { hl.material.dispose(); } catch {}
+    if (hl.overlay && hl.overlay.parent) {
+      hl.overlay.parent.remove(hl.overlay);
     }
+    dispose(hl.overlayMaterial);
   } catch {}
   ctx.selectionHighlight = null;
-}
-
-function createSelectionGlow(mesh) {
-  if (!mesh || !mesh.geometry?.boundingSphere) {
-    try { mesh?.geometry?.computeBoundingSphere?.(); } catch {}
-  }
-  const radius = mesh?.geometry?.boundingSphere?.radius || 1;
-  const scaleFactor = 1 + Math.min(0.08, Math.max(0.02, 0.02 / Math.max(radius, 0.1)));
-  const material = new THREE.MeshBasicMaterial({
-    color: SELECTION_OVERLAY_COLOR,
-    transparent: true,
-    opacity: 0.9,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    depthTest: false,
-    blending: THREE.AdditiveBlending,
-  });
-  const glow = new THREE.Mesh(mesh.geometry, material);
-  glow.renderOrder = (mesh.renderOrder || 0) + 0.5;
-  glow.frustumCulled = false;
-  glow.userData = { selectionGlow: true };
-  glow.scale.setScalar(scaleFactor);
-  return { glow, material };
 }
 
 function applySelectionHighlight(ctx, mesh) {
@@ -2620,20 +2619,38 @@ function applySelectionHighlight(ctx, mesh) {
     return;
   }
   if (ctx.selectionHighlight?.mesh === mesh) {
-    const hl = ctx.selectionHighlight;
-    if (hl.glow && hl.glow.geometry !== mesh.geometry) {
-      hl.glow.geometry = mesh.geometry;
+    const target = ctx.selectionHighlight.highlightMaterial;
+    if (mesh.material !== target) {
+      mesh.material = target;
     }
-    if (hl.glow && hl.glow.parent !== mesh) {
-      mesh.add(hl.glow);
-    }
-    hl.glow.visible = true;
     return;
   }
   clearSelectionHighlight(ctx);
-  const { glow, material } = createSelectionGlow(mesh);
-  mesh.add(glow);
-  ctx.selectionHighlight = { mesh, glow, material };
+  const originalMaterial = mesh.material;
+  const highlightMaterial = Array.isArray(originalMaterial)
+    ? originalMaterial.map((mat) => cloneHighlightMaterial(mat))
+    : cloneHighlightMaterial(originalMaterial);
+  const overlayMaterial = new THREE.MeshBasicMaterial({
+    color: SELECTION_OVERLAY_COLOR,
+    transparent: true,
+    opacity: 0.25,
+    depthWrite: false,
+  });
+  const overlay = new THREE.Mesh(mesh.geometry, overlayMaterial);
+  overlay.position.set(0, 0, 0);
+  overlay.quaternion.set(0, 0, 0, 1);
+  overlay.scale.set(1.02, 1.02, 1.02);
+  overlay.renderOrder = (mesh.renderOrder || 0) + 0.5;
+  overlay.userData = { selectionOverlay: true };
+  mesh.add(overlay);
+  mesh.material = highlightMaterial;
+  ctx.selectionHighlight = {
+    mesh,
+    originalMaterial,
+    highlightMaterial,
+    overlay,
+    overlayMaterial,
+  };
 }
 
 function updateSelectionOverlay(ctx, snapshot, state) {
