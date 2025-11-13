@@ -493,12 +493,12 @@ export function createPickingController({
     }
     return torque;
   }
-const TRANSLATION_GAIN = 750;
-const ROTATION_GAIN = 30;
+const TRANSLATION_GAIN = 3000;
+const ROTATION_GAIN = 150;
 // 简单稳定阻尼：指数衰减 + 渐进累加
-const FORCE_DECAY = 0.25;   // 每帧衰减 25%
+const FORCE_DECAY = 0.50;   // 每帧衰减 50%
 const FORCE_ACCUM = 0.08;   // 新目标力的累加系数
-const TORQUE_DECAY = 0.25;
+const TORQUE_DECAY = 0.38;
 const TORQUE_ACCUM = 0.08;
   function setPerturbState(mode, active) {
     store.update((draft) => {

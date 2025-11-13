@@ -74,9 +74,11 @@ const PERTURB_TEMP_AXIS = new THREE.Vector3();
 const PERTURB_TEMP_RADIAL = new THREE.Vector3();
 const PERTURB_TEMP_TANGENT = new THREE.Vector3();
 const PERTURB_TEMP_QUAT = new THREE.Quaternion();
-const SELECTION_HIGHLIGHT_COLOR = new THREE.Color(0x80ffc0);
-const SELECTION_EMISSIVE_COLOR = new THREE.Color(0x7bff7a);
-const SELECTION_OVERLAY_COLOR = new THREE.Color(0x9dffc8);
+const SELECTION_HIGHLIGHT_COLOR = new THREE.Color(0x40ff99);
+const SELECTION_EMISSIVE_COLOR = new THREE.Color(0x3aff3a);
+const SELECTION_OVERLAY_COLOR = new THREE.Color(0x66ffcc);
+const PERTURB_COLOR_RING = 0xff8a2b;   // original ring color
+const PERTURB_COLOR_ARROW = 0xffb366;  // previous arrow color (lighter)
 
 function cloneHighlightMaterial(source) {
   if (!source || typeof source.clone !== 'function') {
@@ -782,7 +784,8 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
     }
   } else if (mode === FRAME_MODES.WORLD) {
     const helper = addHelper();
-    helper.position.set(0, 0, 0);
+    // Lift world frame slightly above ground to avoid z-fighting
+    helper.position.set(0, 0, 0.01);
     helper.quaternion.set(0, 0, 0, 1);
     const axisScale = overlayScale(radius, 0.25, 0.5, 5);
     helper.scale.set(axisScale, axisScale, axisScale);
@@ -801,7 +804,7 @@ function createPerturbArrowNode(colorHex) {
   const material = new THREE.MeshLambertMaterial({
     color: colorHex,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.8,
     depthWrite: false,
   });
   const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, material);
@@ -860,7 +863,7 @@ function ensurePerturbHelpers(ctx) {
   if (!ctx.perturbRotate) {
     const ringGeom = new THREE.RingGeometry(0.9, 1, 48, 1);
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: PERTURB_COLOR_ROTATE,
+      color: PERTURB_COLOR_RING,
       transparent: true,
       opacity: 0.45,
       side: THREE.DoubleSide,
@@ -872,8 +875,8 @@ function ensurePerturbHelpers(ctx) {
     ring.renderOrder = 61;
     ctx.perturbGroup.add(ring);
 
-    const arrowPrimary = createPerturbArrowNode(PERTURB_COLOR_ROTATE);
-    const arrowSecondary = createPerturbArrowNode(PERTURB_COLOR_ROTATE);
+    const arrowPrimary = createPerturbArrowNode(PERTURB_COLOR_ARROW);
+    const arrowSecondary = createPerturbArrowNode(PERTURB_COLOR_ARROW);
     ctx.perturbGroup.add(arrowPrimary.node);
     ctx.perturbGroup.add(arrowSecondary.node);
 
@@ -978,7 +981,7 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
       const tangentDir = tangents[idx];
       const ringPoint = anchor.clone().add(radialVec.clone().multiplyScalar(radius));
       arrow.node.visible = true;
-      arrow.material.color.setHex(PERTURB_COLOR_ROTATE);
+      arrow.material.color.setHex(PERTURB_COLOR_ARROW);
       arrow.node.position.copy(ringPoint);
       arrow.node.quaternion.copy(PERTURB_TEMP_QUAT.setFromUnitVectors(PERTURB_AXIS_DEFAULT, tangentDir));
       arrow.shaft.scale.set(shaftRadius, shaftLen, shaftRadius);
@@ -2633,7 +2636,7 @@ function applySelectionHighlight(ctx, mesh) {
   const overlayMaterial = new THREE.MeshBasicMaterial({
     color: SELECTION_OVERLAY_COLOR,
     transparent: true,
-    opacity: 0.25,
+    opacity: 0.5,
     depthWrite: false,
   });
   const overlay = new THREE.Mesh(mesh.geometry, overlayMaterial);
