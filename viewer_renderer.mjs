@@ -784,10 +784,12 @@ function createPerturbArrowNode(colorHex, { transparent = true } = {}) {
         depthTest: true,
         depthWrite: false,
       })
-    : new THREE.MeshStandardMaterial({
+    : new THREE.MeshBasicMaterial({
         color: colorHex,
-        metalness: 0.2,
-        roughness: 0.45,
+        transparent: true,
+        opacity: 0.9,
+        depthTest: true,
+        depthWrite: false,
       });
   const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, material);
   const head = new THREE.Mesh(PERTURB_HEAD_GEOMETRY, material);
@@ -857,8 +859,8 @@ function ensurePerturbHelpers(ctx) {
     ring.renderOrder = 61;
     ctx.perturbGroup.add(ring);
 
-    const arrowPrimary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { transparent: true });
-    const arrowSecondary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { transparent: true });
+    const arrowPrimary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { transparent: false });
+    const arrowSecondary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { transparent: false });
     ctx.perturbGroup.add(arrowPrimary.node);
     ctx.perturbGroup.add(arrowSecondary.node);
 
@@ -2590,10 +2592,15 @@ function clearSelectionHighlight(ctx) {
 }
 
 function createSelectionGlow(mesh) {
+  if (!mesh || !mesh.geometry?.boundingSphere) {
+    try { mesh?.geometry?.computeBoundingSphere?.(); } catch {}
+  }
+  const radius = mesh?.geometry?.boundingSphere?.radius || 1;
+  const scaleFactor = 1 + Math.min(0.08, Math.max(0.02, 0.02 / Math.max(radius, 0.1)));
   const material = new THREE.MeshBasicMaterial({
     color: SELECTION_OVERLAY_COLOR,
     transparent: true,
-    opacity: 0.65,
+    opacity: 0.9,
     side: THREE.DoubleSide,
     depthWrite: false,
     depthTest: false,
@@ -2603,7 +2610,7 @@ function createSelectionGlow(mesh) {
   glow.renderOrder = (mesh.renderOrder || 0) + 0.5;
   glow.frustumCulled = false;
   glow.userData = { selectionGlow: true };
-  glow.scale.setScalar(1.04);
+  glow.scale.setScalar(scaleFactor);
   return { glow, material };
 }
 
