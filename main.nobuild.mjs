@@ -309,6 +309,7 @@ const pickingController = createPickingController({
   backend,
   renderCtx,
   debugMode,
+  getSnapshot: () => latestSnapshot,
 });
 pickingController.setup();
 

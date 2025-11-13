@@ -1149,6 +1149,15 @@ onmessage = async (ev) => {
           postMessage({ kind:'log', message:'worker: applyForce unsupported in current mode' });
         }
       } catch {}
+    } else if (msg.cmd === 'applyBodyForce') {
+      try {
+        const fx=+msg.force?.[0]||0, fy=+msg.force?.[1]||0, fz=+msg.force?.[2]||0;
+        const tx=+msg.torque?.[0]||0, ty=+msg.torque?.[1]||0, tz=+msg.torque?.[2]||0;
+        const body=msg.bodyId|0;
+        if (!sim?.applyXfrcByBody?.(body, [fx, fy, fz], [tx, ty, tz]) && snapshotDebug) {
+          postMessage({ kind:'log', message:'worker: applyBodyForce unsupported in current mode' });
+        }
+      } catch {}
     } else if (msg.cmd === 'align') {
       const info = captureBounds();
       if (info) lastBounds = info;

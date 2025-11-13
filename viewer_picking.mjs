@@ -39,6 +39,7 @@ export function createPickingController({
   renderCtx,
   debugMode = false,
   globalUp = new THREE_NS.Vector3(0, 0, 1),
+  getSnapshot = null,
 } = {}) {
   if (!canvas || !store || !backend || !renderCtx) {
     throw new Error('Picking controller requires canvas, store, backend, and renderCtx.');
@@ -50,6 +51,7 @@ export function createPickingController({
   const tempVecB = new THREE_NS.Vector3();
   const tempVecC = new THREE_NS.Vector3();
   const tempVecD = new THREE_NS.Vector3();
+  const tempVecE = new THREE_NS.Vector3();
   const selectionWorld = new THREE_NS.Vector3();
   const dragState = {
     active: false,
@@ -57,16 +59,23 @@ export function createPickingController({
     mode: 'idle',
     lastX: 0,
     lastY: 0,
+    lastClientX: 0,
+    lastClientY: 0,
     shiftKey: false,
     payload: null,
+    anchorLocal: new THREE_NS.Vector3(),
     anchorPoint: new THREE_NS.Vector3(),
     pointerTarget: new THREE_NS.Vector3(),
+    bodyId: -1,
+    scale: 1,
   };
   let perturbRaf = null;
   const cleanup = [];
-  const pointerRaycaster = new THREE_NS.Raycaster();
-  const pointerPlane = new THREE_NS.Plane();
-  const pointerHit = new THREE_NS.Vector3();
+  const tempBodyPos = new THREE_NS.Vector3();
+  const tempBodyCom = new THREE_NS.Vector3();
+  const tempBodyRot = new Float64Array(9);
+  const tempVecLocal = new THREE_NS.Vector3();
+  const tempVecWorld = new THREE_NS.Vector3();
 
   function hasSelection() {
     const sel = store.get()?.runtime?.selection;
@@ -91,6 +100,7 @@ export function createPickingController({
         draft.toast = { message: 'Selection cleared', ts: Date.now() };
       }
     });
+    dragState.bodyId = -1;
   }
 
   function showToast(message) {
@@ -122,6 +132,10 @@ export function createPickingController({
       draft.runtime.lastAction = 'select';
       draft.toast = { message: `Selected ${pick.geomName}`, ts };
     });
+    if (pick.bodyId >= 0) {
+      dragState.bodyId = pick.bodyId;
+      setAnchorLocalFromWorld(pick.bodyId, pick.worldPoint);
+    }
   }
 
   function getMeshList() {
@@ -246,38 +260,172 @@ export function createPickingController({
     return false;
   }
 
-  function computeWorldDrag(dx, dy) {
-    const camera = renderCtx.camera;
-    if (!camera) return null;
-    const boundsRadius = Math.max(0.25, renderCtx.bounds?.radius || 1);
-    const dragScale = boundsRadius * 0.02;
-    const forward = tempVecA;
-    camera.getWorldDirection(forward).normalize();
-    const up = tempVecB.copy(globalUp).normalize();
-    const right = tempVecC.copy(forward).cross(up).normalize();
-    const move = new THREE_NS.Vector3();
-    move.addScaledVector(right, dx * dragScale);
-    move.addScaledVector(up, -dy * dragScale);
-    if (dragState.shiftKey) {
-      move.addScaledVector(forward, -dy * dragScale * 1.1);
+  function refreshBodyPose(bodyId) {
+    if (typeof getSnapshot !== 'function') return false;
+    const snap = getSnapshot();
+    const bxpos = snap?.bxpos;
+    const bxmat = snap?.bxmat;
+    const xipos = snap?.xipos;
+    if (!snap || !bxpos || !bxmat) return false;
+    if (!(bodyId >= 0)) return false;
+    const posIdx = bodyId * 3;
+    tempBodyPos.set(
+      bxpos[posIdx + 0] ?? 0,
+      bxpos[posIdx + 1] ?? 0,
+      bxpos[posIdx + 2] ?? 0,
+    );
+    if (xipos) {
+      tempBodyCom.set(
+        xipos[posIdx + 0] ?? tempBodyPos.x,
+        xipos[posIdx + 1] ?? tempBodyPos.y,
+        xipos[posIdx + 2] ?? tempBodyPos.z,
+      );
+    } else {
+      tempBodyCom.copy(tempBodyPos);
     }
-    return move;
+    const rotIdx = bodyId * 9;
+    for (let i = 0; i < 9; i += 1) {
+      tempBodyRot[i] = bxmat[rotIdx + i] ?? 0;
+    }
+    return true;
   }
 
-  function pointerToWorldTarget(clientX, clientY, referencePoint) {
-    if (!renderCtx.camera || !canvas || !referencePoint) return null;
-    const rect = canvas.getBoundingClientRect();
-    const width = Math.max(1, rect.width);
-    const height = Math.max(1, rect.height);
-    pointerNdc.x = ((clientX - rect.left) / width) * 2 - 1;
-    pointerNdc.y = -(((clientY - rect.top) / height) * 2 - 1);
-    pointerRaycaster.setFromCamera(pointerNdc, renderCtx.camera);
-    const normal = tempVecA.copy(renderCtx.camera.getWorldDirection(new THREE_NS.Vector3())).normalize();
-    pointerPlane.setFromNormalAndCoplanarPoint(normal, referencePoint);
-    if (!pointerRaycaster.ray.intersectPlane(pointerPlane, pointerHit)) {
-      return null;
+  function computePerturbScale(referencePoint) {
+    if (!renderCtx.camera || !referencePoint) {
+      return 1;
     }
-    return pointerHit.clone();
+    const camera = renderCtx.camera;
+    const forward = tempVecA.copy(camera.getWorldDirection(new THREE_NS.Vector3()));
+    if (forward.lengthSq() === 0) {
+      forward.set(0, 0, 1);
+    } else {
+      forward.normalize();
+    }
+    const cameraPos = tempVecB.copy(camera.position);
+    const depth = Math.max(
+      1e-6,
+      tempVecC.copy(referencePoint).sub(cameraPos).dot(forward),
+    );
+    let frustumHeight = 2;
+    if (camera.isPerspectiveCamera) {
+      const fovRad = THREE_NS.MathUtils.degToRad(camera.fov || 45);
+      frustumHeight = 2 * Math.tan(fovRad / 2);
+    } else if (camera.isOrthographicCamera) {
+      frustumHeight = Math.max(1e-6, (camera.top ?? 1) - (camera.bottom ?? -1));
+    }
+    let scale = frustumHeight * depth;
+    if (camera.isOrthographicCamera) {
+      scale *= 0.15;
+    }
+    if (!Number.isFinite(scale) || scale <= 0) {
+      scale = 1;
+    }
+    return scale;
+  }
+
+  function resolvePerturbAction(mode, shiftKey) {
+    if (mode === 'translate') {
+      return shiftKey ? 'MOVE_H' : 'MOVE_V';
+    }
+    if (mode === 'rotate') {
+      return shiftKey ? 'ROTATE_H' : 'ROTATE_V';
+    }
+    return null;
+  }
+
+  function buildMouseVector(action, reldx, reldy, outVec) {
+    switch (action) {
+      case 'MOVE_V':
+        outVec.set(reldx, 0, -reldy);
+        return outVec;
+      case 'MOVE_H':
+        outVec.set(reldx, -reldy, 0);
+        return outVec;
+      case 'ROTATE_V':
+        outVec.set(reldy, 0, reldx);
+        return outVec;
+      case 'ROTATE_H':
+        outVec.set(reldy, reldx, 0);
+        return outVec;
+      default:
+        return null;
+    }
+  }
+
+  function alignVectorToCamera(vec, outVec) {
+    if (!renderCtx.camera) return null;
+    const camera = renderCtx.camera;
+    const forward = tempVecB.copy(camera.getWorldDirection(new THREE_NS.Vector3()));
+    if (forward.lengthSq() === 0) {
+      forward.set(0, 0, 1);
+    } else {
+      forward.normalize();
+    }
+    const forwardXY = tempVecC.set(forward.x, forward.y, 0);
+    const planarLen = forwardXY.length();
+    if (planarLen < 1e-9) {
+      forwardXY.set(0, 1, 0);
+    } else {
+      forwardXY.multiplyScalar(1 / planarLen);
+    }
+    const yAxis = tempVecE.copy(forwardXY);
+    const xAxis = tempVecD.set(yAxis.y, -yAxis.x, 0);
+    outVec.set(0, 0, vec.z);
+    outVec.addScaledVector(xAxis, vec.x);
+    outVec.addScaledVector(yAxis, vec.y);
+    return outVec;
+  }
+
+  function applyPointerDelta(deltaX, deltaY) {
+    if (!dragState.active || !canvas) return;
+    const rect = typeof canvas.getBoundingClientRect === 'function'
+      ? canvas.getBoundingClientRect()
+      : { width: 1, height: 1 };
+    const height = Math.max(1, rect.height || 1);
+    const reldx = deltaX / height;
+    const reldy = deltaY / height;
+    if (!Number.isFinite(reldx) || !Number.isFinite(reldy)) return;
+    const action = resolvePerturbAction(dragState.mode, dragState.shiftKey);
+    if (!action) return;
+    const mouseVec = buildMouseVector(action, reldx, reldy, tempVecLocal);
+    if (!mouseVec) return;
+    const worldVec = alignVectorToCamera(mouseVec, tempVecWorld);
+    if (!worldVec) return;
+    const scale = dragState.scale || computePerturbScale(dragState.anchorPoint);
+    dragState.pointerTarget.addScaledVector(worldVec, scale);
+  }
+
+  function applyRotation(mat, vec, out) {
+    out.set(
+      mat[0] * vec.x + mat[1] * vec.y + mat[2] * vec.z,
+      mat[3] * vec.x + mat[4] * vec.y + mat[5] * vec.z,
+      mat[6] * vec.x + mat[7] * vec.y + mat[8] * vec.z,
+    );
+    return out;
+  }
+
+  function applyRotationTranspose(mat, vec, out) {
+    out.set(
+      mat[0] * vec.x + mat[3] * vec.y + mat[6] * vec.z,
+      mat[1] * vec.x + mat[4] * vec.y + mat[7] * vec.z,
+      mat[2] * vec.x + mat[5] * vec.y + mat[8] * vec.z,
+    );
+    return out;
+  }
+
+  function setAnchorLocalFromWorld(bodyId, worldPoint) {
+    if (!refreshBodyPose(bodyId)) return false;
+    tempVecLocal.copy(worldPoint).sub(tempBodyPos);
+    applyRotationTranspose(tempBodyRot, tempVecLocal, dragState.anchorLocal);
+    dragState.bodyId = bodyId;
+    return true;
+  }
+
+  function updateAnchorWorldFromLocal(outVec) {
+    if (!refreshBodyPose(dragState.bodyId)) return false;
+    applyRotation(tempBodyRot, dragState.anchorLocal, outVec);
+    outVec.add(tempBodyPos);
+    return true;
   }
 
   function computeTorque(dx, dy) {
@@ -297,9 +445,8 @@ export function createPickingController({
     }
     return torque;
   }
-  const TRANSLATION_GAIN = 500;
-  const ROTATION_GAIN = 30;
-
+const TRANSLATION_GAIN = 500;
+const ROTATION_GAIN = 30;
   function setPerturbState(mode, active) {
     store.update((draft) => {
       if (!draft.runtime) draft.runtime = {};
@@ -315,6 +462,23 @@ export function createPickingController({
     });
   }
 
+  function updatePerturbViz({ active, mode, anchor, cursor, force, torque }) {
+    try {
+      store.update((draft) => {
+        if (!draft.runtime) draft.runtime = {};
+        draft.runtime.pertViz = {
+          active: !!active,
+          mode: String(mode || dragState.mode || 'idle'),
+          anchor: Array.isArray(anchor) ? anchor : [anchor?.x || 0, anchor?.y || 0, anchor?.z || 0],
+          cursor: Array.isArray(cursor) ? cursor : [cursor?.x || 0, cursor?.y || 0, cursor?.z || 0],
+          force: Array.isArray(force) ? force : (force ? [force.x || 0, force.y || 0, force.z || 0] : null),
+          torque: Array.isArray(torque) ? torque : (torque ? [torque.x || 0, torque.y || 0, torque.z || 0] : null),
+          ts: Date.now(),
+        };
+      });
+    } catch {}
+  }
+
   function ensurePerturbLoop() {
     if (perturbRaf !== null) return;
     if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
@@ -325,7 +489,7 @@ export function createPickingController({
         perturbRaf = null;
         return;
       }
-      backend.applyForce?.(dragState.payload);
+      dispatchPayload(dragState.payload);
       perturbRaf = window.requestAnimationFrame(step);
     };
     perturbRaf = window.requestAnimationFrame(step);
@@ -338,17 +502,92 @@ export function createPickingController({
     perturbRaf = null;
   }
 
+  function dispatchPayload(payload) {
+    if (!payload) return;
+    if (Number.isFinite(payload.bodyId) && payload.bodyId >= 0 && typeof backend.applyBodyForce === 'function') {
+      backend.applyBodyForce(payload);
+    } else if (Number.isFinite(payload.geomIndex) && payload.geomIndex >= 0) {
+      backend.applyForce?.(payload);
+    }
+  }
+
   function applyPerturb() {
     const selection = currentSelection();
     if (!selection || selection.geom < 0) return;
     const geomIndex = selection.geom | 0;
-    const anchor = dragState.anchorPoint;
-    const target = dragState.pointerTarget;
-    if (!anchor || !target) return;
-    const displacement = tempVecB.copy(target).sub(anchor);
+    const camera = renderCtx.camera;
+    if (!camera) return;
+    const boundsRadius = Math.max(0.1, renderCtx.bounds?.radius || 1);
     let payload = null;
+    const bodyCapable = Number.isFinite(dragState.bodyId) && dragState.bodyId >= 0 && refreshBodyPose(dragState.bodyId);
+    if (bodyCapable) {
+      const bodyPos = tempVecWorld.copy(tempBodyPos);
+      applyRotation(tempBodyRot, dragState.anchorLocal, dragState.anchorPoint);
+      dragState.anchorPoint.add(tempBodyPos);
+      dragState.scale = computePerturbScale(dragState.anchorPoint);
+      const target = dragState.pointerTarget;
+      const displacement = tempVecB.copy(target).sub(dragState.anchorPoint);
+      const baseVec = displacement.clone();
+      const forward = tempVecC.copy(camera.getWorldDirection(new THREE_NS.Vector3())).normalize();
+      const up = tempVecD.copy(camera.up).normalize();
+      const right = tempVecA.copy(forward).cross(up).normalize();
+      if (dragState.mode === 'translate') {
+        const forceVec = baseVec.clone().multiplyScalar(TRANSLATION_GAIN);
+        const maxForce = TRANSLATION_GAIN * boundsRadius * 1.2;
+        if (forceVec.length() > maxForce) forceVec.setLength(maxForce);
+        const lever = tempVecE.copy(dragState.anchorPoint).sub(tempBodyCom);
+        const torqueFromForce = lever.clone().cross(forceVec);
+        payload = {
+          bodyId: dragState.bodyId,
+          force: [forceVec.x, forceVec.y, forceVec.z],
+          torque: [torqueFromForce.x, torqueFromForce.y, torqueFromForce.z],
+        };
+        setPerturbState('translate', true);
+      } else if (dragState.mode === 'rotate') {
+        const localX = baseVec.dot(right);
+        const localY = baseVec.dot(up);
+        const torqueVec = new THREE_NS.Vector3()
+          .addScaledVector(up, localX * ROTATION_GAIN)
+          .addScaledVector(right, -localY * ROTATION_GAIN);
+        if (dragState.shiftKey) {
+          torqueVec.addScaledVector(forward, displacement.dot(forward) * ROTATION_GAIN * 0.4);
+        }
+        const maxTorque = ROTATION_GAIN * boundsRadius * 1.5;
+        if (torqueVec.length() > maxTorque) torqueVec.setLength(maxTorque);
+        payload = {
+          bodyId: dragState.bodyId,
+          force: [0, 0, 0],
+          torque: [torqueVec.x, torqueVec.y, torqueVec.z],
+        };
+        setPerturbState('rotate', true);
+      }
+      if (payload) {
+        dragState.payload = payload;
+        dispatchPayload(payload);
+        updatePerturbViz({
+          active: true,
+          mode: dragState.mode,
+          anchor: dragState.anchorPoint,
+          cursor: dragState.pointerTarget,
+          force: payload.force ? { x: payload.force[0], y: payload.force[1], z: payload.force[2] } : null,
+          torque: payload.torque ? { x: payload.torque[0], y: payload.torque[1], z: payload.torque[2] } : null,
+        });
+        ensurePerturbLoop();
+      }
+      return;
+    }
+
+    const anchor = dragState.anchorPoint;
+    if (!resolveSelectionWorldPoint(selection, anchor)) return;
+    dragState.scale = computePerturbScale(anchor);
+    const target = dragState.pointerTarget;
+    if (!target) return;
+    const displacement = tempVecB.copy(target).sub(anchor);
     if (dragState.mode === 'translate') {
-      const forceVec = clampVector(displacement.clone().multiplyScalar(TRANSLATION_GAIN), TRANSLATION_GAIN * 2);
+      const baseVec = displacement.clone();
+      const forceVec = baseVec.multiplyScalar(TRANSLATION_GAIN);
+      const maxForce = TRANSLATION_GAIN * boundsRadius * 1.2;
+      if (forceVec.length() > maxForce) forceVec.setLength(maxForce);
       payload = {
         geomIndex,
         force: [forceVec.x, forceVec.y, forceVec.z],
@@ -357,10 +596,8 @@ export function createPickingController({
       };
       setPerturbState('translate', true);
     } else if (dragState.mode === 'rotate') {
-      const camera = renderCtx.camera;
-      if (!camera) return;
       const forward = tempVecC.copy(camera.getWorldDirection(new THREE_NS.Vector3())).normalize();
-      const up = tempVecD.copy(camera.up).normalize();
+      const up = tempVecD.copy(globalUp).normalize();
       const right = tempVecA.copy(forward).cross(up).normalize();
       const localX = displacement.dot(right);
       const localY = displacement.dot(up);
@@ -370,6 +607,8 @@ export function createPickingController({
       if (dragState.shiftKey) {
         torqueVec.addScaledVector(forward, displacement.dot(forward) * ROTATION_GAIN * 0.4);
       }
+      const maxTorque = ROTATION_GAIN * boundsRadius * 1.5;
+      if (torqueVec.length() > maxTorque) torqueVec.setLength(maxTorque);
       payload = {
         geomIndex,
         force: [0, 0, 0],
@@ -380,7 +619,15 @@ export function createPickingController({
     }
     if (payload) {
       dragState.payload = payload;
-      backend.applyForce?.(payload);
+      dispatchPayload(payload);
+      updatePerturbViz({
+        active: true,
+        mode: dragState.mode,
+        anchor,
+        cursor: dragState.pointerTarget,
+        force: payload.force ? { x: payload.force[0], y: payload.force[1], z: payload.force[2] } : null,
+        torque: payload.torque ? { x: payload.torque[0], y: payload.torque[1], z: payload.torque[2] } : null,
+      });
       ensurePerturbLoop();
     }
   }
@@ -391,11 +638,14 @@ export function createPickingController({
     dragState.mode = mode;
     dragState.lastX = event.clientX;
     dragState.lastY = event.clientY;
+    dragState.lastClientX = event.clientX;
+    dragState.lastClientY = event.clientY;
     dragState.shiftKey = !!event.shiftKey;
     dragState.payload = null;
-    if (!resolveSelectionWorldPoint(currentSelection(), dragState.anchorPoint)) {
-      dragState.anchorPoint.set(0, 0, 0);
+    if (!updateAnchorWorldFromLocal(dragState.anchorPoint)) {
+      resolveSelectionWorldPoint(currentSelection(), dragState.anchorPoint);
     }
+    dragState.scale = computePerturbScale(dragState.anchorPoint);
     dragState.pointerTarget.copy(dragState.anchorPoint);
     backend.clearForces?.();
     if (typeof dragState.pointerId === 'number' && canvas.setPointerCapture) {
@@ -404,6 +654,7 @@ export function createPickingController({
       } catch {}
     }
     setPerturbState(mode, true);
+    updatePerturbViz({ active: true, mode, anchor: dragState.anchorPoint, cursor: dragState.pointerTarget, force: null, torque: null });
   }
 
   function endPerturb() {
@@ -421,6 +672,7 @@ export function createPickingController({
     dragState.pointerId = null;
     dragState.mode = 'idle';
     setPerturbState('idle', false);
+    updatePerturbViz({ active: false, mode: 'idle', anchor: dragState.anchorPoint, cursor: dragState.pointerTarget, force: null, torque: null });
   }
 
   function handleDoubleClick(event) {
@@ -468,20 +720,14 @@ export function createPickingController({
     }
     event.preventDefault();
     event.stopImmediatePropagation();
+    const deltaX = event.clientX - dragState.lastClientX;
+    const deltaY = event.clientY - dragState.lastClientY;
     dragState.shiftKey = !!event.shiftKey;
-    const deltaX = event.clientX - dragState.lastX;
-    const deltaY = event.clientY - dragState.lastY;
     dragState.lastX = event.clientX;
     dragState.lastY = event.clientY;
-    const target = pointerToWorldTarget(event.clientX, event.clientY, dragState.anchorPoint);
-    if (target) {
-      dragState.pointerTarget.copy(target);
-    } else {
-      const deltaFallback = computeWorldDrag(deltaX, deltaY);
-      if (deltaFallback) {
-        dragState.pointerTarget.add(deltaFallback);
-      }
-    }
+    dragState.lastClientX = event.clientX;
+    dragState.lastClientY = event.clientY;
+    applyPointerDelta(deltaX, deltaY);
     applyPerturb();
   }
 

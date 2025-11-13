@@ -1877,6 +1877,24 @@ export async function createBackend(options = {}) {
     return resolveSnapshot(lastSnapshot);
   }
 
+  async function applyBodyForceCommand(options = {}) {
+    const bodyId = Number(options.bodyId);
+    if (!Number.isFinite(bodyId) || bodyId < 0) {
+      return resolveSnapshot(lastSnapshot);
+    }
+    try {
+      client.postMessage?.({
+        cmd: 'applyBodyForce',
+        bodyId: bodyId | 0,
+        force: toVec3(options.force),
+        torque: toVec3(options.torque),
+      });
+    } catch (err) {
+      if (debug) console.warn('[backend applyBodyForce] failed', err);
+    }
+    return resolveSnapshot(lastSnapshot);
+  }
+
   async function clearForcesCommand() {
     try {
       client.postMessage?.({ cmd: 'clearForces' });
@@ -1905,6 +1923,7 @@ export async function createBackend(options = {}) {
     step,
     setCameraIndex,
     applyForce: applyForceCommand,
+    applyBodyForce: applyBodyForceCommand,
     clearForces: clearForcesCommand,
     dispose,
   };

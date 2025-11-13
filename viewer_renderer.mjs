@@ -59,6 +59,21 @@ const CONTACT_POINT_FALLBACK_COLOR = 0xff8a2b;
 const CONTACT_FORCE_EPS = 1e-9;
 const CONTACT_FORCE_SHAFT_GEOMETRY = new THREE.CylinderGeometry(1, 1, 1, 20, 1, false);
 const CONTACT_FORCE_HEAD_GEOMETRY = new THREE.ConeGeometry(1, 1, 24, 1, false);
+const PERTURB_SHAFT_GEOMETRY = CONTACT_FORCE_SHAFT_GEOMETRY;
+const PERTURB_HEAD_GEOMETRY = CONTACT_FORCE_HEAD_GEOMETRY;
+const PERTURB_COLOR_TRANSLATE = 0x2b90d9;
+const PERTURB_COLOR_ROTATE = 0xff8a2b;
+const PERTURB_AXIS_DEFAULT = new THREE.Vector3(0, 1, 0);
+const PERTURB_RING_NORMAL = new THREE.Vector3(0, 0, 1);
+const PERTURB_RADIAL_DEFAULT = new THREE.Vector3(1, 0, 0);
+const PERTURB_TEMP_ANCHOR = new THREE.Vector3();
+const PERTURB_TEMP_CURSOR = new THREE.Vector3();
+const PERTURB_TEMP_DIR = new THREE.Vector3();
+const PERTURB_TEMP_FORCE = new THREE.Vector3();
+const PERTURB_TEMP_AXIS = new THREE.Vector3();
+const PERTURB_TEMP_RADIAL = new THREE.Vector3();
+const PERTURB_TEMP_TANGENT = new THREE.Vector3();
+const PERTURB_TEMP_QUAT = new THREE.Quaternion();
 const LABEL_MODE_WARNINGS = new Set();
 const FRAME_MODE_WARNINGS = new Set();
 const LABEL_DPR_CAP = 2;
@@ -757,6 +772,208 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
     if (pool[i]) pool[i].visible = false;
   }
   frameGroup.visible = used > 0;
+}
+
+function ensurePerturbHelpers(ctx) {
+  if (!ctx || !ctx.scene) return;
+  if (!ctx.perturbGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:perturb';
+    ctx.scene.add(group);
+    ctx.perturbGroup = group;
+  }
+  if (!ctx.perturbTranslate) {
+    const material = new THREE.MeshBasicMaterial({
+      color: PERTURB_COLOR_TRANSLATE,
+      transparent: true,
+      opacity: 0.95,
+      depthTest: true,
+      depthWrite: false,
+    });
+    const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, material);
+    const head = new THREE.Mesh(PERTURB_HEAD_GEOMETRY, material);
+    const node = new THREE.Group();
+    node.add(shaft);
+    node.add(head);
+    node.visible = false;
+    node.renderOrder = 60;
+    ctx.perturbGroup.add(node);
+
+    const lineGeom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+    ]);
+    const lineMaterial = new THREE.LineBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.35,
+      depthTest: true,
+      depthWrite: false,
+    });
+    const line = new THREE.Line(lineGeom, lineMaterial);
+    line.visible = false;
+    line.renderOrder = 59;
+    ctx.perturbGroup.add(line);
+
+    ctx.perturbTranslate = { node, shaft, head, material, line };
+  }
+  if (!ctx.perturbRotate) {
+    const ringGeom = new THREE.RingGeometry(0.9, 1, 48, 1);
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: PERTURB_COLOR_ROTATE,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: false,
+    });
+    const ring = new THREE.Mesh(ringGeom, ringMaterial);
+    ring.visible = false;
+    ring.renderOrder = 61;
+    ctx.perturbGroup.add(ring);
+
+    const arrow = new THREE.ArrowHelper(
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(),
+      1,
+      PERTURB_COLOR_ROTATE,
+    );
+    arrow.visible = false;
+    arrow.cone.material.transparent = true;
+    arrow.cone.material.opacity = 0.9;
+    arrow.line.material.transparent = true;
+    arrow.line.material.opacity = 0.9;
+    arrow.renderOrder = 62;
+    ctx.perturbGroup.add(arrow);
+
+    ctx.perturbRotate = { ring, arrow };
+  }
+}
+
+function hidePerturbTranslate(ctx) {
+  if (ctx?.perturbTranslate?.node) ctx.perturbTranslate.node.visible = false;
+  if (ctx?.perturbTranslate?.line) ctx.perturbTranslate.line.visible = false;
+}
+
+function hidePerturbRotate(ctx) {
+  if (ctx?.perturbRotate?.ring) ctx.perturbRotate.ring.visible = false;
+  if (ctx?.perturbRotate?.arrow) ctx.perturbRotate.arrow.visible = false;
+}
+
+function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
+  const viz = state?.runtime?.pertViz;
+  if (!viz || !viz.active) {
+    hidePerturbTranslate(ctx);
+    hidePerturbRotate(ctx);
+    if (ctx?.perturbGroup) ctx.perturbGroup.visible = false;
+    return;
+  }
+  ensurePerturbHelpers(ctx);
+  if (ctx.perturbGroup) ctx.perturbGroup.visible = true;
+  const bounds = options?.bounds || ctx?.bounds || null;
+  const sceneRadius = Math.max(0.1, Number(bounds?.radius) || 1);
+  const anchor = PERTURB_TEMP_ANCHOR.set(
+    Number(viz.anchor?.[0]) || 0,
+    Number(viz.anchor?.[1]) || 0,
+    Number(viz.anchor?.[2]) || 0,
+  );
+  const cursor = PERTURB_TEMP_CURSOR.set(
+    Number(viz.cursor?.[0]) || 0,
+    Number(viz.cursor?.[1]) || 0,
+    Number(viz.cursor?.[2]) || 0,
+  );
+  const mode = String(viz.mode || 'translate');
+  if (mode === 'rotate') {
+    hidePerturbTranslate(ctx);
+    const rotate = ctx.perturbRotate;
+    if (!rotate) return;
+    const torqueVec = Array.isArray(viz.torque)
+      ? PERTURB_TEMP_AXIS.set(
+          Number(viz.torque[0]) || 0,
+          Number(viz.torque[1]) || 0,
+          Number(viz.torque[2]) || 0,
+        )
+      : null;
+    const torqueMag = torqueVec ? torqueVec.length() : 0;
+    if (!torqueVec || torqueMag < 1e-8) {
+      hidePerturbRotate(ctx);
+      return;
+    }
+    const axis = torqueVec.normalize();
+    const radius = Math.max(
+      0.08 * sceneRadius,
+      Math.min(sceneRadius * 0.9, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.1)) * sceneRadius * 0.25),
+    );
+    const quat = PERTURB_TEMP_QUAT.setFromUnitVectors(PERTURB_RING_NORMAL, axis);
+    rotate.ring.visible = true;
+    rotate.ring.position.copy(anchor);
+    rotate.ring.quaternion.copy(quat);
+    rotate.ring.scale.setScalar(radius);
+
+    const radialWorld = PERTURB_TEMP_RADIAL.copy(PERTURB_RADIAL_DEFAULT).multiplyScalar(radius).applyQuaternion(quat);
+    const ringPoint = anchor.clone().add(radialWorld);
+    rotate.arrow.visible = true;
+    rotate.arrow.position.copy(ringPoint);
+    const tangent = PERTURB_TEMP_TANGENT.copy(axis).cross(radialWorld.clone().normalize());
+    if (tangent.lengthSq() < 1e-10) {
+      tangent.copy(PERTURB_AXIS_DEFAULT).applyQuaternion(quat);
+    } else {
+      tangent.normalize();
+    }
+    rotate.arrow.setDirection(tangent);
+    const arrowLenBase = Math.max(
+      0.12 * radius,
+      Math.min(radius * 0.4, Math.log(1 + torqueMag / Math.max(1e-6, sceneRadius * 0.1)) * radius * 0.3),
+    );
+    rotate.arrow.setLength(arrowLenBase, arrowLenBase * 0.4, arrowLenBase * 0.3);
+    rotate.arrow.setColor(new THREE.Color(PERTURB_COLOR_ROTATE));
+  } else {
+    hidePerturbRotate(ctx);
+    const translate = ctx.perturbTranslate;
+    if (!translate) return;
+    const dir = PERTURB_TEMP_DIR.copy(cursor).sub(anchor);
+    const distance = dir.length();
+    if (distance < 1e-6) {
+      hidePerturbTranslate(ctx);
+      return;
+    }
+    const dirNorm = dir.clone().multiplyScalar(1 / distance);
+    const forceVec = Array.isArray(viz.force)
+      ? PERTURB_TEMP_FORCE.set(
+          Number(viz.force[0]) || 0,
+          Number(viz.force[1]) || 0,
+          Number(viz.force[2]) || 0,
+        )
+      : null;
+    const forceMag = forceVec ? forceVec.length() : distance;
+    const thicknessScale = Math.log(1 + forceMag / Math.max(1e-6, sceneRadius * 0.15));
+    const shaftRadius = Math.max(
+      0.004 * sceneRadius,
+      Math.min(0.05 * sceneRadius, thicknessScale * 0.015 * sceneRadius),
+    );
+    let headLength = Math.min(
+      Math.max(0.05 * sceneRadius, distance * 0.3),
+      Math.max(distance * 0.6, 0.12 * sceneRadius),
+    );
+    headLength = Math.min(headLength, Math.max(0.15 * distance, distance * 0.8));
+    const shaftLength = Math.max(1e-4, distance - headLength);
+    translate.node.visible = true;
+    translate.material.color.setHex(PERTURB_COLOR_TRANSLATE);
+    translate.node.position.copy(anchor);
+    translate.node.quaternion.copy(PERTURB_TEMP_QUAT.setFromUnitVectors(PERTURB_AXIS_DEFAULT, dirNorm));
+    translate.shaft.scale.set(shaftRadius, shaftLength, shaftRadius);
+    translate.shaft.position.set(0, shaftLength / 2, 0);
+    translate.head.scale.set(shaftRadius * 1.9, headLength, shaftRadius * 1.9);
+    translate.head.position.set(0, shaftLength + headLength / 2, 0);
+    if (translate.line?.geometry?.attributes?.position) {
+      const attr = translate.line.geometry.attributes.position;
+      attr.setXYZ(0, anchor.x, anchor.y, anchor.z);
+      attr.setXYZ(1, cursor.x, cursor.y, cursor.z);
+      attr.needsUpdate = true;
+      translate.line.geometry.computeBoundingSphere?.();
+      translate.line.visible = true;
+    }
+  }
 }
 
 function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
@@ -2021,6 +2238,7 @@ export function createRendererManager({
     };
     updateFrameOverlays(context, snapshot, state, overlayOptions);
     updateLabelOverlays(context, snapshot, state, overlayOptions);
+    updatePerturbOverlay(context, snapshot, state, overlayOptions);
 
     for (let i = 0; i < ngeom; i += 1) {
       const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;

@@ -575,6 +575,20 @@ class DirectBackend {
         }
         break;
       }
+      case 'applyBodyForce': {
+        if (this.sim && typeof this.sim.applyXfrcByBody === 'function') {
+          try {
+            this.sim.applyXfrcByBody(
+              msg.bodyId | 0,
+              msg.force || [0, 0, 0],
+              msg.torque || [0, 0, 0],
+            );
+          } catch (err) {
+            this.#emitError(err);
+          }
+        }
+        break;
+      }
       case 'clearForces': {
         try {
           this.sim?.clearAllXfrc?.();
@@ -832,6 +846,19 @@ class DirectBackend {
         const rgbaView = this.sim.matRgbaView?.();
         if (rgbaView) matrgba = cloneArray(rgbaView, Float32Array);
       }
+      // Body-level pose (optional but recommended for picking/perturb)
+      let bxpos = null;
+      let bxmat = null;
+      let xipos = null;
+      try {
+        const bposView = this.sim.bodyXposView?.();
+        const bmatView = this.sim.bodyXmatView?.();
+        const xiposView = this.sim.bodyXiposView?.();
+        if (bposView) bxpos = cloneArray(bposView, Float64Array) || new Float64Array(bposView);
+        if (bmatView) bxmat = cloneArray(bmatView, Float64Array) || new Float64Array(bmatView);
+        if (xiposView) xipos = cloneArray(xiposView, Float64Array) || new Float64Array(xiposView);
+      } catch {}
+
       let contacts = null;
       if (this.snapshotState) {
         this.snapshotState.lastSim = {
@@ -844,6 +871,9 @@ class DirectBackend {
           gdataid,
           xpos,
           xmat,
+          bxpos,
+          bxmat,
+          xipos,
         };
         this.snapshotState.frame += 1;
       }
@@ -942,6 +972,9 @@ class DirectBackend {
         nv: this.sim.nv?.() | 0,
         xpos,
         xmat,
+        bxpos,
+        bxmat,
+        xipos,
         gesture,
         drag,
         voptFlags: Array.isArray(this.voptFlags) ? [...this.voptFlags] : [],

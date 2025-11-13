@@ -677,6 +677,9 @@ export class MjSimLite {
 
   geomXposView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.mode==='legacy' ? 'mjwf' : (this.pref||'mjwf'); const d=m['_' + pref + '_geom_xpos_ptr']; let p=0; if (typeof d==='function') p=d.call(m,h)|0; else { try{ p=m.ccall(pref+'_geom_xpos_ptr','number',['number'],[h])|0; }catch{ p=0; } } if(!p)return; return heapViewF64(m,p,n*3); }
   geomXmatView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.mode==='legacy' ? 'mjwf' : (this.pref||'mjwf'); const d=m['_' + pref + '_geom_xmat_ptr']; let p=0; if (typeof d==='function') p=d.call(m,h)|0; else { try{ p=m.ccall(pref+'_geom_xmat_ptr','number',['number'],[h])|0; }catch{ p=0; } } if(!p)return; return heapViewF64(m,p,n*9); }
+  bodyXposView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const pref=this.mode==='legacy' ? 'mjwf' : (this.pref||'mjwf'); let d=m['_' + pref + '_body_xpos_ptr']; if (typeof d!=='function') { d = m['_' + pref + '_xpos_ptr'] || m['_' + pref + '_xipos_ptr']; } if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*3); }
+  bodyXmatView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const pref=this.mode==='legacy' ? 'mjwf' : (this.pref||'mjwf'); const d=m['_' + pref + '_body_xmat_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*9); }
+  bodyXiposView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const pref=this.mode==='legacy' ? 'mjwf' : (this.pref||'mjwf'); const d=m['_' + pref + '_xipos_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*3); }
   // Optional getters: never call ccall for unknown symbols — only use direct exports
   geomSizeView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_geom_size_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*3); }
   geomTypeView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_geom_type_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
@@ -778,6 +781,23 @@ export class MjSimLite {
     } catch {}
     return false;
   }
+  applyXfrcByBody(bodyIndex, force3, torque3){
+    const m=this.mod; const h=this.h|0; const body=bodyIndex|0;
+    const fx=+force3?.[0]||0, fy=+force3?.[1]||0, fz=+force3?.[2]||0;
+    const tx=+torque3?.[0]||0, ty=+torque3?.[1]||0, tz=+torque3?.[2]||0;
+    try {
+      const xfPtr = typeof m._mjwf_xfrc_applied_ptr === 'function' ? (m._mjwf_xfrc_applied_ptr(h)|0) : 0;
+      const nbody = this.nbody();
+      if (xfPtr && nbody>0 && body>=0 && body < nbody) {
+        const H = heapViewF64(m, xfPtr, nbody*6);
+        const off = 6*body;
+        H[off+0]=fx; H[off+1]=fy; H[off+2]=fz; H[off+3]=tx; H[off+4]=ty; H[off+5]=tz;
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
   clearAllXfrc(){ const m=this.mod; const h=this.h|0; try { const nbody = typeof m._mjwf_nbody === 'function' ? (m._mjwf_nbody(h)|0) : 0; const xfPtr = typeof m._mjwf_xfrc_applied_ptr === 'function' ? (m._mjwf_xfrc_applied_ptr(h)|0) : 0; if (xfPtr && nbody>0) { const H = heapViewF64(m, xfPtr, nbody*6); H.fill(0); return true; } } catch {} return false; }
   reset(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_reset']; if (typeof d==='function') return ((d.call(m,h)|0)===1); try{ return ((m.ccall(pref+'_reset','number',['number'],[h])|0)===1);}catch{return false;} }
   term(){
