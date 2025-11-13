@@ -493,10 +493,10 @@ export function createPickingController({
     }
     return torque;
   }
-const TRANSLATION_GAIN = 500;
+const TRANSLATION_GAIN = 750;
 const ROTATION_GAIN = 30;
-const FORCE_SMOOTHING = 0.3;
-const TORQUE_SMOOTHING = 0.35;
+const FORCE_LERP_ALPHA = 0.12;
+const TORQUE_LERP_ALPHA = 0.12;
   function setPerturbState(mode, active) {
     store.update((draft) => {
       if (!draft.runtime) draft.runtime = {};
@@ -587,7 +587,7 @@ const TORQUE_SMOOTHING = 0.35;
         const maxForce = TRANSLATION_GAIN * boundsRadius * 1.2;
         if (forceVec.length() > maxForce) forceVec.setLength(maxForce);
         if (dragState.lastForceVec.lengthSq() > 0) {
-          dragState.lastForceVec.lerp(forceVec, 1 - FORCE_SMOOTHING);
+          dragState.lastForceVec.lerp(forceVec, FORCE_LERP_ALPHA);
         } else {
           dragState.lastForceVec.copy(forceVec);
         }
@@ -612,7 +612,7 @@ const TORQUE_SMOOTHING = 0.35;
         const maxTorque = ROTATION_GAIN * boundsRadius * 1.5;
         if (torqueVec.length() > maxTorque) torqueVec.setLength(maxTorque);
         if (dragState.lastTorqueVec.lengthSq() > 0) {
-          dragState.lastTorqueVec.lerp(torqueVec, 1 - TORQUE_SMOOTHING);
+          dragState.lastTorqueVec.lerp(torqueVec, TORQUE_LERP_ALPHA);
         } else {
           dragState.lastTorqueVec.copy(torqueVec);
         }
@@ -654,7 +654,7 @@ const TORQUE_SMOOTHING = 0.35;
       const maxForce = TRANSLATION_GAIN * boundsRadius * 1.2;
       if (forceVec.length() > maxForce) forceVec.setLength(maxForce);
       if (dragState.lastForceVec.lengthSq() > 0) {
-        dragState.lastForceVec.lerp(forceVec, 1 - FORCE_SMOOTHING);
+        dragState.lastForceVec.lerp(forceVec, FORCE_LERP_ALPHA);
       } else {
         dragState.lastForceVec.copy(forceVec);
       }
@@ -681,7 +681,7 @@ const TORQUE_SMOOTHING = 0.35;
       const maxTorque = ROTATION_GAIN * boundsRadius * 1.5;
       if (torqueVec.length() > maxTorque) torqueVec.setLength(maxTorque);
       if (dragState.lastTorqueVec.lengthSq() > 0) {
-        dragState.lastTorqueVec.lerp(torqueVec, 1 - TORQUE_SMOOTHING);
+        dragState.lastTorqueVec.lerp(torqueVec, TORQUE_LERP_ALPHA);
       } else {
         dragState.lastTorqueVec.copy(torqueVec);
       }
