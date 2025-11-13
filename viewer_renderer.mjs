@@ -775,19 +775,19 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
   frameGroup.visible = used > 0;
 }
 
-function createPerturbArrowNode(colorHex, { lit = false } = {}) {
-  const material = lit
-    ? new THREE.MeshStandardMaterial({
-        color: colorHex,
-        metalness: 0.55,
-        roughness: 0.25,
-      })
-    : new THREE.MeshBasicMaterial({
+function createPerturbArrowNode(colorHex, { transparent = true } = {}) {
+  const material = transparent
+    ? new THREE.MeshBasicMaterial({
         color: colorHex,
         transparent: true,
         opacity: 0.9,
         depthTest: true,
         depthWrite: false,
+      })
+    : new THREE.MeshStandardMaterial({
+        color: colorHex,
+        metalness: 0.2,
+        roughness: 0.45,
       });
   const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, material);
   const head = new THREE.Mesh(PERTURB_HEAD_GEOMETRY, material);
@@ -857,8 +857,8 @@ function ensurePerturbHelpers(ctx) {
     ring.renderOrder = 61;
     ctx.perturbGroup.add(ring);
 
-    const arrowPrimary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { lit: true });
-    const arrowSecondary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { lit: true });
+    const arrowPrimary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { transparent: true });
+    const arrowSecondary = createPerturbArrowNode(PERTURB_COLOR_ROTATE, { transparent: true });
     ctx.perturbGroup.add(arrowPrimary.node);
     ctx.perturbGroup.add(arrowSecondary.node);
 
@@ -936,9 +936,9 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
       radialPlane.copy(PERTURB_RADIAL_DEFAULT).applyQuaternion(quat);
     }
     const radialDir = radialPlane.normalize();
-    const primaryRadial = radialDir.clone();
+    const primaryRadial = radialDir.clone().applyAxisAngle(axis, Math.PI);
     const oppositeRadial = primaryRadial.clone().multiplyScalar(-1);
-    const tangentialBase = PERTURB_TEMP_TANGENT.copy(axis).cross(primaryRadial);
+    const tangentialBase = PERTURB_TEMP_TANGENT.copy(primaryRadial).cross(axis);
     if (tangentialBase.lengthSq() < 1e-8) {
       tangentialBase.copy(PERTURB_AXIS_DEFAULT).applyQuaternion(quat);
     } else {
@@ -2590,17 +2590,13 @@ function clearSelectionHighlight(ctx) {
 }
 
 function createSelectionGlow(mesh) {
-  const material = new THREE.MeshStandardMaterial({
+  const material = new THREE.MeshBasicMaterial({
     color: SELECTION_OVERLAY_COLOR,
-    emissive: SELECTION_OVERLAY_COLOR.clone(),
-    emissiveIntensity: 0.8,
-    metalness: 0.2,
-    roughness: 0.35,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.65,
     side: THREE.DoubleSide,
     depthWrite: false,
-    depthTest: true,
+    depthTest: false,
     blending: THREE.AdditiveBlending,
   });
   const glow = new THREE.Mesh(mesh.geometry, material);
