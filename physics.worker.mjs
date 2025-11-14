@@ -84,7 +84,7 @@ const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
 const HISTORY_DEFAULT_CAPTURE_HZ = 30;
 const HISTORY_DEFAULT_CAPACITY = 900;
 const KEYFRAME_CAPACITY = 16;
-const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata'];
+const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata', 'xpos', 'xmat', 'body_xpos', 'body_xmat'];
 
 let historyConfig = { captureHz: HISTORY_DEFAULT_CAPTURE_HZ, capacity: HISTORY_DEFAULT_CAPACITY };
 let historyState = null;
@@ -315,6 +315,7 @@ function emitHistoryMeta() {
 function captureHistorySample(force = false) {
   if (!historyState || !historyState.enabled || !sim) return;
   if (!(historyState.samples?.length > 0)) return;
+  if (!force && (!running || historyState.scrubActive)) return;
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
   if (!force && historyState.captureIntervalMs > 0) {
     if ((now - historyState.lastCaptureTs) < historyState.captureIntervalMs) return;
@@ -404,12 +405,13 @@ function applyHistoryConfig(partial = {}) {
   emitHistoryMeta();
 }
 
-function resetKeyframes(nq = 0, nv = 0) {
+function resetKeyframes(nq = 0, nv = 0, nuLocal = 0) {
   keyframeState = {
     capacity: KEYFRAME_CAPACITY,
     entries: [],
     nq,
     nv,
+    nu: nuLocal,
     lastSaved: -1,
     lastLoaded: -1,
   };
@@ -441,6 +443,7 @@ function ensureKeyframeSlot(index) {
     keyframeState.entries.push({
       qpos: new Float64Array(keyframeState.nq),
       qvel: keyframeState.nv > 0 ? new Float64Array(keyframeState.nv) : null,
+      ctrl: keyframeState.nu > 0 ? new Float64Array(keyframeState.nu) : null,
       time: 0,
       label: '',
       seq: 0,
@@ -475,6 +478,10 @@ function saveKeyframe(requestedIndex) {
   if (slot.qvel && qvelView && slot.qvel.length === qvelView.length) {
     slot.qvel.set(qvelView);
   }
+  const ctrlView = sim.ctrlView?.();
+  if (slot.ctrl && ctrlView && slot.ctrl.length === ctrlView.length) {
+    slot.ctrl.set(ctrlView);
+  }
   slot.time = sim.time?.() || 0;
   slot.seq = snapshotState.frame;
   slot.label = slot.label || `Key ${target + 1}`;
@@ -500,11 +507,18 @@ function loadKeyframe(index) {
       for (let i = 0; i < qvelView.length; i += 1) qvelView[i] = 0;
     }
   }
+  const ctrlView = sim.ctrlView?.();
+  if (ctrlView) {
+    if (slot.ctrl && slot.ctrl.length === ctrlView.length) {
+      ctrlView.set(slot.ctrl);
+    } else {
+      for (let i = 0; i < ctrlView.length; i += 1) ctrlView[i] = 0;
+    }
+  }
   try { sim.forward?.(); } catch {}
   keyframeState.lastLoaded = index;
   emitKeyframeMeta();
   releaseHistoryScrub();
-  running = false;
   return true;
 }
 
@@ -523,7 +537,9 @@ function resetWatchState() {
 
 function normaliseWatchField(field) {
   const token = String(field || '').trim().toLowerCase();
-  return WATCH_FIELDS.includes(token) ? token : 'qpos';
+  if (WATCH_FIELDS.includes(token)) return token;
+  if (token === 'xipos' || token === 'body_xipos') return 'body_xpos';
+  return 'qpos';
 }
 
 function updateWatchTarget(field, index) {
@@ -541,6 +557,14 @@ function updateWatchTarget(field, index) {
 function readWatchView(field) {
   const token = normaliseWatchField(field);
   switch (token) {
+    case 'xpos':
+      return sim?.geomXposView?.();
+    case 'xmat':
+      return sim?.geomXmatView?.();
+    case 'body_xpos':
+      return sim?.bodyXposView?.();
+    case 'body_xmat':
+      return sim?.bodyXmatView?.();
     case 'qvel':
       return sim?.qvelView?.();
     case 'ctrl':
@@ -591,6 +615,33 @@ function emitWatchState() {
   try {
     postMessage({ kind: 'watch', ...payload });
   } catch {}
+}
+
+function collectWatchSources() {
+  const sources = {};
+  const add = (id, length, label) => {
+    if (Number.isFinite(length) && length > 0) {
+      sources[id] = {
+        length,
+        label: label || id,
+      };
+    }
+  };
+  const nq = sim?.nq?.() | 0;
+  const nv = sim?.nv?.() | 0;
+  const nuLocal = sim?.nu?.() | 0;
+  const nsens = readDataCount('nsensordata');
+  const ngeomLocal = sim?.ngeom?.() | 0;
+  const nbodyLocal = sim?.nbody?.() | 0;
+  add('qpos', nq, `qpos (${nq})`);
+  add('qvel', nv, `qvel (${nv})`);
+  add('ctrl', nuLocal, `ctrl (${nuLocal})`);
+  add('sensordata', nsens || 0, `sensordata (${nsens || 0})`);
+  add('xpos', ngeomLocal * 3, `geom xpos (${ngeomLocal}×3)`);
+  add('xmat', ngeomLocal * 9, `geom xmat (${ngeomLocal}×9)`);
+  add('body_xpos', nbodyLocal * 3, `body xpos (${nbodyLocal}×3)`);
+  add('body_xmat', nbodyLocal * 9, `body xmat (${nbodyLocal}×9)`);
+  return sources;
 }
 
 function wasmUrl(rel) { return new URL(rel, import.meta.url).href; }
@@ -1056,6 +1107,7 @@ function snapshot() {
   if (watchPayload) {
     msg.watch = watchPayload;
   }
+  msg.watchSources = collectWatchSources();
   if (Number.isFinite(keySliderIndex)) {
     msg.keyIndex = keySliderIndex | 0;
   }
@@ -1340,7 +1392,7 @@ onmessage = async (ev) => {
       nu = sim?.nu?.() | 0;
       pendingCtrl.clear();
       initHistoryBuffers(sim?.nq?.() | 0, sim?.nv?.() | 0);
-      resetKeyframes(sim?.nq?.() | 0, sim?.nv?.() | 0);
+      resetKeyframes(sim?.nq?.() | 0, sim?.nv?.() | 0, sim?.nu?.() | 0);
       resetWatchState();
       keySliderIndex = -1;
       captureHistorySample(true);
@@ -1415,6 +1467,7 @@ onmessage = async (ev) => {
         cameraMode = 0;
         groupState = createGroupState();
         initHistoryBuffers(sim?.nq?.() | 0, sim?.nv?.() | 0);
+        resetKeyframes(sim?.nq?.() | 0, sim?.nv?.() | 0, sim?.nu?.() | 0);
         resetWatchState();
         captureHistorySample(true);
         emitHistoryMeta();

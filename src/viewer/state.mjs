@@ -29,6 +29,7 @@ function createDefaultWatchState() {
     status: 'idle',
     summary: '',
     valid: false,
+    sources: {},
   };
 }
 
@@ -350,9 +351,17 @@ function normaliseControlValue(control, raw) {
       if (raw === null || raw === undefined) return '';
       return String(raw).trim();
     case 'radio':
-      if (typeof raw === 'string') return raw;
+      if (typeof raw === 'string') {
+        if (control?.item_id === 'simulation.run') {
+          return raw.toLowerCase() !== 'pause';
+        }
+        return raw;
+      }
       if (Array.isArray(control.options) && typeof raw === 'number') {
         return control.options[raw] ?? control.options[0];
+      }
+      if (control?.item_id === 'simulation.run') {
+        return bool(raw);
       }
       return raw;
     case 'select':
@@ -515,6 +524,10 @@ function mergeBackendSnapshot(draft, snapshot) {
     } else {
       watch.summary = '—';
     }
+  }
+  if (snapshot.watchSources) {
+    const watch = ensureWatchState(draft);
+    watch.sources = { ...snapshot.watchSources };
   }
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const idx = snapshot.cameraMode | 0;
@@ -1031,11 +1044,17 @@ export function createViewerStore(initialState) {
 export async function applySpecAction(store, backend, control, rawValue) {
   if (!control) return;
   const value = normaliseControlValue(control, rawValue);
-  const prepared = await prepareBindingUpdate(control, value);
+  const isRunToggle = control.item_id === 'simulation.run' && typeof backend?.setRunState === 'function';
+  const prepared = isRunToggle ? null : await prepareBindingUpdate(control, value);
   let snapshot = null;
-  if (backend && typeof backend.apply === 'function') {
+  if (backend) {
     try {
-      snapshot = await backend.apply({ kind: 'ui', id: control.item_id, value, control });
+      if (isRunToggle && typeof backend.setRunState === 'function') {
+        const runState = typeof value === 'string' ? value.toLowerCase() !== 'pause' : !!value;
+        snapshot = await backend.setRunState(runState, 'ui');
+      } else if (typeof backend.apply === 'function') {
+        snapshot = await backend.apply({ kind: 'ui', id: control.item_id, value, control });
+      }
     } catch (err) {
       console.error('[backend.apply] failed', err);
     }
@@ -1266,6 +1285,7 @@ function resolveSnapshot(state) {
           summary: state.watch.summary || '',
           status: state.watch.status || 'idle',
           valid: !!state.watch.valid,
+          sources: state.watch.sources ? { ...state.watch.sources } : {},
         }
       : null,
   };
@@ -1295,6 +1315,7 @@ export async function createBackend(options = {}) {
   let kind = 'direct';
   let paused = false;
   let rate = 1;
+  let historyScrubbing = false;
   let visualOverrideApplied = false;
   let lastSnapshot = {
     t: 0,
@@ -1453,6 +1474,27 @@ export async function createBackend(options = {}) {
     if (data.groups && typeof data.groups === 'object') {
       lastSnapshot.groups = normaliseGroupState(data.groups);
     }
+  }
+
+  function setRunState(run, source = 'ui') {
+    const nextPaused = !run;
+    paused = nextPaused;
+    lastSnapshot.paused = nextPaused;
+    lastSnapshot.pausedSource = source;
+    if (!nextPaused && lastSnapshot.history && lastSnapshot.history.scrubIndex < 0) {
+      lastSnapshot.history.scrubIndex = 0;
+      lastSnapshot.history.live = true;
+      historyScrubbing = false;
+      try { client.postMessage?.({ cmd: 'historyScrub', offset: 0 }); } catch (err) {
+        if (debug) console.warn('[backend history reset] post failed', err);
+      }
+    }
+    try {
+      client.postMessage?.({ cmd: 'setPaused', paused: nextPaused });
+    } catch (err) {
+      if (debug) console.warn('[backend] setPaused post failed', err);
+    }
+    return notifyListeners();
   }
 
   function applyVisualOverrides() {
@@ -1947,6 +1989,10 @@ export async function createBackend(options = {}) {
       try { client.postMessage?.({ cmd: 'historyScrub', offset }); } catch (err) {
         if (debug) console.warn('[backend history] post failed', err);
       }
+      historyScrubbing = offset < 0;
+      if (offset < 0 && !paused) {
+        setRunState(false, 'history');
+      }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
@@ -2099,11 +2145,7 @@ export async function createBackend(options = {}) {
     switch (id) {
       case 'simulation.run': {
         const run = value === 'Run' || value === true || value === 1;
-        paused = !run;
-        client.postMessage?.({ cmd: 'setPaused', paused });
-        lastSnapshot.pausedSource = 'ui';
-        notifyListeners();
-        break;
+        return setRunState(run, 'ui');
       }
       case 'simulation.reset':
         client.postMessage?.({ cmd: 'reset' });
@@ -2130,9 +2172,6 @@ export async function createBackend(options = {}) {
       }
       case 'simulation.noise_rate':
       case 'simulation.noise_scale':
-      case 'simulation.history_scrubber':
-      case 'simulation.key_slider':
-      case 'simulation.key':
       case 'rendering.camera_mode':
       case 'option.help':
       default:
@@ -2236,6 +2275,7 @@ export async function createBackend(options = {}) {
     subscribe,
     step,
     setCameraIndex,
+    setRunState,
     applyForce: applyForceCommand,
     applyBodyForce: applyBodyForceCommand,
     clearForces: clearForcesCommand,

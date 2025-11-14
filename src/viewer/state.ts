@@ -77,6 +77,7 @@ export interface WatchState {
   status: string;
   valid: boolean;
   summary: string;
+  sources: Record<string, { length?: number; label?: string }>;
 }
 
 export interface KeyframeState {
@@ -222,6 +223,7 @@ export interface BackendSnapshot {
     valid?: boolean;
     summary?: string;
   } | null;
+  watchSources?: Record<string, { length?: number; label?: string }>;
   keyIndex?: number;
 }
 
@@ -232,6 +234,7 @@ export interface ViewerBackend {
   subscribe(listener: (snapshot: BackendSnapshot) => void): () => void;
   step?(direction?: number): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
   setCameraIndex?(index: number): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
+  setRunState?(run: boolean, source?: string): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
   dispose?(): void;
 }
 

@@ -98,12 +98,12 @@ function clamp01(x) {
     'simulation.history_scrubber': () => {
       const hist = store.get()?.history;
       const count = Math.max(1, hist?.count ?? hist?.capacity ?? 1);
-      return { min: 1 - count, max: 0, step: 1 };
+      return { min: 1 - count, max: 0, step: 1, absolute: true };
     },
     'simulation.key_slider': () => {
       const keyframes = store.get()?.keyframes;
       const capacity = Math.max(1, keyframes?.capacity ?? 16);
-      return { min: 0, max: Math.max(0, capacity - 1), step: 1 };
+      return { min: 0, max: Math.max(0, capacity - 1), step: 1, absolute: true };
     },
   };
 
@@ -905,6 +905,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     container.append(row);
 
     let resolvedRange = { ...baseRange };
+    let usesAbsolute = false;
     const resolveRange = () => {
       const range = { ...baseRange };
       const resolver = dynamicRangeResolvers[control.item_id];
@@ -926,9 +927,16 @@ function registerShortcutHandlers(shortcutSpec, handler) {
         range.step = input.type === 'range' ? 0.001 : 1;
       }
       resolvedRange = range;
-      input.min = String(range.min);
-      input.max = String(range.max);
-      input.step = String(range.step);
+      usesAbsolute = !!range.absolute;
+      if (usesAbsolute) {
+        input.min = String(range.min);
+        input.max = String(range.max);
+        input.step = String(range.step);
+      } else {
+        input.min = '0';
+        input.max = '1';
+        input.step = '0.001';
+      }
       return resolvedRange;
     };
 
@@ -937,14 +945,21 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     const binding = createBinding(control, {
       getValue: () => {
         resolveRange();
+        if (usesAbsolute) {
+          return Number(input.value);
+        }
         return denormaliseFromRange(Number(input.value), resolvedRange);
       },
       applyValue: (value) => {
         const range = resolveRange();
         const numeric = Number(value ?? range.min);
         const limited = Number.isFinite(numeric) ? Math.min(range.max, Math.max(range.min, numeric)) : range.min;
-        const t = normaliseToRange(limited, range);
-        input.value = String(t);
+        if (usesAbsolute) {
+          input.value = String(limited);
+        } else {
+          const t = normaliseToRange(limited, range);
+          input.value = String(t);
+        }
         valueLabel.textContent = formatNumber(limited);
       },
     });
@@ -958,13 +973,33 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       'input',
       guardBinding(binding, async () => {
         const range = resolveRange();
-        const t = Number(input.value);
-        const realValue = denormaliseFromRange(t, range);
+        let realValue;
+        if (usesAbsolute) {
+          const raw = Number(input.value);
+          realValue = Number.isFinite(raw) ? raw : range.min;
+        } else {
+          const t = Number(input.value);
+          realValue = denormaliseFromRange(t, range);
+        }
         valueLabel.textContent = formatNumber(realValue);
         await applySpecAction(store, backend, control, realValue);
       }),
     );
-    valueLabel.textContent = formatNumber(denormaliseFromRange(Number(input.value), resolvedRange));
+    if (usesAbsolute) {
+      valueLabel.textContent = formatNumber(Number(input.value) || resolvedRange.min);
+    } else {
+      valueLabel.textContent = formatNumber(denormaliseFromRange(Number(input.value), resolvedRange));
+    }
+
+    const setEditing = (flag) => {
+      binding.isEditing = !!flag;
+    };
+    input.addEventListener('pointerdown', () => setEditing(true));
+    input.addEventListener('pointerup', () => setEditing(false));
+    input.addEventListener('pointerleave', () => {
+      if (binding.isEditing) setEditing(false);
+    });
+    input.addEventListener('blur', () => setEditing(false));
   }
 
   function renderEditInput(container, control, mode = 'text') {
@@ -1178,6 +1213,68 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     container.append(row);
   }
 
+  function renderWatchField(container, control) {
+    const { row, label, field } = createLabeledRow(control);
+    const inputId = `${sanitiseName(control.item_id)}__watch`;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = inputId;
+    input.setAttribute('data-testid', control.item_id);
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.placeholder = 'qpos';
+    const datalist = document.createElement('datalist');
+    datalist.id = `${inputId}__options`;
+    input.setAttribute('list', datalist.id);
+    field.append(input, datalist);
+    container.append(row);
+
+    const syncOptions = (state) => {
+      const sources = state?.watch?.sources || {};
+      datalist.innerHTML = '';
+      Object.entries(sources).forEach(([key, meta]) => {
+        const option = document.createElement('option');
+        option.value = key;
+        const len = Number(meta?.length) || 0;
+        const labelText = meta?.label || (len ? `${key} (${len})` : key);
+        option.label = labelText;
+        datalist.append(option);
+      });
+    };
+
+    const binding = createBinding(control, {
+      getValue: () => input.value,
+      applyValue: (value) => {
+        input.value = value == null ? '' : String(value);
+      },
+    });
+
+    binding.updateOptions = (state) => syncOptions(state);
+    syncOptions(store.get());
+
+    const commit = guardBinding(binding, async () => {
+      const token = input.value.trim();
+      await applySpecAction(store, backend, control, token);
+    });
+
+    input.addEventListener('focus', () => {
+      binding.isEditing = true;
+    });
+    input.addEventListener('input', () => {
+      binding.isEditing = true;
+    });
+    input.addEventListener('blur', () => {
+      binding.isEditing = false;
+      commit();
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.blur();
+      }
+    });
+  }
+
   function renderSeparator(container, control) {
     const row = createControlRow(control, { full: true });
     const sep = document.createElement('div');
@@ -1233,6 +1330,9 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     }
     if (control?.item_id === 'simulation.run') {
       return renderRunToggle(container, control);
+    }
+    if (control?.item_id === 'watch.field') {
+      return renderWatchField(container, control);
     }
     const renderer = CONTROL_RENDERERS[type] || renderStatic;
     return renderer(container, control);
@@ -1371,6 +1471,11 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     for (const [id, binding] of controlBindings.entries()) {
       if (hasDirty && !dirtyIds.includes(id)) continue;
       if (!binding || !binding.setValue) continue;
+      if (typeof binding.updateOptions === 'function') {
+        try {
+          binding.updateOptions(state);
+        } catch {}
+      }
       if (binding.isEditing) continue;
       const control = controlById.get(id);
       if (!control) continue;

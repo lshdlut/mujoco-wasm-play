@@ -17,7 +17,7 @@ const MJ_GROUP_COUNT = 6;
 const HISTORY_DEFAULT_CAPTURE_HZ = 30;
 const HISTORY_DEFAULT_CAPACITY = 900;
 const KEYFRAME_CAPACITY = 16;
-const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata'];
+const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata', 'xpos', 'xmat', 'body_xpos', 'body_xmat'];
 
 function createGroupState(initial = 1) {
   const state = {};
@@ -287,6 +287,7 @@ class DirectBackend {
   #captureHistorySample(force = false) {
     if (!this.history || !this.history.enabled || !this.sim) return;
     if (!(this.history.samples?.length > 0)) return;
+    if (!force && (!this.running || this.history.scrubActive)) return;
     const now = performance.now();
     if (!force && this.history.captureIntervalMs > 0) {
       if ((now - this.history.lastCaptureTs) < this.history.captureIntervalMs) return;
@@ -377,12 +378,13 @@ class DirectBackend {
     this.#emitHistoryMeta();
   }
 
-  #resetKeyframes(nq = 0, nv = 0) {
+  #resetKeyframes(nq = 0, nv = 0, nu = 0) {
     this.keyframes = {
       capacity: KEYFRAME_CAPACITY,
       entries: [],
       nq,
       nv,
+      nu,
       lastSaved: -1,
       lastLoaded: -1,
     };
@@ -412,6 +414,7 @@ class DirectBackend {
       this.keyframes.entries.push({
         qpos: new Float64Array(this.keyframes.nq),
         qvel: this.keyframes.nv > 0 ? new Float64Array(this.keyframes.nv) : null,
+        ctrl: this.keyframes.nu > 0 ? new Float64Array(this.keyframes.nu) : null,
         time: 0,
         label: '',
         seq: 0,
@@ -447,6 +450,10 @@ class DirectBackend {
     if (slot.qvel && qvelView && slot.qvel.length === qvelView.length) {
       slot.qvel.set(qvelView);
     }
+    const ctrlView = this.sim.ctrlView?.();
+    if (slot.ctrl && ctrlView && slot.ctrl.length === ctrlView.length) {
+      slot.ctrl.set(ctrlView);
+    }
     slot.time = this.sim.time?.() || 0;
     slot.seq = this.frameSeq;
     slot.label = slot.label || `Key ${target + 1}`;
@@ -471,9 +478,16 @@ class DirectBackend {
         for (let i = 0; i < qvelView.length; i += 1) qvelView[i] = 0;
       }
     }
+    const ctrlView = this.sim.ctrlView?.();
+    if (ctrlView) {
+      if (slot.ctrl && slot.ctrl.length === ctrlView.length) {
+        ctrlView.set(slot.ctrl);
+      } else {
+        for (let i = 0; i < ctrlView.length; i += 1) ctrlView[i] = 0;
+      }
+    }
     try { this.sim.forward?.(); } catch {}
     this.keyframes.lastLoaded = index;
-    this.running = false;
     this.#releaseHistoryScrub();
     this.#emitKeyframeMeta();
     return true;
@@ -494,7 +508,9 @@ class DirectBackend {
 
   #normaliseWatchField(field) {
     const token = String(field || '').trim().toLowerCase();
-    return WATCH_FIELDS.includes(token) ? token : 'qpos';
+    if (WATCH_FIELDS.includes(token)) return token;
+    if (token === 'xipos' || token === 'body_xipos') return 'body_xpos';
+    return 'qpos';
   }
 
   #updateWatchTarget(field, index, emit = false) {
@@ -517,6 +533,14 @@ class DirectBackend {
   #readWatchView(field) {
     const token = this.#normaliseWatchField(field);
     switch (token) {
+      case 'xpos':
+        return this.sim?.geomXposView?.();
+      case 'xmat':
+        return this.sim?.geomXmatView?.();
+      case 'body_xpos':
+        return this.sim?.bodyXposView?.();
+      case 'body_xmat':
+        return this.sim?.bodyXmatView?.();
       case 'qvel':
         return this.sim?.qvelView?.();
       case 'ctrl':
@@ -565,6 +589,36 @@ class DirectBackend {
     const payload = this.#sampleWatch();
     if (!payload) return;
     this.#emitMessage({ kind: 'watch', ...payload });
+  }
+
+  #collectWatchSources() {
+    const sources = {};
+    const add = (id, length, label) => {
+      if (Number.isFinite(length) && length > 0) {
+        sources[id] = {
+          length,
+          label: label || id,
+        };
+      }
+    };
+    const nq = this.sim?.nq?.() | 0;
+    const nv = this.sim?.nv?.() | 0;
+    const nuLocal = this.sim?.nu?.() | 0;
+    let nsens = 0;
+    try {
+      nsens = this.sim?.nsensordata?.() | 0;
+    } catch {}
+    const ngeom = this.sim?.ngeom?.() | 0;
+    const nbody = this.sim?.nbody?.() | 0;
+    add('qpos', nq, `qpos (${nq})`);
+    add('qvel', nv, `qvel (${nv})`);
+    add('ctrl', nuLocal, `ctrl (${nuLocal})`);
+    add('sensordata', nsens, `sensordata (${nsens})`);
+    add('xpos', ngeom * 3, `geom xpos (${ngeom}×3)`);
+    add('xmat', ngeom * 9, `geom xmat (${ngeom}×9)`);
+    add('body_xpos', nbody * 3, `body xpos (${nbody}×3)`);
+    add('body_xmat', nbody * 9, `body xmat (${nbody}×9)`);
+    return sources;
   }
 
   #collectCameraMeta() {
@@ -746,6 +800,7 @@ class DirectBackend {
           const ok = this.sim.reset?.();
           if (ok) {
             this.#resetHistory(this.sim.nq?.() | 0, this.sim.nv?.() | 0);
+            this.#resetKeyframes(this.sim.nq?.() | 0, this.sim.nv?.() | 0, this.sim.nu?.() | 0);
             this.#resetWatch();
             this.#captureHistorySample(true);
             this.#emitHistoryMeta();
@@ -1059,7 +1114,7 @@ class DirectBackend {
     this.visualState = this.#captureStructState('mjVisual');
     this.statisticState = this.#captureStructState('mjStatistic');
     this.#resetHistory(this.sim.nq?.() | 0, this.sim.nv?.() | 0);
-    this.#resetKeyframes(this.sim.nq?.() | 0, this.sim.nv?.() | 0);
+    this.#resetKeyframes(this.sim.nq?.() | 0, this.sim.nv?.() | 0, this.sim.nu?.() | 0);
     this.#resetWatch();
     this.keySliderIndex = -1;
     this.#captureHistorySample(true);
@@ -1403,6 +1458,7 @@ class DirectBackend {
       msg.keyframes = this.#serializeKeyframes();
       const watchPayload = this.#sampleWatch();
       if (watchPayload) msg.watch = watchPayload;
+      msg.watchSources = this.#collectWatchSources();
       if (Number.isFinite(this.keySliderIndex)) {
         msg.keyIndex = this.keySliderIndex | 0;
       }
