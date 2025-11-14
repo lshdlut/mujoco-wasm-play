@@ -1,5 +1,5 @@
-import type { MujocoModule } from '../wasm/loader.js';
-import { heapViewF64 } from '../wasm/loader.js';
+import type { MujocoModule } from './loader.js';
+import { heapViewF64 } from './loader.js';
 
 const MJ_STATE_INTEGRATION = 0x1fff;
 

@@ -7,7 +7,7 @@ import {
   applyGesture,
   readControlValue,
   mergeBackendSnapshot,
-} from './src/viewer/state.mjs';
+} from './viewer/state.mjs';
 import { consumeViewerParams } from './viewer_params.mjs';
 import {
   FALLBACK_PRESET_ALIASES,
