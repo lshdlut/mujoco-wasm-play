@@ -41,7 +41,8 @@ let pendingCtrl = new Map(); // index -> value (clamped later)
 let gestureState = { mode: 'idle', phase: 'idle', pointer: null };
 let dragState = { dx: 0, dy: 0 };
 let voptFlags = Array.from({ length: 32 }, () => 0);
-let sceneFlags = Array.from({ length: 8 }, () => 0);
+const SCENE_FLAG_DEFAULTS = [1, 0, 1, 0, 1, 0, 1, 0, 0, 1];
+let sceneFlags = SCENE_FLAG_DEFAULTS.slice();
 let labelMode = 0;
 let frameMode = 0;
 let cameraMode = 0;
@@ -134,12 +135,24 @@ function cloneGroupState(source = groupState) {
   return out;
 }
 
+function cloneSceneFlags(source = sceneFlags) {
+  const out = [];
+  for (let i = 0; i < SCENE_FLAG_DEFAULTS.length; i += 1) {
+    if (source && source[i] != null) {
+      out[i] = source[i] ? 1 : 0;
+    } else {
+      out[i] = SCENE_FLAG_DEFAULTS[i];
+    }
+  }
+  return out;
+}
+
 function emitOptionState() {
   try {
     postMessage({
       kind: 'options',
       voptFlags: Array.isArray(voptFlags) ? [...voptFlags] : [],
-      sceneFlags: Array.isArray(sceneFlags) ? [...sceneFlags] : [],
+      sceneFlags: cloneSceneFlags(),
       labelMode,
       frameMode,
       cameraMode,
@@ -1077,7 +1090,7 @@ function snapshot() {
     gesture,
     drag,
     voptFlags: Array.isArray(voptFlags) ? [...voptFlags] : [],
-    sceneFlags: Array.isArray(sceneFlags) ? [...sceneFlags] : [],
+    sceneFlags: cloneSceneFlags(),
     labelMode,
     frameMode,
     cameraMode,
@@ -1396,7 +1409,7 @@ onmessage = async (ev) => {
       gestureState = { mode: 'idle', phase: 'idle', pointer: null };
       dragState = { dx: 0, dy: 0 };
       voptFlags = Array.from({ length: 32 }, () => 0);
-      sceneFlags = Array.from({ length: 8 }, () => 0);
+      sceneFlags = SCENE_FLAG_DEFAULTS.slice();
       labelMode = 0;
       frameMode = 0;
       cameraMode = 0;
@@ -1502,7 +1515,9 @@ onmessage = async (ev) => {
     } else if (msg.cmd === 'setSceneFlag') {
       const idx = Number(msg.index) | 0;
       const enabled = !!msg.enabled;
-      if (!Array.isArray(sceneFlags)) sceneFlags = Array.from({ length: 8 }, () => 0);
+      if (!Array.isArray(sceneFlags) || sceneFlags.length !== SCENE_FLAG_DEFAULTS.length) {
+        sceneFlags = SCENE_FLAG_DEFAULTS.slice();
+      }
       if (idx >= 0 && idx < sceneFlags.length) {
         sceneFlags[idx] = enabled ? 1 : 0;
         emitOptionState();

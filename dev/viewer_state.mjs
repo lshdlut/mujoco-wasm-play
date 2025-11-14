@@ -84,6 +84,19 @@ function resetSelectionState(runtime) {
   runtime.selection = createDefaultSelectionState();
 }
 
+const SCENE_FLAG_DEFAULTS = Object.freeze([
+  true,  // shadow
+  false, // wireframe
+  true,  // reflection
+  false, // additive
+  true,  // skybox
+  false, // fog
+  true,  // haze
+  false, // segment
+  false, // id color
+  true,  // cull face
+]);
+
 const DEFAULT_VIEWER_STATE = Object.freeze({
   overlays: {
     help: false,
@@ -114,6 +127,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
       dx: 0,
       dy: 0,
     },
+    screenshotSeq: 0,
     selection: createDefaultSelectionState(),
     perturb: {
       mode: 'idle',
@@ -158,7 +172,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   },
   rendering: {
     voptFlags: Array.from({ length: 32 }, () => false),
-    sceneFlags: Array.from({ length: 8 }, () => false),
+    sceneFlags: SCENE_FLAG_DEFAULTS.slice(),
     labelMode: 0,
     frameMode: 0,
     assets: null,
@@ -549,7 +563,15 @@ function mergeBackendSnapshot(draft, snapshot) {
   }
   if (Array.isArray(snapshot.sceneFlags)) {
     const rendering = ensureRenderingState(draft);
-    rendering.sceneFlags = snapshot.sceneFlags.map((flag) => !!flag);
+    const flags = [];
+    for (let i = 0; i < SCENE_FLAG_DEFAULTS.length; i += 1) {
+      if (i < snapshot.sceneFlags.length && snapshot.sceneFlags[i] != null) {
+        flags[i] = !!snapshot.sceneFlags[i];
+      } else {
+        flags[i] = SCENE_FLAG_DEFAULTS[i];
+      }
+    }
+    rendering.sceneFlags = flags;
   }
   if (snapshot.groups) {
     const rendering = ensureRenderingState(draft);
@@ -650,7 +672,7 @@ function ensureRenderingState(target) {
   if (!target.rendering) {
     target.rendering = {
       voptFlags: Array.from({ length: 32 }, () => false),
-      sceneFlags: Array.from({ length: 8 }, () => false),
+      sceneFlags: SCENE_FLAG_DEFAULTS.slice(),
       labelMode: 0,
       frameMode: 0,
       groups: createViewerGroupState(true),
@@ -660,7 +682,18 @@ function ensureRenderingState(target) {
       target.rendering.voptFlags = Array.from({ length: 32 }, () => false);
     }
     if (!Array.isArray(target.rendering.sceneFlags)) {
-      target.rendering.sceneFlags = Array.from({ length: 8 }, () => false);
+      target.rendering.sceneFlags = SCENE_FLAG_DEFAULTS.slice();
+    }
+    if (target.rendering.sceneFlags.length !== SCENE_FLAG_DEFAULTS.length) {
+      const normalised = [];
+      for (let i = 0; i < SCENE_FLAG_DEFAULTS.length; i += 1) {
+        if (i < target.rendering.sceneFlags.length && target.rendering.sceneFlags[i] != null) {
+          normalised[i] = !!target.rendering.sceneFlags[i];
+        } else {
+          normalised[i] = SCENE_FLAG_DEFAULTS[i];
+        }
+      }
+      target.rendering.sceneFlags = normalised;
     }
     if (typeof target.rendering.labelMode !== 'number') {
       target.rendering.labelMode = 0;
@@ -852,6 +885,10 @@ function applyControl(draft, control, value) {
   }
   if (control.item_id === 'file.screenshot') {
     draft.toast = { message: 'Screenshot captured', ts: Date.now() };
+    if (!Number.isFinite(draft.runtime?.screenshotSeq)) {
+      draft.runtime.screenshotSeq = 0;
+    }
+    draft.runtime.screenshotSeq += 1;
     return true;
   }
   if (control.item_id === 'file.quit') {
@@ -1192,9 +1229,18 @@ function resolveSnapshot(state) {
     voptFlags: Array.isArray(state.voptFlags)
       ? state.voptFlags.map((flag) => (flag ? 1 : 0))
       : Array.from({ length: 32 }, () => 0),
-    sceneFlags: Array.isArray(state.sceneFlags)
-      ? state.sceneFlags.map((flag) => (flag ? 1 : 0))
-      : Array.from({ length: 8 }, () => 0),
+    sceneFlags: (() => {
+      const flags = [];
+      const source = Array.isArray(state.sceneFlags) ? state.sceneFlags : [];
+      for (let i = 0; i < SCENE_FLAG_DEFAULTS.length; i += 1) {
+        if (i < source.length && source[i] != null) {
+          flags[i] = source[i] ? 1 : 0;
+        } else {
+          flags[i] = SCENE_FLAG_DEFAULTS[i] ? 1 : 0;
+        }
+      }
+      return flags;
+    })(),
     labelMode: Number.isFinite(state.labelMode) ? (state.labelMode | 0) : 0,
     frameMode: Number.isFinite(state.frameMode) ? (state.frameMode | 0) : 0,
     cameraMode: Number.isFinite(state.cameraMode) ? (state.cameraMode | 0) : 0,
@@ -1339,7 +1385,7 @@ export async function createBackend(options = {}) {
     gesture: { mode: 'idle', phase: 'idle', pointer: null },
     drag: { dx: 0, dy: 0 },
     voptFlags: Array.from({ length: 32 }, () => 0),
-    sceneFlags: Array.from({ length: 8 }, () => 0),
+    sceneFlags: SCENE_FLAG_DEFAULTS.map((flag) => (flag ? 1 : 0)),
     labelMode: 0,
     frameMode: 0,
     cameraMode: 0,
@@ -1470,7 +1516,15 @@ export async function createBackend(options = {}) {
       lastSnapshot.voptFlags = data.voptFlags.map((flag) => (flag ? 1 : 0));
     }
     if (Array.isArray(data.sceneFlags)) {
-      lastSnapshot.sceneFlags = data.sceneFlags.map((flag) => (flag ? 1 : 0));
+      const flags = [];
+      for (let i = 0; i < SCENE_FLAG_DEFAULTS.length; i += 1) {
+        if (i < data.sceneFlags.length && data.sceneFlags[i] != null) {
+          flags[i] = data.sceneFlags[i] ? 1 : 0;
+        } else {
+          flags[i] = SCENE_FLAG_DEFAULTS[i] ? 1 : 0;
+        }
+      }
+      lastSnapshot.sceneFlags = flags;
     }
     if (typeof data.labelMode === 'number' && Number.isFinite(data.labelMode)) {
       lastSnapshot.labelMode = data.labelMode | 0;
@@ -2147,9 +2201,11 @@ export async function createBackend(options = {}) {
       const idx = Number(sceneMatch[1]);
       const enabled = bool(value);
       if (!Array.isArray(lastSnapshot.sceneFlags)) {
-        lastSnapshot.sceneFlags = Array.from({ length: 8 }, () => 0);
+        lastSnapshot.sceneFlags = SCENE_FLAG_DEFAULTS.map((flag) => (flag ? 1 : 0));
       }
-      lastSnapshot.sceneFlags[idx] = enabled ? 1 : 0;
+      if (idx >= 0 && idx < SCENE_FLAG_DEFAULTS.length) {
+        lastSnapshot.sceneFlags[idx] = enabled ? 1 : 0;
+      }
       try { client.postMessage?.({ cmd: 'setSceneFlag', index: idx, enabled }); } catch (err) {
         if (debug) console.warn('[backend scene flag] post failed', err);
       }

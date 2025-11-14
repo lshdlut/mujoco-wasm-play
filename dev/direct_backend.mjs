@@ -19,6 +19,7 @@ const HISTORY_DEFAULT_CAPTURE_HZ = 30;
 const HISTORY_DEFAULT_CAPACITY = 900;
 const KEYFRAME_USER_SLOTS = 5;
 const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata', 'xpos', 'xmat', 'body_xpos', 'body_xmat'];
+const SCENE_FLAG_DEFAULTS = [1, 0, 1, 0, 1, 0, 1, 0, 0, 1];
 
 function createGroupState(initial = 1) {
   const state = {};
@@ -33,6 +34,18 @@ function cloneGroupState(source) {
   for (const type of GROUP_TYPES) {
     const arr = Array.isArray(source?.[type]) ? source[type] : [];
     out[type] = Array.from({ length: MJ_GROUP_COUNT }, (_, idx) => (arr[idx] ? 1 : 0));
+  }
+  return out;
+}
+
+function cloneSceneFlags(source) {
+  const out = [];
+  for (let i = 0; i < SCENE_FLAG_DEFAULTS.length; i += 1) {
+    if (source && source[i] != null) {
+      out[i] = source[i] ? 1 : 0;
+    } else {
+      out[i] = SCENE_FLAG_DEFAULTS[i];
+    }
   }
   return out;
 }
@@ -113,7 +126,7 @@ class DirectBackend {
     this.gesture = { mode: 'idle', phase: 'idle', pointer: null };
     this.drag = { dx: 0, dy: 0 };
     this.voptFlags = Array.from({ length: 32 }, () => 0);
-    this.sceneFlags = Array.from({ length: 8 }, () => 0);
+    this.sceneFlags = SCENE_FLAG_DEFAULTS.slice();
     this.labelMode = 0;
     this.frameMode = 0;
     this.cameraMode = 0;
@@ -857,7 +870,9 @@ class DirectBackend {
       case 'setSceneFlag': {
         const idx = Number(msg.index) | 0;
         const enabled = !!msg.enabled;
-        if (!Array.isArray(this.sceneFlags)) this.sceneFlags = Array.from({ length: 8 }, () => 0);
+        if (!Array.isArray(this.sceneFlags) || this.sceneFlags.length !== SCENE_FLAG_DEFAULTS.length) {
+          this.sceneFlags = SCENE_FLAG_DEFAULTS.slice();
+        }
         if (idx >= 0 && idx < this.sceneFlags.length) {
           this.sceneFlags[idx] = enabled ? 1 : 0;
           this.#emitOptions();
@@ -1128,7 +1143,7 @@ class DirectBackend {
       hasCcall: typeof this.mod?.ccall === 'function',
     });
     this.voptFlags = Array.from({ length: 32 }, () => 0);
-    this.sceneFlags = Array.from({ length: 8 }, () => 0);
+    this.sceneFlags = SCENE_FLAG_DEFAULTS.slice();
     this.labelMode = 0;
     this.frameMode = 0;
     this.cameraMode = 0;
@@ -1444,7 +1459,7 @@ class DirectBackend {
         gesture,
         drag,
         voptFlags: Array.isArray(this.voptFlags) ? [...this.voptFlags] : [],
-        sceneFlags: Array.isArray(this.sceneFlags) ? [...this.sceneFlags] : [],
+        sceneFlags: cloneSceneFlags(this.sceneFlags),
         labelMode: this.labelMode | 0,
         frameMode: this.frameMode | 0,
         cameraMode: this.cameraMode | 0,
@@ -1554,7 +1569,7 @@ class DirectBackend {
     this.#emitMessage({
       kind: 'options',
       voptFlags: Array.isArray(this.voptFlags) ? [...this.voptFlags] : [],
-      sceneFlags: Array.isArray(this.sceneFlags) ? [...this.sceneFlags] : [],
+      sceneFlags: cloneSceneFlags(this.sceneFlags),
       labelMode: this.labelMode | 0,
       frameMode: this.frameMode | 0,
       cameraMode: this.cameraMode | 0,

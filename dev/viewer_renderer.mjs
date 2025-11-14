@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createVerticalGradientTexture } from './viewer_environment.mjs';
 
 const MJ_GEOM = {
   PLANE: 0,
@@ -105,6 +106,74 @@ const LABEL_DPR_CAP = 2;
 const LABEL_GEOM_LIMIT = 120;
 const FRAME_GEOM_LIMIT = 80;
 const TEMP_MAT4 = new THREE.Matrix4();
+const DEFAULT_CLEAR_HEX = 0xd6dce4;
+
+function ensureSceneFog(ctx) {
+  if (!ctx) return null;
+  if (ctx.sceneFog && ctx.sceneFog.isFog) return ctx.sceneFog;
+  const fog = new THREE.Fog(DEFAULT_CLEAR_HEX, 12, 48);
+  ctx.sceneFog = fog;
+  return fog;
+}
+
+function updateFogEnabled(ctx, enabled) {
+  if (!ctx?.scene) return;
+  if (enabled) {
+    const fog = ensureSceneFog(ctx);
+    ctx.scene.fog = fog;
+  } else if (ctx.scene.fog) {
+    ctx.sceneFog = ctx.scene.fog;
+    ctx.scene.fog = null;
+  }
+}
+
+function applySkyboxVisibility(ctx, enabled) {
+  if (!ctx) return;
+  if (!enabled) {
+    ctx.skySuppressed = true;
+    if (ctx.sky) ctx.sky.visible = false;
+    if (ctx.scene) {
+      if (ctx.scene.background && ctx.scene.background !== ctx.hazeTexture) {
+        ctx._skyboxBackup = ctx.scene.background;
+      }
+      ctx.scene.background = null;
+    }
+  } else if (ctx.skySuppressed) {
+    ctx.skySuppressed = false;
+    ctx.envDirty = true;
+    if (ctx.sky && !ctx.envFromHDRI) ctx.sky.visible = true;
+  } else if (ctx.sky && !ctx.envFromHDRI) {
+    ctx.sky.visible = true;
+  }
+}
+
+function applyHazeBackground(ctx, vis, hazeEnabled, skyboxEnabled) {
+  if (!ctx?.scene) return;
+  if (!hazeEnabled || skyboxEnabled) {
+    if (ctx.scene.background === ctx.hazeTexture) {
+      ctx.scene.background = null;
+    }
+    if (!hazeEnabled && ctx.renderer && typeof ctx.renderer.setClearColor === 'function') {
+      const hex = ctx.baseClearHex ?? DEFAULT_CLEAR_HEX;
+      ctx.renderer.setClearColor(hex, 1);
+    }
+    ctx.hazeActive = false;
+    return;
+  }
+  const hazeHex = rgbaToHex(vis?.rgba?.haze, 0xf0f6ff);
+  const fogHex = rgbaToHex(vis?.rgba?.fog, DEFAULT_CLEAR_HEX);
+  const key = `${hazeHex}_${fogHex}`;
+  if (!ctx.hazeTexture || ctx.hazeTextureKey !== key) {
+    try { ctx.hazeTexture?.dispose?.(); } catch {}
+    ctx.hazeTexture = createVerticalGradientTexture(THREE, hazeHex, fogHex, 256);
+    ctx.hazeTextureKey = key;
+  }
+  ctx.scene.background = ctx.hazeTexture;
+  if (ctx.renderer && typeof ctx.renderer.setClearColor === 'function') {
+    ctx.renderer.setClearColor(fogHex, 1);
+  }
+  ctx.hazeActive = true;
+}
 
 function mat3ToQuat(m) {
   const m00 = m[0] ?? 1;
@@ -1506,7 +1575,10 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
       };
       if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
       material = ctx.materialPool.get(poolKey);
-      if (!useStandard) material.envMapIntensity = (ctx?.envIntensity ?? 0.6);
+      if (!useStandard) {
+        const baseIntensity = ctx?.envIntensity ?? 0.6;
+        material.envMapIntensity = ctx?.reflectionActive === false ? 0 : baseIntensity;
+      }
     }
     material.side = THREE.FrontSide;
     mesh = new THREE.Mesh(geometryInfo.geometry, material);
@@ -1725,7 +1797,8 @@ export function createRendererManager({
     if ('physicallyCorrectLights' in renderer) {
       renderer.physicallyCorrectLights = true;
     }
-    renderer.setClearColor(0xd6dce4, 1);
+    renderer.setClearColor(DEFAULT_CLEAR_HEX, 1);
+    ctx.baseClearHex = DEFAULT_CLEAR_HEX;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
 
@@ -1824,7 +1897,8 @@ export function createRendererManager({
     }
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0xd6dce4, 12, 48);
+    scene.fog = new THREE.Fog(DEFAULT_CLEAR_HEX, 12, 48);
+    ctx.sceneFog = scene.fog;
 
     const ambient = new THREE.AmbientLight(0xffffff, 0);
     scene.add(ambient);
@@ -1924,6 +1998,12 @@ export function createRendererManager({
     const context = initRenderer();
     if (!context.initialized) return;
     const renderer = context.renderer;
+    const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
+    const reflectionEnabled = sceneFlags[2] !== false;
+    const skyboxEnabled = sceneFlags[4] !== false;
+    const fogEnabled = !!sceneFlags[5];
+    const hazeEnabled = !!sceneFlags[6];
+    context.reflectionActive = reflectionEnabled;
 
     const assets = state.rendering?.assets || null;
     syncRendererAssets(context, assets);
@@ -1936,17 +2016,21 @@ export function createRendererManager({
     if (typeof ensureEnvIfNeeded === 'function') {
       ensureEnvIfNeeded(context, state);
     }
+    applySkyboxVisibility(context, skyboxEnabled);
 
     const visStruct = state.model?.vis || null;
     const statStruct = state.model?.stat || null;
+    updateFogEnabled(context, fogEnabled);
+    applyHazeBackground(context, visStruct, hazeEnabled, skyboxEnabled);
     if (visStruct) {
       applyVisualLighting(context, visStruct);
-      applyVisualFog(context, visStruct, statStruct, context.bounds);
+      if (fogEnabled) {
+        applyVisualFog(context, visStruct, statStruct, context.bounds);
+      }
     }
 
     const defaults = getDefaultVopt(context, state);
     const voptFlags = state.rendering?.voptFlags || [];
-    const sceneFlags = state.rendering?.sceneFlags || [];
     if (context.renderer) {
       context.renderer.shadowMap.enabled = true;
       if (context.renderer.shadowMap) {
@@ -2377,14 +2461,15 @@ export function createRendererManager({
       }
     } catch {}
 
-    if (typeof context.envIntensity === 'number' && context.envIntensity !== context.lastEnvIntensity) {
-      const intensity = context.envIntensity;
+    const baseEnvIntensity = typeof context.envIntensity === 'number' ? context.envIntensity : 0;
+    const effectiveEnvIntensity = reflectionEnabled ? baseEnvIntensity : 0;
+    if (context.lastEnvIntensity !== effectiveEnvIntensity) {
       for (const m of context.meshes) {
         if (m && m.material && 'envMapIntensity' in m.material) {
-          m.material.envMapIntensity = intensity;
+          m.material.envMapIntensity = effectiveEnvIntensity;
         }
       }
-      context.lastEnvIntensity = intensity;
+      context.lastEnvIntensity = effectiveEnvIntensity;
     }
 
     if (context.light && context.bounds) {
@@ -2520,16 +2605,14 @@ export function createRendererManager({
     if (copyState && copyState.seq > context.copySeq) {
       context.copySeq = copyState.seq;
     }
-    const baseGrid = sceneFlags[2] !== false;
     const fb = context.fallback || {};
     const gridVisible =
-      !fb.enabled &&
-      (baseGrid &&
-        !(
-          copyState &&
-          copyState.precision === 'full' &&
-          copyState.seq === context.copySeq
-        ));
+      (!reflectionEnabled || fb.enabled === false) &&
+      !(
+        copyState &&
+        copyState.precision === 'full' &&
+        copyState.seq === context.copySeq
+      );
     context.grid.visible = gridVisible;
 
     const gl = renderer && typeof renderer.getContext === 'function' ? renderer.getContext() : null;

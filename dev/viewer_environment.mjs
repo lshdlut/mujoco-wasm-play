@@ -44,7 +44,7 @@ function hasModelBackground(state) {
 }
 
 
-function createVerticalGradientTexture(THREE_NS, topHex, bottomHex, height = 256) {
+export function createVerticalGradientTexture(THREE_NS, topHex, bottomHex, height = 256) {
   const width = 2;
   const h = Math.max(8, height | 0);
   const data = new Uint8Array(width * h * 4);

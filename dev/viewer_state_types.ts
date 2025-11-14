@@ -28,6 +28,7 @@ export interface RuntimeState {
   drag: DragState;
   lastAlign: AlignRuntimeState;
   lastCopy: CopyRuntimeState;
+  screenshotSeq: number;
 }
 
 export interface PanelState {
