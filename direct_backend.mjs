@@ -793,13 +793,9 @@ class DirectBackend {
           const ok = this.sim.reset?.();
           if (ok) {
             this.#resetHistory();
-            this.#resetKeyframes();
-            this.#resetWatch();
             this.#captureHistorySample(true);
             this.#emitHistoryMeta();
-            this.#emitWatchState();
             this.#snapshot();
-            this.#emitRenderAssets();
           }
         }
         break;

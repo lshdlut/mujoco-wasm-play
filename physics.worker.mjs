@@ -1450,22 +1450,10 @@ onmessage = async (ev) => {
       emitRenderAssets();
     } else if (msg.cmd === 'reset') {
       if (sim && sim.reset?.()) {
-        gestureState = { mode: 'idle', phase: 'idle', pointer: null };
-        dragState = { dx: 0, dy: 0 };
-        voptFlags = Array.from({ length: 32 }, () => 0);
-        sceneFlags = Array.from({ length: 8 }, () => 0);
-        labelMode = 0;
-        frameMode = 0;
-        cameraMode = 0;
-        groupState = createGroupState();
         initHistoryBuffers();
-        resetKeyframes();
-        resetWatchState();
         captureHistorySample(true);
         emitHistoryMeta();
-        emitWatchState();
         snapshot();
-        emitRenderAssets();
       }
     } else if (msg.cmd === 'step') {
       if (sim) {
