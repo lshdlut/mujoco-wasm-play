@@ -8,6 +8,7 @@ tmp/
 
 # Local notes (ignored)
 local/
+local_tools/docs/
 FORGE_NOTES.local.md
 FORGE_REFERENCE.md
 AGENTS.md
@@ -16,3 +17,7 @@ backups/
 worker_debug_direct.txt
 
 worker_debug_last.txt
+
+# Root markdown files (keep README tracked)
+/*.md
+!/README.md

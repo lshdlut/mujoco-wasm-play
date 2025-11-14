@@ -1,6 +1,6 @@
-// Type definitions and re-exports for the runtime state helpers located in
-// state.mjs. This file allows TypeScript-aware tooling to reason about the
-// viewer store while keeping the browser-consumable implementation in plain JS.
+// Type definitions for the runtime state helpers located in viewer_state.mjs.
+// This file lets TypeScript-aware tooling reason about the viewer store while
+// keeping the browser-consumable implementation in plain JS.
 
 export interface OverlayState {
   help: boolean;

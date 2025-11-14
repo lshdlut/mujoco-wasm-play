@@ -1,15 +1,15 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Dev HTTP server for mujoco-wasm-play.
 
-- Serves a given root directory (default: local_tools)
+- Serves a given root directory (default: repository dev root)
 - Ensures correct MIME types for .mjs/.js/.wasm
 - Adds security/cache headers:
   X-Content-Type-Options: nosniff
   Cache-Control: public, max-age=0, must-revalidate
 
 Usage:
-  python scripts/dev_server.py --root local_tools --port 8080
+  python scripts/dev_server.py --root . --port 8080
 """
 from __future__ import annotations
 import argparse
@@ -89,14 +89,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default="local_tools", help="directory to serve")
+    ap.add_argument("--root", default=".", help="directory to serve")
     ap.add_argument("--port", type=int, default=8080)
     args = ap.parse_args()
 
     root = os.path.abspath(args.root)
     os.chdir(root)
     httpd = http.server.ThreadingHTTPServer(("", args.port), Handler)
-    print(f"Serving {root} on http://localhost:{args.port} …")
+    print(f"Serving {root} on http://localhost:{args.port}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -107,3 +107,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+

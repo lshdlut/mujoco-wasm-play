@@ -91,7 +91,7 @@ export function consumeViewerParams(params = viewerSearchParams) {
     requestedModel: params.get('model'),
     hdriParam: hdriParamRaw && hdriParamRaw.trim().length > 0
       ? hdriParamRaw
-      : 'local_tools/assets/env/autumn_field_puresky_4k.hdr',
+      : 'dist/assets/env/autumn_field_puresky_4k.hdr',
   };
 }
 

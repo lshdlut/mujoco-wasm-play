@@ -1,5 +1,5 @@
 {
-  "source": "local_tools/mujoco/simulate",
+  "source": "dist/src/mujoco/simulate",
   "left_panel": [
     {
       "section_id": "file",

@@ -18,6 +18,12 @@ export const FALLBACK_PRESETS = {
   },
 };
 
+const HDRI_FALLBACK_PATHS = [
+  'dist/assets/env/sky_clear_4k.hdr',
+  'dist/assets/env/hausdorf_clear_sky_4k.hdr',
+  'dist/assets/env/autumn_field_puresky_4k.hdr',
+];
+
 function hasModelEnvironment(state) {
   const env = state?.rendering?.environment;
   if (!env) return false;
@@ -95,12 +101,7 @@ export function createEnvironmentManager({
     if (!ctx.envFromHDRI && !hasModelEnvironment(store.get())) {
       const candidates = [];
       if (hdriQueryParam) candidates.push(hdriQueryParam);
-      candidates.push('local_tools/assets/env/sky_clear_4k.hdr');
-      candidates.push('local_tools/assets/env/hausdorf_clear_sky_4k.hdr');
-      candidates.push('local_tools/assets/env/autumn_field_puresky_4k.hdr');
-      candidates.push('dist/assets/env/sky_clear_4k.hdr');
-      candidates.push('dist/assets/env/hausdorf_clear_sky_4k.hdr');
-      candidates.push('dist/assets/env/autumn_field_puresky_4k.hdr');
+      candidates.push(...HDRI_FALLBACK_PATHS);
       const tryLoadHDRI = async (url) => {
         try {
           const mod = await import('three/addons/loaders/RGBELoader.js');

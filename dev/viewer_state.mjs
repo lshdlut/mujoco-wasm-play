@@ -1,8 +1,8 @@
-import { prepareBindingUpdate, splitBinding } from './bindings.mjs';
+import { prepareBindingUpdate, splitBinding } from './viewer_bindings.mjs';
 
 // Lightweight state container and backend helpers for the simulate parity UI.
 // Runtime implementation lives in JS so it can be consumed directly by the
-// buildless viewer. Type definitions are provided separately in state.ts.
+// buildless viewer. Type definitions are provided separately in viewer_state_types.ts.
 
 const MJ_GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'skin'];
 const MJ_GROUP_COUNT = 6;
