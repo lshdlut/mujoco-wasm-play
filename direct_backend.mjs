@@ -17,7 +17,7 @@ const MJ_GROUP_COUNT = 6;
 const MJ_STATE_SIG = 0x1fff;
 const HISTORY_DEFAULT_CAPTURE_HZ = 30;
 const HISTORY_DEFAULT_CAPACITY = 900;
-const KEYFRAME_CAPACITY = 16;
+const KEYFRAME_USER_SLOTS = 5;
 const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata', 'xpos', 'xmat', 'body_xpos', 'body_xmat'];
 
 function createGroupState(initial = 1) {
@@ -218,10 +218,12 @@ class DirectBackend {
     }
   }
 
-    #resetHistory() {
+  #resetHistory() {
     const capacity = Math.max(0, this.historyConfig.capacity | 0);
     const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
-    const stateSize = typeof this.sim?.stateSize === 'function' ? (this.sim.stateSize(this.historyConfig.stateSig) | 0) : 0;
+    const stateSize = typeof this.sim?.stateSize === 'function'
+      ? (this.sim.stateSize(this.historyConfig.stateSig) | 0)
+      : 0;
     if (!(capacity > 0) || !(stateSize > 0)) {
       this.history = {
         enabled: false,
@@ -252,30 +254,6 @@ class DirectBackend {
       scrubIndex: 0,
       scrubActive: false,
       resumeRun: true,
-    };
-  };
-      return;
-    }
-    const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
-    this.history = {
-      enabled: true,
-      captureHz,
-      capacity,
-      captureIntervalMs: 1000 / captureHz,
-      samples: Array.from({ length: capacity }, () => ({
-        qpos: new Float64Array(nq),
-        qvel: nv > 0 ? new Float64Array(nv) : null,
-        time: 0,
-        seq: 0,
-      })),
-      head: 0,
-      count: 0,
-      lastCaptureTs: 0,
-      scrubIndex: 0,
-      scrubActive: false,
-      resumeRun: true,
-      nq,
-      nv,
     };
   }
 
@@ -315,22 +293,20 @@ class DirectBackend {
       if ((now - this.history.lastCaptureTs) < this.history.captureIntervalMs) return;
     }
     this.history.lastCaptureTs = now;
-    const qposView = this.sim.qposView?.();
-    if (!qposView) return;
     const slot = this.history.samples[this.history.head];
     if (!slot) return;
-    if (slot.qpos.length !== qposView.length) {
-      slot.qpos = new Float64Array(qposView.length);
-    }
-    slot.qpos.set(qposView);
-    const qvelView = this.sim.qvelView?.();
-    if (slot.qvel && qvelView && slot.qvel.length === qvelView.length) {
-      slot.qvel.set(qvelView);
-    }
-    slot.time = this.sim.time?.() || 0;
-    slot.seq = this.frameSeq;
+    this.sim.captureState?.(slot, this.history.stateSig || MJ_STATE_SIG);
     this.history.head = (this.history.head + 1) % this.history.capacity;
     this.history.count = Math.min(this.history.count + 1, this.history.capacity);
+  }
+
+  #setRunning(run, source = 'backend', notify = true) {
+    const target = !!run;
+    const changed = this.running !== target;
+    this.running = target;
+    if (notify && changed) {
+      this.#emitMessage({ kind: 'run_state', running: target, source });
+    }
   }
 
   #releaseHistoryScrub() {
@@ -338,7 +314,9 @@ class DirectBackend {
     this.history.scrubIndex = 0;
     if (this.history.scrubActive) {
       this.history.scrubActive = false;
-      this.running = this.history.resumeRun;
+      const resume = this.history.resumeRun;
+      this.history.resumeRun = true;
+      this.#setRunning(resume, 'history');
     }
   }
 
@@ -359,25 +337,14 @@ class DirectBackend {
     const idx = (this.history.head - steps + this.history.capacity) % this.history.capacity;
     const slot = this.history.samples[idx];
     if (!slot) return false;
-    const qposView = this.sim.qposView?.();
-    if (qposView && slot.qpos.length === qposView.length) {
-      qposView.set(slot.qpos);
-    }
-    const qvelView = this.sim.qvelView?.();
-    if (qvelView) {
-      if (slot.qvel && slot.qvel.length === qvelView.length) {
-        qvelView.set(slot.qvel);
-      } else {
-        for (let i = 0; i < qvelView.length; i += 1) qvelView[i] = 0;
-      }
-    }
-    try { this.sim.forward?.(); } catch {}
+    const applied = this.sim.applyState?.(slot, this.history.stateSig || MJ_STATE_SIG);
+    if (!applied) return false;
     this.history.scrubIndex = -steps;
     if (!this.history.scrubActive) {
       this.history.scrubActive = true;
       this.history.resumeRun = this.running;
     }
-    this.running = false;
+    this.#setRunning(false, 'history');
     return true;
   }
 
@@ -396,52 +363,73 @@ class DirectBackend {
       }
     }
     this.historyConfig = next;
-    this.  #resetHistory() {
-    const capacity = Math.max(0, this.historyConfig.capacity | 0);
-    const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
-    const stateSize = typeof this.sim?.stateSize === 'function' ? (this.sim.stateSize(this.historyConfig.stateSig) | 0) : 0;
-    if (!(capacity > 0) || !(stateSize > 0)) {
-      this.history = {
-        enabled: false,
-        captureHz,
-        capacity,
-        stateSize: 0,
-        samples: [],
-        head: 0,
-        count: 0,
-        lastCaptureTs: 0,
-        scrubIndex: 0,
-        scrubActive: false,
-        resumeRun: true,
-      };
-      return;
-    }
-    this.history = {
-      enabled: true,
-      captureHz,
-      capacity,
-      captureIntervalMs: 1000 / captureHz,
+    this.#resetHistory();
+    this.#emitHistoryMeta();
+  }
+
+  #resetKeyframes() {
+    const stateSig = this.historyConfig?.stateSig || MJ_STATE_SIG;
+    const stateSize = typeof this.sim?.stateSize === 'function' ? (this.sim.stateSize(stateSig) | 0) : 0;
+    const nativeCount = typeof this.sim?.nkey === 'function' ? (this.sim.nkey() | 0) : 0;
+    const totalSlots = nativeCount + KEYFRAME_USER_SLOTS;
+    const slots = Array.from({ length: totalSlots }, (_, idx) => ({
+      label: idx < nativeCount ? `XML Key ${idx}` : `User Slot ${idx - nativeCount + 1}`,
+      kind: idx < nativeCount ? 'xml' : 'user',
+      available: false,
+      state: stateSize > 0 ? new Float64Array(stateSize) : null,
+    }));
+    this.keyframes = {
       stateSize,
-      stateSig: this.historyConfig.stateSig,
-      samples: Array.from({ length: capacity }, () => new Float64Array(stateSize)),
-      head: 0,
-      count: 0,
-      lastCaptureTs: 0,
-      scrubIndex: 0,
-      scrubActive: false,
-      resumeRun: true,
+      stateSig,
+      slots,
+      nativeCount,
+      lastSaved: -1,
+      lastLoaded: -1,
     };
-  };
+    const captureState = typeof this.sim?.captureState === 'function' ? this.sim.captureState.bind(this.sim) : null;
+    const applyState = typeof this.sim?.applyState === 'function' ? this.sim.applyState.bind(this.sim) : null;
+    if (captureState && applyState && stateSize > 0 && slots.length) {
+      const restore = captureState(null, stateSig);
+      if (nativeCount > 0 && typeof this.sim.resetKeyframe === 'function') {
+        for (let i = 0; i < nativeCount; i += 1) {
+          const slot = slots[i];
+          const ok = this.sim.resetKeyframe(i);
+          if (ok && slot.state) {
+            captureState(slot.state, stateSig);
+            slot.available = true;
+          }
+        }
+        if (restore && restore.length === stateSize) {
+          applyState(restore, stateSig);
+        }
+      } else if (restore && restore.length === stateSize && slots[0]?.state) {
+        slots[0].state.set(restore);
+        slots[0].available = true;
+      }
+    }
+    if (slots.length > 0) {
+      this.keySliderIndex = Math.max(0, Math.min(this.keySliderIndex ?? 0, slots.length - 1));
+    } else {
+      this.keySliderIndex = -1;
+    }
+    this.#emitKeyframeMeta();
   }
 
   #serializeKeyframes() {
     if (!this.keyframes) {
-      return { capacity: KEYFRAME_CAPACITY, count: 0, labels: [], lastSaved: -1, lastLoaded: -1 };
+      return { capacity: 0, count: 0, labels: [], slots: [], lastSaved: -1, lastLoaded: -1 };
     }
+    const slots = Array.isArray(this.keyframes.slots) ? this.keyframes.slots : [];
     return {
-      capacity: this.keyframes.capacity,
-      count: this.keyframes.entries.length,
-      labels: this.keyframes.entries.map((entry, idx) => entry.label || `Key ${idx + 1}`),
+      capacity: slots.length,
+      count: slots.filter((slot) => slot.available).length,
+      labels: slots.map((slot) => slot.label),
+      slots: slots.map((slot, idx) => ({
+        index: idx,
+        label: slot.label,
+        kind: slot.kind,
+        available: !!slot.available,
+      })),
       lastSaved: this.keyframes.lastSaved ?? -1,
       lastLoaded: this.keyframes.lastLoaded ?? -1,
     };
@@ -452,55 +440,29 @@ class DirectBackend {
   }
 
   #ensureKeyframeSlot(index) {
-    if (!this.keyframes) return null;
-    const target = Math.max(0, Math.min(index, this.keyframes.entries.length));
-    if (target === this.keyframes.entries.length) {
-      this.keyframes.entries.push({
-        qpos: new Float64Array(this.keyframes.nq),
-        qvel: this.keyframes.nv > 0 ? new Float64Array(this.keyframes.nv) : null,
-        ctrl: this.keyframes.nu > 0 ? new Float64Array(this.keyframes.nu) : null,
-        time: 0,
-        label: '',
-        seq: 0,
-      });
+    if (!this.keyframes || !Array.isArray(this.keyframes.slots)) return null;
+    const slots = this.keyframes.slots;
+    if (!slots.length) return null;
+    const target = Math.max(0, Math.min(index, slots.length - 1));
+    const slot = slots[target];
+    if (slot && !slot.state && (this.keyframes.stateSize | 0) > 0) {
+      slot.state = new Float64Array(this.keyframes.stateSize | 0);
     }
-    return this.keyframes.entries[target];
+    return slot;
   }
 
   #saveKeyframe(requestedIndex) {
     if (!this.keyframes || !this.sim) return -1;
-    const qposView = this.sim.qposView?.();
-    if (!qposView) return -1;
-    let target = Number.isFinite(requestedIndex) && requestedIndex >= 0
-      ? requestedIndex
-      : this.keyframes.entries.length;
-    if (target > this.keyframes.entries.length) {
-      target = this.keyframes.entries.length;
-    }
-    if (this.keyframes.entries.length >= this.keyframes.capacity && target >= this.keyframes.capacity) {
-      this.keyframes.entries.shift();
-      target = this.keyframes.entries.length;
-    }
-    if (this.keyframes.entries.length >= this.keyframes.capacity) {
-      target = this.keyframes.capacity - 1;
-    }
+    const slots = this.keyframes.slots || [];
+    if (!slots.length) return -1;
+    const target = Math.max(0, Math.min(Number.isFinite(requestedIndex) && requestedIndex >= 0
+      ? requestedIndex | 0
+      : (this.keySliderIndex | 0), slots.length - 1));
     const slot = this.#ensureKeyframeSlot(target);
-    if (!slot) return -1;
-    if (slot.qpos.length !== qposView.length) {
-      slot.qpos = new Float64Array(qposView.length);
-    }
-    slot.qpos.set(qposView);
-    const qvelView = this.sim.qvelView?.();
-    if (slot.qvel && qvelView && slot.qvel.length === qvelView.length) {
-      slot.qvel.set(qvelView);
-    }
-    const ctrlView = this.sim.ctrlView?.();
-    if (slot.ctrl && ctrlView && slot.ctrl.length === ctrlView.length) {
-      slot.ctrl.set(ctrlView);
-    }
-    slot.time = this.sim.time?.() || 0;
-    slot.seq = this.frameSeq;
-    slot.label = slot.label || `Key ${target + 1}`;
+    if (!slot || !slot.state) return -1;
+    if (typeof this.sim.captureState !== 'function') return -1;
+    this.sim.captureState(slot.state, this.keyframes.stateSig || MJ_STATE_SIG);
+    slot.available = true;
     this.keyframes.lastSaved = target;
     this.#emitKeyframeMeta();
     return target;
@@ -508,32 +470,18 @@ class DirectBackend {
 
   #loadKeyframe(index) {
     if (!this.keyframes || !this.sim) return false;
-    const entries = this.keyframes.entries || [];
-    if (!(index >= 0 && index < entries.length)) return false;
-    const slot = entries[index];
-    const qposView = this.sim.qposView?.();
-    if (!qposView || slot.qpos.length !== qposView.length) return false;
-    qposView.set(slot.qpos);
-    const qvelView = this.sim.qvelView?.();
-    if (qvelView) {
-      if (slot.qvel && slot.qvel.length === qvelView.length) {
-        qvelView.set(slot.qvel);
-      } else {
-        for (let i = 0; i < qvelView.length; i += 1) qvelView[i] = 0;
-      }
-    }
-    const ctrlView = this.sim.ctrlView?.();
-    if (ctrlView) {
-      if (slot.ctrl && slot.ctrl.length === ctrlView.length) {
-        ctrlView.set(slot.ctrl);
-      } else {
-        for (let i = 0; i < ctrlView.length; i += 1) ctrlView[i] = 0;
-      }
-    }
-    try { this.sim.forward?.(); } catch {}
-    this.keyframes.lastLoaded = index;
-    this.#releaseHistoryScrub();
+    const slots = this.keyframes.slots || [];
+    if (!slots.length) return false;
+    const target = Math.max(0, Math.min(index | 0, slots.length - 1));
+    const slot = slots[target];
+    if (!slot || !slot.state || !slot.available) return false;
+    if (typeof this.sim.applyState !== 'function') return false;
+    const ok = this.sim.applyState(slot.state, this.keyframes.stateSig || MJ_STATE_SIG);
+    if (!ok) return false;
+    this.keyframes.lastLoaded = target;
     this.#emitKeyframeMeta();
+    this.#releaseHistoryScrub();
+    this.#setRunning(false, 'keyframe');
     return true;
   }
 
@@ -550,17 +498,17 @@ class DirectBackend {
     };
   }
 
-  #normaliseWatchField(field) {
+  #resolveWatchField(field) {
     const token = String(field || '').trim().toLowerCase();
     if (WATCH_FIELDS.includes(token)) return token;
     if (token === 'xipos' || token === 'body_xipos') return 'body_xpos';
-    return 'qpos';
+    return null;
   }
 
   #updateWatchTarget(field, index, emit = false) {
     if (!this.watch) this.#resetWatch();
-    if (field) {
-      this.watch.field = this.#normaliseWatchField(field);
+    if (typeof field === 'string') {
+      this.watch.field = field.trim();
     }
     if (Number.isFinite(index)) {
       this.watch.index = Math.max(0, index | 0);
@@ -575,7 +523,7 @@ class DirectBackend {
   }
 
   #readWatchView(field) {
-    const token = this.#normaliseWatchField(field);
+    const token = this.#resolveWatchField(field) || 'qpos';
     switch (token) {
       case 'xpos':
         return this.sim?.geomXposView?.();
@@ -598,7 +546,8 @@ class DirectBackend {
 
   #sampleWatch() {
     if (!this.watch || !this.sim) return null;
-    const view = this.#readWatchView(this.watch.field);
+    const resolved = this.#resolveWatchField(this.watch.field);
+    const view = this.#readWatchView(resolved || this.watch.field);
     const idx = this.watch.index | 0;
     if (view && idx >= 0 && idx < view.length) {
       const val = Number(view[idx]) || 0;
@@ -615,6 +564,7 @@ class DirectBackend {
     }
     return {
       field: this.watch.field,
+      resolved: resolved || 'qpos',
       index: this.watch.index,
       value: this.watch.value,
       min: this.watch.min,
@@ -624,7 +574,7 @@ class DirectBackend {
       valid: !!this.watch.valid,
       summary:
         this.watch.valid && typeof this.watch.value === 'number'
-          ? `${this.watch.field}[${this.watch.index}] = ${this.watch.value}`
+          ? `${(resolved || this.watch.field || 'qpos')}[${this.watch.index}] = ${this.watch.value}`
           : 'n/a',
     };
   }
@@ -658,10 +608,10 @@ class DirectBackend {
     add('qvel', nv, `qvel (${nv})`);
     add('ctrl', nuLocal, `ctrl (${nuLocal})`);
     add('sensordata', nsens, `sensordata (${nsens})`);
-    add('xpos', ngeom * 3, `geom xpos (${ngeom}×3)`);
-    add('xmat', ngeom * 9, `geom xmat (${ngeom}×9)`);
-    add('body_xpos', nbody * 3, `body xpos (${nbody}×3)`);
-    add('body_xmat', nbody * 9, `body xmat (${nbody}×9)`);
+    add('xpos', ngeom * 3, `geom xpos (${ngeom}x3)`);
+    add('xmat', ngeom * 9, `geom xmat (${ngeom}x9)`);
+    add('body_xpos', nbody * 3, `body xpos (${nbody}x3)`);
+    add('body_xmat', nbody * 9, `body xmat (${nbody}x9)`);
     return sources;
   }
 
@@ -810,7 +760,7 @@ class DirectBackend {
   }
 
   terminate() {
-    this.running = false;
+    this.#setRunning(false, 'terminate');
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
@@ -843,42 +793,25 @@ class DirectBackend {
         if (this.sim) {
           const ok = this.sim.reset?.();
           if (ok) {
-            this.  #resetHistory() {
-    const capacity = Math.max(0, this.historyConfig.capacity | 0);
-    const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
-    const stateSize = typeof this.sim?.stateSize === 'function' ? (this.sim.stateSize(this.historyConfig.stateSig) | 0) : 0;
-    if (!(capacity > 0) || !(stateSize > 0)) {
-      this.history = {
-        enabled: false,
-        captureHz,
-        capacity,
-        stateSize: 0,
-        samples: [],
-        head: 0,
-        count: 0,
-        lastCaptureTs: 0,
-        scrubIndex: 0,
-        scrubActive: false,
-        resumeRun: true,
-      };
-      return;
-    }
-    this.history = {
-      enabled: true,
-      captureHz,
-      capacity,
-      captureIntervalMs: 1000 / captureHz,
-      stateSize,
-      stateSig: this.historyConfig.stateSig,
-      samples: Array.from({ length: capacity }, () => new Float64Array(stateSize)),
-      head: 0,
-      count: 0,
-      lastCaptureTs: 0,
-      scrubIndex: 0,
-      scrubActive: false,
-      resumeRun: true,
-    };
-  } catch (err) {
+            this.#resetHistory();
+            this.#resetKeyframes();
+            this.#resetWatch();
+            this.#captureHistorySample(true);
+            this.#emitHistoryMeta();
+            this.#emitWatchState();
+            this.#snapshot();
+            this.#emitRenderAssets();
+          }
+        }
+        break;
+      }
+      case 'step': {
+        if (this.sim) {
+          try {
+            const n = Math.max(1, Math.min(10000, (msg.n | 0) || 1));
+            this.sim.step?.(n);
+            this.#snapshot();
+          } catch (err) {
             this.#emitError(err);
           }
         }
@@ -1069,10 +1002,11 @@ class DirectBackend {
         break;
       }
       case 'setPaused': {
-        this.running = !msg.paused;
-        if (!this.running && this.history) {
+        const nextRunning = !msg.paused;
+        this.#setRunning(nextRunning, msg.source || 'ui');
+        if (!nextRunning && this.history) {
           this.history.resumeRun = false;
-        } else if (this.running && this.history?.scrubActive) {
+        } else if (nextRunning && this.history?.scrubActive) {
           this.#releaseHistoryScrub();
           this.#emitHistoryMeta();
         }
@@ -1170,46 +1104,56 @@ class DirectBackend {
 
     this.dt = this.sim.timestep?.() || 0.002;
     this.rate = typeof msg.rate === 'number' ? msg.rate : 1.0;
-    this.running = true;
+    this.#setRunning(true, 'load');
     this.lastSimNow = performance.now();
     this.visualState = this.#captureStructState('mjVisual');
     this.statisticState = this.#captureStructState('mjStatistic');
-    this.  #resetHistory() {
-    const capacity = Math.max(0, this.historyConfig.capacity | 0);
-    const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
-    const stateSize = typeof this.sim?.stateSize === 'function' ? (this.sim.stateSize(this.historyConfig.stateSig) | 0) : 0;
-    if (!(capacity > 0) || !(stateSize > 0)) {
-      this.history = {
-        enabled: false,
-        captureHz,
-        capacity,
-        stateSize: 0,
-        samples: [],
-        head: 0,
-        count: 0,
-        lastCaptureTs: 0,
-        scrubIndex: 0,
-        scrubActive: false,
-        resumeRun: true,
-      };
-      return;
-    }
-    this.history = {
-      enabled: true,
-      captureHz,
-      capacity,
-      captureIntervalMs: 1000 / captureHz,
-      stateSize,
-      stateSig: this.historyConfig.stateSig,
-      samples: Array.from({ length: capacity }, () => new Float64Array(stateSize)),
-      head: 0,
-      count: 0,
-      lastCaptureTs: 0,
-      scrubIndex: 0,
-      scrubActive: false,
-      resumeRun: true,
-    };
-  } catch (err) {
+    this.#resetHistory();
+    this.#resetKeyframes();
+    this.#resetWatch();
+    this.keySliderIndex = -1;
+    this.#captureHistorySample(true);
+    this.#emitHistoryMeta();
+    this.#emitKeyframeMeta();
+    this.#emitWatchState();
+
+    const abi = this.#readAbi();
+    this.#emitLog('direct: forge module ready', {
+      hasMake: typeof this.mod?._mjwf_helper_make_from_xml === 'function',
+      hasCcall: typeof this.mod?.ccall === 'function',
+    });
+    this.voptFlags = Array.from({ length: 32 }, () => 0);
+    this.sceneFlags = Array.from({ length: 8 }, () => 0);
+    this.labelMode = 0;
+    this.frameMode = 0;
+    this.cameraMode = 0;
+    this.#emitMessage({
+      kind: 'ready',
+      abi,
+      dt: this.dt,
+      ngeom: this.sim.ngeom?.() | 0,
+      optionSupport: this.optionSupport,
+      visual: this.visualState || null,
+      statistic: this.statisticState || null,
+    });
+    this.#emitOptions();
+    this.#snapshot();
+    this.#emitRenderAssets();
+
+    this.#sendMeta();
+    this.#emitCameraMeta();
+    this.#emitGeomMeta();
+
+    this.#startLoops();
+  }
+
+  async #ensureModule() {
+    if (this.mod && this.sim) return;
+    try {
+      this.mod = await this.#loadForgeModule();
+      this.sim = new MjSimLite(this.mod);
+      await this.sim.maybeInstallShimFromQuery?.();
+    } catch (err) {
       this.#emitError(err);
       this.mod = createLocalModule();
       this.sim = new MjSimLite(this.mod);
@@ -1702,4 +1646,3 @@ class DirectBackend {
     }
   }
 }
-

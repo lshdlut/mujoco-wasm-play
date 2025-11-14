@@ -1275,6 +1275,73 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     });
   }
 
+  function renderKeyframeSelect(container, control) {
+    const { row, label, field } = createLabeledRow(control);
+    const selectId = `${sanitiseName(control.item_id)}__select`;
+    label.setAttribute('for', selectId);
+    const select = document.createElement('select');
+    select.id = selectId;
+    select.setAttribute('data-testid', control.item_id);
+    field.append(select);
+    container.append(row);
+
+    let binding = null;
+    const syncOptions = (state) => {
+      const keyframes = state?.keyframes;
+      const slots = Array.isArray(keyframes?.slots) && keyframes.slots.length
+        ? keyframes.slots
+        : (Array.isArray(keyframes?.labels)
+            ? keyframes.labels.map((label, idx) => ({ index: idx, label, available: true, kind: 'user' }))
+            : []);
+      select.innerHTML = '';
+      if (!slots.length) {
+        const option = document.createElement('option');
+        option.value = '-1';
+        option.textContent = 'No keyframes';
+        option.disabled = true;
+        select.append(option);
+        select.disabled = true;
+        return;
+      }
+      select.disabled = false;
+      slots.forEach((slot, idx) => {
+        const option = document.createElement('option');
+        const index = Number.isFinite(slot.index) ? slot.index : idx;
+        option.value = String(index);
+        const baseLabel = typeof slot.label === 'string' ? slot.label : `Key ${index}`;
+        option.textContent = slot.available ? baseLabel : `${baseLabel} (empty)`;
+        option.dataset.kind = slot.kind || 'user';
+        option.dataset.available = slot.available ? '1' : '0';
+        select.append(option);
+      });
+      const current = String(binding?.getValue?.() ?? -1);
+      const hasValue = Array.from(select.options).some((opt) => opt.value === current);
+      select.value = hasValue ? current : select.options[0].value;
+    };
+
+    binding = createBinding(control, {
+      getValue: () => store.get()?.simulation?.keyIndex ?? -1,
+      applyValue: (value) => {
+        const token = String(Number.isFinite(value) ? value : -1);
+        const hasValue = Array.from(select.options).some((opt) => opt.value === token);
+        select.value = hasValue ? token : (select.options[0]?.value ?? '-1');
+      },
+    });
+
+    binding.updateOptions = syncOptions;
+    syncOptions(store.get());
+
+    select.addEventListener(
+      'change',
+      guardBinding(binding, async () => {
+        const nextIndex = Number(select.value);
+        await applySpecAction(store, backend, control, Number.isFinite(nextIndex) ? nextIndex : 0);
+      }),
+    );
+
+    return row;
+  }
+
   function renderSeparator(container, control) {
     const row = createControlRow(control, { full: true });
     const sep = document.createElement('div');
@@ -1328,15 +1395,18 @@ function registerShortcutHandlers(shortcutSpec, handler) {
         await toggleControl(control.item_id);
       });
     }
-    if (control?.item_id === 'simulation.run') {
-      return renderRunToggle(container, control);
+      if (control?.item_id === 'simulation.run') {
+        return renderRunToggle(container, control);
+      }
+      if (control?.item_id === 'watch.field') {
+        return renderWatchField(container, control);
+      }
+      if (control?.item_id === 'simulation.key_slider') {
+        return renderKeyframeSelect(container, control);
+      }
+      const renderer = CONTROL_RENDERERS[type] || renderStatic;
+      return renderer(container, control);
     }
-    if (control?.item_id === 'watch.field') {
-      return renderWatchField(container, control);
-    }
-    const renderer = CONTROL_RENDERERS[type] || renderStatic;
-    return renderer(container, control);
-  }
 
   function renderSection(container, section) {
     const sectionEl = document.createElement('section');

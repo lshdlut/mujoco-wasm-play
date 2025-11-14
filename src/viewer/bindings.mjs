@@ -110,7 +110,8 @@ function normaliseValueByKind(kind, size, rawValue, control) {
 }
 
 export async function prepareBindingUpdate(control, rawValue) {
-  const binding = control?.binding;
+  const bindingRaw = control?.binding;
+  const binding = typeof bindingRaw === 'string' ? bindingRaw.trim() : bindingRaw;
   if (!binding || typeof binding !== 'string') return null;
   if (binding === 'Simulate::run') return null;
   const meta = await ensureBindingIndex();

@@ -84,7 +84,7 @@ const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
 
 const HISTORY_DEFAULT_CAPTURE_HZ = 30;
 const HISTORY_DEFAULT_CAPACITY = 900;
-const KEYFRAME_CAPACITY = 16;
+const KEYFRAME_EXTRA_SLOTS = 5;
 const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata', 'xpos', 'xmat', 'body_xpos', 'body_xmat'];
 
 let historyConfig = { captureHz: HISTORY_DEFAULT_CAPTURE_HZ, capacity: HISTORY_DEFAULT_CAPACITY, stateSig: MJ_STATE_SIG };
@@ -92,6 +92,17 @@ let historyState = null;
 let keyframeState = null;
 let watchState = null;
 let keySliderIndex = -1;
+
+function setRunning(next, source = 'backend', notify = true) {
+  const target = !!next;
+  const changed = running !== target;
+  running = target;
+  if (notify && changed) {
+    try {
+      postMessage({ kind: 'run_state', running: target, source });
+    } catch {}
+  }
+}
 
 function readStructState(scope) {
   if (!mod || !(h > 0)) return null;
@@ -332,8 +343,9 @@ function releaseHistoryScrub() {
   historyState.scrubIndex = 0;
   if (historyState.scrubActive) {
     historyState.scrubActive = false;
-    running = historyState.resumeRun;
+    const resume = historyState.resumeRun;
     historyState.resumeRun = true;
+    setRunning(resume, 'history');
   }
 }
 
@@ -361,7 +373,7 @@ function loadHistoryOffset(offset) {
     historyState.scrubActive = true;
     historyState.resumeRun = running;
   }
-  running = false;
+  setRunning(false, 'history');
   return true;
 }
 
@@ -380,69 +392,125 @@ function applyHistoryConfig(partial = {}) {
     }
   }
   historyConfig = next;
-  initHistoryBuffers(sim?.nq?.() | 0, sim?.nv?.() | 0);
+  initHistoryBuffers();
   emitHistoryMeta();
 }
 
 function resetKeyframes() {
-  const capacity = typeof sim?.nkey === 'function' ? (sim.nkey() | 0) : KEYFRAME_CAPACITY;
+  const stateSig = historyConfig.stateSig || MJ_STATE_SIG;
+  const stateSize = typeof sim?.stateSize === 'function' ? (sim.stateSize(stateSig) | 0) : 0;
+  const nativeCount = typeof sim?.nkey === 'function' ? (sim.nkey() | 0) : 0;
+  const totalSlots = nativeCount + KEYFRAME_EXTRA_SLOTS;
+  const slots = Array.from({ length: totalSlots }, (_, idx) => ({
+    label: idx < nativeCount ? `XML Key ${idx}` : `User Slot ${idx - nativeCount + 1}`,
+    kind: idx < nativeCount ? 'xml' : 'user',
+    available: false,
+    state: stateSize > 0 ? new Float64Array(stateSize) : null,
+  }));
   keyframeState = {
-    capacity: Math.max(0, capacity),
+    stateSize,
+    stateSig,
+    slots,
+    nativeCount,
     lastSaved: -1,
     lastLoaded: -1,
   };
+  const captureState = typeof sim?.captureState === 'function' ? sim.captureState.bind(sim) : null;
+  const applyState = typeof sim?.applyState === 'function' ? sim.applyState.bind(sim) : null;
+  if (captureState && applyState && stateSize > 0 && slots.length) {
+    const restore = captureState(null, stateSig);
+    if (nativeCount > 0 && typeof sim.resetKeyframe === 'function') {
+      for (let i = 0; i < nativeCount; i += 1) {
+        const slot = slots[i];
+        const ok = sim.resetKeyframe(i);
+        if (ok && slot.state) {
+          captureState(slot.state, stateSig);
+          slot.available = true;
+        }
+      }
+      if (restore && restore.length === stateSize) {
+        applyState(restore, stateSig);
+      }
+    } else if (restore && restore.length === stateSize && slots[0]?.state) {
+      slots[0].state.set(restore);
+      slots[0].available = true;
+    }
+  }
+  keySliderIndex = slots.length ? Math.max(0, Math.min(keySliderIndex, slots.length - 1)) : -1;
+  emitKeyframeMeta();
 }
-
 function serializeKeyframeMeta() {
   if (!keyframeState) {
-    return { capacity: KEYFRAME_CAPACITY, count: 0, labels: [], lastSaved: -1, lastLoaded: -1 };
+    return { capacity: 0, count: 0, labels: [], slots: [], lastSaved: -1, lastLoaded: -1 };
   }
-  const capacity = Math.max(0, keyframeState.capacity | 0);
-  const labels = capacity > 0 ? Array.from({ length: capacity }, (_, idx) => `Key ${idx}`) : [];
+  const slots = Array.isArray(keyframeState.slots) ? keyframeState.slots : [];
   return {
-    capacity,
-    count: capacity,
-    labels,
+    capacity: slots.length,
+    count: slots.filter((slot) => slot.available).length,
+    labels: slots.map((slot) => slot.label),
+    slots: slots.map((slot, idx) => ({
+      index: idx,
+      label: slot.label,
+      kind: slot.kind,
+      available: !!slot.available,
+    })),
     lastSaved: keyframeState.lastSaved ?? -1,
     lastLoaded: keyframeState.lastLoaded ?? -1,
   };
 }
-
 function emitKeyframeMeta() {
   try {
     postMessage({ kind: 'keyframes', ...serializeKeyframeMeta(), keyIndex: keySliderIndex });
   } catch {}
 }
 
-function saveKeyframe(requestedIndex) {
-  if (!keyframeState || !sim || typeof sim.setKeyframe !== 'function') return -1;
-  const capacity = Math.max(0, keyframeState.capacity | 0);
-  if (!(capacity > 0)) return -1;
-  const index = Number.isFinite(requestedIndex) && requestedIndex >= 0 ? requestedIndex | 0 : (keySliderIndex | 0);
-  const target = Math.max(0, Math.min(index, capacity - 1));
-  const ok = sim.setKeyframe(target);
-  if (ok) {
-    keyframeState.lastSaved = target;
-    emitKeyframeMeta();
-    return target;
+function ensureKeySlot(index) {
+  if (!keyframeState || !Array.isArray(keyframeState.slots)) return null;
+  const slots = keyframeState.slots;
+  if (!slots.length) return null;
+  const target = Math.max(0, Math.min(index, slots.length - 1));
+  const slot = slots[target];
+  if (slot && !slot.state && (keyframeState.stateSize | 0) > 0) {
+    slot.state = new Float64Array(keyframeState.stateSize | 0);
   }
-  return -1;
+  return slot;
+}
+
+function saveKeyframe(requestedIndex) {
+  if (!keyframeState || !sim) return -1;
+  const slots = keyframeState.slots || [];
+  if (!slots.length) return -1;
+  const target = Math.max(
+    0,
+    Math.min(
+      Number.isFinite(requestedIndex) && requestedIndex >= 0 ? requestedIndex | 0 : (keySliderIndex | 0),
+      slots.length - 1,
+    ),
+  );
+  const slot = ensureKeySlot(target);
+  if (!slot || !slot.state || typeof sim.captureState !== 'function') return -1;
+  sim.captureState(slot.state, keyframeState.stateSig || MJ_STATE_SIG);
+  slot.available = true;
+  keyframeState.lastSaved = target;
+  emitKeyframeMeta();
+  return target;
 }
 
 function loadKeyframe(index) {
-  if (!keyframeState || !sim || typeof sim.resetKeyframe !== 'function') return false;
-  const capacity = Math.max(0, keyframeState.capacity | 0);
-  if (!(capacity > 0)) return false;
-  const target = Math.max(0, Math.min(index | 0, capacity - 1));
-  const ok = sim.resetKeyframe(target);
+  if (!keyframeState || !sim) return false;
+  const slots = keyframeState.slots || [];
+  if (!slots.length) return false;
+  const target = Math.max(0, Math.min(index | 0, slots.length - 1));
+  const slot = slots[target];
+  if (!slot || !slot.state || !slot.available || typeof sim.applyState !== 'function') return false;
+  const ok = sim.applyState(slot.state, keyframeState.stateSig || MJ_STATE_SIG);
   if (!ok) return false;
   keyframeState.lastLoaded = target;
   emitKeyframeMeta();
   releaseHistoryScrub();
-  running = false;
+  setRunning(false, 'keyframe');
   return true;
 }
-
 function resetWatchState() {
   watchState = {
     field: 'qpos',
@@ -456,16 +524,18 @@ function resetWatchState() {
   };
 }
 
-function normaliseWatchField(field) {
+function resolveWatchField(field) {
   const token = String(field || '').trim().toLowerCase();
   if (WATCH_FIELDS.includes(token)) return token;
   if (token === 'xipos' || token === 'body_xipos') return 'body_xpos';
-  return 'qpos';
+  return null;
 }
 
 function updateWatchTarget(field, index) {
   if (!watchState) resetWatchState();
-  watchState.field = normaliseWatchField(field || watchState?.field);
+  if (typeof field === 'string') {
+    watchState.field = field.trim();
+  }
   watchState.index = Math.max(0, normaliseInt(index, 0));
   watchState.value = null;
   watchState.min = null;
@@ -476,7 +546,7 @@ function updateWatchTarget(field, index) {
 }
 
 function readWatchView(field) {
-  const token = normaliseWatchField(field);
+  const token = resolveWatchField(field) || 'qpos';
   switch (token) {
     case 'xpos':
       return sim?.geomXposView?.();
@@ -499,7 +569,8 @@ function readWatchView(field) {
 
 function sampleWatch() {
   if (!watchState || !sim) return null;
-  const view = readWatchView(watchState.field);
+  const resolved = resolveWatchField(watchState.field);
+  const view = readWatchView(resolved || watchState.field);
   const idx = watchState.index | 0;
   if (view && idx >= 0 && idx < view.length) {
     const val = Number(view[idx]) || 0;
@@ -516,6 +587,7 @@ function sampleWatch() {
   }
   return {
     field: watchState.field,
+    resolved: resolved || 'qpos',
     index: watchState.index,
     value: watchState.value,
     min: watchState.min,
@@ -525,7 +597,7 @@ function sampleWatch() {
     valid: !!watchState.valid,
     summary:
       watchState.valid && typeof watchState.value === 'number'
-        ? `${watchState.field}[${watchState.index}] = ${watchState.value}`
+        ? `${(resolved || watchState.field || 'qpos')}[${watchState.index}] = ${watchState.value}`
         : 'n/a',
   };
 }
@@ -1320,7 +1392,7 @@ onmessage = async (ev) => {
       emitHistoryMeta();
       emitKeyframeMeta();
       emitWatchState();
-      running = true;
+      setRunning(true, 'load');
       rate = typeof msg.rate === 'number' ? msg.rate : 1.0;
       gestureState = { mode: 'idle', phase: 'idle', pointer: null };
       dragState = { dx: 0, dy: 0 };
@@ -1578,8 +1650,9 @@ onmessage = async (ev) => {
     } else if (msg.cmd === 'setRate') {
       rate = Math.max(0.0625, Math.min(16, +msg.rate || 1));
     } else if (msg.cmd === 'setPaused') {
-      running = !msg.paused;
-      if (!running) {
+      const nextRunning = !msg.paused;
+      setRunning(nextRunning, msg.source || 'ui');
+      if (!nextRunning) {
         historyState && (historyState.resumeRun = false);
       } else if (historyState?.scrubActive) {
         releaseHistoryScrub();
@@ -1592,6 +1665,8 @@ onmessage = async (ev) => {
     try { postMessage({ kind:'error', message: String(e) }); } catch {}
   }
 };
+
+
 
 
 

@@ -38,6 +38,7 @@ function createDefaultKeyframeState() {
     capacity: 0,
     count: 0,
     labels: [],
+    slots: [],
     lastSaved: -1,
     lastLoaded: -1,
   };
@@ -487,6 +488,14 @@ function mergeBackendSnapshot(draft, snapshot) {
     }
     if (Array.isArray(snapshot.keyframes.labels)) {
       keyframes.labels = snapshot.keyframes.labels.slice();
+    }
+    if (Array.isArray(snapshot.keyframes.slots)) {
+      keyframes.slots = snapshot.keyframes.slots.map((slot) => ({
+        index: Number(slot.index) || 0,
+        label: typeof slot.label === 'string' ? slot.label : `Key ${slot.index | 0}`,
+        kind: slot.kind || 'user',
+        available: !!slot.available,
+      }));
     }
     if (typeof snapshot.keyframes.lastSaved === 'number') {
       keyframes.lastSaved = snapshot.keyframes.lastSaved | 0;
@@ -1270,6 +1279,7 @@ function resolveSnapshot(state) {
           capacity: Number(state.keyframes.capacity) || 0,
           count: Number(state.keyframes.count) || 0,
           labels: Array.isArray(state.keyframes.labels) ? state.keyframes.labels.slice() : [],
+          slots: Array.isArray(state.keyframes.slots) ? state.keyframes.slots.map((slot) => ({ ...slot })) : [],
           lastSaved: Number.isFinite(state.keyframes.lastSaved) ? (state.keyframes.lastSaved | 0) : -1,
           lastLoaded: Number.isFinite(state.keyframes.lastLoaded) ? (state.keyframes.lastLoaded | 0) : -1,
         }
@@ -1476,7 +1486,7 @@ export async function createBackend(options = {}) {
     }
   }
 
-  function setRunState(run, source = 'ui') {
+  function setRunState(run, source = 'ui', notifyBackend = true) {
     const nextPaused = !run;
     paused = nextPaused;
     lastSnapshot.paused = nextPaused;
@@ -1489,10 +1499,12 @@ export async function createBackend(options = {}) {
         if (debug) console.warn('[backend history reset] post failed', err);
       }
     }
-    try {
-      client.postMessage?.({ cmd: 'setPaused', paused: nextPaused });
-    } catch (err) {
-      if (debug) console.warn('[backend] setPaused post failed', err);
+    if (notifyBackend) {
+      try {
+        client.postMessage?.({ cmd: 'setPaused', paused: nextPaused, source });
+      } catch (err) {
+        if (debug) console.warn('[backend] setPaused post failed', err);
+      }
     }
     return notifyListeners();
   }
@@ -1557,6 +1569,12 @@ export async function createBackend(options = {}) {
       }
     }
     switch (data.kind) {
+      case 'run_state': {
+        if (typeof data.running === 'boolean') {
+          setRunState(!!data.running, data.source || 'backend', false);
+        }
+        break;
+      }
       case 'ready':
         lastFrameId = -1;
         lastSnapshot.history = createDefaultHistoryState();
@@ -1728,9 +1746,17 @@ export async function createBackend(options = {}) {
           if (typeof data.keyframes.count === 'number') {
             lastSnapshot.keyframes.count = Math.max(0, data.keyframes.count | 0);
           }
-          if (Array.isArray(data.keyframes.labels)) {
-            lastSnapshot.keyframes.labels = data.keyframes.labels.slice();
-          }
+      if (Array.isArray(data.keyframes.labels)) {
+        lastSnapshot.keyframes.labels = data.keyframes.labels.slice();
+      }
+      if (Array.isArray(data.keyframes.slots)) {
+        lastSnapshot.keyframes.slots = data.keyframes.slots.map((slot) => ({
+          index: Number(slot.index) || 0,
+          label: typeof slot.label === 'string' ? slot.label : `Key ${slot.index | 0}`,
+          kind: slot.kind || 'user',
+          available: !!slot.available,
+        }));
+      }
           if (typeof data.keyframes.lastSaved === 'number') {
             lastSnapshot.keyframes.lastSaved = data.keyframes.lastSaved | 0;
           }

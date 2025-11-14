@@ -84,6 +84,7 @@ export interface KeyframeState {
   capacity: number;
   count: number;
   labels: string[];
+  slots: Array<{ index: number; label: string; kind: string; available: boolean }>;
   lastSaved: number;
   lastLoaded: number;
 }
@@ -209,6 +210,7 @@ export interface BackendSnapshot {
     capacity?: number;
     count?: number;
     labels?: string[];
+    slots?: Array<{ index?: number; label?: string; kind?: string; available?: boolean }>;
     lastSaved?: number;
     lastLoaded?: number;
   } | null;
