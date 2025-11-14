@@ -508,7 +508,6 @@ function loadKeyframe(index) {
   keyframeState.lastLoaded = target;
   emitKeyframeMeta();
   releaseHistoryScrub();
-  setRunning(false, 'keyframe');
   return true;
 }
 function resetWatchState() {
@@ -1563,6 +1562,14 @@ onmessage = async (ev) => {
       if (loadKeyframe(idx)) {
         keySliderIndex = idx;
       }
+    } else if (msg.cmd === 'keyframeSelect') {
+      const idx = Math.max(0, normaliseInt(msg.index, 0));
+      if (keyframeState?.slots?.length) {
+        keySliderIndex = Math.min(idx, keyframeState.slots.length - 1);
+      } else {
+        keySliderIndex = idx;
+      }
+      emitKeyframeMeta();
     } else if (msg.cmd === 'setWatch') {
       const field = typeof msg.field === 'string' ? msg.field : watchState?.field;
       updateWatchTarget(field, msg.index);

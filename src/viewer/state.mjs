@@ -2024,6 +2024,12 @@ export async function createBackend(options = {}) {
     }
     if (id === 'simulation.key_slider') {
       lastSnapshot.keyIndex = normaliseInt(value, -1);
+      const index = Math.max(-1, lastSnapshot.keyIndex | 0);
+      try {
+        client.postMessage?.({ cmd: 'keyframeSelect', index });
+      } catch (err) {
+        if (debug) console.warn('[backend keyframe select] failed', err);
+      }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }

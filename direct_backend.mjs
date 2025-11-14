@@ -481,7 +481,6 @@ class DirectBackend {
     this.keyframes.lastLoaded = target;
     this.#emitKeyframeMeta();
     this.#releaseHistoryScrub();
-    this.#setRunning(false, 'keyframe');
     return true;
   }
 
@@ -924,6 +923,16 @@ class DirectBackend {
       case 'keyframeLoad': {
         const idx = Math.max(0, Number(msg.index) | 0);
         if (this.#loadKeyframe(idx)) {
+          this.keySliderIndex = idx;
+        }
+        break;
+      }
+      case 'keyframeSelect': {
+        const idx = Math.max(0, Number(msg.index) | 0);
+        if (this.keyframes?.slots?.length) {
+          this.keySliderIndex = Math.min(idx, this.keyframes.slots.length - 1);
+          this.#emitKeyframeMeta();
+        } else {
           this.keySliderIndex = idx;
         }
         break;
