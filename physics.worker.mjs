@@ -9,6 +9,7 @@ import installForgeAbiCompat from './forge_abi_compat.js';
 import { createSceneSnap } from './snapshots.mjs';
 
 const FORCE_EPS = 1e-9;
+const MJ_STATE_SIG = 0x1fff;
 // Minimal local getView to avoid path issues in buildless mode
 function getView(mod, ptr, dtype, len) {
   if (!ptr || !len) {
@@ -86,7 +87,7 @@ const HISTORY_DEFAULT_CAPACITY = 900;
 const KEYFRAME_CAPACITY = 16;
 const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata', 'xpos', 'xmat', 'body_xpos', 'body_xmat'];
 
-let historyConfig = { captureHz: HISTORY_DEFAULT_CAPTURE_HZ, capacity: HISTORY_DEFAULT_CAPACITY };
+let historyConfig = { captureHz: HISTORY_DEFAULT_CAPTURE_HZ, capacity: HISTORY_DEFAULT_CAPACITY, stateSig: MJ_STATE_SIG };
 let historyState = null;
 let keyframeState = null;
 let watchState = null;
@@ -244,42 +245,40 @@ function clamp(value, lo, hi) {
   return Math.max(lo, Math.min(hi, value));
 }
 
-function initHistoryBuffers(nq = 0, nv = 0) {
+function initHistoryBuffers() {
   const capacity = Math.max(0, historyConfig.capacity | 0);
-  if (!(capacity > 0) || !(nq > 0)) {
+  const captureHz = Math.max(1, Number(historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
+  const stateSize = typeof sim?.stateSize === 'function' ? (sim.stateSize(historyConfig.stateSig) | 0) : 0;
+  if (!(capacity > 0) || !(stateSize > 0)) {
     historyState = {
       enabled: false,
-      captureHz: historyConfig.captureHz,
+      captureHz,
       capacity,
+      stateSize: 0,
+      samples: [],
+      head: 0,
       count: 0,
+      lastCaptureTs: 0,
       scrubIndex: 0,
       scrubActive: false,
-      samples: [],
-      nq,
-      nv,
+      resumeRun: true,
     };
     return;
   }
-  const captureHz = Math.max(1, Number(historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
   historyState = {
     enabled: true,
     captureHz,
     capacity,
     captureIntervalMs: 1000 / captureHz,
-    samples: Array.from({ length: capacity }, () => ({
-      qpos: new Float64Array(nq),
-      qvel: nv > 0 ? new Float64Array(nv) : null,
-      time: 0,
-      seq: 0,
-    })),
+    stateSize,
+    stateSig: historyConfig.stateSig,
+    samples: Array.from({ length: capacity }, () => new Float64Array(stateSize)),
     head: 0,
     count: 0,
     lastCaptureTs: 0,
     scrubIndex: 0,
     scrubActive: false,
     resumeRun: true,
-    nq,
-    nv,
   };
 }
 
@@ -321,19 +320,9 @@ function captureHistorySample(force = false) {
     if ((now - historyState.lastCaptureTs) < historyState.captureIntervalMs) return;
   }
   historyState.lastCaptureTs = now;
-  const qposView = sim.qposView?.();
-  if (!qposView || !qposView.length) return;
   const slot = historyState.samples[historyState.head];
   if (!slot) return;
-  slot.qpos.set(qposView);
-  if (slot.qvel) {
-    const qvelView = sim.qvelView?.();
-    if (qvelView && qvelView.length === slot.qvel.length) {
-      slot.qvel.set(qvelView);
-    }
-  }
-  slot.time = sim.time?.() || 0;
-  slot.seq = snapshotState.frame;
+  sim.captureState?.(slot, historyState.stateSig || MJ_STATE_SIG);
   historyState.head = (historyState.head + 1) % historyState.capacity;
   historyState.count = Math.min(historyState.count + 1, historyState.capacity);
 }
@@ -344,6 +333,7 @@ function releaseHistoryScrub() {
   if (historyState.scrubActive) {
     historyState.scrubActive = false;
     running = historyState.resumeRun;
+    historyState.resumeRun = true;
   }
 }
 
@@ -364,19 +354,8 @@ function loadHistoryOffset(offset) {
   const idx = (historyState.head - steps + historyState.capacity) % historyState.capacity;
   const slot = historyState.samples[idx];
   if (!slot) return false;
-  const qposView = sim.qposView?.();
-  if (qposView) {
-    qposView.set(slot.qpos);
-  }
-  const qvelView = sim.qvelView?.();
-  if (qvelView) {
-    if (slot.qvel && slot.qvel.length === qvelView.length) {
-      qvelView.set(slot.qvel);
-    } else {
-      for (let i = 0; i < qvelView.length; i += 1) qvelView[i] = 0;
-    }
-  }
-  try { sim.forward?.(); } catch {}
+  const applied = sim.applyState?.(slot, historyState.stateSig || MJ_STATE_SIG);
+  if (!applied) return false;
   historyState.scrubIndex = -steps;
   if (!historyState.scrubActive) {
     historyState.scrubActive = true;
@@ -405,13 +384,10 @@ function applyHistoryConfig(partial = {}) {
   emitHistoryMeta();
 }
 
-function resetKeyframes(nq = 0, nv = 0, nuLocal = 0) {
+function resetKeyframes() {
+  const capacity = typeof sim?.nkey === 'function' ? (sim.nkey() | 0) : KEYFRAME_CAPACITY;
   keyframeState = {
-    capacity: KEYFRAME_CAPACITY,
-    entries: [],
-    nq,
-    nv,
-    nu: nuLocal,
+    capacity: Math.max(0, capacity),
     lastSaved: -1,
     lastLoaded: -1,
   };
@@ -421,10 +397,12 @@ function serializeKeyframeMeta() {
   if (!keyframeState) {
     return { capacity: KEYFRAME_CAPACITY, count: 0, labels: [], lastSaved: -1, lastLoaded: -1 };
   }
+  const capacity = Math.max(0, keyframeState.capacity | 0);
+  const labels = capacity > 0 ? Array.from({ length: capacity }, (_, idx) => `Key ${idx}`) : [];
   return {
-    capacity: keyframeState.capacity,
-    count: keyframeState.entries.length,
-    labels: keyframeState.entries.map((entry, idx) => entry.label || `Key ${idx + 1}`),
+    capacity,
+    count: capacity,
+    labels,
     lastSaved: keyframeState.lastSaved ?? -1,
     lastLoaded: keyframeState.lastLoaded ?? -1,
   };
@@ -436,89 +414,32 @@ function emitKeyframeMeta() {
   } catch {}
 }
 
-function ensureKeyframeSlot(index) {
-  if (!keyframeState) return null;
-  const target = clamp(index, 0, keyframeState.entries.length);
-  if (target === keyframeState.entries.length) {
-    keyframeState.entries.push({
-      qpos: new Float64Array(keyframeState.nq),
-      qvel: keyframeState.nv > 0 ? new Float64Array(keyframeState.nv) : null,
-      ctrl: keyframeState.nu > 0 ? new Float64Array(keyframeState.nu) : null,
-      time: 0,
-      label: '',
-      seq: 0,
-    });
-  }
-  return keyframeState.entries[target];
-}
-
 function saveKeyframe(requestedIndex) {
-  if (!keyframeState || !(keyframeState.nq > 0) || !sim) return -1;
-  const qposView = sim.qposView?.();
-  if (!qposView) return -1;
-  let target = Number.isFinite(requestedIndex) && requestedIndex >= 0 ? requestedIndex : keyframeState.entries.length;
-  if (target > keyframeState.entries.length) {
-    target = keyframeState.entries.length;
+  if (!keyframeState || !sim || typeof sim.setKeyframe !== 'function') return -1;
+  const capacity = Math.max(0, keyframeState.capacity | 0);
+  if (!(capacity > 0)) return -1;
+  const index = Number.isFinite(requestedIndex) && requestedIndex >= 0 ? requestedIndex | 0 : (keySliderIndex | 0);
+  const target = Math.max(0, Math.min(index, capacity - 1));
+  const ok = sim.setKeyframe(target);
+  if (ok) {
+    keyframeState.lastSaved = target;
+    emitKeyframeMeta();
+    return target;
   }
-  if (keyframeState.entries.length >= keyframeState.capacity && target >= keyframeState.capacity) {
-    keyframeState.entries.shift();
-    target = keyframeState.entries.length;
-  }
-  if (keyframeState.entries.length >= keyframeState.capacity) {
-    // overwrite the last slot when at capacity
-    target = keyframeState.capacity - 1;
-  }
-  const slot = ensureKeyframeSlot(target);
-  if (!slot) return -1;
-  if (slot.qpos.length !== qposView.length) {
-    slot.qpos = new Float64Array(qposView.length);
-  }
-  slot.qpos.set(qposView);
-  const qvelView = sim.qvelView?.();
-  if (slot.qvel && qvelView && slot.qvel.length === qvelView.length) {
-    slot.qvel.set(qvelView);
-  }
-  const ctrlView = sim.ctrlView?.();
-  if (slot.ctrl && ctrlView && slot.ctrl.length === ctrlView.length) {
-    slot.ctrl.set(ctrlView);
-  }
-  slot.time = sim.time?.() || 0;
-  slot.seq = snapshotState.frame;
-  slot.label = slot.label || `Key ${target + 1}`;
-  keyframeState.lastSaved = target;
-  emitKeyframeMeta();
-  return target;
+  return -1;
 }
 
 function loadKeyframe(index) {
-  if (!keyframeState || !sim) return false;
-  const entries = keyframeState.entries || [];
-  if (!(index >= 0 && index < entries.length)) return false;
-  const slot = entries[index];
-  const qposView = sim.qposView?.();
-  if (!qposView) return false;
-  if (slot.qpos.length !== qposView.length) return false;
-  qposView.set(slot.qpos);
-  const qvelView = sim.qvelView?.();
-  if (qvelView) {
-    if (slot.qvel && slot.qvel.length === qvelView.length) {
-      qvelView.set(slot.qvel);
-    } else {
-      for (let i = 0; i < qvelView.length; i += 1) qvelView[i] = 0;
-    }
-  }
-  const ctrlView = sim.ctrlView?.();
-  if (ctrlView) {
-    if (slot.ctrl && slot.ctrl.length === ctrlView.length) {
-      ctrlView.set(slot.ctrl);
-    } else {
-      for (let i = 0; i < ctrlView.length; i += 1) ctrlView[i] = 0;
-    }
-  }
-  try { sim.forward?.(); } catch {}
-  keyframeState.lastLoaded = index;
+  if (!keyframeState || !sim || typeof sim.resetKeyframe !== 'function') return false;
+  const capacity = Math.max(0, keyframeState.capacity | 0);
+  if (!(capacity > 0)) return false;
+  const target = Math.max(0, Math.min(index | 0, capacity - 1));
+  const ok = sim.resetKeyframe(target);
+  if (!ok) return false;
+  keyframeState.lastLoaded = target;
   emitKeyframeMeta();
   releaseHistoryScrub();
+  running = false;
   return true;
 }
 
@@ -1391,8 +1312,8 @@ onmessage = async (ev) => {
       ngeom = sim?.ngeom?.() | 0;
       nu = sim?.nu?.() | 0;
       pendingCtrl.clear();
-      initHistoryBuffers(sim?.nq?.() | 0, sim?.nv?.() | 0);
-      resetKeyframes(sim?.nq?.() | 0, sim?.nv?.() | 0, sim?.nu?.() | 0);
+      initHistoryBuffers();
+      resetKeyframes();
       resetWatchState();
       keySliderIndex = -1;
       captureHistorySample(true);
@@ -1466,8 +1387,8 @@ onmessage = async (ev) => {
         frameMode = 0;
         cameraMode = 0;
         groupState = createGroupState();
-        initHistoryBuffers(sim?.nq?.() | 0, sim?.nv?.() | 0);
-        resetKeyframes(sim?.nq?.() | 0, sim?.nv?.() | 0, sim?.nu?.() | 0);
+        initHistoryBuffers();
+        resetKeyframes();
         resetWatchState();
         captureHistorySample(true);
         emitHistoryMeta();
@@ -1671,4 +1592,10 @@ onmessage = async (ev) => {
     try { postMessage({ kind:'error', message: String(e) }); } catch {}
   }
 };
+
+
+
+
+
+
 

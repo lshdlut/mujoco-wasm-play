@@ -1,6 +1,8 @@
 import type { MujocoModule } from '../wasm/loader.js';
 import { heapViewF64 } from '../wasm/loader.js';
 
+const MJ_STATE_INTEGRATION = 0x1fff;
+
 export class MjSim {
   private h: number = 0;
   private modelPtr = 0;
@@ -64,6 +66,40 @@ export class MjSim {
     if (!((nq > 0 && nv > 0 && ng > 2) || (nq === 0 && nv === 0 && ng > 0))) {
       throw new Error(`invalid model counts nq=${nq}, nv=${nv}, ngeom=${ng}`);
     }
+  }
+
+  private withStack(bytes: number, work: (ptr: number) => void): boolean {
+    const modAny = this.mod as any;
+    if (typeof modAny.stackSave === 'function' && typeof modAny.stackAlloc === 'function' && typeof modAny.stackRestore === 'function') {
+      let sp = 0;
+      try { sp = modAny.stackSave(); } catch { sp = 0; }
+      let ptr = 0;
+      try { ptr = modAny.stackAlloc(bytes) | 0; } catch { ptr = 0; }
+      if (!(ptr > 0)) {
+        if (sp) {
+          try { modAny.stackRestore(sp); } catch {}
+        }
+        return false;
+      }
+      try {
+        work(ptr);
+        return true;
+      } finally {
+        try { modAny.stackRestore(sp); } catch {}
+      }
+    }
+    if (typeof modAny._malloc === 'function' && typeof modAny._free === 'function') {
+      let ptr = 0;
+      try { ptr = modAny._malloc(bytes) | 0; } catch { ptr = 0; }
+      if (!(ptr > 0)) return false;
+      try {
+        work(ptr);
+        return true;
+      } finally {
+        try { modAny._free(ptr); } catch {}
+      }
+    }
+    return false;
   }
 
   private mjCall(name: string, count = 1): void {
@@ -136,5 +172,89 @@ export class MjSim {
     const ng = this.ngeom(); if (!ng) return undefined;
     const ptr = this.readPtr('data', 'geom_xpos'); if (!ptr) return undefined;
     return heapViewF64(this.mod, ptr, ng * 3);
+  }
+
+  stateSize(sig = MJ_STATE_INTEGRATION): number {
+    const modAny = this.mod as any;
+    const fn = modAny._mjwf_mj_stateSize;
+    if (typeof fn !== 'function') return 0;
+    this.ensurePointers();
+    try { return fn.call(modAny, this.modelPtr | 0, sig >>> 0) | 0; } catch { return 0; }
+  }
+
+  captureState(target: Float64Array | null = null, sig = MJ_STATE_INTEGRATION): Float64Array {
+    const size = this.stateSize(sig);
+    if (!(size > 0)) {
+      return target instanceof Float64Array ? target : new Float64Array(0);
+    }
+    const out = target instanceof Float64Array && target.length >= size ? target : new Float64Array(size);
+    const modAny = this.mod as any;
+    const fn = modAny._mjwf_mj_getState;
+    if (typeof fn !== 'function') return out;
+    this.ensurePointers();
+    const bytes = size * Float64Array.BYTES_PER_ELEMENT;
+    this.withStack(bytes, (ptr) => {
+      const view = heapViewF64(this.mod, ptr, size);
+      try { fn.call(modAny, this.modelPtr | 0, this.dataPtr | 0, ptr | 0, sig >>> 0); } catch {}
+      out.set(view);
+    });
+    return out;
+  }
+
+  applyState(source: ArrayLike<number>, sig = MJ_STATE_INTEGRATION): boolean {
+    if (!source) return false;
+    const modAny = this.mod as any;
+    const fn = modAny._mjwf_mj_setState;
+    if (typeof fn !== 'function') return false;
+    const size = this.stateSize(sig);
+    if (!(size > 0)) return false;
+    const buf = source instanceof Float64Array ? source : Float64Array.from(source as any);
+    if (buf.length < size) return false;
+    const bytes = size * Float64Array.BYTES_PER_ELEMENT;
+    this.ensurePointers();
+    let ok = false;
+    this.withStack(bytes, (ptr) => {
+      const view = heapViewF64(this.mod, ptr, size);
+      view.set(buf.subarray(0, size));
+      try {
+        fn.call(modAny, this.modelPtr | 0, this.dataPtr | 0, ptr | 0, sig >>> 0);
+        ok = true;
+      } catch {}
+    });
+    if (ok) {
+      this.mjCall('forward');
+    }
+    return ok;
+  }
+
+  nkey(): number {
+    return this.readModelCount('nkey');
+  }
+
+  setKeyframe(index: number): boolean {
+    const modAny = this.mod as any;
+    const fn = modAny._mjwf_mj_setKeyframe;
+    if (typeof fn !== 'function') return false;
+    this.ensurePointers();
+    try {
+      fn.call(modAny, this.modelPtr | 0, this.dataPtr | 0, index | 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  resetKeyframe(index: number): boolean {
+    const modAny = this.mod as any;
+    const fn = modAny._mjwf_mj_resetDataKeyframe;
+    if (typeof fn !== 'function') return false;
+    this.ensurePointers();
+    try {
+      fn.call(modAny, this.modelPtr | 0, this.dataPtr | 0, index | 0);
+      this.mjCall('forward');
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

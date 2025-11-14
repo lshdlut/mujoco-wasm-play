@@ -43,6 +43,8 @@ export function resolveHeapBuffer(mod) {
   return null;
 }
 
+const MJ_STATE_INTEGRATION = 0x1fff;
+
 function createHeapTypedArray(mod, ptr, length, Ctor) {
   const n = length | 0;
   if (!(n > 0) || !(ptr > 0)) {
@@ -489,6 +491,98 @@ export class MjSimLite {
   jntRangeView(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_jnt_range_ptr']; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,nj*2); }
   jntTypeView(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_jnt_type_ptr']; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,nj); }
   jntNameOf(i){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_jnt_name_of']||m['_mjwf_joint_name_of']; if (typeof d!=='function') return ''; try { const p=d.call(m,h,(i|0))|0; return this._cstr(p); } catch { return ''; } }
+  stateSize(sig = MJ_STATE_INTEGRATION){
+    const mod = this.mod;
+    if (!mod) return 0;
+    const fn = mod._mjwf_mj_stateSize;
+    if (typeof fn !== 'function') return 0;
+    try {
+      const { modelPtr } = this.ensurePointers();
+      if (!(modelPtr > 0)) return 0;
+      return fn.call(mod, modelPtr | 0, sig >>> 0) | 0;
+    } catch {
+      return 0;
+    }
+  }
+  captureState(target = null, sig = MJ_STATE_INTEGRATION){
+    const size = this.stateSize(sig);
+    if (!(size > 0)) {
+      return target instanceof Float64Array ? target : new Float64Array(0);
+    }
+    const out = target instanceof Float64Array && target.length >= size ? target : new Float64Array(size);
+    const mod = this.mod;
+    if (!mod) return out;
+    const fn = mod._mjwf_mj_getState;
+    if (typeof fn !== 'function') return out;
+    const bytes = size * Float64Array.BYTES_PER_ELEMENT;
+    this.ensurePointers();
+    this._withStack(bytes, (ptr) => {
+      const view = heapViewF64(mod, ptr, size);
+      try { fn.call(mod, this.modelPtr | 0, this.dataPtr | 0, ptr | 0, sig >>> 0); } catch {}
+      out.set(view);
+    });
+    return out;
+  }
+  applyState(source, sig = MJ_STATE_INTEGRATION){
+    if (!source) return false;
+    const mod = this.mod;
+    if (!mod) return false;
+    const fn = mod._mjwf_mj_setState;
+    if (typeof fn !== 'function') return false;
+    const ary = source instanceof Float64Array ? source : Float64Array.from(source);
+    const size = this.stateSize(sig);
+    if (!(size > 0) || ary.length < size) return false;
+    const bytes = size * Float64Array.BYTES_PER_ELEMENT;
+    this.ensurePointers();
+    let ok = false;
+    this._withStack(bytes, (ptr) => {
+      const view = heapViewF64(mod, ptr, size);
+      view.set(ary.subarray ? ary.subarray(0, size) : Array.from(ary).slice(0, size));
+      try {
+        fn.call(mod, this.modelPtr | 0, this.dataPtr | 0, ptr | 0, sig >>> 0);
+        ok = true;
+      } catch {}
+    });
+    if (ok) {
+      this.forward();
+      return true;
+    }
+    return false;
+  }
+  nkey(){
+    const m = this.mod;
+    const h = this.h | 0;
+    const fn = m?._mjwf_model_nkey;
+    if (typeof fn !== 'function') return 0;
+    try { return fn.call(m, h) | 0; } catch { return 0; }
+  }
+  setKeyframe(index){
+    const m = this.mod;
+    if (!m) return false;
+    const fn = m._mjwf_mj_setKeyframe;
+    if (typeof fn !== 'function') return false;
+    this.ensurePointers();
+    try {
+      fn.call(m, this.modelPtr | 0, this.dataPtr | 0, index | 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  resetKeyframe(index){
+    const m = this.mod;
+    if (!m) return false;
+    const fn = m._mjwf_mj_resetDataKeyframe;
+    if (typeof fn !== 'function') return false;
+    this.ensurePointers();
+    try {
+      fn.call(m, this.modelPtr | 0, this.dataPtr | 0, index | 0);
+      this.forward();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   forward(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_forward']; if (typeof d==='function') { try { d.call(m,h); } catch {} } }
   setQpos(i, val){ const v=this.qposView(); if (!v) return false; const idx=i|0; if (idx<0 || idx>=v.length) return false; v[idx] = +val||0; this.forward(); return true; }
@@ -554,6 +648,39 @@ export class MjSimLite {
   _readPtr(owner,name){ const m=this.mod; const h=this.h|0; const fn=m && m[`_mjwf_${owner}_${name}_ptr`]; if (typeof fn!=='function') return 0; try { return fn.call(m,h)|0; } catch { return 0; } }
   _readModelPtr(name){ return this._readPtr('model', name); }
   _readDataPtr(name){ return this._readPtr('data', name); }
+
+  _withStack(bytes, cb){
+    const mod = this.mod;
+    if (!mod) return null;
+    if (typeof mod.stackSave === 'function' && typeof mod.stackAlloc === 'function' && typeof mod.stackRestore === 'function') {
+      let sp = 0;
+      try { sp = mod.stackSave(); } catch { sp = 0; }
+      let ptr = 0;
+      try { ptr = mod.stackAlloc(bytes) | 0; } catch { ptr = 0; }
+      if (!(ptr > 0)) {
+        if (sp) {
+          try { mod.stackRestore(sp); } catch {}
+        }
+        return null;
+      }
+      try {
+        return cb(ptr | 0);
+      } finally {
+        try { mod.stackRestore(sp); } catch {}
+      }
+    }
+    if (typeof mod._malloc === 'function' && typeof mod._free === 'function') {
+      let ptr = 0;
+      try { ptr = mod._malloc(bytes) | 0; } catch { ptr = 0; }
+      if (!(ptr > 0)) return null;
+      try {
+        return cb(ptr | 0);
+      } finally {
+        try { mod._free(ptr); } catch {}
+      }
+    }
+    return null;
+  }
 
   _ensureContactForceScratch(){
     if (this.contactForceScratch?.ptr) return this.contactForceScratch;

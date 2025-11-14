@@ -14,6 +14,7 @@ const TICK_INTERVAL_MS = 8;   // matches physics.worker.mjs stepping cadence
 const SNAP_INTERVAL_MS = 16;  // ~60 Hz snapshot stream
 const GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'skin'];
 const MJ_GROUP_COUNT = 6;
+const MJ_STATE_SIG = 0x1fff;
 const HISTORY_DEFAULT_CAPTURE_HZ = 30;
 const HISTORY_DEFAULT_CAPACITY = 900;
 const KEYFRAME_CAPACITY = 16;
@@ -131,7 +132,7 @@ class DirectBackend {
     this.statisticState = null;
     this.cameraList = [];
     this.geomList = [];
-    this.historyConfig = { captureHz: HISTORY_DEFAULT_CAPTURE_HZ, capacity: HISTORY_DEFAULT_CAPACITY };
+    this.historyConfig = { captureHz: HISTORY_DEFAULT_CAPTURE_HZ, capacity: HISTORY_DEFAULT_CAPACITY, stateSig: MJ_STATE_SIG };
     this.history = null;
     this.keyframes = null;
     this.watch = null;
@@ -217,21 +218,42 @@ class DirectBackend {
     }
   }
 
-  #resetHistory(nq = 0, nv = 0) {
+    #resetHistory() {
     const capacity = Math.max(0, this.historyConfig.capacity | 0);
-    if (!(capacity > 0) || !(nq > 0)) {
+    const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
+    const stateSize = typeof this.sim?.stateSize === 'function' ? (this.sim.stateSize(this.historyConfig.stateSig) | 0) : 0;
+    if (!(capacity > 0) || !(stateSize > 0)) {
       this.history = {
         enabled: false,
-        captureHz: this.historyConfig.captureHz,
+        captureHz,
         capacity,
+        stateSize: 0,
         samples: [],
         head: 0,
         count: 0,
+        lastCaptureTs: 0,
         scrubIndex: 0,
         scrubActive: false,
-        nq,
-        nv,
+        resumeRun: true,
       };
+      return;
+    }
+    this.history = {
+      enabled: true,
+      captureHz,
+      capacity,
+      captureIntervalMs: 1000 / captureHz,
+      stateSize,
+      stateSig: this.historyConfig.stateSig,
+      samples: Array.from({ length: capacity }, () => new Float64Array(stateSize)),
+      head: 0,
+      count: 0,
+      lastCaptureTs: 0,
+      scrubIndex: 0,
+      scrubActive: false,
+      resumeRun: true,
+    };
+  };
       return;
     }
     const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
@@ -374,20 +396,42 @@ class DirectBackend {
       }
     }
     this.historyConfig = next;
-    this.#resetHistory(this.sim?.nq?.() | 0, this.sim?.nv?.() | 0);
-    this.#emitHistoryMeta();
-  }
-
-  #resetKeyframes(nq = 0, nv = 0, nu = 0) {
-    this.keyframes = {
-      capacity: KEYFRAME_CAPACITY,
-      entries: [],
-      nq,
-      nv,
-      nu,
-      lastSaved: -1,
-      lastLoaded: -1,
+    this.  #resetHistory() {
+    const capacity = Math.max(0, this.historyConfig.capacity | 0);
+    const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
+    const stateSize = typeof this.sim?.stateSize === 'function' ? (this.sim.stateSize(this.historyConfig.stateSig) | 0) : 0;
+    if (!(capacity > 0) || !(stateSize > 0)) {
+      this.history = {
+        enabled: false,
+        captureHz,
+        capacity,
+        stateSize: 0,
+        samples: [],
+        head: 0,
+        count: 0,
+        lastCaptureTs: 0,
+        scrubIndex: 0,
+        scrubActive: false,
+        resumeRun: true,
+      };
+      return;
+    }
+    this.history = {
+      enabled: true,
+      captureHz,
+      capacity,
+      captureIntervalMs: 1000 / captureHz,
+      stateSize,
+      stateSig: this.historyConfig.stateSig,
+      samples: Array.from({ length: capacity }, () => new Float64Array(stateSize)),
+      head: 0,
+      count: 0,
+      lastCaptureTs: 0,
+      scrubIndex: 0,
+      scrubActive: false,
+      resumeRun: true,
     };
+  };
   }
 
   #serializeKeyframes() {
@@ -799,25 +843,42 @@ class DirectBackend {
         if (this.sim) {
           const ok = this.sim.reset?.();
           if (ok) {
-            this.#resetHistory(this.sim.nq?.() | 0, this.sim.nv?.() | 0);
-            this.#resetKeyframes(this.sim.nq?.() | 0, this.sim.nv?.() | 0, this.sim.nu?.() | 0);
-            this.#resetWatch();
-            this.#captureHistorySample(true);
-            this.#emitHistoryMeta();
-            this.#emitWatchState();
-            this.#snapshot();
-            this.#emitRenderAssets();
-          }
-        }
-        break;
-      }
-      case 'step': {
-        if (this.sim) {
-          try {
-            const n = Math.max(1, Math.min(10000, (msg.n | 0) || 1));
-            this.sim.step?.(n);
-            this.#snapshot();
-          } catch (err) {
+            this.  #resetHistory() {
+    const capacity = Math.max(0, this.historyConfig.capacity | 0);
+    const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
+    const stateSize = typeof this.sim?.stateSize === 'function' ? (this.sim.stateSize(this.historyConfig.stateSig) | 0) : 0;
+    if (!(capacity > 0) || !(stateSize > 0)) {
+      this.history = {
+        enabled: false,
+        captureHz,
+        capacity,
+        stateSize: 0,
+        samples: [],
+        head: 0,
+        count: 0,
+        lastCaptureTs: 0,
+        scrubIndex: 0,
+        scrubActive: false,
+        resumeRun: true,
+      };
+      return;
+    }
+    this.history = {
+      enabled: true,
+      captureHz,
+      capacity,
+      captureIntervalMs: 1000 / captureHz,
+      stateSize,
+      stateSig: this.historyConfig.stateSig,
+      samples: Array.from({ length: capacity }, () => new Float64Array(stateSize)),
+      head: 0,
+      count: 0,
+      lastCaptureTs: 0,
+      scrubIndex: 0,
+      scrubActive: false,
+      resumeRun: true,
+    };
+  } catch (err) {
             this.#emitError(err);
           }
         }
@@ -1113,52 +1174,42 @@ class DirectBackend {
     this.lastSimNow = performance.now();
     this.visualState = this.#captureStructState('mjVisual');
     this.statisticState = this.#captureStructState('mjStatistic');
-    this.#resetHistory(this.sim.nq?.() | 0, this.sim.nv?.() | 0);
-    this.#resetKeyframes(this.sim.nq?.() | 0, this.sim.nv?.() | 0, this.sim.nu?.() | 0);
-    this.#resetWatch();
-    this.keySliderIndex = -1;
-    this.#captureHistorySample(true);
-    this.#emitHistoryMeta();
-    this.#emitKeyframeMeta();
-    this.#emitWatchState();
-
-    const abi = this.#readAbi();
-    this.#emitLog('direct: forge module ready', {
-      hasMake: typeof this.mod?._mjwf_helper_make_from_xml === 'function',
-      hasCcall: typeof this.mod?.ccall === 'function',
-    });
-    this.voptFlags = Array.from({ length: 32 }, () => 0);
-    this.sceneFlags = Array.from({ length: 8 }, () => 0);
-    this.labelMode = 0;
-    this.frameMode = 0;
-    this.cameraMode = 0;
-    this.#emitMessage({
-      kind: 'ready',
-      abi,
-      dt: this.dt,
-      ngeom: this.sim.ngeom?.() | 0,
-      optionSupport: this.optionSupport,
-      visual: this.visualState || null,
-      statistic: this.statisticState || null,
-    });
-    this.#emitOptions();
-    this.#snapshot();
-    this.#emitRenderAssets();
-
-    this.#sendMeta();
-    this.#emitCameraMeta();
-    this.#emitGeomMeta();
-
-    this.#startLoops();
-  }
-
-  async #ensureModule() {
-    if (this.mod && this.sim) return;
-    try {
-      this.mod = await this.#loadForgeModule();
-      this.sim = new MjSimLite(this.mod);
-      await this.sim.maybeInstallShimFromQuery?.();
-    } catch (err) {
+    this.  #resetHistory() {
+    const capacity = Math.max(0, this.historyConfig.capacity | 0);
+    const captureHz = Math.max(1, Number(this.historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
+    const stateSize = typeof this.sim?.stateSize === 'function' ? (this.sim.stateSize(this.historyConfig.stateSig) | 0) : 0;
+    if (!(capacity > 0) || !(stateSize > 0)) {
+      this.history = {
+        enabled: false,
+        captureHz,
+        capacity,
+        stateSize: 0,
+        samples: [],
+        head: 0,
+        count: 0,
+        lastCaptureTs: 0,
+        scrubIndex: 0,
+        scrubActive: false,
+        resumeRun: true,
+      };
+      return;
+    }
+    this.history = {
+      enabled: true,
+      captureHz,
+      capacity,
+      captureIntervalMs: 1000 / captureHz,
+      stateSize,
+      stateSig: this.historyConfig.stateSig,
+      samples: Array.from({ length: capacity }, () => new Float64Array(stateSize)),
+      head: 0,
+      count: 0,
+      lastCaptureTs: 0,
+      scrubIndex: 0,
+      scrubActive: false,
+      resumeRun: true,
+    };
+  } catch (err) {
       this.#emitError(err);
       this.mod = createLocalModule();
       this.sim = new MjSimLite(this.mod);
@@ -1651,3 +1702,4 @@ class DirectBackend {
     }
   }
 }
+
