@@ -76,6 +76,9 @@ const renderCtx = {
   snapshotLogState: null,
   frameId: null,
 };
+if (typeof window !== 'undefined') {
+  window.__renderCtx = renderCtx;
+}
 
 
 
@@ -322,7 +325,28 @@ const pickingController = createPickingController({
 });
 pickingController.setup();
 
+function isTextEditingTarget(event) {
+  const target = event?.target;
+  if (target && typeof target.closest === 'function') {
+    const editable = target.closest('input, textarea, select, [contenteditable=\"true\"], [role=\"textbox\"], [role=\"combobox\"]');
+    if (editable) return true;
+  }
+  const doc = window.document;
+  let active = doc.activeElement;
+  while (active && active.shadowRoot && active.shadowRoot.activeElement) {
+    active = active.shadowRoot.activeElement;
+  }
+  if (!active) return false;
+  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement) {
+    return !active.disabled && !active.readOnly;
+  }
+  if (active.isContentEditable) return true;
+  const role = typeof active.getAttribute === 'function' ? active.getAttribute('role') : null;
+  return role === 'textbox' || role === 'combobox';
+}
+
 window.addEventListener('keydown', async (event) => {
+  if (isTextEditingTarget(event)) return;
   switch (event.key) {
     case 'F1':
       event.preventDefault();

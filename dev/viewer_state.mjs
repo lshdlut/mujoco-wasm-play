@@ -1,4 +1,6 @@
 import { prepareBindingUpdate, splitBinding } from './viewer_bindings.mjs';
+import { VISUAL_FIELD_DESCRIPTORS } from './viewer_visual_struct.mjs';
+import { VISUAL_FIELD_GROUPS } from './visual_field_groups.mjs';
 
 // Lightweight state container and backend helpers for the simulate parity UI.
 // Runtime implementation lives in JS so it can be consumed directly by the
@@ -6,6 +8,7 @@ import { prepareBindingUpdate, splitBinding } from './viewer_bindings.mjs';
 
 const MJ_GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'skin'];
 const MJ_GROUP_COUNT = 6;
+const VISUAL_FLOAT_TOLERANCE = 1e-4;
 
 function createDefaultHistoryState() {
   return {
@@ -161,6 +164,19 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     ctrl: [],
     optSupport: { supported: false, pointers: [] },
   },
+  visualSourceMode: 'model',
+  visualBackups: {
+    preset: null,
+    model: null,
+    sceneFlagsPreset: null,
+    sceneFlagsModel: null,
+  },
+  visualBaselines: {
+    model: null,
+    preset: null,
+    sceneFlagsModel: null,
+    sceneFlagsPreset: null,
+  },
   panels: {
     left: true,
     right: true,
@@ -189,6 +205,10 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     rateSource: 'backend',
   },
   toast: null,
+  visualDiagnostics: {
+    diffs: {},
+    timestamp: 0,
+  },
   // Optional scene snapshot (mjvScene-like) carried by backend
   scene: null,
   history: createDefaultHistoryState(),
@@ -572,6 +592,13 @@ function mergeBackendSnapshot(draft, snapshot) {
       }
     }
     rendering.sceneFlags = flags;
+    const backups = ensureVisualBackups(draft);
+    if (!backups.sceneFlagsModel) {
+      backups.sceneFlagsModel = [...flags];
+    }
+    if (!backups.sceneFlagsPreset) {
+      backups.sceneFlagsPreset = [...flags];
+    }
   }
   if (snapshot.groups) {
     const rendering = ensureRenderingState(draft);
@@ -604,9 +631,19 @@ function mergeBackendSnapshot(draft, snapshot) {
     if (!draft.model) draft.model = {};
     draft.model.vis = deepMerge(draft.model.vis || {}, snapshot.visual);
   }
+  const baselines = ensureVisualBaselines(draft);
   if (snapshot.visualDefaults) {
     if (!draft.model) draft.model = {};
     draft.model.visDefaults = deepMerge(draft.model.visDefaults || {}, snapshot.visualDefaults);
+    baselines.model = cloneStruct(snapshot.visualDefaults);
+    baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
+    baselines.preset = applyPresetOverridesToStruct(baselines.model);
+    baselines.sceneFlagsPreset = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
+  } else if (!baselines.model && snapshot.visual) {
+    baselines.model = cloneStruct(snapshot.visual);
+    baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
+    baselines.preset = applyPresetOverridesToStruct(baselines.model);
+    baselines.sceneFlagsPreset = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
   }
   if (snapshot.cameras) {
     if (!draft.model) draft.model = {};
@@ -1040,6 +1077,9 @@ function readControlValue(state, control) {
   if (!control) return undefined;
   if (control.item_id === 'simulation.reset') return null;
   if (control.item_id === 'simulation.align') return null;
+  if (control.item_id === 'option.visual_source') {
+    return state.visualSourceMode === 'model' ? 'Model' : 'Preset';
+  }
   if (control.item_id === 'file.screenshot') return null;
   if (control.item_id === 'file.quit') return null;
   if (control.binding) {
@@ -1090,6 +1130,16 @@ export function createViewerStore(initialState) {
 export async function applySpecAction(store, backend, control, rawValue) {
   if (!control) return;
   const value = normaliseControlValue(control, rawValue);
+  if (control.item_id === 'option.visual_source') {
+    const nextMode =
+      typeof value === 'string' && value.toLowerCase().startsWith('model') ? 'model' : 'preset';
+    try {
+      await switchVisualSourceMode(store, backend, nextMode);
+    } catch (err) {
+      console.error('[option.visual_source] switch failed', err);
+    }
+    return;
+  }
   const isRunToggle = control.item_id === 'simulation.run' && typeof backend?.setRunState === 'function';
   const prepared = isRunToggle ? null : await prepareBindingUpdate(control, value);
   let snapshot = null;
@@ -1372,7 +1422,6 @@ export async function createBackend(options = {}) {
   let paused = false;
   let rate = 1;
   let historyScrubbing = false;
-  let visualOverrideApplied = false;
   let lastSnapshot = {
     t: 0,
     rate: 1,
@@ -1563,23 +1612,39 @@ export async function createBackend(options = {}) {
     return notifyListeners();
   }
 
-  function applyVisualOverrides() {
-    if (visualOverrideApplied || typeof client?.postMessage !== 'function') return;
-    for (const entry of VISUAL_OVERRIDE_PRESET) {
-      try {
-        client.postMessage({
-          cmd: 'setField',
-          target: 'mjVisual',
-          path: entry.path,
-          kind: entry.kind,
-          size: entry.size,
-          value: entry.value,
-        });
-      } catch (err) {
-        if (debug) console.warn('[backend vis override] failed', entry.path, err);
+  function applyVisualStatePayload(payload) {
+    if (!payload || typeof client?.postMessage !== 'function') {
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (payload.visual && typeof payload.visual === 'object') {
+      for (const descriptor of VISUAL_FIELD_DESCRIPTORS) {
+        const value = resolveStructPath(payload.visual, descriptor.path);
+        if (value == null) continue;
+        try {
+          client.postMessage({
+            cmd: 'setField',
+            target: 'mjVisual',
+            path: descriptor.path,
+            kind: descriptor.kind,
+            size: descriptor.size,
+            value,
+          });
+        } catch (err) {
+          if (debug) console.warn('[backend setField] failed', descriptor.path, err);
+        }
       }
     }
-    visualOverrideApplied = true;
+    if (Array.isArray(payload.sceneFlags)) {
+      for (let i = 0; i < payload.sceneFlags.length; i += 1) {
+        const enabled = !!payload.sceneFlags[i];
+        try {
+          client.postMessage?.({ cmd: 'setSceneFlag', index: i, enabled });
+        } catch (err) {
+          if (debug) console.warn('[backend setSceneFlag] failed', { index: i, enabled }, err);
+        }
+      }
+    }
+    return resolveSnapshot(lastSnapshot);
   }
 
   function updateGeometryCaches(data = {}) {
@@ -1649,7 +1714,6 @@ export async function createBackend(options = {}) {
           lastSnapshot.statistic = cloneStruct(data.statistic);
         }
         updateGeometryCaches(data);
-        applyVisualOverrides();
         if (data.gesture) {
           lastSnapshot.gesture = {
             ...(lastSnapshot.gesture || {}),
@@ -1960,7 +2024,6 @@ export async function createBackend(options = {}) {
   let initialXml = await loadDefaultXml();
   if (typeof client.postMessage === 'function') {
     try {
-      visualOverrideApplied = false;
       lastSnapshot.visualDefaults = null;
       client.postMessage({ cmd: 'load', rate, xmlText: initialXml });
       client.postMessage({ cmd: 'snapshot' });
@@ -2367,6 +2430,7 @@ export async function createBackend(options = {}) {
     applyForce: applyForceCommand,
     applyBodyForce: applyBodyForceCommand,
     clearForces: clearForcesCommand,
+    setVisualState: applyVisualStatePayload,
     dispose,
   };
 }
@@ -2377,6 +2441,7 @@ export {
   readControlValue,
   cameraLabelFromIndex,
   mergeBackendSnapshot,
+  switchVisualSourceMode,
 };
 const VISUAL_OVERRIDE_PRESET = [
   { path: ['headlight', 'active'], kind: 'enum', size: 1, value: 1 },
@@ -2426,3 +2491,272 @@ const VISUAL_OVERRIDE_PRESET = [
   { path: ['rgba', 'light'], kind: 'float_vec', size: 4, value: [0.6, 0.6, 0.9, 1] },
   { path: ['rgba', 'selectpoint'], kind: 'float_vec', size: 4, value: [0.9, 0.9, 0.1, 1] },
 ];
+
+function applyPresetOverridesToStruct(base) {
+  const source = cloneStruct(base) || {};
+  for (const entry of VISUAL_OVERRIDE_PRESET) {
+    const overrideValue = Array.isArray(entry.value) ? entry.value.slice() : entry.value;
+    assignStructPath(source, entry.path, overrideValue);
+  }
+  return source;
+}
+
+function cloneVisualValue(value) {
+  if (value == null) return null;
+  if (ArrayBuffer.isView(value)) {
+    return Array.from(value);
+  }
+  if (Array.isArray(value)) {
+    return value.slice();
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+function visualValuesEqual(a, b) {
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  const aIsArray = Array.isArray(a) || ArrayBuffer.isView(a);
+  const bIsArray = Array.isArray(b) || ArrayBuffer.isView(b);
+  if (aIsArray || bIsArray) {
+    const arrA = aIsArray ? Array.from(a) : [a];
+    const arrB = bIsArray ? Array.from(b) : [b];
+    if (arrA.length !== arrB.length) return false;
+    for (let i = 0; i < arrA.length; i += 1) {
+      if (!visualValuesEqual(arrA[i], arrB[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (typeof a === 'number' || typeof b === 'number') {
+    const numA = Number(a) || 0;
+    const numB = Number(b) || 0;
+    return Math.abs(numA - numB) < VISUAL_FLOAT_TOLERANCE;
+  }
+  if (typeof a === 'boolean' || typeof b === 'boolean') {
+    return !!a === !!b;
+  }
+  return String(a) === String(b);
+}
+
+function computeVisualGroupDiffs(modelVisual, presetVisual) {
+  const diagnostics = {};
+  for (const group of VISUAL_FIELD_GROUPS) {
+    const fields = [];
+    let changed = false;
+    for (const path of group.fields) {
+      const modelValue = cloneVisualValue(resolveStructPath(modelVisual, path));
+      const presetValue = cloneVisualValue(resolveStructPath(presetVisual, path));
+      const equal = visualValuesEqual(modelValue, presetValue);
+      if (!equal) changed = true;
+      fields.push({
+        path,
+        modelValue,
+        presetValue,
+        equal,
+      });
+    }
+    diagnostics[group.id] = {
+      id: group.id,
+      label: group.label,
+      changed,
+      fields,
+    };
+  }
+  return diagnostics;
+}
+
+function ensureVisualBackups(target) {
+  if (!target.visualBackups) {
+    target.visualBackups = {
+      preset: null,
+      model: null,
+      sceneFlagsPreset: null,
+      sceneFlagsModel: null,
+    };
+  }
+  if (target.visualSourceMode !== 'model' && target.visualSourceMode !== 'preset') {
+    target.visualSourceMode = 'model';
+  }
+  return target.visualBackups;
+}
+
+function ensureVisualBaselines(target) {
+  if (!target.visualBaselines) {
+    target.visualBaselines = {
+      model: null,
+      preset: null,
+      sceneFlagsModel: null,
+      sceneFlagsPreset: null,
+    };
+  }
+  return target.visualBaselines;
+}
+
+async function switchVisualSourceMode(store, backend, requestedMode) {
+  const targetMode = requestedMode === 'model' ? 'model' : 'preset';
+  if (!store || typeof store.get !== 'function' || !backend || typeof backend.snapshot !== 'function') {
+    throw new Error('switchVisualSourceMode requires a store and backend with snapshot support');
+  }
+  const currentState = store.get();
+  const currentMode = currentState?.visualSourceMode === 'model' ? 'model' : 'preset';
+  let snapshot;
+  try {
+    snapshot = await backend.snapshot();
+  } catch (err) {
+    console.error('[visual source switch] snapshot failed', err);
+    throw err;
+  }
+  if (!snapshot) {
+    throw new Error('Unable to resolve backend snapshot for visual source switch');
+  }
+  const currentVisual = snapshot.visual
+    ? cloneStruct(snapshot.visual)
+    : snapshot.visualDefaults
+    ? cloneStruct(snapshot.visualDefaults)
+    : null;
+  const currentSceneFlags = normaliseSceneFlagArray(snapshot.sceneFlags);
+  store.update((draft) => {
+    const backups = ensureVisualBackups(draft);
+    const baselines = ensureVisualBaselines(draft);
+    if (!baselines.model) {
+      if (snapshot.visualDefaults) {
+        baselines.model = cloneStruct(snapshot.visualDefaults);
+        baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
+      } else if (snapshot.visual) {
+        baselines.model = cloneStruct(snapshot.visual);
+        baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
+      }
+    }
+    if (!baselines.preset && baselines.model) {
+      baselines.preset = applyPresetOverridesToStruct(baselines.model);
+      baselines.sceneFlagsPreset = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
+    }
+    if (currentMode === 'preset') {
+      backups.preset = cloneStruct(currentVisual);
+      backups.sceneFlagsPreset = currentSceneFlags ? [...currentSceneFlags] : null;
+    } else {
+      backups.model = cloneStruct(currentVisual);
+      backups.sceneFlagsModel = currentSceneFlags ? [...currentSceneFlags] : null;
+    }
+  });
+  const updatedState = store.get();
+  const backups = ensureVisualBackups(updatedState);
+  const baselines = ensureVisualBaselines(updatedState);
+  let targetVisual =
+    targetMode === 'preset' ? cloneStruct(backups.preset) : cloneStruct(backups.model);
+  let targetSceneFlags =
+    targetMode === 'preset'
+      ? Array.isArray(backups.sceneFlagsPreset)
+        ? [...backups.sceneFlagsPreset]
+        : null
+      : Array.isArray(backups.sceneFlagsModel)
+      ? [...backups.sceneFlagsModel]
+      : null;
+  let seedTargetVisual = false;
+  let seedTargetSceneFlags = false;
+  if (!targetVisual) {
+    const fallbackBase =
+      targetMode === 'preset'
+        ? baselines.preset || (baselines.model ? applyPresetOverridesToStruct(baselines.model) : null)
+        : baselines.model;
+    if (fallbackBase) {
+      targetVisual = cloneStruct(fallbackBase);
+      seedTargetVisual = true;
+    }
+  }
+  if (!targetSceneFlags) {
+    const fallbackFlags =
+      targetMode === 'preset'
+        ? baselines.sceneFlagsPreset || baselines.sceneFlagsModel
+        : baselines.sceneFlagsModel;
+    if (fallbackFlags) {
+      targetSceneFlags = [...fallbackFlags];
+      seedTargetSceneFlags = true;
+    } else {
+      targetSceneFlags = normaliseSceneFlagArray(null);
+      seedTargetSceneFlags = true;
+    }
+  }
+  if (!targetVisual) {
+    targetVisual = {};
+    seedTargetVisual = true;
+  }
+  const diagnostics = computeVisualGroupDiffs(
+    backups.model || baselines.model || {},
+    backups.preset || baselines.preset || applyPresetOverridesToStruct(baselines.model || {}),
+  );
+  if (typeof console !== 'undefined') {
+    try {
+      console.log('[visual source switch]', {
+        from: currentMode,
+        to: targetMode,
+        hasBackups: {
+          model: !!backups.model,
+          preset: !!backups.preset,
+        },
+        headlight: targetVisual?.headlight
+          ? {
+              active: targetVisual.headlight.active,
+              diffuse: targetVisual.headlight.diffuse,
+              ambient: targetVisual.headlight.ambient,
+            }
+          : null,
+        sceneFlags: targetSceneFlags,
+      });
+    } catch {}
+  }
+  store.update((draft) => {
+    draft.visualSourceMode = targetMode;
+    if (!draft.model) draft.model = {};
+    draft.model.vis = cloneStruct(targetVisual) || {};
+    const rendering = ensureRenderingState(draft);
+    rendering.sceneFlags = Array.isArray(targetSceneFlags)
+      ? targetSceneFlags.slice()
+      : SCENE_FLAG_DEFAULTS.slice();
+    draft.visualDiagnostics = {
+      diffs: diagnostics,
+      timestamp: Date.now(),
+    };
+  });
+  if (typeof backend.setVisualState === 'function') {
+    try {
+      await backend.setVisualState({ visual: targetVisual, sceneFlags: targetSceneFlags });
+    } catch (err) {
+      console.error('[visual source switch] apply failed', err);
+    }
+  }
+  /* istanbul ignore next */
+  if (typeof console !== 'undefined') {
+    const changedGroups = Object.values(diagnostics || {}).filter((info) => info?.changed);
+    if (changedGroups.length > 0) {
+      console.log('[visual group diff]', changedGroups.map((info) => info.id));
+    } else {
+      console.log('[visual group diff] none');
+    }
+  }
+  return {
+    mode: targetMode,
+    visual: targetVisual,
+    sceneFlags: targetSceneFlags,
+  };
+}
+
+function normaliseSceneFlagArray(source) {
+  const arr = [];
+  for (let i = 0; i < SCENE_FLAG_DEFAULTS.length; i += 1) {
+    if (Array.isArray(source) && source[i] != null) {
+      arr[i] = !!source[i];
+    } else {
+      arr[i] = SCENE_FLAG_DEFAULTS[i];
+    }
+  }
+  return arr;
+}

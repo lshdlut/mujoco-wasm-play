@@ -1305,6 +1305,7 @@ function collectAssetBuffersForTransfer(assets) {
   }
   if (assets?.materials) {
     push(assets.materials.rgba);
+    push(assets.materials.reflectance);
   }
   if (assets?.meshes) {
     push(assets.meshes.vertadr);

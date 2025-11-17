@@ -134,6 +134,39 @@ export interface CopyRuntimeState {
   complete: boolean;
 }
 
+export interface VisualBackupsState {
+  preset: Record<string, unknown> | null;
+  model: Record<string, unknown> | null;
+  sceneFlagsPreset: boolean[] | null;
+  sceneFlagsModel: boolean[] | null;
+}
+
+export interface VisualBaselinesState {
+  model: Record<string, unknown> | null;
+  preset: Record<string, unknown> | null;
+  sceneFlagsModel: boolean[] | null;
+  sceneFlagsPreset: boolean[] | null;
+}
+
+export interface VisualDiagnosticsField {
+  path: (string | number)[];
+  modelValue: unknown;
+  presetValue: unknown;
+  equal: boolean;
+}
+
+export interface VisualDiagnosticsGroup {
+  id: string;
+  label: string;
+  changed: boolean;
+  fields: VisualDiagnosticsField[];
+}
+
+export interface VisualDiagnosticsState {
+  diffs: Record<string, VisualDiagnosticsGroup>;
+  timestamp: number;
+}
+
 export interface ViewerState {
   overlays: OverlayState;
   simulation: SimulationState;
@@ -146,6 +179,10 @@ export interface ViewerState {
   history: HistoryState;
   watch: WatchState;
   keyframes: KeyframeState;
+  visualSourceMode: 'preset' | 'model';
+  visualBackups: VisualBackupsState;
+  visualBaselines: VisualBaselinesState;
+  visualDiagnostics: VisualDiagnosticsState;
 }
 
 export interface UiControl {
@@ -238,6 +275,7 @@ export interface ViewerBackend {
   step?(direction?: number): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
   setCameraIndex?(index: number): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
   setRunState?(run: boolean, source?: string): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
+  setVisualState?(payload: { visual?: Record<string, unknown> | null; sceneFlags?: boolean[] | null }): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
   dispose?(): void;
 }
 
@@ -250,4 +288,5 @@ export {
   readControlValue,
   cameraLabelFromIndex,
   mergeBackendSnapshot,
+  switchVisualSourceMode,
 } from './state.mjs';

@@ -178,9 +178,11 @@ export function collectRenderAssetsFromModule(mod, handle) {
   const nmat = typeof mod._mjwf_nmat === 'function' ? (mod._mjwf_nmat(handle) | 0) : 0;
   if (nmat > 0) {
     const rgbaView = readView(mod, mod._mjwf_mat_rgba_ptr, handle, nmat * 4, heapViewF32);
+    const reflectanceView = readView(mod, ensureFunc('_mjwf_mat_reflectance_ptr'), handle, nmat, heapViewF64);
     assets.materials = {
       count: nmat,
       rgba: cloneTyped(rgbaView, Float32Array),
+      reflectance: cloneTyped(reflectanceView, Float64Array),
     };
   }
   const nmesh = typeof mod._mjwf_nmesh === 'function' ? (mod._mjwf_nmesh(handle) | 0) : 0;

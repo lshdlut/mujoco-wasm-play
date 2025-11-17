@@ -88,6 +88,17 @@
       "default_open": true,
       "items": [
         {
+          "item_id": "option.visual_source",
+          "type": "radio",
+          "label": "Visual source",
+          "shortcut": null,
+          "options": [
+            "Preset",
+            "Model"
+          ],
+          "default": "Preset"
+        },
+        {
           "item_id": "option.help",
           "type": "checkbox",
           "label": "Help",
@@ -1200,21 +1211,21 @@
         },
         {
           "item_id": "visualization.headlight_ambient",
-          "type": "edit_float",
+          "type": "edit_vec3",
           "label": "Ambient",
           "binding": "mjVisual::headlight.ambient",
           "default": "model.vis.headlight.ambient"
         },
         {
           "item_id": "visualization.headlight_diffuse",
-          "type": "edit_float",
+          "type": "edit_vec3",
           "label": "Diffuse",
           "binding": "mjVisual::headlight.diffuse",
           "default": "model.vis.headlight.diffuse"
         },
         {
           "item_id": "visualization.headlight_specular",
-          "type": "edit_float",
+          "type": "edit_vec3",
           "label": "Specular",
           "binding": "mjVisual::headlight.specular",
           "default": "model.vis.headlight.specular"

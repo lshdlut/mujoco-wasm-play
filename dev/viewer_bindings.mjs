@@ -129,6 +129,11 @@ export async function prepareBindingUpdate(control, rawValue) {
   const normalised = normaliseValueByKind(kind, size, rawValue, control);
   if (normalised == null) {
     console.warn('[bindings] unable to normalise value for', binding, rawValue);
+    if (control && typeof control.binding === 'string' && control.binding.startsWith('mjVisual::headlight.')) {
+      try {
+        addToast(`[${control.label || 'headlight'}] invalid vector input`);
+      } catch {}
+    }
     return null;
   }
   return {

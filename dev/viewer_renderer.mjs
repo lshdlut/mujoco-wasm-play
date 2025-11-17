@@ -1,6 +1,4 @@
 import * as THREE from 'three';
-import { createVerticalGradientTexture } from './viewer_environment.mjs';
-
 const MJ_GEOM = {
   PLANE: 0,
   HFIELD: 1,
@@ -108,22 +106,148 @@ const FRAME_GEOM_LIMIT = 80;
 const TEMP_MAT4 = new THREE.Matrix4();
 const DEFAULT_CLEAR_HEX = 0xd6dce4;
 
-function ensureSceneFog(ctx) {
-  if (!ctx) return null;
-  if (ctx.sceneFog && ctx.sceneFog.isFog) return ctx.sceneFog;
-  const fog = new THREE.Fog(DEFAULT_CLEAR_HEX, 12, 48);
-  ctx.sceneFog = fog;
-  return fog;
+function isMatrixLike(value) {
+  return value && typeof value.copy === 'function';
 }
 
-function updateFogEnabled(ctx, enabled) {
-  if (!ctx?.scene) return;
-  if (enabled) {
-    const fog = ensureSceneFog(ctx);
-    ctx.scene.fog = fog;
-  } else if (ctx.scene.fog) {
-    ctx.sceneFog = ctx.scene.fog;
-    ctx.scene.fog = null;
+function ensurePostProcessResources(ctx, renderer) {
+  if (!ctx || !renderer) return null;
+  const width = Math.max(1, renderer.domElement.width);
+  const height = Math.max(1, renderer.domElement.height);
+  if (
+    !ctx.postTarget
+    || ctx.postTarget.width !== width
+    || ctx.postTarget.height !== height
+  ) {
+    if (ctx.postTarget) ctx.postTarget.dispose();
+    const target = new THREE.WebGLRenderTarget(width, height, {
+      depthBuffer: true,
+      type: THREE.HalfFloatType,
+    });
+    target.texture.colorSpace = renderer.outputColorSpace || THREE.SRGBColorSpace;
+    target.depthTexture = new THREE.DepthTexture(width, height);
+    target.depthTexture.format = THREE.DepthFormat;
+    target.depthTexture.type = THREE.UnsignedShortType;
+    ctx.postTarget = target;
+  }
+  if (!ctx.postScene) {
+    const quadGeom = new THREE.PlaneGeometry(2, 2);
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        tColor: { value: null },
+        tDepth: { value: null },
+        cameraNear: { value: 0.1 },
+        cameraFar: { value: 100 },
+        fogColor: { value: new THREE.Color(DEFAULT_CLEAR_HEX) },
+        fogStart: { value: 10 },
+        fogEnd: { value: 40 },
+        fogEnabled: { value: 0 },
+        fogBgStrength: { value: 0.6 },
+        hazeColor: { value: new THREE.Color(0xdfe7ff) },
+        hazeCoverage: { value: 0.25 },
+        hazeIntensity: { value: 0.5 },
+        hazeEnabled: { value: 0 },
+        projInv: { value: new THREE.Matrix4() },
+        cameraMatrixWorld: { value: new THREE.Matrix4() },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec2 vUv;
+        uniform sampler2D tColor;
+        uniform sampler2D tDepth;
+        uniform float cameraNear;
+        uniform float cameraFar;
+        uniform vec3 fogColor;
+        uniform float fogStart;
+        uniform float fogEnd;
+        uniform float fogEnabled;
+        uniform float fogBgStrength;
+        uniform vec3 hazeColor;
+        uniform float hazeCoverage;
+        uniform float hazeIntensity;
+        uniform float hazeEnabled;
+        uniform mat4 projInv;
+        uniform mat4 cameraMatrixWorld;
+
+        vec3 reconstructViewPosition(float depthSample) {
+          float z = depthSample * 2.0 - 1.0;
+          vec4 clip = vec4(vUv * 2.0 - 1.0, z, 1.0);
+          vec4 viewPos = projInv * clip;
+          return viewPos.xyz / max(viewPos.w, 1e-6);
+        }
+
+        vec3 viewToWorldDirection(vec3 viewDir) {
+          vec4 world = cameraMatrixWorld * vec4(viewDir, 0.0);
+          return normalize(world.xyz);
+        }
+
+        void main() {
+          vec4 colorSample = texture2D(tColor, vUv);
+          float depthSample = texture2D(tDepth, vUv).x;
+          bool isBackground = depthSample >= 0.999995;
+          float depthForView = isBackground ? 0.9999 : depthSample;
+          vec3 viewPos = reconstructViewPosition(depthForView);
+          float viewDist = length(viewPos);
+          float fogFactor = 0.0;
+          if (fogEnabled > 0.5) {
+            float start = fogStart;
+            float endVal = max(start + 0.001, fogEnd);
+            fogFactor = clamp((viewDist - start) / max(0.0001, endVal - start), 0.0, 1.0);
+          }
+          vec3 outColor = colorSample.rgb;
+          if (hazeEnabled > 0.5 && hazeIntensity > 0.0 && isBackground) {
+            vec3 viewDir = normalize(viewPos);
+            vec3 worldDir = viewToWorldDirection(viewDir);
+            float height = worldDir.z;
+            float strip = 1.0 - smoothstep(0.0, hazeCoverage, abs(height));
+            float hazeMix = clamp(strip * hazeIntensity, 0.0, 1.0);
+            outColor = mix(outColor, hazeColor, hazeMix);
+          }
+          if (fogEnabled > 0.5) {
+            outColor = mix(outColor, fogColor, fogFactor);
+            if (isBackground) {
+              outColor = mix(outColor, fogColor, clamp(fogBgStrength, 0.0, 1.0));
+            }
+          }
+          gl_FragColor = vec4(outColor, 1.0);
+        }
+      `,
+      depthWrite: false,
+      depthTest: false,
+    });
+    const quad = new THREE.Mesh(quadGeom, material);
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    scene.add(quad);
+    ctx.postScene = scene;
+    ctx.postCamera = camera;
+    ctx.postQuad = quad;
+    ctx.postMaterial = material;
+  }
+  return ctx.postTarget;
+}
+
+function renderSceneWithPost(ctx, renderer, scene, camera, fogConfig, hazeConfig) {
+  if (!ctx || !renderer || !scene || !camera) return;
+  const fogCfg = fogConfig || ctx.fogConfig || { enabled: false };
+  const hazeCfg = hazeConfig || ctx.hazeConfig || { enabled: false };
+  const needsPost = !!(fogCfg.enabled || hazeCfg.enabled);
+  if (needsPost) {
+    ensurePostProcessResources(ctx, renderer);
+    renderer.setRenderTarget(ctx.postTarget);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    applyPostPass(ctx, renderer, camera, fogCfg, hazeCfg);
+    renderer.render(ctx.postScene, ctx.postCamera);
+  } else {
+    renderer.setRenderTarget(null);
+    renderer.render(scene, camera);
   }
 }
 
@@ -147,33 +271,6 @@ function applySkyboxVisibility(ctx, enabled) {
   }
 }
 
-function applyHazeBackground(ctx, vis, hazeEnabled, skyboxEnabled) {
-  if (!ctx?.scene) return;
-  if (!hazeEnabled || skyboxEnabled) {
-    if (ctx.scene.background === ctx.hazeTexture) {
-      ctx.scene.background = null;
-    }
-    if (!hazeEnabled && ctx.renderer && typeof ctx.renderer.setClearColor === 'function') {
-      const hex = ctx.baseClearHex ?? DEFAULT_CLEAR_HEX;
-      ctx.renderer.setClearColor(hex, 1);
-    }
-    ctx.hazeActive = false;
-    return;
-  }
-  const hazeHex = rgbaToHex(vis?.rgba?.haze, 0xf0f6ff);
-  const fogHex = rgbaToHex(vis?.rgba?.fog, DEFAULT_CLEAR_HEX);
-  const key = `${hazeHex}_${fogHex}`;
-  if (!ctx.hazeTexture || ctx.hazeTextureKey !== key) {
-    try { ctx.hazeTexture?.dispose?.(); } catch {}
-    ctx.hazeTexture = createVerticalGradientTexture(THREE, hazeHex, fogHex, 256);
-    ctx.hazeTextureKey = key;
-  }
-  ctx.scene.background = ctx.hazeTexture;
-  if (ctx.renderer && typeof ctx.renderer.setClearColor === 'function') {
-    ctx.renderer.setClearColor(fogHex, 1);
-  }
-  ctx.hazeActive = true;
-}
 
 function mat3ToQuat(m) {
   const m00 = m[0] ?? 1;
@@ -278,6 +375,86 @@ function alphaFromArray(color, fallback = 1) {
 function averageRGB(arr) {
   if (!Array.isArray(arr) || arr.length === 0) return 0;
   return arr.reduce((acc, v) => acc + (Number(v) || 0), 0) / arr.length;
+}
+
+function computeSceneExtent(bounds, statStruct) {
+  const fromBounds = Number(bounds?.radius);
+  const fromStat = Number(statStruct?.extent);
+  if (Number.isFinite(fromBounds) && fromBounds > 0) return fromBounds;
+  if (Number.isFinite(fromStat) && fromStat > 0) return fromStat;
+  return 1;
+}
+
+function resolveFogConfig(vis, statStruct, bounds, enabled) {
+  if (!enabled || !vis?.map) {
+    return { enabled: false };
+  }
+  const start = Number(vis.map.fogstart);
+  const end = Number(vis.map.fogend);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return { enabled: false };
+  }
+  const extent = computeSceneExtent(bounds, statStruct);
+  const fogStart = Math.max(0, start) * extent;
+  const fogEnd = Math.max(fogStart + 0.1, end * extent);
+  const colorArr = rgbFromArray(vis?.rgba?.fog, [0.7, 0.75, 0.85]);
+  const fogColor = new THREE.Color().setRGB(colorArr[0], colorArr[1], colorArr[2]);
+  return {
+    enabled: true,
+    start: fogStart,
+    end: fogEnd,
+    color: fogColor,
+    bgStrength: 0.65,
+  };
+}
+
+function resolveHazeConfig(vis, hazeEnabled, skyboxEnabled) {
+  if (!vis || !hazeEnabled || !skyboxEnabled) {
+    return { enabled: false };
+  }
+  const raw = clampUnit(Number(vis?.map?.haze) ?? 0.3);
+  const rgba = vis?.rgba?.haze;
+  const rgb = rgbFromArray(rgba, [0.95, 0.98, 1]);
+  const intensity = clampUnit(Array.isArray(rgba) ? (rgba[3] ?? 0.6) : 0.6);
+  const hazeColor = new THREE.Color().setRGB(rgb[0], rgb[1], rgb[2]);
+  return {
+    enabled: true,
+    coverage: 0.08 + raw * 0.35,
+    intensity: intensity * 0.7,
+    color: hazeColor,
+  };
+}
+
+function applyPostPass(ctx, renderer, camera, fogConfig, hazeConfig) {
+  if (!ctx?.postMaterial || !ctx?.postTarget || !camera) return;
+  const uniforms = ctx.postMaterial.uniforms;
+  uniforms.tColor.value = ctx.postTarget.texture;
+  uniforms.tDepth.value = ctx.postTarget.depthTexture;
+  uniforms.cameraNear.value = camera.near;
+  uniforms.cameraFar.value = camera.far;
+  uniforms.projInv.value.copy(camera.projectionMatrixInverse);
+  if (isMatrixLike(uniforms.cameraMatrixWorld.value)) {
+    uniforms.cameraMatrixWorld.value.copy(camera.matrixWorld);
+  } else {
+    uniforms.cameraMatrixWorld.value = camera.matrixWorld.clone();
+  }
+  const fogEnabled = fogConfig?.enabled;
+  uniforms.fogEnabled.value = fogEnabled ? 1 : 0;
+  uniforms.fogStart.value = fogConfig?.start ?? 10;
+  uniforms.fogEnd.value = fogConfig?.end ?? 40;
+  if (fogEnabled && fogConfig?.color) {
+    uniforms.fogColor.value.copy(fogConfig.color);
+    uniforms.fogBgStrength.value = fogConfig.bgStrength ?? 0.6;
+  }
+  const hazeEnabled = hazeConfig?.enabled;
+  uniforms.hazeEnabled.value = hazeEnabled ? 1 : 0;
+  if (hazeEnabled && hazeConfig?.color) {
+    uniforms.hazeColor.value.copy(hazeConfig.color);
+    uniforms.hazeCoverage.value = Math.max(0.02, hazeConfig.coverage ?? 0.25);
+    uniforms.hazeIntensity.value = clampUnit(hazeConfig.intensity ?? 0.5);
+  } else {
+    uniforms.hazeIntensity.value = 0;
+  }
 }
 
 function ensureCameraTarget(ctx) {
@@ -431,41 +608,23 @@ function applyVisualLighting(ctx, vis) {
   const diffuseRGB = rgbFromArray(head.diffuse, [1, 1, 1]);
   const ambientRGB = rgbFromArray(head.ambient, [0.2, 0.2, 0.2]);
   const active = (head.active ?? 1) !== 0;
-  const diffuseStrength = Math.max(0.05, averageRGB(diffuseRGB) * 3);
-  const ambientStrength = Math.max(0.01, averageRGB(ambientRGB));
   if (ctx.light) {
-    ctx.light.intensity = active ? diffuseStrength : 0;
+    ctx.light.intensity = active ? Math.max(0.05, averageRGB(diffuseRGB) * 3) : 0;
     ctx.light.color.setRGB(diffuseRGB[0], diffuseRGB[1], diffuseRGB[2]);
   }
   if (ctx.fill) {
-    ctx.fill.intensity = active ? diffuseStrength * 0.35 : 0;
+    ctx.fill.intensity = active ? Math.max(0.05, averageRGB(diffuseRGB) * 1.0) : 0;
     ctx.fill.color.setRGB(diffuseRGB[0], diffuseRGB[1], diffuseRGB[2]);
   }
   if (ctx.ambient) {
-    ctx.ambient.intensity = ambientStrength;
+    ctx.ambient.intensity = active ? Math.max(0.0, averageRGB(ambientRGB)) : 0;
     ctx.ambient.color.setRGB(ambientRGB[0], ambientRGB[1], ambientRGB[2]);
   }
-}
-
-function applyVisualFog(ctx, vis, stat, bounds) {
-  if (!ctx?.scene?.fog || !vis?.map) return;
-  const map = vis.map;
-  const extent = Math.max(
-    0.1,
-    Number(stat?.extent) || Number(bounds?.radius) || 1
-  );
-  const fogStart = Number(map.fogstart);
-  const fogEnd = Number(map.fogend);
-  if (Number.isFinite(fogStart) && Number.isFinite(fogEnd)) {
-    const near = Math.max(0.001, extent * fogStart);
-    const far = Math.max(near + 0.1, extent * fogEnd);
-    ctx.scene.fog.near = near;
-    ctx.scene.fog.far = far;
-  }
-  const fogColor = vis?.rgba?.fog;
-  if (fogColor && ctx.scene.fog?.color) {
-    const color = rgbFromArray(fogColor, [0.7, 0.75, 0.85]);
-    ctx.scene.fog.color.setRGB(color[0], color[1], color[2]);
+  if (ctx.hemi) {
+    const hemiStrength = Math.max(0.0, averageRGB(ambientRGB));
+    ctx.hemi.intensity = active ? hemiStrength : 0;
+    ctx.hemi.color.setRGB(diffuseRGB[0], diffuseRGB[1], diffuseRGB[2]);
+    ctx.hemi.groundColor.setRGB(ambientRGB[0], ambientRGB[1], ambientRGB[2]);
   }
 }
 
@@ -870,11 +1029,13 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
 }
 
 function createPerturbArrowNode(colorHex) {
-  const material = new THREE.MeshLambertMaterial({
+  const material = new THREE.MeshBasicMaterial({
     color: colorHex,
     transparent: true,
     opacity: 0.8,
     depthWrite: false,
+    toneMapped: false,
+    fog: false,
   });
   const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, material);
   const head = new THREE.Mesh(PERTURB_HEAD_GEOMETRY, material);
@@ -901,6 +1062,8 @@ function ensurePerturbHelpers(ctx) {
       opacity: 0.95,
       depthTest: true,
       depthWrite: false,
+      toneMapped: false,
+      fog: false,
     });
     const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, material);
     const head = new THREE.Mesh(PERTURB_HEAD_GEOMETRY, material);
@@ -921,6 +1084,7 @@ function ensurePerturbHelpers(ctx) {
       opacity: 0.35,
       depthTest: true,
       depthWrite: false,
+      fog: false,
     });
     const line = new THREE.Line(lineGeom, lineMaterial);
     line.visible = false;
@@ -938,6 +1102,8 @@ function ensurePerturbHelpers(ctx) {
       side: THREE.DoubleSide,
       depthTest: true,
       depthWrite: false,
+      toneMapped: false,
+      fog: false,
     });
     const ring = new THREE.Mesh(ringGeom, ringMaterial);
     ring.visible = false;
@@ -1483,9 +1649,9 @@ function applyMaterialFlags(mesh, index, state) {
   const sceneFlags = state.rendering?.sceneFlags || [];
   mesh.material.wireframe = !!sceneFlags[1];
   if (mesh.material.emissive && typeof mesh.material.emissive.set === 'function') {
-    mesh.material.emissive.set(sceneFlags[0] ? 0x1a1f2a : 0x000000);
+    mesh.material.emissive.set(0x000000);
   } else if (mesh.material && 'emissive' in mesh.material) {
-    mesh.material.emissive = new THREE.Color(sceneFlags[0] ? 0x1a1f2a : 0x000000);
+    mesh.material.emissive = new THREE.Color(0x000000);
   }
 }
 
@@ -1506,6 +1672,27 @@ function updateMeshMaterial(mesh, matIndex, matRgbaView) {
   }
   if ('needsUpdate' in material) {
     material.needsUpdate = true;
+  }
+}
+
+function resolveMaterialReflectance(matIndex, assets) {
+  if (!(matIndex >= 0)) return 0;
+  const reflectArr = assets?.materials?.reflectance || null;
+  if (!reflectArr) return 0;
+  const value = reflectArr[matIndex];
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Number(value));
+}
+
+function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
+  if (!mesh) return;
+  mesh.userData = mesh.userData || {};
+  mesh.userData.reflectance = reflectance;
+  const baseIntensity = typeof ctx?.envIntensity === 'number' ? ctx.envIntensity : 0;
+  const active = reflectionEnabled ? reflectance : 0;
+  if (mesh.material && 'envMapIntensity' in mesh.material) {
+    mesh.material.envMapIntensity = baseIntensity * active;
+    mesh.material.needsUpdate = true;
   }
 }
 
@@ -1575,10 +1762,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
       };
       if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
       material = ctx.materialPool.get(poolKey);
-      if (!useStandard) {
-        const baseIntensity = ctx?.envIntensity ?? 0.6;
-        material.envMapIntensity = ctx?.reflectionActive === false ? 0 : baseIntensity;
-      }
+      if (!useStandard) material.envMapIntensity = 0;
     }
     material.side = THREE.FrontSide;
     mesh = new THREE.Mesh(geometryInfo.geometry, material);
@@ -1737,7 +1921,7 @@ export function createRendererManager({
       ctx.frameId = window.requestAnimationFrame(step);
       if (!ctx.initialized || !ctx.renderer || !ctx.scene || !ctx.camera) return;
       // Background/environment is managed by environment manager (ensureEnvIfNeeded)
-      ctx.renderer.render(ctx.scene, ctx.camera);
+      renderSceneWithPost(ctx, ctx.renderer, ctx.scene, ctx.camera);
       // Expose a simple frame counter for headless readiness checks
       try {
         ctx._frameCounter = (ctx._frameCounter || 0) + 1;
@@ -1838,7 +2022,7 @@ export function createRendererManager({
             const cam = (ctx && ctx.camera) ? ctx.camera : camera;
             if (!r || !scn || !cam) return null;
             r.setRenderTarget?.(null);
-            r.render(scn, cam);
+            renderSceneWithPost(ctx, r, scn, cam);
             const url = r.domElement && typeof r.domElement.toDataURL === 'function'
               ? r.domElement.toDataURL('image/png')
               : null;
@@ -1882,7 +2066,7 @@ export function createRendererManager({
               });
             } catch {}
             r.setRenderTarget?.(null);
-            r.render(scn, cam);
+            renderSceneWithPost(ctx, r, scn, cam);
             const url = r.domElement?.toDataURL?.('image/png');
             window.__viewerCanvasDataUrlLength = url ? url.length : 0;
             // restore
@@ -1897,8 +2081,6 @@ export function createRendererManager({
     }
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(DEFAULT_CLEAR_HEX, 12, 48);
-    ctx.sceneFog = scene.fog;
 
     const ambient = new THREE.AmbientLight(0xffffff, 0);
     scene.add(ambient);
@@ -1973,6 +2155,7 @@ export function createRendererManager({
       hdriReady: false,
       hdriLoading: false,
       hdriBackground: null,
+      hdriLoadPromise: null,
       envDirty: true,
       sky: null,
       skyInit: false,
@@ -1999,6 +2182,7 @@ export function createRendererManager({
     if (!context.initialized) return;
     const renderer = context.renderer;
     const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
+    const voptFlags = Array.isArray(state.rendering?.voptFlags) ? state.rendering.voptFlags : [];
     const reflectionEnabled = sceneFlags[2] !== false;
     const skyboxEnabled = sceneFlags[4] !== false;
     const fogEnabled = !!sceneFlags[5];
@@ -2020,41 +2204,24 @@ export function createRendererManager({
 
     const visStruct = state.model?.vis || null;
     const statStruct = state.model?.stat || null;
-    updateFogEnabled(context, fogEnabled);
-    applyHazeBackground(context, visStruct, hazeEnabled, skyboxEnabled);
+    const fogConfig = resolveFogConfig(visStruct, statStruct, context.bounds, fogEnabled);
+    const hazeConfig = resolveHazeConfig(visStruct, hazeEnabled, skyboxEnabled);
+    context.fogConfig = fogConfig;
+    context.hazeConfig = hazeConfig;
     if (visStruct) {
       applyVisualLighting(context, visStruct);
-      if (fogEnabled) {
-        applyVisualFog(context, visStruct, statStruct, context.bounds);
-      }
     }
 
     const defaults = getDefaultVopt(context, state);
-    const voptFlags = state.rendering?.voptFlags || [];
     if (context.renderer) {
       context.renderer.shadowMap.enabled = true;
       if (context.renderer.shadowMap) {
         context.renderer.shadowMap.type = THREE.PCFShadowMap;
       }
     }
-    if (context.light) {
-      const baseLight = sceneFlags[0] ? 1.45 : 1.05;
-      context.light.intensity = baseLight;
-    }
-    if (context.fill) {
-      context.fill.intensity = sceneFlags[0] ? 0.35 : 0.2;
-    }
-    if (context.ambient) {
-      context.ambient.intensity = 0.03;
-    }
-    if (context.hemi) {
-      const fillLight = sceneFlags[0] ? 0.6 : 0.35;
-      context.hemi.intensity = fillLight;
-      context.hemi.groundColor.set(sceneFlags[0] ? 0x111622 : 0x161b29);
-    }
 
     // --- Overlays: contacts (controlled by vopt flags) ---
-    const vopt = state.rendering?.voptFlags || [];
+    const vopt = voptFlags;
     const contactPointEnabled = !!vopt[14];
     const contactForceEnabled = !!vopt[16];
     // Contact overlays: points (flags[14]) and force arrows (flags[16]).
@@ -2097,14 +2264,16 @@ export function createRendererManager({
       const contactColorHex = rgbaToHex(rgbaContact, CONTACT_POINT_FALLBACK_COLOR);
       const contactOpacity = alphaFromArray(rgbaContact, 0.85);
       if (!group.userData.material) {
-        group.userData.material = new THREE.MeshBasicMaterial({
-          color: contactColorHex,
-          side: THREE.DoubleSide,
-          transparent: contactOpacity < 0.999,
-          opacity: contactOpacity,
-          depthTest: true,
-          depthWrite: false,
-        });
+      group.userData.material = new THREE.MeshBasicMaterial({
+        color: contactColorHex,
+        side: THREE.DoubleSide,
+        transparent: contactOpacity < 0.999,
+        opacity: contactOpacity,
+        depthTest: true,
+        depthWrite: false,
+        toneMapped: false,
+        fog: false,
+      });
       } else {
         group.userData.material.color.setHex(contactColorHex);
         group.userData.material.opacity = contactOpacity;
@@ -2210,6 +2379,7 @@ export function createRendererManager({
             opacity: colorOpacity,
             depthWrite: false,
             toneMapped: false,
+            fog: false,
           });
         } else {
           context.contactForceMaterial.color.setHex(colorHex);
@@ -2311,7 +2481,6 @@ export function createRendererManager({
     }
 
     let hideAllGeometry = !!hideAllGeometryDefault;
-    let highlightGeometry = false;
     if (defaults) {
       for (let idx = 0; idx < Math.min(defaults.length, voptFlags.length); idx += 1) {
         const def = defaults[idx];
@@ -2319,9 +2488,6 @@ export function createRendererManager({
         if (def && !val) {
           hideAllGeometry = true;
           break;
-        }
-        if (!def && val) {
-          highlightGeometry = true;
         }
       }
     }
@@ -2374,6 +2540,7 @@ export function createRendererManager({
     const sizeView = snapshot.gsize || assets?.geoms?.size || null;
     const typeView = snapshot.gtype || assets?.geoms?.type || null;
     const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
+    const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
 
     const overlayOptions = {
       geomGroupIds,
@@ -2411,6 +2578,11 @@ export function createRendererManager({
         state,
       );
       if (!mesh) continue;
+      const matIndex = matIdView?.[i] ?? -1;
+      const reflectanceValue = resolveMaterialReflectance(matIndex, assets);
+      mesh.userData = mesh.userData || {};
+      mesh.userData.matId = matIndex;
+      applyReflectanceToMaterial(mesh, context, reflectanceValue, reflectionEnabled);
       updateMeshFromSnapshot(mesh, i, snapshot, state, assets);
 
       let visible = mesh.visible;
@@ -2424,14 +2596,6 @@ export function createRendererManager({
           if (!geomGroupMask[groupIdx]) {
             visible = false;
           }
-        }
-      }
-
-      if (highlightGeometry) {
-        if (mesh.material?.emissive && typeof mesh.material.emissive.set === 'function') {
-          mesh.material.emissive.set(0x2b3a7a);
-        } else if (mesh.material) {
-          mesh.material.emissive = new THREE.Color(0x2b3a7a);
         }
       }
 
@@ -2461,15 +2625,12 @@ export function createRendererManager({
       }
     } catch {}
 
-    const baseEnvIntensity = typeof context.envIntensity === 'number' ? context.envIntensity : 0;
-    const effectiveEnvIntensity = reflectionEnabled ? baseEnvIntensity : 0;
-    if (context.lastEnvIntensity !== effectiveEnvIntensity) {
-      for (const m of context.meshes) {
-        if (m && m.material && 'envMapIntensity' in m.material) {
-          m.material.envMapIntensity = effectiveEnvIntensity;
-        }
+    if (Array.isArray(context.meshes)) {
+      for (const mesh of context.meshes) {
+        if (!mesh) continue;
+        const refl = Number(mesh.userData?.reflectance) || 0;
+        applyReflectanceToMaterial(mesh, context, refl, reflectionEnabled);
       }
-      context.lastEnvIntensity = effectiveEnvIntensity;
     }
 
     if (context.light && context.bounds) {
@@ -2606,13 +2767,14 @@ export function createRendererManager({
       context.copySeq = copyState.seq;
     }
     const fb = context.fallback || {};
-    const gridVisible =
-      (!reflectionEnabled || fb.enabled === false) &&
+    const baseGrid =
+      fb.enabled === false &&
       !(
         copyState &&
         copyState.precision === 'full' &&
         copyState.seq === context.copySeq
       );
+    const gridVisible = baseGrid;
     context.grid.visible = gridVisible;
 
     const gl = renderer && typeof renderer.getContext === 'function' ? renderer.getContext() : null;
@@ -2721,6 +2883,8 @@ function applySelectionHighlight(ctx, mesh) {
     transparent: true,
     opacity: 0.5,
     depthWrite: false,
+    toneMapped: false,
+    fog: false,
   });
   const overlay = new THREE.Mesh(mesh.geometry, overlayMaterial);
   overlay.position.set(0, 0, 0);

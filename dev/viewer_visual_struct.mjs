@@ -62,24 +62,24 @@ export const VISUAL_FIELD_DESCRIPTORS = [
       "headlight",
       "ambient"
     ],
-    "kind": "float",
-    "size": 1
+    "kind": "float_vec",
+    "size": 3
   },
   {
     "path": [
       "headlight",
       "diffuse"
     ],
-    "kind": "float",
-    "size": 1
+    "kind": "float_vec",
+    "size": 3
   },
   {
     "path": [
       "headlight",
       "specular"
     ],
-    "kind": "float",
-    "size": 1
+    "kind": "float_vec",
+    "size": 3
   },
   {
     "path": [

@@ -72,6 +72,62 @@ export function createVerticalGradientTexture(THREE_NS, topHex, bottomHex, heigh
   return tex;
 }
 
+function isPresetMode(state) {
+  return (state?.visualSourceMode ?? 'model') === 'preset';
+}
+
+function ensureBaseLightingCache(ctx) {
+  if (!ctx) return;
+  if (!ctx._baseLighting) {
+    ctx._baseLighting = {
+      exposure: ctx.renderer ? ctx.renderer.toneMappingExposure : null,
+      ambientIntensity: ctx.ambient ? ctx.ambient.intensity : null,
+      ambientColor: ctx.ambient ? ctx.ambient.color.clone() : null,
+      hemiIntensity: ctx.hemi ? ctx.hemi.intensity : null,
+      hemiSky: ctx.hemi ? ctx.hemi.color.clone() : null,
+      hemiGround: ctx.hemi ? ctx.hemi.groundColor.clone() : null,
+      lightIntensity: ctx.light ? ctx.light.intensity : null,
+      lightColor: ctx.light ? ctx.light.color.clone() : null,
+      lightPosition: ctx.light ? ctx.light.position.clone() : null,
+      lightTargetPosition: ctx.lightTarget ? ctx.lightTarget.position.clone() : null,
+      fillIntensity: ctx.fill ? ctx.fill.intensity : null,
+      fillColor: ctx.fill ? ctx.fill.color.clone() : null,
+      fillPosition: ctx.fill ? ctx.fill.position.clone() : null,
+    };
+  }
+}
+
+function restoreBaseLighting(ctx) {
+  if (!ctx || !ctx._baseLighting) return;
+  const base = ctx._baseLighting;
+  if (ctx.renderer && base.exposure != null) {
+    ctx.renderer.toneMappingExposure = base.exposure;
+  }
+  if (ctx.ambient) {
+    if (base.ambientIntensity != null) ctx.ambient.intensity = base.ambientIntensity;
+    if (base.ambientColor) ctx.ambient.color.copy(base.ambientColor);
+  }
+  if (ctx.hemi) {
+    if (base.hemiIntensity != null) ctx.hemi.intensity = base.hemiIntensity;
+    if (base.hemiSky) ctx.hemi.color.copy(base.hemiSky);
+    if (base.hemiGround) ctx.hemi.groundColor.copy(base.hemiGround);
+  }
+  if (ctx.light) {
+    if (base.lightIntensity != null) ctx.light.intensity = base.lightIntensity;
+    if (base.lightColor) ctx.light.color.copy(base.lightColor);
+    if (base.lightPosition) ctx.light.position.copy(base.lightPosition);
+  }
+  if (ctx.lightTarget && base.lightTargetPosition) {
+    ctx.lightTarget.position.copy(base.lightTargetPosition);
+    ctx.light.target?.updateMatrixWorld?.();
+  }
+  if (ctx.fill) {
+    if (base.fillIntensity != null) ctx.fill.intensity = base.fillIntensity;
+    if (base.fillColor) ctx.fill.color.copy(base.fillColor);
+    if (base.fillPosition) ctx.fill.position.copy(base.fillPosition);
+  }
+}
+
 export function createEnvironmentManager({
   THREE_NS,
   store,
@@ -92,7 +148,8 @@ export function createEnvironmentManager({
         ctx.sky.visible = !ctx.envFromHDRI;
       }
     } catch {}
-    if ((ctx.envFromHDRI && ctx.envRT && ctx.scene.environment) || ctx.hdriLoading) {
+    const hdrReady = ctx.envFromHDRI && ctx.envRT && ctx.hdriReady;
+    if (hdrReady || ctx.hdriLoading || ctx.hdriLoadPromise) {
       return;
     }
     if (!ctx.pmrem) {
@@ -123,14 +180,18 @@ export function createEnvironmentManager({
           hdr.magFilter = THREE_NS.LinearFilter;
           hdr.generateMipmaps = false;
           hdr.needsUpdate = true;
-          ctx.hdriBackground = hdr;
-          ctx.envFromHDRI = true;
-          ctx.hdriReady = true;
           const envRT = ctx.pmrem.fromEquirectangular(hdr);
           const envTexture = envRT.texture;
           if (THREE_NS.LinearSRGBColorSpace && envTexture) {
             envTexture.colorSpace = THREE_NS.LinearSRGBColorSpace;
           }
+          const prevEnvRT = ctx.envRT;
+          const prevHdr = ctx.hdriBackground;
+          ctx.envRT = envRT;
+          ctx.hdriBackground = hdr;
+          ctx.envFromHDRI = true;
+          ctx.hdriReady = true;
+          ctx.envDirty = false;
           if (ctx.scene) {
             ctx.scene.environment = envTexture;
             ctx.scene.background = hdr;
@@ -140,15 +201,10 @@ export function createEnvironmentManager({
             if ('backgroundBlurriness' in ctx.scene) {
               ctx.scene.backgroundBlurriness = 0.0;
             }
-            
           }
-          // dispose previous resources before committing the new ones
-          try { ctx.envRT?.dispose?.(); } catch {}
-          try { ctx.hdriBackground?.dispose?.(); } catch {}
-          ctx.envRT = envRT;
-          ctx.hdriBackground = hdr;
-          ctx.envFromHDRI = true;
-          ctx.hdriReady = true;
+          // dispose previous resources now that replacements are active
+          try { prevEnvRT?.dispose?.(); } catch {}
+          try { prevHdr?.dispose?.(); } catch {}
           const intensity = preset?.envIntensity ?? 1.7;
           if (typeof console !== 'undefined') console.log('[env] HDRI loaded', { url, intensity });
           ctx.envIntensity = intensity;
@@ -163,19 +219,32 @@ export function createEnvironmentManager({
           return false;
         }
       };
-      (async () => {
+      ctx.hdriLoadPromise = (async () => {
         for (const url of candidates) {
           // eslint-disable-next-line no-await-in-loop
           if (await tryLoadHDRI(url)) {
-            ctx.envDirty = false;
-            return;
+            return true;
           }
         }
         ctx.hdriLoading = false;
         if (!ctx.envFromHDRI) {
           ctx.hdriReady = false;
         }
-      })();
+        return false;
+      })()
+        .catch((err) => {
+          if (typeof console !== 'undefined') {
+            console.warn('[env] HDRI queue failed', err);
+          }
+          ctx.hdriLoading = false;
+          if (!ctx.envFromHDRI) {
+            ctx.hdriReady = false;
+          }
+          return false;
+        })
+        .finally(() => {
+          ctx.hdriLoadPromise = null;
+        });
     }
     if (!ctx.skyInit) {
       ctx.skyInit = true;
@@ -236,13 +305,18 @@ export function createEnvironmentManager({
 
   function applyFallbackAppearance(ctx, state) {
     const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: 'bright-outdoor' };
-    const preset = FALLBACK_PRESETS['bright-outdoor'];
     const renderer = ctx.renderer;
-    if (renderer) {
-      renderer.toneMappingExposure = preset.exposure ?? 1.0;
+    ensureBaseLightingCache(ctx);
+    const presetMode = isPresetMode(state);
+    fallback.enabled = fallbackEnabledDefault && presetMode;
+    if (!fallback.enabled) {
+      restoreBaseLighting(ctx);
+      return;
     }
-
-    // Background/environment handled by ensureEnvIfNeeded (no side effects here).
+    const preset = FALLBACK_PRESETS['bright-outdoor'];
+    if (renderer && preset.exposure != null) {
+      renderer.toneMappingExposure = preset.exposure;
+    }
 
     if (!hasModelLights(state)) {
       if (ctx.ambient) {
@@ -265,6 +339,7 @@ export function createEnvironmentManager({
         }
         if (ctx.lightTarget && Array.isArray(dirCfg.target) && dirCfg.target.length === 3) {
           ctx.lightTarget.position.set(dirCfg.target[0], dirCfg.target[1], dirCfg.target[2]);
+          ctx.light.target?.updateMatrixWorld?.();
         }
         if (ctx.light.shadow) {
           ctx.light.shadow.bias =
@@ -280,13 +355,31 @@ export function createEnvironmentManager({
         }
       }
     }
-
-    // no env orchestration here
   }
 
   function ensureEnvIfNeeded(ctx, state) {
     const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: 'bright-outdoor' };
     const preset = FALLBACK_PRESETS['bright-outdoor'];
+    const presetMode = isPresetMode(state);
+    fallback.enabled = fallbackEnabledDefault && presetMode;
+    if (!presetMode) {
+      if (ctx.scene && ctx.envFromHDRI && ctx.envRT && ctx.scene.environment === ctx.envRT.texture) {
+        ctx.scene.environment = null;
+      }
+      if (ctx.scene && ctx.hdriBackground && ctx.scene.background === ctx.hdriBackground) {
+        ctx.scene.background = null;
+      }
+      if (ctx.sky) {
+        ctx.sky.visible = false;
+      }
+      return;
+    }
+    if (ctx.envFromHDRI && ctx.envRT && ctx.scene && !ctx.scene.environment) {
+      ctx.scene.environment = ctx.envRT.texture;
+      if (ctx.hdriBackground) {
+        ctx.scene.background = ctx.hdriBackground;
+      }
+    }
     const hasEnv = hasModelEnvironment(state);
     if (!hasEnv && fallback.enabled) {
       ensureOutdoorSkyEnv(ctx, preset);

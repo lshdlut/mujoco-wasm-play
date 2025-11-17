@@ -631,8 +631,8 @@
   },
   "mjVisual::headlight.ambient": {
     "value": {
-      "kind": "float",
-      "size": 1
+      "kind": "float_vec",
+      "size": 3
     },
     "occurrences": [
       {
@@ -641,7 +641,7 @@
         "group_id": null,
         "group_type": null,
         "item_id": "visualization.headlight_ambient",
-        "control_type": "edit_float",
+        "control_type": "edit_vec3",
         "label": "Ambient",
         "shortcut": null
       }
@@ -649,8 +649,8 @@
   },
   "mjVisual::headlight.diffuse": {
     "value": {
-      "kind": "float",
-      "size": 1
+      "kind": "float_vec",
+      "size": 3
     },
     "occurrences": [
       {
@@ -659,7 +659,7 @@
         "group_id": null,
         "group_type": null,
         "item_id": "visualization.headlight_diffuse",
-        "control_type": "edit_float",
+        "control_type": "edit_vec3",
         "label": "Diffuse",
         "shortcut": null
       }
@@ -667,8 +667,8 @@
   },
   "mjVisual::headlight.specular": {
     "value": {
-      "kind": "float",
-      "size": 1
+      "kind": "float_vec",
+      "size": 3
     },
     "occurrences": [
       {
@@ -677,7 +677,7 @@
         "group_id": null,
         "group_type": null,
         "item_id": "visualization.headlight_specular",
-        "control_type": "edit_float",
+        "control_type": "edit_vec3",
         "label": "Specular",
         "shortcut": null
       }

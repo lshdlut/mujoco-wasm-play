@@ -94,6 +94,38 @@ function clamp01(x) {
   return x;
 }
 
+function pushToast(message) {
+  if (!message) return;
+  try {
+    store.update((draft) => {
+      draft.toast = { message, ts: Date.now() };
+    });
+  } catch {}
+}
+
+  function elementIsEditable(node) {
+    if (!node || typeof node !== 'object') return false;
+    if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement) {
+      return !node.disabled && !node.readOnly;
+    }
+    if (node instanceof HTMLElement) {
+      if (node.isContentEditable) return true;
+      const role = typeof node.getAttribute === 'function' ? node.getAttribute('role') : null;
+      if (role === 'textbox' || role === 'combobox') return true;
+    }
+    return false;
+  }
+
+  function hasEditableFocus(contextRoot) {
+    const doc = contextRoot?.ownerDocument || contextRoot?.document || globalThis.document;
+    if (!doc) return false;
+    let active = doc.activeElement;
+    while (active && active.shadowRoot && active.shadowRoot.activeElement) {
+      active = active.shadowRoot.activeElement;
+    }
+    return elementIsEditable(active);
+  }
+
   const dynamicRangeResolvers = {
     'simulation.history_scrubber': () => {
       const hist = store.get()?.history;
@@ -1002,10 +1034,10 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     input.addEventListener('blur', () => setEditing(false));
   }
 
-  function renderEditInput(container, control, mode = 'text') {
+  function createTextInputField(container, control, { mode = 'text', idSuffix = '__edit' } = {}) {
     const range = mode === 'text' ? null : parseRange(control);
     const { row, label, field } = createLabeledRow(control);
-    const inputId = `${sanitiseName(control.item_id)}__edit`;
+    const inputId = `${sanitiseName(control.item_id)}${idSuffix}`;
     label.setAttribute('for', inputId);
     const input = document.createElement('input');
     input.id = inputId;
@@ -1023,6 +1055,11 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     } else {
       input.type = 'text';
     }
+    return { row, input, field, range };
+  }
+
+  function renderEditInput(container, control, mode = 'text') {
+    const { row, input, field, range } = createTextInputField(container, control, { mode });
     field.append(input);
     container.append(row);
 
@@ -1098,42 +1135,63 @@ function registerShortcutHandlers(shortcutSpec, handler) {
   }
 
   function renderVectorInput(container, control, expectedLength) {
-    const { row, label, field } = createLabeledRow(control);
-    const inputId = `${sanitiseName(control.item_id)}__vector`;
-    label.setAttribute('for', inputId);
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.id = inputId;
-    input.setAttribute('data-testid', control.item_id);
-    input.autocomplete = 'off';
-    input.spellcheck = false;
+    const { row, input, field } = createTextInputField(container, control, {
+      mode: 'text',
+      idSuffix: '__vector',
+    });
     field.append(input);
     container.append(row);
 
     applyOptionAvailability(control, input);
 
     const targetLength = Math.max(1, expectedLength | 0);
+    let lastValidText = '';
+
+    const formatVector = (vector) => vector.map(formatNumber).join(' ');
+    const toVectorArray = (value) => {
+      if (Array.isArray(value)) {
+        const arr = value.map((v) => Number(v));
+        return arr.length === targetLength && arr.every((n) => Number.isFinite(n)) ? arr : null;
+      }
+      if (value && typeof value === 'object') {
+        try {
+          const arr = Array.from(value, (v) => Number(v));
+          return arr.length === targetLength && arr.every((n) => Number.isFinite(n)) ? arr : null;
+        } catch {
+          return null;
+        }
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const tokens = trimmed.split(/\s+/).filter(Boolean);
+        if (tokens.length !== targetLength) return null;
+        const arr = tokens.map((token) => Number(token));
+        return arr.every((n) => Number.isFinite(n)) ? arr : null;
+      }
+      if (typeof value === 'number' && targetLength === 1) {
+        return Number.isFinite(value) ? [Number(value)] : null;
+      }
+      return null;
+    };
+
+    const setInputText = (text) => {
+      input.value = text;
+      input.classList.remove('is-invalid');
+    };
 
     const binding = createBinding(control, {
-      getValue: () => input.value,
+      getValue: () => lastValidText || input.value,
       applyValue: (value) => {
         if (value === undefined || value === null) return;
-        let text = '';
-        if (Array.isArray(value)) {
-          text = value.map(formatNumber).join(' ');
-        } else if (typeof value === 'string') {
-          text = value.trim();
-        } else if (value != null && typeof value === 'object') {
-          try {
-            text = Array.from(value).map(formatNumber).join(' ');
-          } catch {
-            text = '';
-          }
+        const parsed = toVectorArray(value);
+        if (parsed) {
+          lastValidText = formatVector(parsed);
+          setInputText(lastValidText);
+          return;
         }
-        input.value = text;
-        if (text) {
-          input.classList.remove('is-invalid');
-        }
+        const text = typeof value === 'string' ? value.trim() : String(value ?? '');
+        setInputText(text);
       },
     });
 
@@ -1145,25 +1203,32 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       }
     }
 
-    const commit = guardBinding(binding, async () => {
-      const tokens = input.value.trim().split(/\s+/).filter(Boolean);
-      const numbers = tokens.map((token) => Number(token));
-      const isValid =
-        tokens.length === targetLength && numbers.every((num) => Number.isFinite(num));
-      if (isValid) {
-        const formatted = numbers.map(formatNumber).join(' ');
-        binding.setValue(formatted);
-        input.classList.remove('is-invalid');
-        await applySpecAction(store, backend, control, formatted);
-        return;
-      }
+    const showInvalid = () => {
       input.classList.add('is-invalid');
+      const labelText = control?.label || control?.name || control?.item_id || 'vector';
+      pushToast(`[${labelText}] invalid vector input (expected ${targetLength})`);
       if (input._invalidTimer) {
         clearTimeout(input._invalidTimer);
       }
       input._invalidTimer = setTimeout(() => {
         input.classList.remove('is-invalid');
-      }, 900);
+      }, 1200);
+      if (lastValidText) {
+        input.value = lastValidText;
+      } else {
+        input.value = '';
+      }
+    };
+
+    const commit = guardBinding(binding, async () => {
+      const parsed = toVectorArray(input.value);
+      if (parsed) {
+        lastValidText = formatVector(parsed);
+        setInputText(lastValidText);
+        await applySpecAction(store, backend, control, parsed);
+        return;
+      }
+      showInvalid();
     });
 
     input.addEventListener('focus', () => {
@@ -1609,6 +1674,9 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     const root = shortcutRoot || leftPanel?.ownerDocument?.body || rightPanel?.ownerDocument?.body;
     if (!root || typeof root.addEventListener !== 'function') return;
     const handler = (event) => {
+      const target = event?.target;
+      if (elementIsEditable(target)) return;
+      if (hasEditableFocus(root)) return;
       const combo = shortcutFromEvent(event);
       if (!combo) return;
       const list = shortcutHandlers.get(combo);
