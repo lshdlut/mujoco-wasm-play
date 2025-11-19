@@ -146,6 +146,7 @@ ${shader.fragmentShader.replace(
   mesh.userData.infiniteGround = {
     uniforms,
     baseDistance: distance,
+    baseFadePow: uniforms.uFadePow.value,
   };
   return mesh;
 }

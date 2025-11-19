@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { createInfiniteGroundHelper } from './infinite_grid_helper.mjs';
-import { createHazeMesh, rebuildHazeGeometry } from './haze_helper.mjs';
 const MJ_GEOM = {
   PLANE: 0,
   HFIELD: 1,
@@ -110,7 +109,6 @@ const DEFAULT_CLEAR_HEX = 0xd6dce4;
 const GROUND_DISTANCE = 200;
 const RENDER_ORDER = Object.freeze({
   GROUND: -50,
-  HAZE: 40,
 });
 const HAZE_TMP_HEAD = new THREE.Vector3();
 const HAZE_TMP_PLANE_POS = new THREE.Vector3();
@@ -168,194 +166,6 @@ function applySkyboxVisibility(ctx, enabled) {
   if (ctx.sky && !ctx.envFromHDRI) {
     ctx.sky.visible = true;
   }
-}
-
-function ensureHazeMesh(context) {
-  const worldScene = getWorldScene(context);
-  if (!context || !worldScene) return null;
-  if (!context.hazeMesh) {
-    context.hazeMesh = createHazeMesh({ renderOrder: RENDER_ORDER.HAZE });
-    worldScene.add(context.hazeMesh);
-  }
-  return context.hazeMesh;
-}
-
-function findInfinitePlaneGeom(sceneSnapshot) {
-  const geoms = sceneSnapshot?.geoms;
-  if (!Array.isArray(geoms)) return null;
-  for (const geom of geoms) {
-    if (!geom || geom.type !== 'plane') continue;
-    const sx = Math.abs(geom.size?.[0] ?? 0);
-    const sy = Math.abs(geom.size?.[1] ?? 0);
-    if (sx === 0 && sy === 0) {
-      return geom;
-    }
-  }
-  return null;
-}
-
-function findInfinitePlaneFromSnapshot(snapshot, assets) {
-  const ngeom = snapshot?.ngeom | 0;
-  if (!(ngeom > 0)) return null;
-  const xpos = snapshot?.xpos;
-  const xmat = snapshot?.xmat;
-  if (!xpos || !xmat) return null;
-  const sizeView = snapshot?.gsize || assets?.geoms?.size || null;
-  const typeView = snapshot?.gtype || assets?.geoms?.type || null;
-  if (!sizeView || !typeView) return null;
-  for (let i = 0; i < ngeom; i += 1) {
-    const typeEnum = Number(typeView?.[i]) | 0;
-    if (typeEnum !== MJ_GEOM.PLANE) continue;
-    const base = 3 * i;
-    const sx = Number(sizeView?.[base + 0]) || 0;
-    const sy = Number(sizeView?.[base + 1]) || 0;
-    const isInfinite = Math.abs(sx) <= 1e-6 && Math.abs(sy) <= 1e-6;
-    if (!isInfinite) continue;
-    const pos = [
-      Number(xpos[base + 0]) || 0,
-      Number(xpos[base + 1]) || 0,
-      Number(xpos[base + 2]) || 0,
-    ];
-    const matBase = 9 * i;
-    const m = [
-      xmat?.[matBase + 0] ?? 1,
-      xmat?.[matBase + 1] ?? 0,
-      xmat?.[matBase + 2] ?? 0,
-      xmat?.[matBase + 3] ?? 0,
-      xmat?.[matBase + 4] ?? 1,
-      xmat?.[matBase + 5] ?? 0,
-      xmat?.[matBase + 6] ?? 0,
-      xmat?.[matBase + 7] ?? 0,
-      xmat?.[matBase + 8] ?? 1,
-    ];
-    return { id: i, xpos: pos, xmat: m };
-  }
-  return null;
-}
-
-// Recreates MuJoCo's truncated-cone haze around the viewer head, aligned with the primary plane.
-function applyHazeOverlay(context, snapshot, state, options = {}) {
-  const mesh = ensureHazeMesh(context);
-  if (!mesh) {
-    return { mode: 'overlay', enabled: false, reason: 'no-mesh' };
-  }
-  const hazeConfig = options.hazeConfig || null;
-  const hazeEnabled = hazeConfig ? !!hazeConfig.enabled : !!options.hazeEnabled;
-  const skyboxEnabled = options.skyboxEnabled !== false;
-  if (!hazeEnabled) {
-    mesh.visible = false;
-    return { mode: 'overlay', enabled: false, reason: 'flag-off' };
-  }
-  if (!skyboxEnabled) {
-    mesh.visible = false;
-    return { mode: 'overlay', enabled: false, reason: 'skybox-disabled' };
-  }
-  const sceneSnapshot = options.sceneSnapshot || snapshot?.scene || state?.scene || null;
-  const sceneLabel =
-    options.sceneLabel
-      || (sceneSnapshot
-        ? (options.sceneSnapshot === sceneSnapshot ? 'state' : (snapshot?.scene === sceneSnapshot ? 'snapshot' : 'unknown'))
-        : 'missing');
-  let planeGeom = findInfinitePlaneGeom(sceneSnapshot);
-  if (!planeGeom) {
-    planeGeom = findInfinitePlaneFromSnapshot(snapshot, options.assets || null);
-  }
-  if (!planeGeom) {
-    mesh.visible = false;
-    return { mode: 'overlay', enabled: false, reason: 'no-plane', scene: sceneLabel };
-  }
-  const camera = context?.camera;
-  if (!camera) {
-    mesh.visible = false;
-    return { mode: 'overlay', enabled: false, reason: 'no-camera', scene: sceneLabel };
-  }
-  const vis = state?.model?.vis || null;
-  const rawHaze = clampUnit(Number(vis?.map?.haze) ?? 0.3);
-  const radiusParam = typeof hazeConfig?.radiusParam === 'number'
-    ? Math.max(0.01, Math.min(0.95, hazeConfig.radiusParam))
-    : Math.max(0.01, Math.min(0.95, rawHaze || 0.3));
-  if (mesh.userData.radiusParam !== radiusParam) {
-    rebuildHazeGeometry(mesh, radiusParam);
-  }
-  const hazeRgb = rgbFromArray(vis?.rgba?.haze, [0.94, 0.96, 1]);
-  const debugColorHex =
-    typeof window !== 'undefined' && window.__PLAY_HAZE_DEBUG_COLOR != null
-      ? window.__PLAY_HAZE_DEBUG_COLOR
-      : null;
-  const baseColor = (() => {
-    if (debugColorHex != null) return new THREE.Color(debugColorHex);
-    if (hazeConfig?.color) return hazeConfig.color;
-    return new THREE.Color().setRGB(hazeRgb[0], hazeRgb[1], hazeRgb[2]);
-  })();
-  const alphaScale = clampUnit(Array.isArray(vis?.rgba?.haze) ? vis.rgba.haze[3] ?? 1 : 1);
-  const boostedOpacity = typeof hazeConfig?.opacityMul === 'number'
-    ? hazeConfig.opacityMul
-    : Math.min(2, alphaScale * 1.35 + 0.25);
-  if (mesh.material?.uniforms?.baseColor?.value) {
-    mesh.material.uniforms.baseColor.value.copy(baseColor);
-  }
-  if (mesh.material?.uniforms?.opacityMul) {
-    mesh.material.uniforms.opacityMul.value = boostedOpacity;
-  }
-  const rot = Array.isArray(planeGeom.xmat) && planeGeom.xmat.length >= 9
-    ? planeGeom.xmat
-    : [1, 0, 0, 0, 1, 0, 0, 0, 1];
-  HAZE_TMP_MAT_ROT.set(
-    rot[0], rot[1], rot[2], 0,
-    rot[3], rot[4], rot[5], 0,
-    rot[6], rot[7], rot[8], 0,
-    0, 0, 0, 1,
-  );
-  HAZE_TMP_NORMAL.set(rot[2], rot[5], rot[8]);
-  if (HAZE_TMP_NORMAL.lengthSq() < 1e-8) {
-    HAZE_TMP_NORMAL.set(0, 0, 1);
-  } else {
-    HAZE_TMP_NORMAL.normalize();
-  }
-  HAZE_TMP_PLANE_POS.set(
-    Number(planeGeom.xpos?.[0] ?? 0),
-    Number(planeGeom.xpos?.[1] ?? 0),
-    Number(planeGeom.xpos?.[2] ?? 0),
-  );
-  HAZE_TMP_DELTA.copy(camera.position).sub(HAZE_TMP_PLANE_POS);
-  const distanceHint = Number.isFinite(options.distanceHint) ? options.distanceHint : null;
-  const skyboxDistance = Math.max(1, distanceHint || (camera.far || 100) * 0.7);
-  const elevation = HAZE_TMP_DELTA.dot(HAZE_TMP_NORMAL) / skyboxDistance;
-  if (!Number.isFinite(elevation) || elevation <= 0) {
-    mesh.visible = false;
-    return {
-      mode: 'overlay',
-      enabled: false,
-      reason: 'below-plane',
-      elevation,
-      scene: sceneLabel,
-    };
-  }
-  HAZE_TMP_MAT_HEAD.makeTranslation(camera.position.x, camera.position.y, camera.position.z);
-  HAZE_TMP_MAT_SCALE.makeScale(skyboxDistance, skyboxDistance, skyboxDistance);
-  HAZE_TMP_MAT_LOCAL_T.makeTranslation(0, 0, -elevation);
-  HAZE_TMP_MAT_LOCAL_S.makeScale(1, 1, elevation);
-  HAZE_TMP_MAT_FINAL.identity();
-  HAZE_TMP_MAT_FINAL.multiply(HAZE_TMP_MAT_HEAD);
-  HAZE_TMP_MAT_FINAL.multiply(HAZE_TMP_MAT_SCALE);
-  HAZE_TMP_MAT_FINAL.multiply(HAZE_TMP_MAT_ROT);
-  HAZE_TMP_MAT_FINAL.multiply(HAZE_TMP_MAT_LOCAL_T);
-  HAZE_TMP_MAT_FINAL.multiply(HAZE_TMP_MAT_LOCAL_S);
-  HAZE_TMP_MAT_FINAL.decompose(mesh.position, mesh.quaternion, mesh.scale);
-  mesh.visible = true;
-  const summaryColor = hazeConfig?.color || baseColor;
-  return {
-    mode: 'overlay',
-    enabled: true,
-    planeId: planeGeom.id,
-    scene: sceneLabel,
-    elevation,
-    radius: radiusParam,
-    skyboxDistance,
-    coverage: hazeConfig?.coverage,
-    intensity: hazeConfig?.intensity,
-    color: summaryColor?.getHexString ? `#${summaryColor.getHexString()}` : undefined,
-  };
 }
 
 
@@ -492,27 +302,6 @@ function resolveFogConfig(vis, statStruct, bounds, enabled) {
     end: fogEnd,
     color: fogColor,
     bgStrength: 0.65,
-  };
-}
-
-function resolveHazeConfig(vis, hazeEnabled, skyboxEnabled) {
-  if (!vis || !hazeEnabled || !skyboxEnabled) {
-    return { enabled: false };
-  }
-  const raw = clampUnit(Number(vis?.map?.haze) ?? 0.3);
-  const rgba = vis?.rgba?.haze;
-  const rgb = rgbFromArray(rgba, [0.95, 0.98, 1]);
-  const intensity = clampUnit(Array.isArray(rgba) ? (rgba[3] ?? 0.6) : 0.6);
-  const hazeColor = new THREE.Color().setRGB(rgb[0], rgb[1], rgb[2]);
-  const radiusParam = Math.max(0.01, Math.min(0.95, raw || 0.3));
-  const opacityMul = Math.min(2, intensity * 1.35 + 0.25);
-  return {
-    enabled: true,
-    coverage: 0.08 + raw * 0.35,
-    intensity: intensity * 0.7,
-    color: hazeColor,
-    radiusParam,
-    opacityMul,
   };
 }
 
@@ -2280,43 +2069,36 @@ export function createRendererManager({
     applySkyboxVisibility(context, skyboxEnabled);
 
     const ground = context.ground;
+    const groundData = ground?.userData?.infiniteGround || null;
+    const groundUniforms =
+      ground?.material?.userData?.infiniteUniforms
+      || ground?.material?.uniforms
+      || null;
     const groundDistance =
-      Number(ground?.userData?.infiniteGround?.baseDistance) || GROUND_DISTANCE;
-    if (ground?.material?.uniforms?.uDistance) {
-      ground.material.uniforms.uDistance.value = groundDistance;
+      Number(groundData?.baseDistance) || GROUND_DISTANCE;
+    if (groundUniforms?.uDistance) {
+      groundUniforms.uDistance.value = groundDistance;
+    }
+    if (groundUniforms?.uFadePow) {
+      const baseFade = Number(groundData?.baseFadePow);
+      const defaultFade = Number.isFinite(baseFade) ? baseFade : 2.5;
+      groundUniforms.uFadePow.value = hazeEnabled ? defaultFade : 1e-6;
     }
     const visStruct = state.model?.vis || null;
     const statStruct = state.model?.stat || null;
     const fogConfig = resolveFogConfig(visStruct, statStruct, context.bounds, fogEnabled);
-    const hazeConfig = resolveHazeConfig(visStruct, hazeEnabled, skyboxEnabled);
     const worldSceneForFog = getWorldScene(context);
     applySceneFog(worldSceneForFog, fogConfig);
-    const sceneSnapshot = state?.scene || snapshot?.scene || null;
-    const overlaySummary = applyHazeOverlay(context, snapshot, state, {
-      hazeEnabled,
-      hazeConfig,
-      skyboxEnabled,
-      sceneSnapshot,
-      distanceHint: groundDistance,
-      assets,
-      sceneLabel: sceneSnapshot
-        ? (state?.scene === sceneSnapshot ? 'state' : (snapshot?.scene === sceneSnapshot ? 'snapshot' : 'unknown'))
-        : 'missing',
-    });
-    if (overlaySummary.enabled) {
-      debugHazeState(overlaySummary);
-    } else {
-      const fallbackSummary = {
-        mode: 'world',
-        enabled: !!hazeConfig?.enabled,
-        reason: overlaySummary.reason || 'overlay-disabled',
-        scene: overlaySummary.scene,
-        coverage: Number(hazeConfig?.coverage ?? 0),
-        intensity: Number(hazeConfig?.intensity ?? 0),
-        color: hazeConfig?.color?.getHexString ? `#${hazeConfig.color.getHexString()}` : null,
-      };
-      debugHazeState(fallbackSummary);
-    }
+    const hazeSummary = {
+      mode: 'ground-fade',
+      enabled: hazeEnabled && skyboxEnabled,
+      reason: hazeEnabled
+        ? (skyboxEnabled ? 'enabled' : 'skybox-disabled')
+        : 'flag-off',
+      fadePow: groundUniforms?.uFadePow?.value ?? null,
+      distance: groundDistance,
+    };
+    debugHazeState(hazeSummary);
     if (visStruct) {
       applyVisualLighting(context, visStruct);
     }
