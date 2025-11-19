@@ -48,6 +48,10 @@ const LABEL_LOD_NEAR = 2.0;
 const LABEL_LOD_MID = 4.5;
 const LABEL_LOD_FACTORS = { near: 2, mid: 1.4, far: 1 };
 const __TMP_VEC3 = new THREE.Vector3();
+const __TMP_VEC3_A = new THREE.Vector3();
+const __TMP_VEC3_B = new THREE.Vector3();
+const __TMP_VEC3_C = new THREE.Vector3();
+const __TMP_COLOR = new THREE.Color();
 const CONTACT_UP = new THREE.Vector3(0, 0, 1);
 const CONTACT_TMP_NORMAL = new THREE.Vector3();
 const CONTACT_FORCE_DIR = new THREE.Vector3();
@@ -107,6 +111,7 @@ const FRAME_GEOM_LIMIT = 80;
 const TEMP_MAT4 = new THREE.Matrix4();
 const DEFAULT_CLEAR_HEX = 0xd6dce4;
 const GROUND_DISTANCE = 200;
+const PLANE_SIZE_EPS = 1e-9;
 const RENDER_ORDER = Object.freeze({
   GROUND: -50,
 });
@@ -150,6 +155,76 @@ function renderWorldScene(ctx, renderer, options = {}) {
   if (target) {
     renderer.setRenderTarget(null);
   }
+}
+
+function createGeomNameLookup(sourceList) {
+  const lookup = new Map();
+  if (!Array.isArray(sourceList)) return lookup;
+  for (const entry of sourceList) {
+    const idx = Number(entry?.index);
+    if (!Number.isFinite(idx)) continue;
+    const label = typeof entry?.name === 'string' ? entry.name.trim() : '';
+    lookup.set(idx, label || `Geom ${idx}`);
+  }
+  return lookup;
+}
+
+function geomNameFromLookup(lookup, index) {
+  if (lookup && lookup.has(index)) {
+    return lookup.get(index);
+  }
+  return `Geom ${index}`;
+}
+
+function isInfinitePlaneSize(sizeVec) {
+  if (!Array.isArray(sizeVec) || sizeVec.length < 2) return false;
+  const sx = Math.abs(Number(sizeVec[0]) || 0);
+  const sy = Math.abs(Number(sizeVec[1]) || 0);
+  return sx <= PLANE_SIZE_EPS || sy <= PLANE_SIZE_EPS;
+}
+
+function applyGeomMetadata(mesh, meta) {
+  if (!mesh || !meta) return;
+  const userData = mesh.userData || (mesh.userData = {});
+  if (meta.index != null) {
+    userData.geomIndex = meta.index;
+  }
+  if (meta.type != null) {
+    userData.geomType = meta.type;
+  }
+  if (meta.dataId != null) {
+    userData.geomDataId = meta.dataId;
+  }
+  if (meta.size) {
+    userData.geomSize = meta.size;
+  }
+  if (meta.grid != null) {
+    userData.geomGrid = meta.grid;
+  }
+  if (meta.name) {
+    userData.geomName = meta.name;
+    mesh.name = meta.name;
+  }
+  if (meta.bodyId != null) {
+    userData.geomBodyId = meta.bodyId;
+  }
+  if (meta.matId != null) {
+    userData.geomMatId = meta.matId;
+    userData.matId = meta.matId;
+  }
+  if (meta.rgba) {
+    userData.geomRgba = meta.rgba;
+  }
+  userData.geomMetadata = {
+    index: meta.index,
+    type: meta.type,
+    name: meta.name,
+    bodyId: meta.bodyId,
+    matId: meta.matId,
+    dataId: meta.dataId,
+    size: meta.size,
+    grid: meta.grid,
+  };
 }
 
 function applySkyboxVisibility(ctx, enabled) {
@@ -267,6 +342,53 @@ function alphaFromArray(color, fallback = 1) {
     }
   }
   return clampUnit(fallback);
+}
+
+function resolveGeomAppearance(index, sceneGeom, snapshot, assets) {
+  if (sceneGeom && Array.isArray(sceneGeom.rgba)) {
+    return {
+      rgba: sceneGeom.rgba.slice(),
+      color: rgbFromArray(sceneGeom.rgba),
+      opacity: alphaFromArray(sceneGeom.rgba),
+    };
+  }
+  const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
+  const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
+  const matIndex = matIdView && index < matIdView.length ? matIdView[index] : -1;
+  if (matIndex >= 0 && matRgbaView && matRgbaView.length >= (matIndex * 4 + 4)) {
+    const rgba = [
+      matRgbaView[matIndex * 4 + 0],
+      matRgbaView[matIndex * 4 + 1],
+      matRgbaView[matIndex * 4 + 2],
+      matRgbaView[matIndex * 4 + 3],
+    ];
+    return {
+      rgba,
+      color: rgbFromArray(rgba),
+      opacity: alphaFromArray(rgba),
+    };
+  }
+  return { rgba: null, color: null, opacity: null };
+}
+
+function applyAppearanceToMaterial(mesh, appearance) {
+  if (!mesh || !mesh.material || !appearance) return;
+  const { color, opacity } = appearance;
+  if (color && mesh.material.color && typeof mesh.material.color.setRGB === 'function') {
+    mesh.material.color.setRGB(Math.max(0, color[0]), Math.max(0, color[1]), Math.max(0, color[2]));
+  }
+  if ('opacity' in mesh.material && opacity != null) {
+    mesh.material.opacity = opacity;
+    mesh.material.transparent = opacity < 0.999;
+  }
+  if ('needsUpdate' in mesh.material) {
+    mesh.material.needsUpdate = true;
+  }
+  const userData = mesh.userData || (mesh.userData = {});
+  if (appearance.rgba) {
+    userData.geomRgba = appearance.rgba.slice();
+    userData.geomOpacity = opacity;
+  }
 }
 
 function averageRGB(arr) {
@@ -726,14 +848,14 @@ function updateLabelOverlays(context, snapshot, state, options = {}) {
     hideLabelGroup(context);
     return;
   }
-  const geomsMeta = Array.isArray(state.model?.geoms) ? state.model.geoms : [];
-  const nameByIndex = new Map();
-  for (const geom of geomsMeta) {
-    const idx = Number(geom?.index);
-    if (Number.isFinite(idx)) {
-      nameByIndex.set(idx, (geom?.name || `Geom ${idx}`).trim());
+    const geomsMeta = Array.isArray(state.model?.geoms) ? state.model.geoms : [];
+    const nameByIndex = new Map();
+    for (const geom of geomsMeta) {
+      const idx = Number(geom?.index);
+      if (Number.isFinite(idx)) {
+        nameByIndex.set(idx, (geom?.name || `Geom ${idx}`).trim());
+      }
     }
-  }
   const labelGroup = ensureLabelGroup(context);
   const pool = context.labelPool;
   const radius = options.bounds?.radius ?? context.bounds?.radius ?? 1;
@@ -752,7 +874,8 @@ function updateLabelOverlays(context, snapshot, state, options = {}) {
     if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
     const geomType = Number(typeView?.[i]);
     if (geomType === MJ_GEOM.PLANE || geomType === MJ_GEOM.HFIELD) continue;
-    const label = nameByIndex.get(i) || `Geom ${i}`;
+      const meshForGeom = Array.isArray(context.meshes) ? context.meshes[i] : null;
+      const label = meshForGeom?.userData?.geomName || nameByIndex.get(i) || `Geom ${i}`;
     let quality = LABEL_LOD_FACTORS.far;
     if (camera) {
       const dist = camera.position.distanceTo(__TMP_VEC3.set(px, py, pz));
@@ -1187,27 +1310,11 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
     }
     case MJ_GEOM.PLANE:
     case MJ_GEOM.HFIELD: {
-      const defaultExtent = 20;
-      const fallbackHalf = Math.max(
-        1,
-        options.planeExtent != null ? options.planeExtent : defaultExtent
-      );
-      const halfX = Math.abs(sizeVec?.[0] ?? 0);
-      const halfY = Math.abs(sizeVec?.[1] ?? 0);
-      const width = Math.max(
-        1,
-        (halfX > 1e-6 ? halfX : fallbackHalf) * 2
-      );
-      const height = Math.max(
-        1,
-        (halfY > 1e-6 ? halfY : fallbackHalf) * 2
-      );
-      geometry = new THREE.PlaneGeometry(
-        width,
-        height,
-        1,
-        1
-      );
+      const halfX = Math.max(Math.abs(sizeVec?.[0] ?? 0), PLANE_SIZE_EPS);
+      const halfY = Math.max(Math.abs(sizeVec?.[1] ?? 0), PLANE_SIZE_EPS);
+      const width = Math.max(PLANE_SIZE_EPS, halfX * 2);
+      const height = Math.max(PLANE_SIZE_EPS, halfY * 2);
+      geometry = new THREE.PlaneGeometry(width, height, 1, 1);
       const lightGray = 0xd0d0d0;
       materialOpts = {
         color: lightGray,
@@ -1540,107 +1647,125 @@ function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
 
 function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}, state = null) {
   if (!ctx.meshes) ctx.meshes = [];
-  if (
-    ctx?.ground &&
-    gtype === MJ_GEOM.PLANE &&
-    Array.isArray(sizeVec) &&
-    Math.abs(sizeVec[0] ?? 0) < 1e-6 &&
-    Math.abs(sizeVec[1] ?? 0) < 1e-6
-  ) {
-    ctx.meshes[index] = null;
-    return null;
-  }
+  const infinitePlane = gtype === MJ_GEOM.PLANE && isInfinitePlaneSize(sizeVec);
   let mesh = ctx.meshes[index];
-  const sizeKey = Array.isArray(sizeVec)
-    ? sizeVec.map((v) => (Number.isFinite(v) ? v.toFixed(6) : '0')).join(',')
-    : 'null';
+  const sizeKey = infinitePlane
+    ? `infinite:${Number(sizeVec?.[2]) || 0}`
+    : Array.isArray(sizeVec)
+      ? sizeVec.map((v) => (Number.isFinite(v) ? v.toFixed(6) : '0')).join(',')
+      : 'null';
   const needsRebuild =
     !mesh ||
     mesh.userData?.geomType !== gtype ||
+    (!!mesh.userData?.infinitePlane !== infinitePlane) ||
     (gtype === MJ_GEOM.MESH && mesh.userData?.geomDataId !== dataId) ||
-    (gtype !== MJ_GEOM.MESH && mesh.userData?.geomSizeKey !== sizeKey);
+    (!infinitePlane && gtype !== MJ_GEOM.MESH && mesh.userData?.geomSizeKey !== sizeKey);
 
   if (needsRebuild) {
     if (mesh) {
       disposeMeshObject(mesh);
     }
 
-    let geometryInfo = null;
-    if (gtype === MJ_GEOM.MESH && assets && dataId >= 0) {
-      const meshGeometry = getSharedMeshGeometry(ctx, assets, dataId);
-      if (meshGeometry) {
-        geometryInfo = {
-          geometry: meshGeometry,
-          materialOpts: {
-            color: 0xffffff,
-            metalness: 0.05,
-            roughness: 0.55,
-          },
-          postCreate: null,
-          ownGeometry: false,
-        };
-      } else if (!ctx.meshAssetMissingLogged) {
-        console.warn('[render] mesh geometry missing', { dataId });
-        ctx.meshAssetMissingLogged = true;
-      }
-    }
-    if (!geometryInfo) {
-      const fb = ctx.fallback || {};
-      geometryInfo = createPrimitiveGeometry(gtype, sizeVec, {
-        fallbackEnabled: fb.enabled !== false,
-        preset: fb.preset || 'bright-outdoor',
-        planeExtent: options.planeExtent,
+    if (infinitePlane) {
+      mesh = createInfiniteGroundHelper({
+        color: 0xffffff,
+        distance: GROUND_DISTANCE,
+        renderOrder: RENDER_ORDER.GROUND,
       });
-      geometryInfo.ownGeometry = true;
-    }
-
-    let material;
-    if (geometryInfo.materialOpts && geometryInfo.materialOpts.shadow) {
-      const op = Number.isFinite(geometryInfo.materialOpts.shadowOpacity)
-        ? geometryInfo.materialOpts.shadowOpacity
-        : 0.5;
-      material = new THREE.ShadowMaterial({ opacity: op });
+      mesh.userData = mesh.userData || {};
+      mesh.userData.infinitePlane = true;
+      mesh.userData.geomType = gtype;
+      mesh.userData.geomDataId = -1;
+      mesh.userData.geomSizeKey = 'infinite';
+      mesh.userData.ownGeometry = true;
+      mesh.userData.geomIndex = index;
+      ctx.root.add(mesh);
+      ctx.meshes[index] = mesh;
     } else {
-      const baseOpts = geometryInfo.materialOpts || {};
-      const useStandard = gtype === MJ_GEOM.PLANE || gtype === MJ_GEOM.HFIELD;
-      const sceneFlags = state?.rendering?.sceneFlags || [];
-      const wire = !!sceneFlags[1];
-      const poolKey = {
-        kind: useStandard ? 'standard' : 'physical',
-        color: baseOpts.color ?? 0xffffff,
-        roughness: baseOpts.roughness ?? 0.55,
-        metalness: baseOpts.metalness ?? 0.0,
-        wireframe: wire,
-      };
-      if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
-      material = ctx.materialPool.get(poolKey);
-      if (!useStandard) material.envMapIntensity = 0;
+      let geometryInfo = null;
+      if (gtype === MJ_GEOM.MESH && assets && dataId >= 0) {
+        const meshGeometry = getSharedMeshGeometry(ctx, assets, dataId);
+        if (meshGeometry) {
+          geometryInfo = {
+            geometry: meshGeometry,
+            materialOpts: {
+              color: 0xffffff,
+              metalness: 0.05,
+              roughness: 0.55,
+            },
+            postCreate: null,
+            ownGeometry: false,
+          };
+        } else if (!ctx.meshAssetMissingLogged) {
+          console.warn('[render] mesh geometry missing', { dataId });
+          ctx.meshAssetMissingLogged = true;
+        }
+      }
+      if (!geometryInfo) {
+        const fb = ctx.fallback || {};
+        geometryInfo = createPrimitiveGeometry(gtype, sizeVec, {
+          fallbackEnabled: fb.enabled !== false,
+          preset: fb.preset || 'bright-outdoor',
+        });
+        geometryInfo.ownGeometry = true;
+      }
+
+      let material;
+      if (geometryInfo.materialOpts && geometryInfo.materialOpts.shadow) {
+        const op = Number.isFinite(geometryInfo.materialOpts.shadowOpacity)
+          ? geometryInfo.materialOpts.shadowOpacity
+          : 0.5;
+        material = new THREE.ShadowMaterial({ opacity: op });
+      } else {
+        const baseOpts = geometryInfo.materialOpts || {};
+        const useStandard = gtype === MJ_GEOM.PLANE || gtype === MJ_GEOM.HFIELD;
+        const sceneFlags = state?.rendering?.sceneFlags || [];
+        const wire = !!sceneFlags[1];
+        const poolKey = {
+          kind: useStandard ? 'standard' : 'physical',
+          color: baseOpts.color ?? 0xffffff,
+          roughness: baseOpts.roughness ?? 0.55,
+          metalness: baseOpts.metalness ?? 0.0,
+          wireframe: wire,
+        };
+        if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
+        material = ctx.materialPool.get(poolKey);
+        if (!useStandard) material.envMapIntensity = 0;
+      }
+      material.side = THREE.FrontSide;
+      mesh = new THREE.Mesh(geometryInfo.geometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      if (typeof geometryInfo.postCreate === 'function') {
+        try {
+          geometryInfo.postCreate(mesh);
+        } catch {}
+      }
+      mesh.userData = mesh.userData || {};
+      mesh.userData.infinitePlane = false;
+      mesh.userData.geomType = gtype;
+      mesh.userData.geomDataId = gtype === MJ_GEOM.MESH ? dataId : -1;
+      mesh.userData.geomSizeKey = gtype === MJ_GEOM.MESH ? null : sizeKey;
+      mesh.userData.ownGeometry = geometryInfo.ownGeometry !== false;
+      mesh.userData.geomIndex = index;
+      ctx.root.add(mesh);
+      ctx.meshes[index] = mesh;
     }
-    material.side = THREE.FrontSide;
-    mesh = new THREE.Mesh(geometryInfo.geometry, material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    if (typeof geometryInfo.postCreate === 'function') {
-      try {
-        geometryInfo.postCreate(mesh);
-      } catch {}
-    }
-    mesh.userData = mesh.userData || {};
-    mesh.userData.geomType = gtype;
-    mesh.userData.geomDataId = gtype === MJ_GEOM.MESH ? dataId : -1;
-    mesh.userData.geomSizeKey = gtype === MJ_GEOM.MESH ? null : sizeKey;
-    mesh.userData.ownGeometry = geometryInfo.ownGeometry !== false;
-    mesh.userData.geomIndex = index;
-    ctx.root.add(mesh);
-    ctx.meshes[index] = mesh;
   }
 
+  if (mesh && options.geomMeta) {
+    applyGeomMetadata(mesh, options.geomMeta);
+  }
   return mesh;
 }
 function updateMeshFromSnapshot(mesh, i, snapshot, state, assets) {
   const n = snapshot.ngeom | 0;
   if (i >= n) {
     mesh.visible = false;
+    return;
+  }
+  if (mesh.userData?.infinitePlane) {
+    updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets);
     return;
   }
   const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
@@ -1677,34 +1802,103 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets) {
   }
   mesh.scale.set(1, 1, 1);
 
-  if (sceneGeom && Array.isArray(sceneGeom.rgba)) {
-    try {
-      const r = Number(sceneGeom.rgba[0]);
-      const g = Number(sceneGeom.rgba[1]);
-      const b = Number(sceneGeom.rgba[2]);
-      const a = Number(sceneGeom.rgba[3]);
-      if (mesh.material && mesh.material.color && typeof mesh.material.color.setRGB === 'function') {
-        if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
-          mesh.material.color.setRGB(Math.max(0, r), Math.max(0, g), Math.max(0, b));
-        }
-      }
-      if ('opacity' in mesh.material && Number.isFinite(a)) {
-        mesh.material.opacity = a;
-        mesh.material.transparent = a < 0.999;
-      }
-      if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
-    } catch {}
-  } else {
+  const appearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
+  if (!appearance.rgba) {
     const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
     const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
     const matIndex = matIdView?.[i] ?? -1;
     if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
       updateMeshMaterial(mesh, matIndex, matRgbaView);
+      appearance.rgba = [
+        matRgbaView[matIndex * 4 + 0] ?? 0.6,
+        matRgbaView[matIndex * 4 + 1] ?? 0.6,
+        matRgbaView[matIndex * 4 + 2] ?? 0.9,
+        matRgbaView[matIndex * 4 + 3] ?? 1,
+      ];
+      appearance.color = rgbFromArray(appearance.rgba);
+      appearance.opacity = alphaFromArray(appearance.rgba);
     }
   }
-
+  applyAppearanceToMaterial(mesh, appearance);
   applyMaterialFlags(mesh, i, state);
   mesh.visible = true;
+}
+
+function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets) {
+  const groundData = mesh.userData?.infiniteGround;
+  if (!groundData) return;
+  const uniforms = groundData.uniforms || {};
+  const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
+  let px = 0;
+  let py = 0;
+  let pz = 0;
+  let rot = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  if (sceneGeom) {
+    px = Number(sceneGeom.xpos?.[0]) || 0;
+    py = Number(sceneGeom.xpos?.[1]) || 0;
+    pz = Number(sceneGeom.xpos?.[2]) || 0;
+    rot = Array.isArray(sceneGeom.xmat) && sceneGeom.xmat.length >= 9
+      ? sceneGeom.xmat
+      : rot;
+  } else {
+    const xpos = snapshot.xpos;
+    const baseIndex = 3 * i;
+    px = xpos?.[baseIndex + 0] ?? 0;
+    py = xpos?.[baseIndex + 1] ?? 0;
+    pz = xpos?.[baseIndex + 2] ?? 0;
+    const xmat = snapshot.xmat;
+    const matBase = 9 * i;
+    rot = [
+      xmat?.[matBase + 0] ?? 1,
+      xmat?.[matBase + 1] ?? 0,
+      xmat?.[matBase + 2] ?? 0,
+      xmat?.[matBase + 3] ?? 0,
+      xmat?.[matBase + 4] ?? 1,
+      xmat?.[matBase + 5] ?? 0,
+      xmat?.[matBase + 6] ?? 0,
+      xmat?.[matBase + 7] ?? 0,
+      xmat?.[matBase + 8] ?? 1,
+    ];
+  }
+  const quat = mat3ToQuat(rot);
+  if (uniforms.uPlaneOrigin?.value) {
+    uniforms.uPlaneOrigin.value.set(px, py, pz);
+  }
+  if (uniforms.uPlaneAxisU?.value) {
+    uniforms.uPlaneAxisU.value.copy(__TMP_VEC3_A.set(1, 0, 0).applyQuaternion(quat).normalize());
+  }
+  if (uniforms.uPlaneAxisV?.value) {
+    uniforms.uPlaneAxisV.value.copy(__TMP_VEC3_B.set(0, 1, 0).applyQuaternion(quat).normalize());
+  }
+  if (uniforms.uPlaneNormal?.value) {
+    uniforms.uPlaneNormal.value.copy(__TMP_VEC3_C.set(0, 0, 1).applyQuaternion(quat).normalize());
+  }
+  const gridStep = Math.abs(mesh.userData?.geomGrid ?? 0);
+  if (uniforms.uGridStep) {
+    const defaultStep = groundData.defaultGridStep || 1;
+    uniforms.uGridStep.value = gridStep > 0 ? gridStep : defaultStep;
+  }
+  if (uniforms.uDistance && groundData.baseDistance) {
+    uniforms.uDistance.value = groundData.baseDistance;
+  }
+  const appearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
+  if (!appearance.rgba) {
+    const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
+    const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
+    const matIndex = matIdView?.[i] ?? -1;
+    if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
+      updateMeshMaterial(mesh, matIndex, matRgbaView);
+      appearance.rgba = [
+        matRgbaView[matIndex * 4 + 0] ?? 0.6,
+        matRgbaView[matIndex * 4 + 1] ?? 0.6,
+        matRgbaView[matIndex * 4 + 2] ?? 0.9,
+        matRgbaView[matIndex * 4 + 3] ?? 1,
+      ];
+      appearance.color = rgbFromArray(appearance.rgba);
+      appearance.opacity = alphaFromArray(appearance.rgba);
+    }
+  }
+  applyAppearanceToMaterial(mesh, appearance);
 }
 
 function getDefaultVopt(ctx, state) {
@@ -1986,14 +2180,6 @@ export function createRendererManager({
     const root = new THREE.Group();
     sceneWorld.add(root);
 
-    const ground = createInfiniteGroundHelper({
-      color: new THREE.Color(0xff0000),
-      distance: GROUND_DISTANCE,
-      axes: 'xyz',
-      renderOrder: RENDER_ORDER.GROUND,
-    });
-    sceneWorld.add(ground);
-
     Object.assign(ctx, {
       initialized: true,
       renderer,
@@ -2001,7 +2187,7 @@ export function createRendererManager({
       scene: sceneWorld,
       camera,
       root,
-      ground,
+      ground: null,
       grid: null,
       light: keyLight,
       lightTarget,
@@ -2420,20 +2606,13 @@ export function createRendererManager({
       { tempVecA, tempVecB, tempVecC, tempVecD },
       { trackingBounds, trackingOverride },
     );
-    const planeExtentHint = (() => {
-      const radiusSource =
-        nextBounds?.radius ?? context.bounds?.radius ?? 0;
-      const baseRadius =
-        Number.isFinite(radiusSource) && radiusSource > 0 ? radiusSource : 1;
-      const candidate = baseRadius * 12;
-      return Math.max(100, candidate);
-    })();
-
     let drawn = 0;
     const sizeView = snapshot.gsize || assets?.geoms?.size || null;
     const typeView = snapshot.gtype || assets?.geoms?.type || null;
     const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
     const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
+    const bodyIdView = state?.model?.geomBodyId || null;
+    const geomNameLookup = createGeomNameLookup(state?.model?.geoms);
 
     const overlayOptions = {
       geomGroupIds,
@@ -2460,6 +2639,17 @@ export function createRendererManager({
               sizeView[base + 2] ?? 0,
             ]
           : null);
+      const matIndex = matIdView?.[i] ?? -1;
+      const geomMeta = {
+        index: i,
+        type,
+        dataId,
+        size: sizeVec,
+        grid: sizeVec?.[2] ?? 0,
+        name: geomNameFromLookup(geomNameLookup, i),
+        matId: matIndex,
+        bodyId: bodyIdView && i < bodyIdView.length ? bodyIdView[i] : -1,
+      };
       const mesh = ensureGeomMesh(
         context,
         i,
@@ -2467,11 +2657,10 @@ export function createRendererManager({
         assets,
         dataId,
         sizeVec,
-        { planeExtent: planeExtentHint },
+        { geomMeta },
         state,
       );
       if (!mesh) continue;
-      const matIndex = matIdView?.[i] ?? -1;
       const reflectanceValue = resolveMaterialReflectance(matIndex, assets);
       mesh.userData = mesh.userData || {};
       mesh.userData.matId = matIndex;
@@ -2494,6 +2683,15 @@ export function createRendererManager({
 
       mesh.visible = visible;
       if (visible) drawn += 1;
+    }
+
+    context.ground = null;
+    for (let i = 0; i < ngeom; i += 1) {
+      const candidate = context.meshes?.[i] || null;
+      if (candidate?.userData?.infinitePlane && candidate.visible) {
+        context.ground = candidate;
+        break;
+      }
     }
 
     for (let i = ngeom; i < context.meshes.length; i += 1) {
@@ -2660,21 +2858,6 @@ export function createRendererManager({
     if (copyState && copyState.seq > context.copySeq) {
       context.copySeq = copyState.seq;
     }
-    if (context.grid) {
-      const fb = context.fallback || {};
-      const baseGrid =
-        fb.enabled === false &&
-        !(
-          copyState &&
-          copyState.precision === 'full' &&
-          copyState.seq === context.copySeq
-        );
-      const gridVisible = baseGrid;
-      context.grid.visible = gridVisible;
-    } else if (context.ground) {
-      context.ground.visible = true;
-    }
-
     const gl = renderer && typeof renderer.getContext === 'function' ? renderer.getContext() : null;
     if (typeof debugMode !== 'undefined' && debugMode && gl && !context.__debugMagentaTested) {
       try {

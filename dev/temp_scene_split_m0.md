@@ -55,3 +55,6 @@
 - `renderLayered` is a thin wrapper that renders `sceneWorld` once (no backgroundScene / post RT).
 - No layered/multi-scene/backgroundScene helpers may be added in later stages.
 - Fog/Haze experiments stay within the single scene via renderOrder/material controls.
+- Plane handling follows MuJoCo exactly: `size="sx sy gz"`, any `sx==0` or `sy==0` is an infinite plane whose pose/rgba/gz are respected verbatim.
+- Rendering only exposes a single plane/ground system (the infinite helper); `planeExtent` fallbacks, duplicate grounds, or ad-hoc heuristics are forbidden.
+- Geom metadata (name/material/body/etc.) originates from `state.model.geoms[i].name` with assets as an optional override and must be written into `mesh.name` / `mesh.userData` for downstream tools.

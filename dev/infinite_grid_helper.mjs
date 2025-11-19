@@ -82,11 +82,9 @@ export function createInfiniteGridHelper({
 export function createInfiniteGroundHelper({
   color = 0xffffff,
   distance = 400.0,
-  axes = 'xyz',
   renderOrder = -10,
 } = {}) {
   const colorObj = color instanceof THREE.Color ? color.clone() : new THREE.Color(color);
-  const planeAxes = axes.slice(0, 2);
   const geometry = new THREE.PlaneGeometry(2, 2, 1, 1);
   const material = new THREE.MeshStandardMaterial({
     color: colorObj,
@@ -99,20 +97,42 @@ export function createInfiniteGroundHelper({
   const uniforms = {
     uDistance: { value: distance },
     uFadePow: { value: 2.5 },
+    uPlaneOrigin: { value: new THREE.Vector3(0, 0, 0) },
+    uPlaneAxisU: { value: new THREE.Vector3(1, 0, 0) },
+    uPlaneAxisV: { value: new THREE.Vector3(0, 1, 0) },
+    uPlaneNormal: { value: new THREE.Vector3(0, 0, 1) },
+    uGridStep: { value: 1.0 },
   };
+  material.extensions = material.extensions || {};
+  material.extensions.derivatives = true;
   material.userData.infiniteUniforms = uniforms;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uDistance = uniforms.uDistance;
     shader.uniforms.uFadePow = uniforms.uFadePow;
+    shader.uniforms.uPlaneOrigin = uniforms.uPlaneOrigin;
+    shader.uniforms.uPlaneAxisU = uniforms.uPlaneAxisU;
+    shader.uniforms.uPlaneAxisV = uniforms.uPlaneAxisV;
+    shader.uniforms.uPlaneNormal = uniforms.uPlaneNormal;
+    shader.uniforms.uGridStep = uniforms.uGridStep;
     shader.vertexShader = `
 varying vec3 vInfiniteWorldPosition;
+varying vec2 vPlaneCoord;
+varying float vCameraSide;
+uniform vec3 uPlaneOrigin;
+uniform vec3 uPlaneAxisU;
+uniform vec3 uPlaneAxisV;
+uniform vec3 uPlaneNormal;
 uniform float uDistance;
 ${shader.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
-      transformed.${planeAxes[0]} = position.${planeAxes[0]} * uDistance + cameraPosition.${planeAxes[0]};
-      transformed.${planeAxes[1]} = position.${planeAxes[1]} * uDistance + cameraPosition.${planeAxes[1]};
-      transformed.${axes[2]} = position.${axes[2]};`
+      vec3 camVec = cameraPosition - uPlaneOrigin;
+      float camSide = dot(camVec, uPlaneNormal);
+      vec3 camProjected = cameraPosition - camSide * uPlaneNormal;
+      vec3 span = position.x * uDistance * uPlaneAxisU + position.y * uDistance * uPlaneAxisV;
+      transformed = camProjected + span;
+      vPlaneCoord = vec2(dot(transformed - uPlaneOrigin, uPlaneAxisU), dot(transformed - uPlaneOrigin, uPlaneAxisV));
+      vCameraSide = camSide;`
     )}`.replace(
       '#include <worldpos_vertex>',
       `#include <worldpos_vertex>
@@ -120,18 +140,30 @@ ${shader.vertexShader.replace(
     );
     shader.fragmentShader = `
 varying vec3 vInfiniteWorldPosition;
+varying vec2 vPlaneCoord;
+varying float vCameraSide;
 uniform float uDistance;
 uniform float uFadePow;
+uniform vec3 uPlaneOrigin;
+uniform vec3 uPlaneAxisU;
+uniform vec3 uPlaneAxisV;
+uniform vec3 uPlaneNormal;
+uniform float uGridStep;
 ${shader.fragmentShader.replace(
       '#include <dithering_fragment>',
       `
-      vec2 camera2D = cameraPosition.${planeAxes};
-      vec2 world2D = vInfiniteWorldPosition.${planeAxes};
-      float planarDist = length(camera2D - world2D);
+      float planarDist = length(vPlaneCoord);
       float fade = 1.0 - min(planarDist / max(0.0001, uDistance), 1.0);
       float alpha = pow(fade, uFadePow);
-      if (cameraPosition.${axes[2]} < vInfiniteWorldPosition.${axes[2]} - 0.01) {
+      if (vCameraSide < -0.01) {
         alpha *= 0.25;
+      }
+      if (uGridStep > 1e-6) {
+        vec2 r = vPlaneCoord / max(uGridStep, 1e-6);
+        vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
+        float line = min(grid.x, grid.y);
+        float gridStrength = 1.0 - min(line, 1.0);
+        alpha *= mix(0.4, 1.0, gridStrength);
       }
       if (alpha <= 0.0) discard;
       gl_FragColor.a *= alpha;
@@ -143,10 +175,14 @@ ${shader.fragmentShader.replace(
   mesh.frustumCulled = false;
   mesh.renderOrder = renderOrder;
   mesh.receiveShadow = true;
+  mesh.matrixAutoUpdate = false;
+  mesh.matrix.identity();
+  mesh.updateMatrix();
   mesh.userData.infiniteGround = {
     uniforms,
     baseDistance: distance,
     baseFadePow: uniforms.uFadePow.value,
+    defaultGridStep: 1.0,
   };
   return mesh;
 }

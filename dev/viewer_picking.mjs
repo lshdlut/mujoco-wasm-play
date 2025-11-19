@@ -172,6 +172,10 @@ export function createPickingController({
   }
 
   function geomNameFor(index) {
+    const mesh = Array.isArray(renderCtx.meshes) ? renderCtx.meshes[index] : null;
+    if (mesh?.userData?.geomName) {
+      return mesh.userData.geomName;
+    }
     const state = store.get();
     const geoms = Array.isArray(state?.model?.geoms) ? state.model.geoms : [];
     for (const geom of geoms) {
@@ -183,6 +187,10 @@ export function createPickingController({
   }
 
   function bodyIdFor(index) {
+    const mesh = Array.isArray(renderCtx.meshes) ? renderCtx.meshes[index] : null;
+    if (Number.isFinite(mesh?.userData?.geomBodyId)) {
+      return mesh.userData.geomBodyId | 0;
+    }
     const state = store.get();
     const arr = state?.model?.geomBodyId;
     if (!arr) return -1;
