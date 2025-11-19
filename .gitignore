@@ -2,6 +2,7 @@
 node_modules/
 dist/
 build/
+local_temp/
 coverage/
 tmp/
 *.log

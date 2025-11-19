@@ -43,6 +43,10 @@ function hasModelBackground(state) {
   return bg.color != null || !!bg.texture;
 }
 
+function getWorldScene(ctx) {
+  return ctx?.sceneWorld || ctx?.scene || null;
+}
+
 
 export function createVerticalGradientTexture(THREE_NS, topHex, bottomHex, height = 256) {
   const width = 2;
@@ -137,7 +141,8 @@ export function createEnvironmentManager({
 }) {
 
   function ensureOutdoorSkyEnv(ctx, preset) {
-    if (!ctx || !ctx.renderer || !ctx.scene) return;
+    const worldScene = getWorldScene(ctx);
+    if (!ctx || !ctx.renderer || !worldScene) return;
     if (typeof skyOffParam !== 'undefined' && skyOffParam) {
       try {
         if (ctx.sky) ctx.sky.visible = false;
@@ -192,15 +197,13 @@ export function createEnvironmentManager({
           ctx.envFromHDRI = true;
           ctx.hdriReady = true;
           ctx.envDirty = false;
-          if (ctx.scene) {
-            ctx.scene.environment = envTexture;
-            ctx.scene.background = hdr;
-            if ('backgroundIntensity' in ctx.scene) {
-              ctx.scene.backgroundIntensity = 1.0;
-            }
-            if ('backgroundBlurriness' in ctx.scene) {
-              ctx.scene.backgroundBlurriness = 0.0;
-            }
+          worldScene.environment = envTexture;
+          worldScene.background = hdr;
+          if ('backgroundIntensity' in worldScene) {
+            worldScene.backgroundIntensity = 1.0;
+          }
+          if ('backgroundBlurriness' in worldScene) {
+            worldScene.backgroundBlurriness = 0.0;
           }
           // dispose previous resources now that replacements are active
           try { prevEnvRT?.dispose?.(); } catch {}
@@ -267,7 +270,8 @@ export function createEnvironmentManager({
                 sky.material.side = THREE_NS.BackSide;
               }
             }
-            ctx.scene.add(sky);
+        const worldSceneCurrent = getWorldScene(ctx);
+        if (worldSceneCurrent) worldSceneCurrent.add(sky);
             ctx.sky = sky;
             ctx.sunVec = new THREE_NS.Vector3();
           })
@@ -292,13 +296,15 @@ export function createEnvironmentManager({
           ctx.envRT.dispose();
         }
         ctx.envRT = ctx.pmrem.fromScene(sky);
-        if (ctx.scene) ctx.scene.environment = ctx.envRT.texture;
+        const worldSceneCurrent = getWorldScene(ctx);
+        if (worldSceneCurrent) worldSceneCurrent.environment = ctx.envRT.texture;
         ctx.envDirty = false;
         const intensity = cfg.envIntensity ?? 1.3;
         ctx.envIntensity = intensity;
       }
-      if (ctx.scene) {
-        ctx.scene.background = null;
+      const worldSceneCurrent = getWorldScene(ctx);
+      if (worldSceneCurrent) {
+        worldSceneCurrent.background = null;
       }
     }
   }
@@ -362,22 +368,23 @@ export function createEnvironmentManager({
     const preset = FALLBACK_PRESETS['bright-outdoor'];
     const presetMode = isPresetMode(state);
     fallback.enabled = fallbackEnabledDefault && presetMode;
+    const worldScene = getWorldScene(ctx);
     if (!presetMode) {
-      if (ctx.scene && ctx.envFromHDRI && ctx.envRT && ctx.scene.environment === ctx.envRT.texture) {
-        ctx.scene.environment = null;
+      if (worldScene && ctx.envFromHDRI && ctx.envRT && worldScene.environment === ctx.envRT.texture) {
+        worldScene.environment = null;
       }
-      if (ctx.scene && ctx.hdriBackground && ctx.scene.background === ctx.hdriBackground) {
-        ctx.scene.background = null;
+      if (worldScene && ctx.hdriBackground && worldScene.background === ctx.hdriBackground) {
+        worldScene.background = null;
       }
       if (ctx.sky) {
         ctx.sky.visible = false;
       }
       return;
     }
-    if (ctx.envFromHDRI && ctx.envRT && ctx.scene && !ctx.scene.environment) {
-      ctx.scene.environment = ctx.envRT.texture;
+    if (ctx.envFromHDRI && ctx.envRT && worldScene && !worldScene.environment) {
+      worldScene.environment = ctx.envRT.texture;
       if (ctx.hdriBackground) {
-        ctx.scene.background = ctx.hdriBackground;
+        worldScene.background = ctx.hdriBackground;
       }
     }
     const hasEnv = hasModelEnvironment(state);
