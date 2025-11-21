@@ -1916,47 +1916,28 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
   const segmentEnabled = Array.isArray(sceneFlags) ? !!sceneFlags[SEGMENT_FLAG_INDEX] : false;
   const baseColor = mesh.material?.color;
   if (segmentEnabled) {
-    const userData = mesh.userData || (mesh.userData = {});
-    if (baseColor && !userData.segmentOriginalColor) {
-      userData.segmentOriginalColor = baseColor.clone();
-    }
-    if (mesh.material?.emissive && !userData.segmentOriginalEmissive) {
-      userData.segmentOriginalEmissive = mesh.material.emissive.clone();
-    }
-    if ('emissiveIntensity' in mesh.material && userData.segmentOriginalEmissiveIntensity == null) {
-      userData.segmentOriginalEmissiveIntensity = mesh.material.emissiveIntensity;
-    }
-    if ('toneMapped' in mesh.material && userData.segmentOriginalToneMapped == null) {
-      userData.segmentOriginalToneMapped = mesh.material.toneMapped;
-    }
     const segColor = segmentColorForIndex(mesh.userData?.geomIndex ?? i);
-    if (baseColor) baseColor.setHex(segColor);
-    if (mesh.material?.emissive) {
-      mesh.material.emissive.setHex(segColor);
+    const segMat = ensureSegmentMaterial(mesh, sceneFlags);
+    if (segMat) {
+      segMat.color.setHex(segColor);
+      segMat.depthWrite = true;
+      segMat.depthTest = true;
+      segMat.transparent = false;
+      mesh.material = segMat;
+    } else if (baseColor) {
+      baseColor.setHex(segColor);
     }
-    if ('emissiveIntensity' in mesh.material) {
-      mesh.material.emissiveIntensity = 1;
-    }
-    if ('metalness' in mesh.material) mesh.material.metalness = 0;
-    if ('roughness' in mesh.material) mesh.material.roughness = 1;
-    if ('toneMapped' in mesh.material) mesh.material.toneMapped = false;
+    if (uniforms?.uFadeStart) uniforms.uFadeStart.value = 0;
+    if (uniforms?.uFadeEnd) uniforms.uFadeEnd.value = 0;
+    if (uniforms?.uFadePow) uniforms.uFadePow.value = 0;
+    if (uniforms?.uGridStep) uniforms.uGridStep.value = 0;
+    return;
+  }
+  restoreSegmentMaterial(mesh);
+  if (baseColor && mesh.userData.segmentOriginalColor) {
+    baseColor.copy(mesh.userData.segmentOriginalColor);
     if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
-  } else {
-    restoreSegmentMaterial(mesh);
-    if (baseColor && mesh.userData.segmentOriginalColor) {
-      baseColor.copy(mesh.userData.segmentOriginalColor);
-      if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
-      mesh.material.transparent = true;
-    }
-    if (mesh.material?.emissive && mesh.userData.segmentOriginalEmissive) {
-      mesh.material.emissive.copy(mesh.userData.segmentOriginalEmissive);
-    }
-    if ('emissiveIntensity' in mesh.material && mesh.userData.segmentOriginalEmissiveIntensity != null) {
-      mesh.material.emissiveIntensity = mesh.userData.segmentOriginalEmissiveIntensity;
-    }
-    if ('toneMapped' in mesh.material && mesh.userData.segmentOriginalToneMapped != null) {
-      mesh.material.toneMapped = mesh.userData.segmentOriginalToneMapped;
-    }
+    mesh.material.transparent = true;
   }
   const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
   let px = 0;
@@ -2006,7 +1987,7 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
   const gridStep = Math.abs(mesh.userData?.geomGrid ?? 0);
   if (uniforms.uGridStep) {
     const defaultStep = groundData.defaultGridStep || 1;
-    uniforms.uGridStep.value = segmentEnabled ? 0 : (gridStep > 0 ? gridStep : defaultStep);
+    uniforms.uGridStep.value = gridStep > 0 ? gridStep : defaultStep;
   }
   if (uniforms.uDistance && groundData.baseDistance) {
     uniforms.uDistance.value = groundData.baseDistance;
@@ -2024,26 +2005,24 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
     const dist = uniforms.uDistance?.value || groundData.baseDistance || 0;
     uniforms.uQuadDistance.value = Math.max(fade * 1.2, dist);
   }
-  if (!segmentEnabled) {
-    const appearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
-    if (!appearance.rgba) {
-      const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
-      const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
-      const matIndex = matIdView?.[i] ?? -1;
-      if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
-        updateMeshMaterial(mesh, matIndex, matRgbaView);
-        appearance.rgba = [
-          matRgbaView[matIndex * 4 + 0] ?? 0.6,
-          matRgbaView[matIndex * 4 + 1] ?? 0.6,
-          matRgbaView[matIndex * 4 + 2] ?? 0.9,
-          matRgbaView[matIndex * 4 + 3] ?? 1,
-        ];
-        appearance.color = rgbFromArray(appearance.rgba);
-        appearance.opacity = alphaFromArray(appearance.rgba);
-      }
+  const appearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
+  if (!appearance.rgba) {
+    const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
+    const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
+    const matIndex = matIdView?.[i] ?? -1;
+    if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
+      updateMeshMaterial(mesh, matIndex, matRgbaView);
+      appearance.rgba = [
+        matRgbaView[matIndex * 4 + 0] ?? 0.6,
+        matRgbaView[matIndex * 4 + 1] ?? 0.6,
+        matRgbaView[matIndex * 4 + 2] ?? 0.9,
+        matRgbaView[matIndex * 4 + 3] ?? 1,
+      ];
+      appearance.color = rgbFromArray(appearance.rgba);
+      appearance.opacity = alphaFromArray(appearance.rgba);
     }
-    applyAppearanceToMaterial(mesh, appearance);
   }
+  applyAppearanceToMaterial(mesh, appearance);
   // Ensure infinite ground remains blended by alpha
   if (mesh.material) {
     mesh.material.transparent = true;
