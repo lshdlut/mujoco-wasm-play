@@ -110,7 +110,7 @@ const LABEL_GEOM_LIMIT = 120;
 const FRAME_GEOM_LIMIT = 80;
 const TEMP_MAT4 = new THREE.Matrix4();
 const DEFAULT_CLEAR_HEX = 0xd6dce4;
-const GROUND_DISTANCE = 200;
+const GROUND_DISTANCE = 400;
 const PLANE_SIZE_EPS = 1e-9;
 const RENDER_ORDER = Object.freeze({
   GROUND: -50,
