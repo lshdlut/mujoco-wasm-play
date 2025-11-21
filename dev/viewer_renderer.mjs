@@ -2665,7 +2665,8 @@ export function createRendererManager({
         type,
         dataId,
         size: sizeVec,
-        grid: sizeVec?.[2] ?? 0,
+        // Plane size[2] is not grid step; use a sane default (1m) for planes.
+        grid: type === MJ_GEOM.PLANE ? 1 : sizeVec?.[2] ?? 0,
         name: geomNameFromLookup(geomNameLookup, i),
         matId: matIndex,
         bodyId: bodyIdView && i < bodyIdView.length ? bodyIdView[i] : -1,
