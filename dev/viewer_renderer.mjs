@@ -316,27 +316,49 @@ function clampUnit(value) {
   return value;
 }
 
+function parseVectorLike(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    const tokens = value
+      .trim()
+      .split(/[\s,]+/)
+      .map((token) => Number(token))
+      .filter((num) => Number.isFinite(num));
+    return tokens.length ? tokens : null;
+  }
+  if (value && typeof value === 'object') {
+    try {
+      const arr = Array.from(value, (v) => Number(v));
+      return arr.every((n) => Number.isFinite(n)) ? arr : null;
+    } catch {}
+  }
+  return null;
+}
+
 function rgbFromArray(arr, fallback = [1, 1, 1]) {
-  if (Array.isArray(arr) && arr.length >= 3) {
+  const source = parseVectorLike(arr);
+  if (Array.isArray(source) && source.length >= 3) {
     return [
-      clampUnit(Number(arr[0])),
-      clampUnit(Number(arr[1])),
-      clampUnit(Number(arr[2])),
+      clampUnit(Number(source[0])),
+      clampUnit(Number(source[1])),
+      clampUnit(Number(source[2])),
     ];
   }
   return fallback.slice();
 }
 
 function rgbaToHex(color, fallback = 0xffffff) {
-  if (!Array.isArray(color) || color.length < 3) return fallback;
-  const [r, g, b] = rgbFromArray(color);
+  const vec = parseVectorLike(color);
+  if (!Array.isArray(vec) || vec.length < 3) return fallback;
+  const [r, g, b] = rgbFromArray(vec);
   const toByte = (value) => Math.max(0, Math.min(255, Math.round(value * 255)));
   return (toByte(r) << 16) | (toByte(g) << 8) | toByte(b);
 }
 
 function alphaFromArray(color, fallback = 1) {
-  if (Array.isArray(color) && color.length >= 4) {
-    const a = Number(color[3]);
+  const source = parseVectorLike(color);
+  if (Array.isArray(source) && source.length >= 4) {
+    const a = Number(source[3]);
     if (Number.isFinite(a)) {
       return clampUnit(a);
     }
@@ -1593,9 +1615,54 @@ function getSharedMeshGeometry(ctx, assets, dataId) {
   return geometry || null;
 }
 
-function applyMaterialFlags(mesh, index, state) {
+const SEGMENT_FLAG_INDEX = 7;
+const SEGMENT_PALETTE = [
+  0x1f77b4, 0xff7f0e, 0x2ca02c, 0xd62728, 0x9467bd,
+  0x8c564b, 0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf,
+  0xaec7e8, 0xffbb78, 0x98df8a, 0xff9896, 0xc5b0d5,
+  0xc49c94, 0xf7b6d2, 0xc7c7c7, 0xdbdb8d, 0x9edae5,
+];
+
+function segmentColorForIndex(index) {
+  const palette = SEGMENT_PALETTE;
+  if (!(index >= 0)) return palette[0];
+  return palette[index % palette.length];
+}
+
+function restoreSegmentMaterial(mesh) {
+  const userData = mesh?.userData || null;
+  if (!mesh || !userData || !userData.segmentMaterial || !userData.segmentOriginalMaterial) {
+    return;
+  }
+  if (mesh.material === userData.segmentMaterial) {
+    mesh.material = userData.segmentOriginalMaterial;
+  }
+}
+
+function ensureSegmentMaterial(mesh, sceneFlags) {
+  if (!mesh) return null;
+  const userData = mesh.userData || (mesh.userData = {});
+  if (!userData.segmentOriginalMaterial) {
+    userData.segmentOriginalMaterial = mesh.material;
+  }
+  let material = userData.segmentMaterial;
+  if (!material) {
+    material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      depthWrite: true,
+      depthTest: true,
+      toneMapped: false,
+    });
+    userData.segmentMaterial = material;
+  }
+  const wireframe = Array.isArray(sceneFlags) ? !!sceneFlags[1] : false;
+  material.wireframe = wireframe;
+  return material;
+}
+
+function applyMaterialFlags(mesh, index, state, sceneFlagsOverride = null) {
   if (!mesh || !mesh.material) return;
-  const sceneFlags = state.rendering?.sceneFlags || [];
+  const sceneFlags = sceneFlagsOverride || state.rendering?.sceneFlags || [];
   mesh.material.wireframe = !!sceneFlags[1];
   if (mesh.material.emissive && typeof mesh.material.emissive.set === 'function') {
     mesh.material.emissive.set(0x000000);
@@ -1758,17 +1825,29 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
   }
   return mesh;
 }
-function updateMeshFromSnapshot(mesh, i, snapshot, state, assets) {
+function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = null) {
   const n = snapshot.ngeom | 0;
   if (i >= n) {
     mesh.visible = false;
     return;
   }
+  const flags = Array.isArray(sceneFlags) ? sceneFlags : state?.rendering?.sceneFlags || [];
   if (mesh.userData?.infinitePlane) {
-    updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets);
+    updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, flags);
     return;
   }
   const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
+  const segmentEnabled = !!flags[SEGMENT_FLAG_INDEX];
+  if (segmentEnabled) {
+    const segMat = ensureSegmentMaterial(mesh, flags);
+    if (segMat) {
+      const segColor = segmentColorForIndex(mesh.userData?.geomIndex ?? i);
+      segMat.color.setHex(segColor);
+      mesh.material = segMat;
+    }
+  } else {
+    restoreSegmentMaterial(mesh);
+  }
   if (sceneGeom) {
     const px = Number(sceneGeom.xpos?.[0]) || 0;
     const py = Number(sceneGeom.xpos?.[1]) || 0;
@@ -1820,14 +1899,29 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets) {
     }
   }
   applyAppearanceToMaterial(mesh, appearance);
-  applyMaterialFlags(mesh, i, state);
+  applyMaterialFlags(mesh, i, state, flags);
   mesh.visible = true;
 }
 
-function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets) {
+function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags = null) {
   const groundData = mesh.userData?.infiniteGround;
   if (!groundData) return;
   const uniforms = groundData.uniforms || {};
+  const segmentEnabled = Array.isArray(sceneFlags) ? !!sceneFlags[SEGMENT_FLAG_INDEX] : false;
+  const baseColor = mesh.material?.color;
+  if (baseColor) {
+    if (segmentEnabled) {
+      if (!mesh.userData.segmentOriginalColor) {
+        mesh.userData.segmentOriginalColor = baseColor.clone();
+      }
+      baseColor.setHex(segmentColorForIndex(mesh.userData?.geomIndex ?? i));
+      baseColor.convertLinearToSRGB?.();
+      if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
+    } else if (mesh.userData.segmentOriginalColor) {
+      baseColor.copy(mesh.userData.segmentOriginalColor);
+      if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
+    }
+  }
   const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
   let px = 0;
   let py = 0;
@@ -2248,18 +2342,19 @@ export function createRendererManager({
 
     return ctx;
   }
-  function renderScene(snapshot, state) {
-    if (!snapshot || !state) return;
-    const context = initRenderer();
-    if (!context.initialized) return;
-    const renderer = context.renderer;
-    const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
-    const voptFlags = Array.isArray(state.rendering?.voptFlags) ? state.rendering.voptFlags : [];
-    const reflectionEnabled = sceneFlags[2] !== false;
-    const skyboxEnabled = sceneFlags[4] !== false;
-    const fogEnabled = !!sceneFlags[5];
-    const hazeEnabled = !!sceneFlags[6];
-    context.reflectionActive = reflectionEnabled;
+function renderScene(snapshot, state) {
+  if (!snapshot || !state) return;
+  const context = initRenderer();
+  if (!context.initialized) return;
+  const renderer = context.renderer;
+  const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
+  const voptFlags = Array.isArray(state.rendering?.voptFlags) ? state.rendering.voptFlags : [];
+  const reflectionEnabled = sceneFlags[2] !== false;
+  const skyboxEnabled = sceneFlags[4] !== false;
+  const fogEnabled = !!sceneFlags[5];
+  const hazeEnabled = !!sceneFlags[6];
+  context.reflectionActive = reflectionEnabled;
+  const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
 
     const assets = state.rendering?.assets || null;
     syncRendererAssets(context, assets);
@@ -2272,11 +2367,28 @@ export function createRendererManager({
     if (typeof ensureEnvIfNeeded === 'function') {
       ensureEnvIfNeeded(context, state);
     }
-    applySkyboxVisibility(context, skyboxEnabled);
+    applySkyboxVisibility(context, skyboxEnabled && !segmentEnabled);
+    const worldScene = getWorldScene(context);
+    if (segmentEnabled) {
+      if (!context._segmentEnvBackup && worldScene) {
+        context._segmentEnvBackup = {
+          background: worldScene.background,
+          environment: worldScene.environment,
+        };
+      }
+      if (worldScene) {
+        worldScene.environment = null;
+        worldScene.background = new THREE.Color(segmentColorForIndex(-1));
+      }
+    } else if (context._segmentEnvBackup && worldScene) {
+      worldScene.background = context._segmentEnvBackup.background || null;
+      worldScene.environment = context._segmentEnvBackup.environment || null;
+      context._segmentEnvBackup = null;
+    }
 
     const ground = context.ground;
     const groundData = ground?.userData?.infiniteGround || null;
-    const groundUniforms =
+  const groundUniforms =
       ground?.material?.userData?.infiniteUniforms
       || ground?.material?.uniforms
       || null;
@@ -2323,6 +2435,13 @@ export function createRendererManager({
     const contactForceEnabled = !!vopt[16];
     // Contact overlays: points (flags[14]) and force arrows (flags[16]).
     const contacts = snapshot.contacts || null;
+    const visScale = visStruct?.scale || {};
+    const boundsRadius = Math.max(0.1, context.bounds?.radius || 1);
+    const meanSize = (() => {
+      const value = Number(statStruct?.meansize);
+      if (Number.isFinite(value) && value > 1e-6) return value;
+      return boundsRadius;
+    })();
     if (contactPointEnabled && contacts && typeof contacts.n === 'number' && !contacts.pos) {
       try { console.warn('[render] contact points enabled but no position array in snapshot; n=', contacts.n); } catch {}
     }
@@ -2338,10 +2457,15 @@ export function createRendererManager({
       const group = context.contactGroup;
       const pool = context.contactPool || [];
       const n = Math.max(0, contacts.n | 0);
-      // Contact visual size: small fraction of bounds radius
-      const r = Math.max(0.5, (context.bounds?.radius || 1));
-      const radius = Math.max(0.012, Math.min(0.04, r * 0.014));
-      const thickness = Math.max(0.2 * radius, 0.01);
+      // Contact visual size is driven by vis.scale.{contactwidth,contactheight} in world units.
+      const widthScale = Number(visScale?.contactwidth);
+      const heightScale = Number(visScale?.contactheight);
+      const radius = Number.isFinite(widthScale) && widthScale > 0
+        ? Math.max(0.0015, widthScale)
+        : Math.max(0.002, Math.min(meanSize * 0.02, meanSize * 0.1));
+      const thickness = Number.isFinite(heightScale) && heightScale > 0
+        ? Math.max(0.0015, heightScale)
+        : Math.max(0.001, radius * 0.65);
       // Prepare a shared cylinder geometry/material
       const currentGeom = group.userData.geometry;
       if (
@@ -2357,7 +2481,6 @@ export function createRendererManager({
           if (mesh) mesh.geometry = cyl;
         }
       }
-      const visStruct = state?.model?.vis || {};
       const rgbaContact = visStruct?.rgba?.contact;
       const contactColorHex = rgbaToHex(rgbaContact, CONTACT_POINT_FALLBACK_COLOR);
       const contactOpacity = alphaFromArray(rgbaContact, 0.85);
@@ -2368,7 +2491,7 @@ export function createRendererManager({
         transparent: contactOpacity < 0.999,
         opacity: contactOpacity,
         depthTest: true,
-        depthWrite: false,
+        depthWrite: true,
         toneMapped: false,
         fog: false,
       });
@@ -2376,7 +2499,7 @@ export function createRendererManager({
         group.userData.material.color.setHex(contactColorHex);
         group.userData.material.opacity = contactOpacity;
         group.userData.material.transparent = contactOpacity < 0.999;
-        group.userData.material.depthWrite = false;
+        group.userData.material.depthWrite = true;
       }
       // Grow pool if needed
       for (let i = pool.length; i < n; i += 1) {
@@ -2437,15 +2560,6 @@ export function createRendererManager({
         }
         const group = context.contactForceGroup;
         const pool = Array.isArray(context.contactForcePool) ? context.contactForcePool : [];
-        const visStruct = state?.model?.vis || {};
-        const statStruct = state?.model?.stat || state?.statistic || {};
-        const meanSize = (() => {
-          const value = Number(statStruct?.meansize);
-          if (Number.isFinite(value) && value > 1e-6) return value;
-          const radius = context.bounds?.radius;
-          if (Number.isFinite(radius) && radius > 0) return radius;
-          return 1;
-        })();
         const meanMass = (() => {
           const value = Number(statStruct?.meanmass);
           if (Number.isFinite(value) && value > 1e-9) return value;
@@ -2476,7 +2590,7 @@ export function createRendererManager({
             color: colorHex,
             transparent: colorOpacity < 0.999,
             opacity: colorOpacity,
-            depthWrite: false,
+            depthWrite: true,
             toneMapped: false,
             fog: false,
           });
@@ -2484,7 +2598,7 @@ export function createRendererManager({
           context.contactForceMaterial.color.setHex(colorHex);
           context.contactForceMaterial.opacity = colorOpacity;
           context.contactForceMaterial.transparent = colorOpacity < 0.999;
-          context.contactForceMaterial.depthWrite = false;
+          context.contactForceMaterial.depthWrite = true;
         }
         const material = context.contactForceMaterial;
         const n = Math.max(0, contacts.n | 0);
@@ -2686,7 +2800,7 @@ export function createRendererManager({
       mesh.userData = mesh.userData || {};
       mesh.userData.matId = matIndex;
       applyReflectanceToMaterial(mesh, context, reflectanceValue, reflectionEnabled);
-      updateMeshFromSnapshot(mesh, i, snapshot, state, assets);
+      updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags);
 
       let visible = mesh.visible;
       if (hideAllGeometry) {

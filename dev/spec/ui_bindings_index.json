@@ -641,7 +641,7 @@
         "group_id": null,
         "group_type": null,
         "item_id": "visualization.headlight_ambient",
-        "control_type": "edit_vec3",
+        "control_type": "edit_vec3_string",
         "label": "Ambient",
         "shortcut": null
       }
@@ -659,7 +659,7 @@
         "group_id": null,
         "group_type": null,
         "item_id": "visualization.headlight_diffuse",
-        "control_type": "edit_vec3",
+        "control_type": "edit_vec3_string",
         "label": "Diffuse",
         "shortcut": null
       }
@@ -677,7 +677,7 @@
         "group_id": null,
         "group_type": null,
         "item_id": "visualization.headlight_specular",
-        "control_type": "edit_vec3",
+        "control_type": "edit_vec3_string",
         "label": "Specular",
         "shortcut": null
       }

@@ -1246,6 +1246,114 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     });
   }
 
+  function renderVec3StringInput(container, control) {
+    const { row, input, field } = createTextInputField(container, control, {
+      mode: 'text',
+      idSuffix: '__vec3str',
+    });
+    field.append(input);
+    container.append(row);
+
+    applyOptionAvailability(control, input);
+    const targetLength = 3;
+    let lastValidText = '';
+
+    const formatVector = (vec) => vec.map(formatNumber).join(' ');
+    const parseVec3 = (value) => {
+      if (Array.isArray(value)) {
+        const arr = value.map((v) => Number(v));
+        return arr.length === targetLength && arr.every((n) => Number.isFinite(n)) ? arr : null;
+      }
+      if (value && typeof value === 'object') {
+        try {
+          const arr = Array.from(value, (v) => Number(v));
+          return arr.length === targetLength && arr.every((n) => Number.isFinite(n)) ? arr : null;
+        } catch {
+          return null;
+        }
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const tokens = trimmed.split(/\s+/).filter(Boolean);
+        if (tokens.length !== targetLength) return null;
+        const arr = tokens.map((token) => Number(token));
+        return arr.every((n) => Number.isFinite(n)) ? arr : null;
+      }
+      return null;
+    };
+
+    const setInputText = (text) => {
+      input.value = text;
+      input.classList.remove('is-invalid');
+    };
+
+    const binding = createBinding(control, {
+      getValue: () => lastValidText || input.value,
+      applyValue: (value) => {
+        if (value === undefined || value === null) return;
+        const parsed = parseVec3(value);
+        if (parsed) {
+          lastValidText = formatVector(parsed);
+          setInputText(lastValidText);
+          return;
+        }
+        const text = typeof value === 'string' ? value.trim() : String(value ?? '');
+        setInputText(text);
+      },
+    });
+
+    if (control.default !== undefined) {
+      if (typeof control.default === 'string') {
+        input.placeholder = control.default;
+      } else if (Array.isArray(control.default)) {
+        binding.setValue(control.default);
+      }
+    }
+
+    const showInvalid = () => {
+      input.classList.add('is-invalid');
+      const labelText = control?.label || control?.name || control?.item_id || 'vector';
+      pushToast(`[${labelText}] invalid vector input (expected ${targetLength})`);
+      if (input._invalidTimer) {
+        clearTimeout(input._invalidTimer);
+      }
+      input._invalidTimer = setTimeout(() => {
+        input.classList.remove('is-invalid');
+      }, 1200);
+      if (lastValidText) {
+        input.value = lastValidText;
+      } else {
+        input.value = '';
+      }
+    };
+
+    const commit = guardBinding(binding, async () => {
+      const parsed = parseVec3(input.value);
+      if (parsed) {
+        lastValidText = formatVector(parsed);
+        setInputText(lastValidText);
+        await applySpecAction(store, backend, control, parsed);
+        return;
+      }
+      showInvalid();
+    });
+
+    input.addEventListener('focus', () => {
+      binding.isEditing = true;
+    });
+    input.addEventListener('blur', () => {
+      binding.isEditing = false;
+      commit();
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.blur();
+      }
+    });
+  }
+
   function renderStatic(container, control) {
     if (control?.binding) {
       const { row, label, field } = createLabeledRow(control);
@@ -1436,6 +1544,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     edit_text: (container, control) => renderEditInput(container, control, 'text'),
     edit_vec2: (container, control) => renderVectorInput(container, control, 2),
     edit_vec3: (container, control) => renderVectorInput(container, control, 3),
+    edit_vec3_string: (container, control) => renderVec3StringInput(container, control),
     edit_vec5: (container, control) => renderVectorInput(container, control, 5),
     edit_rgba: (container, control) => renderVectorInput(container, control, 4),
     static: renderStatic,

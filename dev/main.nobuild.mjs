@@ -428,6 +428,7 @@ if (typeof window !== 'undefined') {
       getStats: () => ({ ...renderStats }),
       getContext: () => (renderCtx.initialized ? renderCtx : null),
       ensureLoop: () => rendererManager.ensureRenderLoop(),
+      renderScene: (snapshot, state) => rendererManager.renderScene(snapshot, state),
     };
   } catch {}
 }

@@ -1211,21 +1211,21 @@
         },
         {
           "item_id": "visualization.headlight_ambient",
-          "type": "edit_vec3",
+          "type": "edit_vec3_string",
           "label": "Ambient",
           "binding": "mjVisual::headlight.ambient",
           "default": "model.vis.headlight.ambient"
         },
         {
           "item_id": "visualization.headlight_diffuse",
-          "type": "edit_vec3",
+          "type": "edit_vec3_string",
           "label": "Diffuse",
           "binding": "mjVisual::headlight.diffuse",
           "default": "model.vis.headlight.diffuse"
         },
         {
           "item_id": "visualization.headlight_specular",
-          "type": "edit_vec3",
+          "type": "edit_vec3_string",
           "label": "Specular",
           "binding": "mjVisual::headlight.specular",
           "default": "model.vis.headlight.specular"

@@ -378,6 +378,21 @@ function normaliseControlValue(control, raw) {
     case 'slider_num':
     case 'slidernum':
       return toNumber(raw);
+    case 'edit_vec3_string': {
+      if (Array.isArray(raw)) {
+        return raw.map((value) => toNumber(value));
+      }
+      if (typeof raw === 'string') {
+        const tokens = raw
+          .trim()
+          .split(/\s+/)
+          .map((token) => Number(token))
+          .filter((num) => Number.isFinite(num));
+        if (tokens.length === 3) return tokens;
+        return raw.trim();
+      }
+      return raw ?? '';
+    }
     case 'edit_vec3':
     case 'edit_rgba':
       if (Array.isArray(raw)) {
