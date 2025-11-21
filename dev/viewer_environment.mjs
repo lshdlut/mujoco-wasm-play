@@ -43,6 +43,26 @@ function hasModelBackground(state) {
   return bg.color != null || !!bg.texture;
 }
 
+function pushSkyDebug(ctx, payload) {
+  try {
+    const log = ctx?._skyDebug || (ctx._skyDebug = []);
+    log.push({ ts: Date.now(), source: 'env', ...payload });
+    if (log.length > 40) log.shift();
+    if (typeof window !== 'undefined') {
+      window.__skyDebug = log;
+    }
+  } catch {}
+}
+
+function detachEnvironment(ctx) {
+  const worldScene = getWorldScene(ctx);
+  if (worldScene) {
+    worldScene.environment = null;
+    worldScene.background = null;
+  }
+  if (ctx.sky) ctx.sky.visible = false;
+}
+
 function disposeEnvResources(ctx, { resetFlags = true } = {}) {
   const worldScene = getWorldScene(ctx);
   if (worldScene && ctx.envRT && worldScene.environment === ctx.envRT.texture) {
@@ -161,12 +181,12 @@ export function createEnvironmentManager({
   fallbackEnabledDefault,
 }) {
 
-  function ensureOutdoorSkyEnv(ctx, preset, generation = null) {
-    const worldScene = getWorldScene(ctx);
-    if (!ctx || !ctx.renderer || !worldScene) return;
-    if (typeof skyOffParam !== 'undefined' && skyOffParam) {
-      try {
-        if (ctx.sky) ctx.sky.visible = false;
+function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
+  const worldScene = getWorldScene(ctx);
+  if (!ctx || !ctx.renderer || !worldScene) return;
+  if (typeof skyOffParam !== 'undefined' && skyOffParam) {
+    try {
+      if (ctx.sky) ctx.sky.visible = false;
       } catch {}
     }
     try {
@@ -174,21 +194,28 @@ export function createEnvironmentManager({
         ctx.sky.visible = !ctx.envFromHDRI;
       }
     } catch {}
-    if (ctx.hdriFailed) {
-      return;
-    }
-    const hdriGen = typeof generation === 'number' ? generation : (ctx.hdriLoadGen ?? 0);
-    const hdrReady = ctx.envFromHDRI && ctx.envRT && ctx.hdriReady;
-    if (hdrReady || ctx.hdriLoading || ctx.hdriLoadPromise) {
-      return;
-    }
-    if (!ctx.pmrem) {
-      ctx.pmrem = new THREE_NS.PMREMGenerator(ctx.renderer);
-    }
-    if (!ctx.envFromHDRI && !hasModelEnvironment(store.get())) {
-      const candidates = [];
-      if (hdriQueryParam) candidates.push(hdriQueryParam);
-      candidates.push(...HDRI_FALLBACK_PATHS);
+  if (ctx.hdriFailed) {
+    return;
+  }
+  const hdriGen = typeof generation === 'number' ? generation : (ctx.hdriLoadGen ?? 0);
+  const hdrReady = ctx.envFromHDRI && ctx.envRT && ctx.hdriReady;
+  if (hdrReady) {
+    return;
+  }
+  if (!ctx.pmrem) {
+    ctx.pmrem = new THREE_NS.PMREMGenerator(ctx.renderer);
+  }
+  const allowHDRI = options.allowHDRI !== false;
+  if (
+    allowHDRI &&
+    !ctx.envFromHDRI &&
+    !ctx.hdriLoading &&
+    !ctx.hdriLoadPromise &&
+    !hasModelEnvironment(store.get())
+  ) {
+    const candidates = [];
+    if (hdriQueryParam) candidates.push(hdriQueryParam);
+    candidates.push(...HDRI_FALLBACK_PATHS);
       const tryLoadHDRI = async (url, token) => {
         try {
           const mod = await import('three/addons/loaders/RGBELoader.js');
@@ -311,11 +338,14 @@ export function createEnvironmentManager({
         const worldSceneCurrent = getWorldScene(ctx);
         if (worldSceneCurrent) worldSceneCurrent.add(sky);
             ctx.sky = sky;
-            ctx.sunVec = new THREE_NS.Vector3();
-          })
-          .catch(() => {});
-      } catch {}
-    }
+      ctx.sunVec = new THREE_NS.Vector3();
+      ctx.envDirty = true;
+      // Now that sky exists, rebuild environment/background on next pass
+      ensureOutdoorSkyEnv(ctx, preset, generation, options);
+    })
+    .catch(() => {});
+  } catch {}
+}
     if (!ctx.envFromHDRI && ctx.sky && ctx.pmrem) {
       const sky = ctx.sky;
       const uniforms = sky.material.uniforms;
@@ -330,20 +360,19 @@ export function createEnvironmentManager({
         uniforms['sunPosition'].value.copy(ctx.sunVec);
       }
       if (!ctx.envRT || ctx.envDirty) {
-        if (ctx.envRT) {
-          ctx.envRT.dispose();
-        }
-        ctx.envRT = ctx.pmrem.fromScene(sky);
-        const worldSceneCurrent = getWorldScene(ctx);
-        if (worldSceneCurrent) worldSceneCurrent.environment = ctx.envRT.texture;
-        ctx.envDirty = false;
-        const intensity = cfg.envIntensity ?? 1.3;
-        ctx.envIntensity = intensity;
+      if (ctx.envRT) {
+        ctx.envRT.dispose();
       }
+      ctx.envRT = ctx.pmrem.fromScene(sky);
       const worldSceneCurrent = getWorldScene(ctx);
       if (worldSceneCurrent) {
-        worldSceneCurrent.background = null;
+        worldSceneCurrent.environment = ctx.envRT.texture;
+        worldSceneCurrent.background = sky;
       }
+      ctx.envDirty = false;
+      const intensity = cfg.envIntensity ?? 1.3;
+      ctx.envIntensity = intensity;
+    }
     }
   }
 
@@ -401,42 +430,38 @@ export function createEnvironmentManager({
     }
   }
 
-  function ensureEnvIfNeeded(ctx, state) {
-    const presetMode = isPresetMode(state);
-    const presetChanged = ctx._lastPresetMode !== presetMode;
-    ctx._lastPresetMode = presetMode;
-    if (presetMode) {
-      if (presetChanged) {
-        ctx.hdriFailed = false;
-        ctx.hdriLoadGen = (ctx.hdriLoadGen || 0) + 1;
-        disposeEnvResources(ctx, { resetFlags: true });
-      }
-    }
-    const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: 'bright-outdoor' };
-    const preset = FALLBACK_PRESETS['bright-outdoor'];
-    fallback.enabled = fallbackEnabledDefault && presetMode;
-    const worldScene = getWorldScene(ctx);
-    if (!presetMode) {
-      disposeEnvResources(ctx, { resetFlags: true });
-      ctx.hdriFailed = false;
-      if (worldScene) {
-        worldScene.environment = null;
-        worldScene.background = null;
-      }
-      if (ctx.sky) ctx.sky.visible = false;
-      return;
-    }
-    if (ctx.envFromHDRI && ctx.envRT && worldScene && !worldScene.environment) {
-      worldScene.environment = ctx.envRT.texture;
-      if (ctx.hdriBackground) {
-        worldScene.background = ctx.hdriBackground;
-      }
-    }
-    const hasEnv = hasModelEnvironment(state);
-    if (!hasEnv && fallback.enabled) {
-      ensureOutdoorSkyEnv(ctx, preset, ctx.hdriLoadGen || 0);
-    }
+
+function ensureEnvIfNeeded(ctx, state, options = {}) {
+  const presetMode = isPresetMode(state);
+  const skyboxEnabled = options.skyboxEnabled !== false;
+  const presetChanged = ctx._lastPresetMode !== presetMode;
+  ctx._lastPresetMode = presetMode;
+  if (presetMode && presetChanged) {
+    ctx.hdriFailed = false;
+    ctx.hdriLoadGen = (ctx.hdriLoadGen || 0) + 1;
+    ctx.envDirty = true;
+  } else if (!presetMode && presetChanged) {
+    disposeEnvResources(ctx, { resetFlags: true });
+    ctx.envDirty = true;
   }
+  const preset = FALLBACK_PRESETS['bright-outdoor'];
+  const hasEnv = hasModelEnvironment(state);
+  const allowHDRI = presetMode && fallbackEnabledDefault;
+  if (!skyboxEnabled) {
+    pushSkyDebug(ctx, { mode: 'skip', reason: 'skybox-off', presetMode, hasEnv });
+    return;
+  }
+  if (presetMode) {
+    ensureOutdoorSkyEnv(ctx, preset, ctx.hdriLoadGen || 0, { allowHDRI });
+    pushSkyDebug(ctx, { mode: 'ensure-preset', presetMode: true, allowHDRI, hasEnv });
+  } else {
+    // Model mode: prefer procedural sky; clear any HDRI state
+    ctx.envFromHDRI = false;
+    ctx.hdriReady = false;
+    ensureOutdoorSkyEnv(ctx, preset, ctx.hdriLoadGen || 0, { allowHDRI: false });
+    pushSkyDebug(ctx, { mode: 'ensure-model-sky', presetMode: false, hasEnv });
+  }
+}
 
   return {
     applyFallbackAppearance,

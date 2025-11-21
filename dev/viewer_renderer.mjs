@@ -177,6 +177,17 @@ function geomNameFromLookup(lookup, index) {
   return `Geom ${index}`;
 }
 
+function pushSkyDebug(ctx, payload) {
+  try {
+    const log = ctx?._skyDebug || (ctx._skyDebug = []);
+    log.push({ ts: Date.now(), ...payload });
+    if (log.length > 40) log.shift();
+    if (typeof window !== 'undefined') {
+      window.__skyDebug = log;
+    }
+  } catch {}
+}
+
 function isInfinitePlaneSize(sizeVec) {
   if (!Array.isArray(sizeVec) || sizeVec.length < 2) return false;
   const sx = Math.abs(Number(sizeVec[0]) || 0);
@@ -238,6 +249,7 @@ function applySkyboxVisibility(ctx, enabled, options = {}) {
     if (ctx.sky) ctx.sky.visible = false;
     worldScene.environment = null;
     worldScene.background = new THREE.Color(useBlackBackground ? 0x000000 : DEFAULT_CLEAR_HEX);
+    pushSkyDebug(ctx, { mode: 'disable', useBlack: useBlackBackground });
     return;
   }
   ctx.envDirty = true;
@@ -246,15 +258,18 @@ function applySkyboxVisibility(ctx, enabled, options = {}) {
     if (ctx.hdriBackground) {
       worldScene.background = ctx.hdriBackground;
     }
+    pushSkyDebug(ctx, { mode: 'hdri', envRT: !!ctx.envRT, background: !!ctx.hdriBackground });
     return;
   }
   if (ctx.sky && !ctx.envFromHDRI) {
     ctx.sky.visible = true;
     worldScene.background = ctx.sky;
+    pushSkyDebug(ctx, { mode: 'sky', skyVisible: true });
     return;
   }
   // If no sky resources exist, fall back to a solid clear colour
   worldScene.background = new THREE.Color(DEFAULT_CLEAR_HEX);
+  pushSkyDebug(ctx, { mode: 'fallback' });
 }
 
 
@@ -2442,7 +2457,7 @@ function renderScene(snapshot, state) {
   const skyboxFlag = sceneFlags[4] !== false;
   const shadowEnabled = segmentEnabled ? false : sceneFlags[0] !== false;
   const reflectionEnabled = segmentEnabled ? false : sceneFlags[2] !== false;
-  const skyboxEnabled = segmentEnabled ? false : skyboxFlag;
+  const skyboxEnabled = !segmentEnabled && skyboxFlag;
   const fogEnabled = segmentEnabled ? false : !!sceneFlags[5];
   const hazeEnabled = segmentEnabled ? false : !!sceneFlags[6];
   context.reflectionActive = reflectionEnabled;
@@ -2453,13 +2468,10 @@ function renderScene(snapshot, state) {
     const geomGroupMask = Array.isArray(state.rendering?.groups?.geom) ? state.rendering.groups.geom : null;
 
     if (typeof ensureEnvIfNeeded === 'function') {
-      ensureEnvIfNeeded(context, state);
+      ensureEnvIfNeeded(context, state, { skyboxEnabled, presetMode });
     }
   if (!segmentEnabled && presetMode && typeof applyFallbackAppearance === 'function') {
       applyFallbackAppearance(context, state);
-    }
-    if (!segmentEnabled) {
-      applySkyboxVisibility(context, skyboxEnabled && !segmentEnabled, { useBlackOnDisable: presetMode });
     }
     const worldScene = getWorldScene(context);
     if (segmentEnabled) {
@@ -2485,27 +2497,29 @@ function renderScene(snapshot, state) {
       if (context.ambient) context.ambient.intensity = 0;
       if (context.hemi) context.hemi.intensity = 0;
       context._segmentEnvBackupApplied = true;
-    } else if (context._segmentEnvBackup && worldScene) {
-      worldScene.background = context._segmentEnvBackup.background || null;
-      worldScene.environment = context._segmentEnvBackup.environment || null;
-      if (context.renderer?.shadowMap && context._segmentEnvBackup.shadowEnabled != null) {
-        context.renderer.shadowMap.enabled = shadowEnabled && context._segmentEnvBackup.shadowEnabled;
+    } else {
+      if (context._segmentEnvBackup && worldScene) {
+        worldScene.background = context._segmentEnvBackup.background || null;
+        worldScene.environment = context._segmentEnvBackup.environment || null;
+        if (context.renderer?.shadowMap && context._segmentEnvBackup.shadowEnabled != null) {
+          context.renderer.shadowMap.enabled = shadowEnabled && context._segmentEnvBackup.shadowEnabled;
+        }
+        if (context.light && context._segmentEnvBackup.light != null) {
+          context.light.intensity = context._segmentEnvBackup.light;
+        }
+        if (context.fill && context._segmentEnvBackup.fill != null) {
+          context.fill.intensity = context._segmentEnvBackup.fill;
+        }
+        if (context.ambient && context._segmentEnvBackup.ambient != null) {
+          context.ambient.intensity = context._segmentEnvBackup.ambient;
+        }
+        if (context.hemi && context._segmentEnvBackup.hemi != null) {
+          context.hemi.intensity = context._segmentEnvBackup.hemi;
+        }
+        context._segmentEnvBackup = null;
+        context._segmentEnvBackupApplied = false;
       }
-      if (context.light && context._segmentEnvBackup.light != null) {
-        context.light.intensity = context._segmentEnvBackup.light;
-      }
-      if (context.fill && context._segmentEnvBackup.fill != null) {
-        context.fill.intensity = context._segmentEnvBackup.fill;
-      }
-      if (context.ambient && context._segmentEnvBackup.ambient != null) {
-        context.ambient.intensity = context._segmentEnvBackup.ambient;
-      }
-      if (context.hemi && context._segmentEnvBackup.hemi != null) {
-        context.hemi.intensity = context._segmentEnvBackup.hemi;
-      }
-      context._segmentEnvBackup = null;
-      context._segmentEnvBackupApplied = false;
-      applySkyboxVisibility(context, skyboxEnabled, { useBlackOnDisable: presetMode });
+      applySkyboxVisibility(context, skyboxEnabled, { useBlackOnDisable: true });
     }
     if (context.grid) {
       context.grid.visible = !segmentEnabled;
