@@ -1629,6 +1629,10 @@ function segmentColorForIndex(index) {
   return palette[index % palette.length];
 }
 
+function segmentBackgroundColor() {
+  return 0x000000;
+}
+
 function restoreSegmentMaterial(mesh) {
   const userData = mesh?.userData || null;
   if (!mesh || !userData || !userData.segmentMaterial || !userData.segmentOriginalMaterial) {
@@ -1655,8 +1659,7 @@ function ensureSegmentMaterial(mesh, sceneFlags) {
     });
     userData.segmentMaterial = material;
   }
-  const wireframe = Array.isArray(sceneFlags) ? !!sceneFlags[1] : false;
-  material.wireframe = wireframe;
+  material.wireframe = false;
   return material;
 }
 
@@ -1898,8 +1901,11 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
       appearance.opacity = alphaFromArray(appearance.rgba);
     }
   }
-  applyAppearanceToMaterial(mesh, appearance);
-  applyMaterialFlags(mesh, i, state, flags);
+  const applyAppearance = !segmentEnabled;
+  if (applyAppearance) {
+    applyAppearanceToMaterial(mesh, appearance);
+    applyMaterialFlags(mesh, i, state, flags);
+  }
   mesh.visible = true;
 }
 
@@ -1909,18 +1915,29 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
   const uniforms = groundData.uniforms || {};
   const segmentEnabled = Array.isArray(sceneFlags) ? !!sceneFlags[SEGMENT_FLAG_INDEX] : false;
   const baseColor = mesh.material?.color;
-  if (baseColor) {
-    if (segmentEnabled) {
-      if (!mesh.userData.segmentOriginalColor) {
-        mesh.userData.segmentOriginalColor = baseColor.clone();
-      }
-      baseColor.setHex(segmentColorForIndex(mesh.userData?.geomIndex ?? i));
-      baseColor.convertLinearToSRGB?.();
-      if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
-    } else if (mesh.userData.segmentOriginalColor) {
-      baseColor.copy(mesh.userData.segmentOriginalColor);
-      if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
+  if (segmentEnabled) {
+    const segColor = segmentColorForIndex(mesh.userData?.geomIndex ?? i);
+    const segMat = ensureSegmentMaterial(mesh, sceneFlags);
+    if (segMat) {
+      segMat.color.setHex(segColor);
+      segMat.depthWrite = true;
+      segMat.depthTest = true;
+      segMat.transparent = false;
+      mesh.material = segMat;
+    } else if (baseColor) {
+      baseColor.setHex(segColor);
     }
+    if (uniforms?.uFadeStart) uniforms.uFadeStart.value = 0;
+    if (uniforms?.uFadeEnd) uniforms.uFadeEnd.value = 0;
+    if (uniforms?.uFadePow) uniforms.uFadePow.value = 0;
+    if (uniforms?.uGridStep) uniforms.uGridStep.value = 0;
+    return;
+  }
+  restoreSegmentMaterial(mesh);
+  if (baseColor && mesh.userData.segmentOriginalColor) {
+    baseColor.copy(mesh.userData.segmentOriginalColor);
+    if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
+    mesh.material.transparent = true;
   }
   const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
   let px = 0;
@@ -2349,41 +2366,75 @@ function renderScene(snapshot, state) {
   const renderer = context.renderer;
   const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
   const voptFlags = Array.isArray(state.rendering?.voptFlags) ? state.rendering.voptFlags : [];
-  const reflectionEnabled = sceneFlags[2] !== false;
-  const skyboxEnabled = sceneFlags[4] !== false;
-  const fogEnabled = !!sceneFlags[5];
-  const hazeEnabled = !!sceneFlags[6];
-  context.reflectionActive = reflectionEnabled;
   const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
+  const reflectionEnabled = segmentEnabled ? false : sceneFlags[2] !== false;
+  const skyboxEnabled = segmentEnabled ? false : sceneFlags[4] !== false;
+  const fogEnabled = segmentEnabled ? false : !!sceneFlags[5];
+  const hazeEnabled = segmentEnabled ? false : !!sceneFlags[6];
+  context.reflectionActive = reflectionEnabled;
 
     const assets = state.rendering?.assets || null;
     syncRendererAssets(context, assets);
     const geomGroupIds = assets?.geoms?.group || null;
     const geomGroupMask = Array.isArray(state.rendering?.groups?.geom) ? state.rendering.groups.geom : null;
 
-    if (typeof applyFallbackAppearance === 'function') {
-      applyFallbackAppearance(context, state);
+    if (!segmentEnabled) {
+      if (typeof applyFallbackAppearance === 'function') {
+        applyFallbackAppearance(context, state);
+      }
+      if (typeof ensureEnvIfNeeded === 'function') {
+        ensureEnvIfNeeded(context, state);
+      }
+      applySkyboxVisibility(context, skyboxEnabled && !segmentEnabled);
     }
-    if (typeof ensureEnvIfNeeded === 'function') {
-      ensureEnvIfNeeded(context, state);
-    }
-    applySkyboxVisibility(context, skyboxEnabled && !segmentEnabled);
     const worldScene = getWorldScene(context);
     if (segmentEnabled) {
       if (!context._segmentEnvBackup && worldScene) {
         context._segmentEnvBackup = {
           background: worldScene.background,
           environment: worldScene.environment,
+          shadowEnabled: context.renderer?.shadowMap?.enabled ?? null,
+          toneExposure: context.renderer?.toneMappingExposure ?? null,
+          light: context.light ? context.light.intensity : null,
+          fill: context.fill ? context.fill.intensity : null,
+          ambient: context.ambient ? context.ambient.intensity : null,
+          hemi: context.hemi ? context.hemi.intensity : null,
         };
       }
       if (worldScene) {
         worldScene.environment = null;
-        worldScene.background = new THREE.Color(segmentColorForIndex(-1));
+        worldScene.background = new THREE.Color(segmentBackgroundColor());
       }
+      if (context.renderer?.shadowMap) context.renderer.shadowMap.enabled = false;
+      if (context.light) context.light.intensity = 0;
+      if (context.fill) context.fill.intensity = 0;
+      if (context.ambient) context.ambient.intensity = 0;
+      if (context.hemi) context.hemi.intensity = 0;
+      context._segmentEnvBackupApplied = true;
     } else if (context._segmentEnvBackup && worldScene) {
       worldScene.background = context._segmentEnvBackup.background || null;
       worldScene.environment = context._segmentEnvBackup.environment || null;
+      if (context.renderer?.shadowMap && context._segmentEnvBackup.shadowEnabled != null) {
+        context.renderer.shadowMap.enabled = context._segmentEnvBackup.shadowEnabled;
+      }
+      if (context.light && context._segmentEnvBackup.light != null) {
+        context.light.intensity = context._segmentEnvBackup.light;
+      }
+      if (context.fill && context._segmentEnvBackup.fill != null) {
+        context.fill.intensity = context._segmentEnvBackup.fill;
+      }
+      if (context.ambient && context._segmentEnvBackup.ambient != null) {
+        context.ambient.intensity = context._segmentEnvBackup.ambient;
+      }
+      if (context.hemi && context._segmentEnvBackup.hemi != null) {
+        context.hemi.intensity = context._segmentEnvBackup.hemi;
+      }
       context._segmentEnvBackup = null;
+      context._segmentEnvBackupApplied = false;
+      applySkyboxVisibility(context, skyboxEnabled);
+    }
+    if (context.grid) {
+      context.grid.visible = !segmentEnabled;
     }
 
     const ground = context.ground;
@@ -2407,9 +2458,9 @@ function renderScene(snapshot, state) {
     const fogConfig = resolveFogConfig(visStruct, statStruct, context.bounds, fogEnabled);
     const worldSceneForFog = getWorldScene(context);
     applySceneFog(worldSceneForFog, fogConfig);
-    const hazeSummary = {
-      mode: 'ground-fade',
-      enabled: hazeEnabled && skyboxEnabled,
+  const hazeSummary = {
+    mode: 'ground-fade',
+    enabled: hazeEnabled && skyboxEnabled,
       reason: hazeEnabled
         ? (skyboxEnabled ? 'enabled' : 'skybox-disabled')
         : 'flag-off',
@@ -2417,7 +2468,7 @@ function renderScene(snapshot, state) {
       distance: groundDistance,
     };
     debugHazeState(hazeSummary);
-    if (visStruct) {
+    if (visStruct && !segmentEnabled) {
       applyVisualLighting(context, visStruct);
     }
 
@@ -2457,14 +2508,16 @@ function renderScene(snapshot, state) {
       const group = context.contactGroup;
       const pool = context.contactPool || [];
       const n = Math.max(0, contacts.n | 0);
-      // Contact visual size is driven by vis.scale.{contactwidth,contactheight} in world units.
+      // Contact visual size scales by vis.scale.{contactwidth,contactheight} * vis.scale.all * meansize.
+      const scaleAll = Number.isFinite(Number(visScale?.all)) ? Math.max(1e-6, Number(visScale.all)) : 1;
+      const base = Math.max(1e-6, meanSize * scaleAll);
       const widthScale = Number(visScale?.contactwidth);
       const heightScale = Number(visScale?.contactheight);
       const radius = Number.isFinite(widthScale) && widthScale > 0
-        ? Math.max(0.0015, widthScale)
-        : Math.max(0.002, Math.min(meanSize * 0.02, meanSize * 0.1));
+        ? Math.max(0.0015, widthScale * base)
+        : Math.max(0.002, Math.min(base * 0.02, base * 0.1));
       const thickness = Number.isFinite(heightScale) && heightScale > 0
-        ? Math.max(0.0015, heightScale)
+        ? Math.max(0.0015, heightScale * base)
         : Math.max(0.001, radius * 0.65);
       // Prepare a shared cylinder geometry/material
       const currentGeom = group.userData.geometry;
@@ -2482,8 +2535,10 @@ function renderScene(snapshot, state) {
         }
       }
       const rgbaContact = visStruct?.rgba?.contact;
-      const contactColorHex = rgbaToHex(rgbaContact, CONTACT_POINT_FALLBACK_COLOR);
-      const contactOpacity = alphaFromArray(rgbaContact, 0.85);
+      const contactColorHex = segmentEnabled
+        ? segmentColorForIndex(contacts?.n ? contacts.n + 1 : 0)
+        : rgbaToHex(rgbaContact, CONTACT_POINT_FALLBACK_COLOR);
+      const contactOpacity = segmentEnabled ? 1 : alphaFromArray(rgbaContact, 0.85);
       if (!group.userData.material) {
       group.userData.material = new THREE.MeshBasicMaterial({
         color: contactColorHex,
@@ -2582,9 +2637,11 @@ function renderScene(snapshot, state) {
         const lengthScale = mapForce / meanMass;
         const frame = ArrayBuffer.isView(contacts.frame) ? contacts.frame : null;
         const force = ArrayBuffer.isView(contacts.force) ? contacts.force : null;
-        const rgbaContactForce = visStruct?.rgba?.contactforce;
-        const colorHex = rgbaToHex(rgbaContactForce, CONTACT_FORCE_FALLBACK_COLOR);
-        const colorOpacity = alphaFromArray(rgbaContactForce, 0.8);
+      const rgbaContactForce = visStruct?.rgba?.contactforce;
+      const colorHex = segmentEnabled
+        ? segmentColorForIndex(contacts.n + 2)
+        : rgbaToHex(rgbaContactForce, CONTACT_FORCE_FALLBACK_COLOR);
+      const colorOpacity = segmentEnabled ? 1 : alphaFromArray(rgbaContactForce, 0.8);
         if (!context.contactForceMaterial) {
           context.contactForceMaterial = new THREE.MeshBasicMaterial({
             color: colorHex,
