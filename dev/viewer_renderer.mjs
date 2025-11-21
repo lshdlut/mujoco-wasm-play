@@ -110,7 +110,7 @@ const LABEL_GEOM_LIMIT = 120;
 const FRAME_GEOM_LIMIT = 80;
 const TEMP_MAT4 = new THREE.Matrix4();
 const DEFAULT_CLEAR_HEX = 0xd6dce4;
-const GROUND_DISTANCE = 400;
+const GROUND_DISTANCE = 200;
 const PLANE_SIZE_EPS = 1e-9;
 const RENDER_ORDER = Object.freeze({
   GROUND: -50,
@@ -1880,6 +1880,19 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets) {
   }
   if (uniforms.uDistance && groundData.baseDistance) {
     uniforms.uDistance.value = groundData.baseDistance;
+  }
+  if (uniforms.uFadeStart) {
+    const val = groundData.baseFadeStart || (groundData.baseDistance ? groundData.baseDistance * 0.5 : 0);
+    uniforms.uFadeStart.value = val;
+  }
+  if (uniforms.uFadeEnd) {
+    const val = groundData.baseFadeEnd || groundData.baseDistance || 0;
+    uniforms.uFadeEnd.value = val;
+  }
+  if (uniforms.uQuadDistance) {
+    const fade = uniforms.uFadeEnd?.value || groundData.baseFadeEnd || 0;
+    const dist = uniforms.uDistance?.value || groundData.baseDistance || 0;
+    uniforms.uQuadDistance.value = Math.max(fade * 1.2, dist);
   }
   const appearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
   if (!appearance.rgba) {

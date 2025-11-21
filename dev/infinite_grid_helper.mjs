@@ -96,6 +96,9 @@ export function createInfiniteGroundHelper({
   });
   const uniforms = {
     uDistance: { value: distance },
+    uFadeStart: { value: distance * 0.5 },
+    uFadeEnd: { value: distance },
+    uQuadDistance: { value: distance },
     uFadePow: { value: 2.5 },
     uPlaneOrigin: { value: new THREE.Vector3(0, 0, 0) },
     uPlaneAxisU: { value: new THREE.Vector3(1, 0, 0) },
@@ -108,6 +111,9 @@ export function createInfiniteGroundHelper({
   material.userData.infiniteUniforms = uniforms;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uDistance = uniforms.uDistance;
+    shader.uniforms.uFadeStart = uniforms.uFadeStart;
+    shader.uniforms.uFadeEnd = uniforms.uFadeEnd;
+    shader.uniforms.uQuadDistance = uniforms.uQuadDistance;
     shader.uniforms.uFadePow = uniforms.uFadePow;
     shader.uniforms.uPlaneOrigin = uniforms.uPlaneOrigin;
     shader.uniforms.uPlaneAxisU = uniforms.uPlaneAxisU;
@@ -123,13 +129,16 @@ uniform vec3 uPlaneAxisU;
 uniform vec3 uPlaneAxisV;
 uniform vec3 uPlaneNormal;
 uniform float uDistance;
+uniform float uQuadDistance;
 ${shader.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
       vec3 camVec = cameraPosition - uPlaneOrigin;
       float camSide = dot(camVec, uPlaneNormal);
       vec3 camProjected = cameraPosition - camSide * uPlaneNormal;
-      vec3 span = position.x * uDistance * uPlaneAxisU + position.y * uDistance * uPlaneAxisV;
+      float quadScale = uQuadDistance;
+      if (quadScale <= 0.0) quadScale = uDistance;
+      vec3 span = position.x * quadScale * uPlaneAxisU + position.y * quadScale * uPlaneAxisV;
       transformed = camProjected + span;
       vPlaneCoord = vec2(dot(transformed - uPlaneOrigin, uPlaneAxisU), dot(transformed - uPlaneOrigin, uPlaneAxisV));
       vCameraSide = camSide;`
@@ -143,6 +152,9 @@ varying vec3 vInfiniteWorldPosition;
 varying vec2 vPlaneCoord;
 varying float vCameraSide;
 uniform float uDistance;
+uniform float uFadeStart;
+uniform float uFadeEnd;
+uniform float uQuadDistance;
 uniform float uFadePow;
 uniform vec3 uPlaneOrigin;
 uniform vec3 uPlaneAxisU;
@@ -156,10 +168,13 @@ ${shader.fragmentShader.replace(
       vec3 camVec = cameraPosition - uPlaneOrigin;
       vec2 camCoord = vec2(dot(camVec, uPlaneAxisU), dot(camVec, uPlaneAxisV));
       float planarDist = length(camCoord - vPlaneCoord);
-      float t = clamp(planarDist / max(uDistance, 1e-6), 0.0, 1.0);
+      float fadeStart = max(0.0, uFadeStart);
+      float fadeEnd = max(fadeStart + 1e-4, uFadeEnd);
+      if (planarDist >= fadeEnd) discard;
+      float t = clamp((planarDist - fadeStart) / max(fadeEnd - fadeStart, 1e-6), 0.0, 1.0);
       float alpha = pow(1.0 - t, uFadePow);
       // Optional soft edge to avoid hard quad boundary
-      float edge = smoothstep(uDistance * 0.9, uDistance, planarDist);
+      float edge = smoothstep(fadeEnd * 0.9, fadeEnd, planarDist);
       alpha *= (1.0 - edge);
       // Attenuate underside
       if (vCameraSide < -0.01) {
@@ -191,6 +206,8 @@ ${shader.fragmentShader.replace(
   mesh.userData.infiniteGround = {
     uniforms,
     baseDistance: distance,
+    baseFadeStart: distance * 1.0,
+    baseFadeEnd: distance * 4.0,
     baseFadePow: uniforms.uFadePow.value,
     defaultGridStep: 1.0,
   };
