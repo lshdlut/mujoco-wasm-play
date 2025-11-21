@@ -1899,6 +1899,13 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets) {
     }
   }
   applyAppearanceToMaterial(mesh, appearance);
+  // Ensure infinite ground remains blended by alpha
+  if (mesh.material) {
+    mesh.material.transparent = true;
+    mesh.material.opacity = 1;
+    if ('depthWrite' in mesh.material) mesh.material.depthWrite = true;
+    if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
+  }
 }
 
 function getDefaultVopt(ctx, state) {

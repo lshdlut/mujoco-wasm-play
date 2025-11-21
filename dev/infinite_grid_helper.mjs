@@ -152,24 +152,31 @@ uniform float uGridStep;
 ${shader.fragmentShader.replace(
       '#include <dithering_fragment>',
       `
-      // Use camera-projected coords so fade stays circular around the viewer
+      // Radial fade around the camera projection on the plane
       vec3 camVec = cameraPosition - uPlaneOrigin;
       vec2 camCoord = vec2(dot(camVec, uPlaneAxisU), dot(camVec, uPlaneAxisV));
       float planarDist = length(camCoord - vPlaneCoord);
-      float fade = 1.0 - min(planarDist / max(0.0001, uDistance), 1.0);
-      float alpha = pow(fade, uFadePow);
+      float t = clamp(planarDist / max(uDistance, 1e-6), 0.0, 1.0);
+      float alpha = pow(1.0 - t, uFadePow);
+      // Optional soft edge to avoid hard quad boundary
+      float edge = smoothstep(uDistance * 0.9, uDistance, planarDist);
+      alpha *= (1.0 - edge);
+      // Attenuate underside
       if (vCameraSide < -0.01) {
         alpha *= 0.25;
       }
+      if (alpha <= 0.0) discard;
+      // Grid strength only influences color, not alpha
+      float gridMod = 1.0;
       if (uGridStep > 1e-6) {
         vec2 r = vPlaneCoord / max(uGridStep, 1e-6);
         vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
         float line = min(grid.x, grid.y);
         float gridStrength = 1.0 - min(line, 1.0);
-        alpha *= mix(0.4, 1.0, gridStrength);
+        gridMod = mix(0.9, 1.0, gridStrength);
       }
-      if (alpha <= 0.0) discard;
-      gl_FragColor.a *= alpha;
+      gl_FragColor.rgb *= gridMod;
+      gl_FragColor.a = alpha;
       #include <dithering_fragment>`
     )}`;
     material.userData.shader = shader;
