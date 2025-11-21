@@ -43,6 +43,27 @@ function hasModelBackground(state) {
   return bg.color != null || !!bg.texture;
 }
 
+function disposeEnvResources(ctx, { resetFlags = true } = {}) {
+  const worldScene = getWorldScene(ctx);
+  if (worldScene && ctx.envRT && worldScene.environment === ctx.envRT.texture) {
+    worldScene.environment = null;
+  }
+  if (worldScene && ctx.hdriBackground && worldScene.background === ctx.hdriBackground) {
+    worldScene.background = null;
+  }
+  try { ctx.envRT?.dispose?.(); } catch {}
+  try { ctx.hdriBackground?.dispose?.(); } catch {}
+  ctx.envRT = null;
+  ctx.hdriBackground = null;
+  if (resetFlags) {
+    ctx.envFromHDRI = false;
+    ctx.hdriReady = false;
+    ctx.hdriLoading = false;
+    ctx.hdriLoadPromise = null;
+    ctx.hdriLoadGen = ctx.hdriLoadGen || 0;
+  }
+}
+
 function getWorldScene(ctx) {
   return ctx?.sceneWorld || ctx?.scene || null;
 }
@@ -140,7 +161,7 @@ export function createEnvironmentManager({
   fallbackEnabledDefault,
 }) {
 
-  function ensureOutdoorSkyEnv(ctx, preset) {
+  function ensureOutdoorSkyEnv(ctx, preset, generation = null) {
     const worldScene = getWorldScene(ctx);
     if (!ctx || !ctx.renderer || !worldScene) return;
     if (typeof skyOffParam !== 'undefined' && skyOffParam) {
@@ -153,6 +174,10 @@ export function createEnvironmentManager({
         ctx.sky.visible = !ctx.envFromHDRI;
       }
     } catch {}
+    if (ctx.hdriFailed) {
+      return;
+    }
+    const hdriGen = typeof generation === 'number' ? generation : (ctx.hdriLoadGen ?? 0);
     const hdrReady = ctx.envFromHDRI && ctx.envRT && ctx.hdriReady;
     if (hdrReady || ctx.hdriLoading || ctx.hdriLoadPromise) {
       return;
@@ -164,7 +189,7 @@ export function createEnvironmentManager({
       const candidates = [];
       if (hdriQueryParam) candidates.push(hdriQueryParam);
       candidates.push(...HDRI_FALLBACK_PATHS);
-      const tryLoadHDRI = async (url) => {
+      const tryLoadHDRI = async (url, token) => {
         try {
           const mod = await import('three/addons/loaders/RGBELoader.js');
           if (!mod || !mod.RGBELoader) return false;
@@ -189,6 +214,12 @@ export function createEnvironmentManager({
           const envTexture = envRT.texture;
           if (THREE_NS.LinearSRGBColorSpace && envTexture) {
             envTexture.colorSpace = THREE_NS.LinearSRGBColorSpace;
+          }
+          if (ctx.hdriLoadGen !== token || !isPresetMode(store.get())) {
+            try { envRT?.dispose?.(); } catch {}
+            try { hdr?.dispose?.(); } catch {}
+            ctx.hdriLoading = false;
+            return false;
           }
           const prevEnvRT = ctx.envRT;
           const prevHdr = ctx.hdriBackground;
@@ -222,16 +253,20 @@ export function createEnvironmentManager({
           return false;
         }
       };
+      const token = hdriGen;
       ctx.hdriLoadPromise = (async () => {
         for (const url of candidates) {
           // eslint-disable-next-line no-await-in-loop
-          if (await tryLoadHDRI(url)) {
+          if (await tryLoadHDRI(url, token)) {
             return true;
           }
         }
         ctx.hdriLoading = false;
         if (!ctx.envFromHDRI) {
           ctx.hdriReady = false;
+          if (ctx.hdriLoadGen === token) {
+            ctx.hdriFailed = true;
+          }
         }
         return false;
       })()
@@ -242,6 +277,9 @@ export function createEnvironmentManager({
           ctx.hdriLoading = false;
           if (!ctx.envFromHDRI) {
             ctx.hdriReady = false;
+            if (ctx.hdriLoadGen === token) {
+              ctx.hdriFailed = true;
+            }
           }
           return false;
         })
@@ -364,21 +402,28 @@ export function createEnvironmentManager({
   }
 
   function ensureEnvIfNeeded(ctx, state) {
+    const presetMode = isPresetMode(state);
+    const presetChanged = ctx._lastPresetMode !== presetMode;
+    ctx._lastPresetMode = presetMode;
+    if (presetMode) {
+      if (presetChanged) {
+        ctx.hdriFailed = false;
+        ctx.hdriLoadGen = (ctx.hdriLoadGen || 0) + 1;
+        disposeEnvResources(ctx, { resetFlags: true });
+      }
+    }
     const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: 'bright-outdoor' };
     const preset = FALLBACK_PRESETS['bright-outdoor'];
-    const presetMode = isPresetMode(state);
     fallback.enabled = fallbackEnabledDefault && presetMode;
     const worldScene = getWorldScene(ctx);
     if (!presetMode) {
-      if (worldScene && ctx.envFromHDRI && ctx.envRT && worldScene.environment === ctx.envRT.texture) {
+      disposeEnvResources(ctx, { resetFlags: true });
+      ctx.hdriFailed = false;
+      if (worldScene) {
         worldScene.environment = null;
-      }
-      if (worldScene && ctx.hdriBackground && worldScene.background === ctx.hdriBackground) {
         worldScene.background = null;
       }
-      if (ctx.sky) {
-        ctx.sky.visible = false;
-      }
+      if (ctx.sky) ctx.sky.visible = false;
       return;
     }
     if (ctx.envFromHDRI && ctx.envRT && worldScene && !worldScene.environment) {
@@ -389,7 +434,7 @@ export function createEnvironmentManager({
     }
     const hasEnv = hasModelEnvironment(state);
     if (!hasEnv && fallback.enabled) {
-      ensureOutdoorSkyEnv(ctx, preset);
+      ensureOutdoorSkyEnv(ctx, preset, ctx.hdriLoadGen || 0);
     }
   }
 

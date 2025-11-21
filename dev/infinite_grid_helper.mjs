@@ -145,7 +145,8 @@ ${shader.vertexShader.replace(
     )}`.replace(
       '#include <worldpos_vertex>',
       `#include <worldpos_vertex>
-      vInfiniteWorldPosition = worldPosition.xyz;`
+      vec4 infiniteWorldPosition = modelMatrix * vec4(transformed, 1.0);
+      vInfiniteWorldPosition = infiniteWorldPosition.xyz;`
     );
     shader.fragmentShader = `
 varying vec3 vInfiniteWorldPosition;

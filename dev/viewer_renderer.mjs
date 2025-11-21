@@ -81,6 +81,7 @@ const PERTURB_TEMP_QUAT = new THREE.Quaternion();
 const SELECTION_HIGHLIGHT_COLOR = new THREE.Color(0x40ff99);
 const SELECTION_EMISSIVE_COLOR = new THREE.Color(0x3aff3a);
 const SELECTION_OVERLAY_COLOR = new THREE.Color(0x66ffcc);
+const SELECT_POINT_FALLBACK_COLOR = 0xe6e619;
 const PERTURB_COLOR_RING = 0xff8a2b;   // original ring color
 const PERTURB_COLOR_ARROW = 0xffb366;  // previous arrow color (lighter)
 
@@ -227,20 +228,33 @@ function applyGeomMetadata(mesh, meta) {
   };
 }
 
-function applySkyboxVisibility(ctx, enabled) {
+function applySkyboxVisibility(ctx, enabled, options = {}) {
   if (!ctx) return;
   const worldScene = getWorldScene(ctx);
   if (!worldScene) return;
+  const useBlackBackground = options.useBlackOnDisable !== false;
   const skyEnabled = enabled !== false;
   if (!skyEnabled) {
     if (ctx.sky) ctx.sky.visible = false;
-    worldScene.background = null;
+    worldScene.environment = null;
+    worldScene.background = new THREE.Color(useBlackBackground ? 0x000000 : DEFAULT_CLEAR_HEX);
     return;
   }
   ctx.envDirty = true;
+  if (ctx.envFromHDRI && ctx.envRT && ctx.envRT.texture) {
+    worldScene.environment = ctx.envRT.texture;
+    if (ctx.hdriBackground) {
+      worldScene.background = ctx.hdriBackground;
+    }
+    return;
+  }
   if (ctx.sky && !ctx.envFromHDRI) {
     ctx.sky.visible = true;
+    worldScene.background = ctx.sky;
+    return;
   }
+  // If no sky resources exist, fall back to a solid clear colour
+  worldScene.background = new THREE.Color(DEFAULT_CLEAR_HEX);
 }
 
 
@@ -1929,6 +1943,21 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
     if ('toneMapped' in mesh.material && userData.segmentOriginalToneMapped == null) {
       userData.segmentOriginalToneMapped = mesh.material.toneMapped;
     }
+    if ('transparent' in mesh.material && userData.segmentOriginalTransparent == null) {
+      userData.segmentOriginalTransparent = mesh.material.transparent;
+    }
+    if ('opacity' in mesh.material && userData.segmentOriginalOpacity == null) {
+      userData.segmentOriginalOpacity = mesh.material.opacity;
+    }
+    if ('metalness' in mesh.material && userData.segmentOriginalMetalness == null) {
+      userData.segmentOriginalMetalness = mesh.material.metalness;
+    }
+    if ('roughness' in mesh.material && userData.segmentOriginalRoughness == null) {
+      userData.segmentOriginalRoughness = mesh.material.roughness;
+    }
+    if ('envMapIntensity' in mesh.material && userData.segmentOriginalEnvMapIntensity == null) {
+      userData.segmentOriginalEnvMapIntensity = mesh.material.envMapIntensity;
+    }
     const segColor = segmentColorForIndex(mesh.userData?.geomIndex ?? i);
     if (baseColor) baseColor.setHex(segColor);
     if (mesh.material?.emissive) {
@@ -1956,6 +1985,24 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
     }
     if ('toneMapped' in mesh.material && mesh.userData.segmentOriginalToneMapped != null) {
       mesh.material.toneMapped = mesh.userData.segmentOriginalToneMapped;
+    }
+    if ('transparent' in mesh.material && mesh.userData.segmentOriginalTransparent != null) {
+      mesh.material.transparent = mesh.userData.segmentOriginalTransparent;
+    }
+    if ('opacity' in mesh.material && mesh.userData.segmentOriginalOpacity != null) {
+      mesh.material.opacity = mesh.userData.segmentOriginalOpacity;
+    }
+    if ('metalness' in mesh.material && mesh.userData.segmentOriginalMetalness != null) {
+      mesh.material.metalness = mesh.userData.segmentOriginalMetalness;
+    }
+    if ('roughness' in mesh.material && mesh.userData.segmentOriginalRoughness != null) {
+      mesh.material.roughness = mesh.userData.segmentOriginalRoughness;
+    }
+    if ('envMapIntensity' in mesh.material && mesh.userData.segmentOriginalEnvMapIntensity != null) {
+      mesh.material.envMapIntensity = mesh.userData.segmentOriginalEnvMapIntensity;
+    }
+    if ('transparent' in mesh.material) {
+      mesh.material.transparent = true;
     }
   }
   const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
@@ -2360,9 +2407,12 @@ export function createRendererManager({
       hdriLoading: false,
       hdriBackground: null,
       hdriLoadPromise: null,
+      hdriFailed: false,
+      hdriLoadGen: 0,
       envDirty: true,
       sky: null,
       skyInit: false,
+      _lastPresetMode: null,
       fallback: {
         enabled: fallbackEnabledDefault,
         preset: fallbackPresetKey,
@@ -2388,8 +2438,11 @@ function renderScene(snapshot, state) {
   const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
   const voptFlags = Array.isArray(state.rendering?.voptFlags) ? state.rendering.voptFlags : [];
   const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
+  const presetMode = (state?.visualSourceMode ?? 'model') === 'preset';
+  const skyboxFlag = sceneFlags[4] !== false;
+  const shadowEnabled = segmentEnabled ? false : sceneFlags[0] !== false;
   const reflectionEnabled = segmentEnabled ? false : sceneFlags[2] !== false;
-  const skyboxEnabled = segmentEnabled ? false : sceneFlags[4] !== false;
+  const skyboxEnabled = segmentEnabled ? false : skyboxFlag;
   const fogEnabled = segmentEnabled ? false : !!sceneFlags[5];
   const hazeEnabled = segmentEnabled ? false : !!sceneFlags[6];
   context.reflectionActive = reflectionEnabled;
@@ -2399,14 +2452,14 @@ function renderScene(snapshot, state) {
     const geomGroupIds = assets?.geoms?.group || null;
     const geomGroupMask = Array.isArray(state.rendering?.groups?.geom) ? state.rendering.groups.geom : null;
 
+    if (typeof ensureEnvIfNeeded === 'function') {
+      ensureEnvIfNeeded(context, state);
+    }
+  if (!segmentEnabled && presetMode && typeof applyFallbackAppearance === 'function') {
+      applyFallbackAppearance(context, state);
+    }
     if (!segmentEnabled) {
-      if (typeof applyFallbackAppearance === 'function') {
-        applyFallbackAppearance(context, state);
-      }
-      if (typeof ensureEnvIfNeeded === 'function') {
-        ensureEnvIfNeeded(context, state);
-      }
-      applySkyboxVisibility(context, skyboxEnabled && !segmentEnabled);
+      applySkyboxVisibility(context, skyboxEnabled && !segmentEnabled, { useBlackOnDisable: presetMode });
     }
     const worldScene = getWorldScene(context);
     if (segmentEnabled) {
@@ -2436,7 +2489,7 @@ function renderScene(snapshot, state) {
       worldScene.background = context._segmentEnvBackup.background || null;
       worldScene.environment = context._segmentEnvBackup.environment || null;
       if (context.renderer?.shadowMap && context._segmentEnvBackup.shadowEnabled != null) {
-        context.renderer.shadowMap.enabled = context._segmentEnvBackup.shadowEnabled;
+        context.renderer.shadowMap.enabled = shadowEnabled && context._segmentEnvBackup.shadowEnabled;
       }
       if (context.light && context._segmentEnvBackup.light != null) {
         context.light.intensity = context._segmentEnvBackup.light;
@@ -2452,7 +2505,7 @@ function renderScene(snapshot, state) {
       }
       context._segmentEnvBackup = null;
       context._segmentEnvBackupApplied = false;
-      applySkyboxVisibility(context, skyboxEnabled);
+      applySkyboxVisibility(context, skyboxEnabled, { useBlackOnDisable: presetMode });
     }
     if (context.grid) {
       context.grid.visible = !segmentEnabled;
@@ -2495,10 +2548,13 @@ function renderScene(snapshot, state) {
 
     const defaults = getDefaultVopt(context, state);
     if (context.renderer) {
-      context.renderer.shadowMap.enabled = true;
+      context.renderer.shadowMap.enabled = shadowEnabled;
       if (context.renderer.shadowMap) {
         context.renderer.shadowMap.type = THREE.PCFShadowMap;
       }
+    }
+    if (context.light) {
+      context.light.castShadow = shadowEnabled;
     }
 
     // --- Overlays: contacts (controlled by vopt flags) ---
@@ -3132,6 +3188,35 @@ function renderScene(snapshot, state) {
 
 
 
+function hideSelectionPoint(ctx) {
+  const overlay = ctx?.selectionPoint?.mesh;
+  if (overlay) {
+    overlay.visible = false;
+  }
+}
+
+function ensureSelectionPointOverlay(ctx) {
+  if (!ctx) return null;
+  if (ctx.selectionPoint?.mesh) return ctx.selectionPoint;
+  const geometry = new THREE.SphereGeometry(1, 18, 12);
+  const material = new THREE.MeshBasicMaterial({
+    color: SELECT_POINT_FALLBACK_COLOR,
+    transparent: false,
+    depthWrite: true,
+    toneMapped: false,
+    fog: false,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = 'overlay:selectpoint';
+  mesh.matrixAutoUpdate = true;
+  mesh.renderOrder = 10;
+  mesh.visible = false;
+  const worldScene = getWorldScene(ctx);
+  if (worldScene) worldScene.add(mesh);
+  ctx.selectionPoint = { mesh, material, geometry };
+  return ctx.selectionPoint;
+}
+
 function clearSelectionHighlight(ctx) {
   const hl = ctx?.selectionHighlight;
   if (!hl?.mesh) return;
@@ -3201,12 +3286,64 @@ function updateSelectionOverlay(ctx, snapshot, state) {
   const selection = state?.runtime?.selection;
   if (!selection || selection.geom < 0) {
     clearSelectionHighlight(ctx);
+    hideSelectionPoint(ctx);
     return;
   }
   const mesh = Array.isArray(ctx.meshes) ? ctx.meshes[selection.geom] : null;
   if (!mesh) {
     clearSelectionHighlight(ctx);
+    hideSelectionPoint(ctx);
     return;
   }
   applySelectionHighlight(ctx, mesh);
+  const point = (() => {
+    if (Array.isArray(selection.point) && selection.point.length >= 3) {
+      return selection.point.map((n) => Number(n) || 0);
+    }
+    if (Array.isArray(selection.localPoint) && selection.localPoint.length >= 3 && mesh.matrixWorld) {
+      const lp = __TMP_VEC3_A.set(
+        Number(selection.localPoint[0]) || 0,
+        Number(selection.localPoint[1]) || 0,
+        Number(selection.localPoint[2]) || 0,
+      );
+      return lp.applyMatrix4(mesh.matrixWorld).toArray();
+    }
+    return null;
+  })();
+  if (!point) {
+    hideSelectionPoint(ctx);
+    return;
+  }
+  const overlay = ensureSelectionPointOverlay(ctx);
+  if (!overlay) return;
+  const scaleStruct = state?.model?.vis?.scale || {};
+  const rgbaStruct = state?.model?.vis?.rgba || {};
+  const scaleAll = Number.isFinite(Number(scaleStruct.all)) ? Math.max(1e-6, Number(scaleStruct.all)) : 1;
+  const selectScale = Number.isFinite(Number(scaleStruct.selectpoint)) && Number(scaleStruct.selectpoint) > 0
+    ? Number(scaleStruct.selectpoint)
+    : 0.2;
+  const boundsRadius = Math.max(0.05, ctx?.bounds?.radius || 1);
+  const radius = Math.max(0.003, boundsRadius * 0.0125 * scaleAll * selectScale);
+  const colorHex = rgbaToHex(rgbaStruct.force, SELECT_POINT_FALLBACK_COLOR);
+  const opacity = alphaFromArray(rgbaStruct.force, 1);
+  const normal = Array.isArray(selection.normal) && selection.normal.length >= 3
+    ? __TMP_VEC3_B.set(
+        Number(selection.normal[0]) || 0,
+        Number(selection.normal[1]) || 0,
+        Number(selection.normal[2]) || 1,
+      ).normalize()
+    : __TMP_VEC3_B.set(0, 0, 1);
+  const offset = normal.clone().multiplyScalar(radius * 0.4);
+  overlay.mesh.position.set(
+    Number(point[0]) + offset.x || 0,
+    Number(point[1]) + offset.y || 0,
+    Number(point[2]) + offset.z || 0,
+  );
+  overlay.mesh.scale.set(radius, radius, radius);
+  overlay.mesh.visible = true;
+  overlay.material.color.setHex(colorHex);
+  overlay.material.opacity = opacity;
+  overlay.material.transparent = opacity < 0.999;
+  overlay.material.depthWrite = true;
+  overlay.material.needsUpdate = true;
 }
