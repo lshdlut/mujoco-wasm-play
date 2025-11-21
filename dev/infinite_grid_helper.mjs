@@ -152,7 +152,10 @@ uniform float uGridStep;
 ${shader.fragmentShader.replace(
       '#include <dithering_fragment>',
       `
-      float planarDist = length(vPlaneCoord);
+      // Use camera-projected coords so fade stays circular around the viewer
+      vec3 camVec = cameraPosition - uPlaneOrigin;
+      vec2 camCoord = vec2(dot(camVec, uPlaneAxisU), dot(camVec, uPlaneAxisV));
+      float planarDist = length(camCoord - vPlaneCoord);
       float fade = 1.0 - min(planarDist / max(0.0001, uDistance), 1.0);
       float alpha = pow(fade, uFadePow);
       if (vCameraSide < -0.01) {
