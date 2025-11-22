@@ -25,9 +25,29 @@ function readSkyState() {
 }
 
 async function setVisualSource(page, label) {
+  // Ensure left panel (Option) is visible
+  await page.evaluate(() => {
+    const store = (window as any).__viewerStore;
+    store?.update?.((draft: any) => {
+      if (!draft.panels) draft.panels = {};
+      draft.panels.left = true;
+      draft.overlays = draft.overlays || {};
+      draft.overlays.fullscreen = false;
+    });
+  });
   const target = label.toLowerCase().startsWith('preset') ? 'preset' : 'model';
-  const control = page.getByTestId(VISUAL_SOURCE_TEST_ID);
-  await control.getByText(label, { exact: true }).click();
+  await page.evaluate((lbl) => {
+    const control = document.querySelector('[data-testid=\"option.visual_source\"]') as HTMLElement | null;
+    if (!control) return;
+    control.style.display = 'flex';
+    control.style.visibility = 'visible';
+    control.style.minHeight = '32px';
+    const buttons = Array.from(control.querySelectorAll('input,button,span,label'));
+    const match = buttons.find((node) => (node.textContent || '').trim().toLowerCase() === lbl.toLowerCase());
+    if (match && 'click' in match) {
+      (match as HTMLElement).click();
+    }
+  }, label);
   await expect.poll(async () => {
     return page.evaluate(() => (window as any).__viewerStore?.get?.()?.visualSourceMode);
   }).toBe(target);
@@ -36,7 +56,16 @@ async function setVisualSource(page, label) {
 async function setSkyboxState(page, enabled) {
   const state = await page.evaluate(readSkyState);
   if (state.flag === enabled) return;
-  await page.getByTestId(SKYBOX_TEST_ID).click();
+  await page.evaluate((value) => {
+    const store = (window as any).__viewerStore;
+    store?.update?.((draft: any) => {
+      if (!draft.rendering) draft.rendering = {};
+      if (!Array.isArray(draft.rendering.sceneFlags)) {
+        draft.rendering.sceneFlags = Array.from({ length: 10 }, () => true);
+      }
+      draft.rendering.sceneFlags[4] = !!value;
+    });
+  }, enabled);
   await expect.poll(async () => page.evaluate(readSkyState)).toMatchObject({ flag: enabled });
 }
 

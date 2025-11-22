@@ -63,6 +63,23 @@ function detachEnvironment(ctx) {
   if (ctx.sky) ctx.sky.visible = false;
 }
 
+function ensureModelGradientEnv(ctx) {
+  const worldScene = getWorldScene(ctx);
+  if (!ctx || !ctx.renderer || !worldScene) return;
+  if (!ctx.pmrem) {
+    ctx.pmrem = new THREE_NS.PMREMGenerator(ctx.renderer);
+  }
+  // Use a lightweight gradient as a MuJoCo-like clear sky
+  const gradTex = createVerticalGradientTexture(THREE_NS, 0x8abafc, 0x0a1324, 256);
+  const envRT = ctx.pmrem.fromEquirectangular(gradTex);
+  worldScene.background = gradTex;
+  worldScene.environment = envRT?.texture || null;
+  ctx.envRT = envRT;
+  ctx.envFromHDRI = false;
+  ctx.hdriReady = false;
+  ctx.envDirty = false;
+}
+
 function disposeEnvResources(ctx, { resetFlags = true } = {}) {
   const worldScene = getWorldScene(ctx);
   if (worldScene && ctx.envRT && worldScene.environment === ctx.envRT.texture) {
@@ -458,7 +475,11 @@ function ensureEnvIfNeeded(ctx, state, options = {}) {
     // Model mode: prefer procedural sky; clear any HDRI state
     ctx.envFromHDRI = false;
     ctx.hdriReady = false;
-    ensureOutdoorSkyEnv(ctx, preset, ctx.hdriLoadGen || 0, { allowHDRI: false });
+    ensureModelGradientEnv(ctx);
+    const worldScene = getWorldScene(ctx);
+    if (worldScene && ctx.sky && !worldScene.background) {
+      worldScene.background = ctx.sky;
+    }
     pushSkyDebug(ctx, { mode: 'ensure-model-sky', presetMode: false, hasEnv });
   }
 }

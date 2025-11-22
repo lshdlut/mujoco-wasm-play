@@ -2491,6 +2491,7 @@ function renderScene(snapshot, state) {
         worldScene.environment = null;
         worldScene.background = new THREE.Color(segmentBackgroundColor());
       }
+      if (context.sky) context.sky.visible = false;
       if (context.renderer?.shadowMap) context.renderer.shadowMap.enabled = false;
       if (context.light) context.light.intensity = 0;
       if (context.fill) context.fill.intensity = 0;
