@@ -116,6 +116,122 @@ function ensureModelGradientEnv(ctx, THREE_NS) {
   return cache?.model || null;
 }
 
+function readSkyboxTextureFromAssets(state) {
+  const textures = state?.rendering?.assets?.textures || null;
+  if (!textures || !textures.type || !textures.data) return null;
+  const typeArr = textures.type;
+  const adrArr = textures.adr;
+  const widthArr = textures.width;
+  const heightArr = textures.height;
+  const nchanArr = textures.nchannel;
+  const data = textures.data;
+  const count = Array.isArray(typeArr) ? typeArr.length : (typeArr?.length ?? 0);
+  for (let i = 0; i < count; i += 1) {
+    const t = typeArr[i] ?? 0;
+    // MuJoCo: mjtTexture type 2 is skybox (cube)
+    if (t !== 2) continue;
+    const width = Number(widthArr?.[i]) || 0;
+    const height = Number(heightArr?.[i]) || 0;
+    const nchan = Number(nchanArr?.[i]) || 0;
+    const adr = Number(adrArr?.[i]) || 0;
+    if (!(width > 0 && height > 0 && nchan > 0)) continue;
+    const texSize = width * height * nchan;
+    const nextAdr = i + 1 < count ? Number(adrArr?.[i + 1]) || texSize + adr : texSize + adr;
+    const end = Math.min(data.length, nextAdr);
+    const start = Math.max(0, adr);
+    if (!(end > start)) continue;
+    const slice = data.subarray(start, end);
+    return {
+      width,
+      height,
+      nchan,
+      data: slice,
+      adr,
+    };
+  }
+  return null;
+}
+
+function createCubeTextureFromSkybox(THREE_NS, skyTex) {
+  if (!skyTex || !THREE_NS || !skyTex.data) return null;
+  const { width, height, nchan, data } = skyTex;
+  if (!(width > 0 && height > 0 && nchan > 0)) return null;
+  const faces = 6;
+  if (height !== width * faces) return null;
+  const faceSize = width * width * nchan;
+  if (data.length < faceSize * faces) return null;
+  const fmt = nchan === 4 ? THREE_NS.RGBAFormat
+    : nchan === 3 ? THREE_NS.RGBFormat
+    : THREE_NS.RedFormat;
+  const type = THREE_NS.UnsignedByteType;
+  const images = [];
+  for (let i = 0; i < faces; i += 1) {
+    const start = i * faceSize;
+    const end = start + faceSize;
+    const faceData = data.subarray(start, end);
+    const tex = new THREE_NS.DataTexture(faceData, width, width, fmt, type);
+    tex.needsUpdate = true;
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE_NS.LinearFilter;
+    tex.magFilter = THREE_NS.LinearFilter;
+    tex.colorSpace = THREE_NS.SRGBColorSpace || THREE_NS.LinearSRGBColorSpace || undefined;
+    images.push(tex);
+  }
+  const cube = new THREE_NS.CubeTexture(images);
+  cube.needsUpdate = true;
+  cube.colorSpace = THREE_NS.SRGBColorSpace || THREE_NS.LinearSRGBColorSpace || undefined;
+  cube.generateMipmaps = false;
+  cube.minFilter = THREE_NS.LinearFilter;
+  cube.magFilter = THREE_NS.LinearFilter;
+  cube.mapping = THREE_NS.CubeReflectionMapping;
+  return cube;
+}
+
+function ensureModelSkyFromAssets(ctx, state, THREE_NS) {
+  const cache = ensureSkyCache(ctx);
+  if (cache?.model?.cube && cache.model.envRT) {
+    const worldScene = getWorldScene(ctx);
+    if (worldScene) {
+      worldScene.environment = cache.model.envRT.texture || null;
+      worldScene.background = cache.model.cube;
+    }
+    ctx.envRT = cache.model.envRT;
+    ctx.envFromHDRI = false;
+    ctx.hdriReady = false;
+    ctx.envDirty = false;
+    ctx.sky = cache.model.cube;
+    return true;
+  }
+  const skyTex = readSkyboxTextureFromAssets(state);
+  if (!skyTex) return false;
+  if (!ctx.pmrem && ctx.renderer) {
+    ctx.pmrem = new THREE_NS.PMREMGenerator(ctx.renderer);
+  }
+  if (!ctx.pmrem) return false;
+  const cube = createCubeTextureFromSkybox(THREE_NS, skyTex);
+  if (!cube) return false;
+  const envRT = ctx.pmrem.fromCubemap(cube);
+  const worldScene = getWorldScene(ctx);
+  if (worldScene) {
+    worldScene.environment = envRT.texture;
+    worldScene.background = cube;
+  }
+  ctx.envRT = envRT;
+  ctx.envFromHDRI = false;
+  ctx.hdriReady = false;
+  ctx.envDirty = false;
+  ctx.sky = cube;
+  ctx.skyInit = true;
+  if (cache) {
+    cache.model = {
+      key: 'model-skybox',
+      envRT,
+      cube,
+    };
+  }
+  return true;
+}
+
 function disposeEnvResources(ctx, { resetFlags = true } = {}) {
   const worldScene = getWorldScene(ctx);
   if (worldScene && ctx.envRT && worldScene.environment === ctx.envRT.texture) {
@@ -442,7 +558,8 @@ function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
     .catch(() => {});
   } catch {}
 }
-    if (!ctx.envFromHDRI && ctx.sky && ctx.pmrem) {
+    if (!ctx.envFromHDRI && ctx.sky && ctx.sky.material && ctx.sky.material.uniforms && ctx.pmrem) {
+      // Procedural sky path (Sky.js)
       const sky = ctx.sky;
       const uniforms = sky.material.uniforms;
       const cfg = preset || {};
@@ -561,12 +678,15 @@ function ensureEnvIfNeeded(ctx, state, options = {}) {
   // Model mode: prefer MuJoCo-driven sky; clear any HDRI state but keep caches
   ctx.envFromHDRI = false;
   ctx.hdriReady = false;
-  ensureModelGradientEnv(ctx, THREE_NS);
+  const skyOk = ensureModelSkyFromAssets(ctx, state, THREE_NS);
+  if (!skyOk) {
+    ensureModelGradientEnv(ctx, THREE_NS);
+  }
   const worldScene = getWorldScene(ctx);
   if (worldScene && ctx.sky && !worldScene.background) {
     worldScene.background = ctx.sky;
   }
-  pushSkyDebug(ctx, { mode: 'ensure-model-sky', presetMode: false, hasEnv, skyMode });
+  pushSkyDebug(ctx, { mode: skyOk ? 'ensure-model-sky-tex' : 'ensure-model-sky', presetMode: false, hasEnv, skyMode });
 }
 
   return {

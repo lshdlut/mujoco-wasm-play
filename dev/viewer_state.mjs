@@ -630,6 +630,8 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (snapshot.renderAssets) {
     const rendering = ensureRenderingState(draft);
     rendering.assets = snapshot.renderAssets;
+    const backups = ensureVisualBackups(draft);
+    backups.renderAssets = snapshot.renderAssets;
   }
   if (snapshot.scene) {
     // Persist scene snapshot for diagnostics / external tools
@@ -1933,16 +1935,18 @@ export async function createBackend(options = {}) {
             ...data.drag,
           };
         }
-        applyOptionSnapshot(data);
-        notifyListeners();
-        break;
-      }
-      case 'render_assets':
-        if (data.assets) {
-          lastSnapshot.renderAssets = data.assets;
-          notifyListeners();
-        }
-        break;
+    applyOptionSnapshot(data);
+    notifyListeners();
+    break;
+  }
+  case 'render_assets':
+    if (data.assets) {
+      lastSnapshot.renderAssets = data.assets;
+      const rendering = ensureRenderingState(lastSnapshot);
+      rendering.assets = data.assets;
+      notifyListeners();
+    }
+    break;
       case 'scene_snapshot': {
         const source = data.source || 'sim';
         if (typeof window !== 'undefined' && data.snap) {

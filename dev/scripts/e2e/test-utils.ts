@@ -1,7 +1,7 @@
 import { Page } from '@playwright/test';
 
-export async function waitForViewerReady(page: Page) {
-  await page.goto('/index.html?model=demo_box.xml');
+export async function waitForViewerReady(page: Page, url = '/index.html?model=demo_box.xml') {
+  await page.goto(url);
   await page.waitForFunction(() => {
     const ctx = (window as any).__renderCtx;
     const store = (window as any).__viewerStore;

@@ -1625,6 +1625,17 @@ class DirectBackend {
             this.snapshotState.lastSim.gmatid = assets.geoms?.matid ? clone(assets.geoms.matid) : this.snapshotState.lastSim.gmatid;
             this.snapshotState.lastSim.gdataid = assets.geoms?.dataid ? clone(assets.geoms.dataid) : this.snapshotState.lastSim.gdataid;
             this.snapshotState.lastSim.matrgba = assets.materials?.rgba ? clone(assets.materials.rgba) : this.snapshotState.lastSim.matrgba;
+            if (assets.textures) {
+              this.snapshotState.lastSim.textures = {
+                type: assets.textures.type ? clone(assets.textures.type) : null,
+                width: assets.textures.width ? clone(assets.textures.width) : null,
+                height: assets.textures.height ? clone(assets.textures.height) : null,
+                nchannel: assets.textures.nchannel ? clone(assets.textures.nchannel) : null,
+                adr: assets.textures.adr ? clone(assets.textures.adr) : null,
+                colorspace: assets.textures.colorspace ? clone(assets.textures.colorspace) : null,
+                data: assets.textures.data ? clone(assets.textures.data) : null,
+              };
+            }
             const meshSnapshot = assets.meshes
               ? {
                   vertnum: assets.meshes.vertnum ? clone(assets.meshes.vertnum) : null,

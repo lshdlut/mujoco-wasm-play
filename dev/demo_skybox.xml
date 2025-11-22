@@ -1,0 +1,14 @@
+<mujoco model="demo_skybox">
+  <visual>
+    <map znear="0.01" zfar="50" haze="0.1" fogstart="5" fogend="8"/>
+  </visual>
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.6 0.8 1" rgb2="0 0 0" width="512" height="3072"/>
+  </asset>
+  <worldbody>
+    <geom name="ground" type="plane" size="3 3 0.1" pos="0 0 -0.1" rgba="0.8 0.8 0.8 1"/>
+    <body name="box" pos="0 0 0.5">
+      <geom type="box" size="0.2 0.2 0.2" rgba="0.1 0.4 0.8 1"/>
+    </body>
+  </worldbody>
+</mujoco>

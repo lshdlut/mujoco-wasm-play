@@ -94,6 +94,9 @@ export function heapViewF32(mod, ptr, length) {
 export function heapViewI32(mod, ptr, length) {
   return createHeapTypedArray(mod, ptr, length, Int32Array);
 }
+export function heapViewU8(mod, ptr, length) {
+  return createHeapTypedArray(mod, ptr, length, Uint8Array);
+}
 export function readCString(mod, ptr) {
   if (!ptr) return '';
   const buffer = resolveHeapBuffer(mod);
@@ -141,6 +144,7 @@ export function collectRenderAssetsFromModule(mod, handle) {
     geoms: null,
     materials: null,
     meshes: null,
+    textures: null,
     extras: {},
   };
   const diagnostics = {
@@ -223,6 +227,38 @@ export function collectRenderAssetsFromModule(mod, handle) {
       face: cloneTyped(faceView, Int32Array),
       normal: cloneTyped(normalView, Float32Array),
       texcoord: cloneTyped(texcoordView, Float32Array),
+    };
+  }
+  const ntex = typeof mod._mjwf_ntex === 'function' ? (mod._mjwf_ntex(handle) | 0) : 0;
+  if (ntex > 0) {
+    const texTypeView = readView(mod, ensureFunc('_mjwf_tex_type_ptr'), handle, ntex, heapViewI32);
+    const texWidthView = readView(mod, ensureFunc('_mjwf_tex_width_ptr'), handle, ntex, heapViewI32);
+    const texHeightView = readView(mod, ensureFunc('_mjwf_tex_height_ptr'), handle, ntex, heapViewI32);
+    const texNChannelView = readView(mod, ensureFunc('_mjwf_tex_nchannel_ptr'), handle, ntex, heapViewI32);
+    const texAdrView = readView(mod, ensureFunc('_mjwf_tex_adr_ptr'), handle, ntex, heapViewI32);
+    const texColorspaceView = readView(mod, ensureFunc('_mjwf_tex_colorspace_ptr'), handle, ntex, heapViewI32);
+    const ntexdataFn = ensureFunc('_mjwf_ntexdata');
+    const texDataPtrFn = ensureFunc('_mjwf_tex_data_ptr');
+    let texData = null;
+    if (texDataPtrFn && ntexdataFn) {
+      const dataLen = ntexdataFn.call(mod, handle) | 0;
+      const dataPtr = texDataPtrFn.call(mod, handle) | 0;
+      texData = heapViewU8(mod, dataPtr, dataLen);
+      if (!texData || texData.length <= 0) {
+        diagnostics.zeroPointers.push('_mjwf_tex_data_ptr');
+      }
+    } else {
+      diagnostics.missingFuncs.push('_mjwf_tex_data_ptr or _mjwf_ntexdata');
+    }
+    assets.textures = {
+      count: ntex,
+      type: cloneTyped(texTypeView, Int32Array),
+      width: cloneTyped(texWidthView, Int32Array),
+      height: cloneTyped(texHeightView, Int32Array),
+      nchannel: cloneTyped(texNChannelView, Int32Array),
+      adr: cloneTyped(texAdrView, Int32Array),
+      colorspace: cloneTyped(texColorspaceView, Int32Array),
+      data: cloneTyped(texData, Uint8Array),
     };
   }
   if (diagnostics.missingFuncs.length || diagnostics.zeroPointers.length) {

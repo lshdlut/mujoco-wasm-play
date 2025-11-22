@@ -994,7 +994,12 @@ async function loadXmlWithFallback(xmlText) {
       try { postMessage({ kind:'log', message:`worker: loaded via ${attempt.stage}`, extra: { abi } }); } catch {}
       return { ok: true, abi, handle: h };
     } catch (err) {
-      logHandleFailure('tryMakeHandle_fail', { stage: attempt.stage, error: String(err || '') });
+      logHandleFailure('tryMakeHandle_fail', {
+        stage: attempt.stage,
+        error: String(err || ''),
+        eno: readErrno(mod || {}),
+        file: attempt.stage === 'primary' ? 'primary' : (attempt.stage === 'demo' ? 'demo_box.xml' : 'empty'),
+      });
     }
   }
   throw new Error('Unable to create handle');
@@ -1318,6 +1323,15 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.meshes.face);
     push(assets.meshes.normal);
     push(assets.meshes.texcoord);
+  }
+  if (assets?.textures) {
+    push(assets.textures.type);
+    push(assets.textures.width);
+    push(assets.textures.height);
+    push(assets.textures.nchannel);
+    push(assets.textures.adr);
+    push(assets.textures.colorspace);
+    push(assets.textures.data);
   }
   return buffers;
 }

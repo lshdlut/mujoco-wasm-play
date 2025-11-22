@@ -24,6 +24,38 @@ function readSkyState() {
   };
 }
 
+function readSkyDebug() {
+  const ctx = (window as any).__renderCtx;
+  const store = (window as any).__viewerStore;
+  const assets = store?.get?.()?.rendering?.assets;
+  const scene = ctx?.sceneWorld || ctx?.scene || null;
+  const bg = scene?.background;
+  const dbg = Array.isArray(ctx?._skyDebug) ? ctx._skyDebug : [];
+  const last = dbg.length ? dbg[dbg.length - 1] : null;
+  const bgType = !bg
+    ? 'none'
+    : (bg.isCubeTexture || bg.isCubeRenderTargetTexture) ? 'cube'
+    : bg.isTexture ? 'texture'
+    : bg.isColor ? 'color'
+    : (bg.constructor && bg.constructor.name) || 'other';
+  return {
+    last,
+    mode: last?.mode || null,
+    bgType,
+    envIsCube: !!scene?.environment?.isTexture && scene.environment.isCubeTexture === true,
+    debugLength: dbg.length,
+    hasTextures: !!assets?.textures,
+    texCount: assets && assets.textures
+      ? (assets.textures.count != null
+        ? assets.textures.count
+        : (assets.textures.type?.length || 0))
+      : 0,
+    texDataType: assets?.textures?.data ? Object.prototype.toString.call(assets.textures.data) : null,
+    texDataLen: assets?.textures?.data?.length || 0,
+    texHasSubarray: !!assets?.textures?.data?.subarray,
+  };
+}
+
 async function setVisualSource(page, label) {
   // Ensure left panel (Option) is visible
   await page.evaluate(() => {
@@ -101,4 +133,53 @@ test('skybox flag controls background across visual sources', async ({ page }) =
   const modelOn = await skyState();
   expect(modelOn.flag).toBe(true);
   expect(modelOn.skyVisible || modelOn.hasEnv || modelOn.backgroundType !== 'none').toBeTruthy();
+});
+
+test('model skybox uses MuJoCo sky texture when available', async ({ page }) => {
+  page.on('console', (msg) => {
+    // eslint-disable-next-line no-console
+    console.log('[browser]', msg.type(), msg.text());
+  });
+  await waitForViewerReady(
+    page,
+    '/index.html?model=RKOB_simplified_upper_with_marker_CAMS.xml&mode=direct',
+  );
+
+  await setVisualSource(page, 'Model');
+  await setSkyboxState(page, true);
+
+  const assetSummary = await page.evaluate(() => {
+    const assets = (window as any).__viewerStore?.get?.()?.rendering?.assets || null;
+    const tex = assets?.textures;
+    return {
+      hasAssets: !!assets,
+      hasTextures: !!tex,
+      texCount: tex?.count ?? tex?.type?.length ?? 0,
+      texKeys: tex ? Object.keys(tex) : [],
+    };
+  });
+  // eslint-disable-next-line no-console
+  console.log('[assets]', assetSummary);
+
+  const texReady = await expect
+    .poll(async () => page.evaluate(readSkyDebug))
+    .toMatchObject({
+      hasTextures: true,
+      texCount: expect.any(Number),
+    });
+
+  // eslint-disable-next-line no-console
+  console.log('[skybox-debug:tex]', texReady);
+
+  const debug = await expect
+    .poll(async () => page.evaluate(readSkyDebug))
+    .toMatchObject({
+      mode: expect.stringMatching(/model-sky/),
+    });
+
+  // Log for diagnostics
+  // eslint-disable-next-line no-console
+  console.log('[skybox-debug]', debug);
+
+  expect(['cube', 'texture'].includes(debug.bgType)).toBeTruthy();
 });
