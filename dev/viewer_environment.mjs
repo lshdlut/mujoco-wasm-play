@@ -116,9 +116,13 @@ function ensureModelGradientEnv(ctx, THREE_NS) {
   return cache?.model || null;
 }
 
+let LAST_SKYBOX_TEXTURE = null;
+
 function readSkyboxTextureFromAssets(state) {
   const textures = state?.rendering?.assets?.textures || null;
-  if (!textures || !textures.type || !textures.data) return null;
+  if (!textures || !textures.type || !textures.data) {
+    return LAST_SKYBOX_TEXTURE;
+  }
   const typeArr = textures.type;
   const adrArr = textures.adr;
   const widthArr = textures.width;
@@ -140,16 +144,23 @@ function readSkyboxTextureFromAssets(state) {
     const end = Math.min(data.length, nextAdr);
     const start = Math.max(0, adr);
     if (!(end > start)) continue;
-    const slice = data.subarray(start, end);
-    return {
+    // Copy underlying data into a stable Uint8Array slice so later frames
+    // can continue to build a cube texture even if assets.textures is absent.
+    const src = data;
+    const byteOffset = start * (src.BYTES_PER_ELEMENT || 1);
+    const byteLength = (end - start) * (src.BYTES_PER_ELEMENT || 1);
+    const uint8 = new Uint8Array(src.buffer || src, byteOffset, byteLength);
+    const tex = {
       width,
       height,
       nchan,
-      data: slice,
+      data: uint8.slice(),
       adr,
     };
+    LAST_SKYBOX_TEXTURE = tex;
+    return tex;
   }
-  return null;
+  return LAST_SKYBOX_TEXTURE;
 }
 
 function createCubeTextureFromSkybox(THREE_NS, skyTex) {
