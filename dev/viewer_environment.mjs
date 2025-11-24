@@ -539,9 +539,11 @@ function createSkyShaderMaterial(THREE_NS) {
     uHorizonColor: { value: new THREE_NS.Color(0.45, 0.6, 0.8) },
     uGroundColor: { value: new THREE_NS.Color(0.08, 0.11, 0.18) },
     uSunDirection: { value: new THREE_NS.Vector3(0.15, 0.35, 0.92) },
-    uExposure: { value: 1.25 },
-    uGradientPower: { value: 1.25 },
-    uHorizonSharpness: { value: 0.68 },
+    uExposure: { value: 1.0 },
+    uGradientPower: { value: 1.1 },
+    uHorizonSharpness: { value: 0.6 },
+    uEffectStrength: { value: 0.25 },
+    uBaseAlpha: { value: 0.04 },
   };
   const vertexShader = `
     varying vec3 vWorldDirection;
@@ -560,6 +562,8 @@ function createSkyShaderMaterial(THREE_NS) {
     uniform float uExposure;
     uniform float uGradientPower;
     uniform float uHorizonSharpness;
+    uniform float uEffectStrength;
+    uniform float uBaseAlpha;
 
     float remapUp(float v) {
       return clamp(v * 0.5 + 0.5, 0.0, 1.0);
@@ -569,18 +573,58 @@ function createSkyShaderMaterial(THREE_NS) {
       vec3 dir = normalize(vWorldDirection);
       float up = remapUp(dir.z);
       float grad = pow(clamp(up, 0.0, 1.0), uGradientPower);
-      float horizonBand = smoothstep(0.28, 0.55, up) * (1.0 - smoothstep(0.55, 0.82, up));
+      // Base vertical gradient between ground and zenith; keep this as close
+      // as possible to the MuJoCo strip-derived colors. Horizon color is not
+      // mixed into the base so that non-solar regions visually match the
+      // underlying gradient/background.
       vec3 base = mix(uGroundColor, uZenithColor, grad);
-      base = mix(base, uHorizonColor, horizonBand * 0.7 + (1.0 - grad) * 0.35);
 
+      // Localised sun highlight; keep most of the sky close to the base gradient
       vec3 sunDir = normalize(uSunDirection);
       float sunAmount = max(dot(sunDir, dir), 0.0);
-      float sunGlow = pow(sunAmount, 8.0) * 0.35 + pow(sunAmount, 3.0) * 0.15;
-      float mie = pow(sunAmount, 1.5) * 0.04;
-      vec3 color = base + sunGlow * mix(uZenithColor, vec3(1.0), 0.3);
-      color += mie * mix(uHorizonColor, vec3(1.0), 0.25);
-      color = vec3(1.0) - exp(-color * uExposure);
-      gl_FragColor = vec4(color, 1.0);
+
+      // --- Anisotropic halo shape: vertical streak broader than horizontal ---
+      vec3 sunHoriz = normalize(vec3(sunDir.x, sunDir.y, 0.0));
+      vec3 dirHoriz = normalize(vec3(dir.x, dir.y, 0.0));
+      float horizDot = dot(sunHoriz, dirHoriz);
+      if (!all(greaterThan(vec3(length(sunHoriz)), vec3(1e-4)))) {
+        horizDot = 1.0;
+      }
+      horizDot = clamp(horizDot, -1.0, 1.0);
+      // Horizontal: keep relatively tight around sun azimuth
+      float horizMask = smoothstep(0.92, 0.99, horizDot);
+
+      float sunUp = remapUp(sunDir.z);
+      float upDiff = abs(up - sunUp);
+      // Vertical: allow a noticeably wider band to create a streak
+      float vertMask = smoothstep(0.9, -0.05, upDiff);
+
+      float shapeMask = clamp(horizMask * vertMask, 0.0, 1.0);
+
+      // Radial falloff for core and halo
+      // - core: sharper highlight very close to the sun
+      // - halo: slower decay so the influence extends further but remains subtle
+      float glow = pow(sunAmount, 12.0);
+      float halo = pow(sunAmount, 1.5);
+
+      // Blend towards brighter/whiter near the sun, but keep base colour visible
+      vec3 glowColor = mix(base, vec3(1.0), 0.6);
+      vec3 haloColor = mix(base, uZenithColor, 0.4);
+
+      float intensity = uEffectStrength * shapeMask;
+      vec3 color = base
+        + glowColor * glow * intensity
+        + haloColor * halo * (intensity * 0.4);
+
+      // Simple exposure; keep contrast and saturation
+      color *= uExposure;
+      color = clamp(color, 0.0, 1.0);
+
+      // Angle-dependent alpha: far from the sun we are almost transparent,
+      // near the sun we blend in more strongly (matching the halo radius).
+      float alphaSun = clamp(intensity + intensity * 0.4 * halo, 0.0, 1.0);
+      float alpha = clamp(uBaseAlpha + alphaSun, 0.0, 1.0);
+      gl_FragColor = vec4(color, alpha);
     }
   `;
   const material = new THREE_NS.ShaderMaterial({
@@ -592,6 +636,8 @@ function createSkyShaderMaterial(THREE_NS) {
     depthTest: false,
     fog: false,
     toneMapped: false,
+    transparent: true,
+    blending: THREE_NS.NormalBlending,
   });
   return material;
 }
@@ -618,17 +664,29 @@ function updateSkyDome(ctx, palette, THREE_NS) {
   if (palette.zenith) mat.uniforms.uZenithColor.value.copy(palette.zenith);
   if (palette.horizon) mat.uniforms.uHorizonColor.value.copy(palette.horizon);
   if (palette.ground) mat.uniforms.uGroundColor.value.copy(palette.ground);
-  const exposure = clamp01(palette.brightness ?? 0.7);
-  mat.uniforms.uExposure.value = 0.9 + exposure * 0.9;
-  mat.uniforms.uGradientPower.value = 1.05 + (0.5 - exposure) * 0.6;
-  mat.uniforms.uHorizonSharpness.value = 0.6 + (exposure * 0.25);
+  const brightness = clamp01(palette.brightness ?? 0.7);
+  // Keep exposure very close to 1 so we stay near the underlying gradient
+  mat.uniforms.uExposure.value = 0.95 + brightness * 0.1;          // ~[0.95, 1.05]
+  // Gentle tweak of gradient steepness
+  mat.uniforms.uGradientPower.value = 1.0 + (0.5 - brightness) * 0.2;
+  // Horizon sharpness: dimmer skies get a slightly stronger band, still subtle
+  mat.uniforms.uHorizonSharpness.value = 0.5 + (1.0 - brightness) * 0.2;
+  // Effect and base alpha: keep very subtle by default; uBaseAlpha can be
+  // driven lower if we want the sky layer to be almost invisible away from
+  // the sun direction.
+  if (mat.uniforms.uEffectStrength) {
+    mat.uniforms.uEffectStrength.value = 0.25;
+  }
+  if (mat.uniforms.uBaseAlpha) {
+    mat.uniforms.uBaseAlpha.value = 0.03;
+  }
   if (ctx.light) {
     const sun = ctx.light.position.clone().normalize();
     mat.uniforms.uSunDirection.value.copy(sun);
   }
   mat.needsUpdate = true;
   const worldScene = getWorldScene(ctx);
-  const far = ctx?.camera?.far ? ctx.camera.far : 1000;
+  const far = ctx?.camera && Number.isFinite(ctx.camera.far) && ctx.camera.far > 0 ? ctx.camera.far : 1000;
   const radius = Math.max(50, Math.min(far * 0.9, 120000));
   try { ctx.skyShader.scale.setScalar(radius); } catch {}
   if (worldScene && !ctx.skyShader.parent) {

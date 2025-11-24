@@ -2393,7 +2393,7 @@ export function createRendererManager({
     fill.position.set(-6, 6, 3);
     sceneWorld.add(fill);
 
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.01, GROUND_DISTANCE * 4);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.01, GROUND_DISTANCE * 20);
     camera.up.set(0, 0, 1);
     camera.position.set(3, -4, 2);
     camera.lookAt(new THREE.Vector3(0, 0, 0));
