@@ -1331,6 +1331,28 @@ class DirectBackend {
       let bxpos = null;
       let bxmat = null;
       let xipos = null;
+      let cam_xpos = null;
+      let cam_xmat = null;
+      let light_xpos = null;
+      let light_xdir = null;
+      let jtype = null;
+      let jpos = null;
+      let jaxis = null;
+      let jbody = null;
+      let act_trnid = null;
+      let act_trntype = null;
+      let act_cranklength = null;
+      let site_xpos = null;
+      let site_xmat = null;
+      let sensor_type = null;
+      let sensor_objid = null;
+      let eq_type = null;
+      let eq_obj1id = null;
+      let eq_obj2id = null;
+      let eq_objtype = null;
+      let eq_data = null;
+      let eq_active = null;
+      let debugJoint = null;
       try {
         const bposView = this.sim.bodyXposView?.();
         const bmatView = this.sim.bodyXmatView?.();
@@ -1338,6 +1360,57 @@ class DirectBackend {
         if (bposView) bxpos = cloneArray(bposView, Float64Array) || new Float64Array(bposView);
         if (bmatView) bxmat = cloneArray(bmatView, Float64Array) || new Float64Array(bmatView);
         if (xiposView) xipos = cloneArray(xiposView, Float64Array) || new Float64Array(xiposView);
+        const camPosView = this.sim.camXposView?.();
+        const camMatView = this.sim.camXmatView?.();
+        if (camPosView) cam_xpos = cloneArray(camPosView, Float64Array) || new Float64Array(camPosView);
+        if (camMatView) cam_xmat = cloneArray(camMatView, Float64Array) || new Float64Array(camMatView);
+        const lightPosView = this.sim.lightXposView?.();
+        const lightDirView = this.sim.lightXdirView?.();
+        if (lightPosView) light_xpos = cloneArray(lightPosView, Float64Array) || new Float64Array(lightPosView);
+        if (lightDirView) light_xdir = cloneArray(lightDirView, Float64Array) || new Float64Array(lightDirView);
+        const jtypeView = this.sim.jntTypeView?.();
+        const jposView = this.sim.jntPosView?.();
+        const jaxisView = this.sim.jntAxisView?.();
+        const jbodyView = this.sim.jntBodyIdView?.();
+        if (jtypeView) jtype = cloneArray(jtypeView, Int32Array) || new Int32Array(jtypeView);
+        if (jposView) jpos = cloneArray(jposView, Float64Array) || new Float64Array(jposView);
+        if (jaxisView) jaxis = cloneArray(jaxisView, Float64Array) || new Float64Array(jaxisView);
+        if (jbodyView) jbody = cloneArray(jbodyView, Int32Array) || new Int32Array(jbodyView);
+        debugJoint = {
+          njnt: typeof this.sim.njnt === 'function' ? (this.sim.njnt() | 0) : null,
+          hasPos: !!jpos,
+          lenPos: jpos?.length || 0,
+          hasAxis: !!jaxis,
+          lenAxis: jaxis?.length || 0,
+          hasBody: !!jbody,
+          lenBody: jbody?.length || 0,
+        };
+        const atrnView = this.sim.actuatorTrnidView?.();
+        const atypeView = this.sim.actuatorTrntypeView?.();
+        const acrankView = this.sim.actuatorCranklengthView?.();
+        if (atrnView) act_trnid = cloneArray(atrnView, Int32Array) || new Int32Array(atrnView);
+        if (atypeView) act_trntype = cloneArray(atypeView, Int32Array) || new Int32Array(atypeView);
+        if (acrankView) act_cranklength = cloneArray(acrankView, Float64Array) || new Float64Array(acrankView);
+        const sitePosView = this.sim.siteXposView?.();
+        const siteMatView = this.sim.siteXmatView?.();
+        if (sitePosView) site_xpos = cloneArray(sitePosView, Float64Array) || new Float64Array(sitePosView);
+        if (siteMatView) site_xmat = cloneArray(siteMatView, Float64Array) || new Float64Array(siteMatView);
+        const sensTypeView = this.sim.sensorTypeView?.();
+        const sensObjView = this.sim.sensorObjIdView?.();
+        if (sensTypeView) sensor_type = cloneArray(sensTypeView, Int32Array) || new Int32Array(sensTypeView);
+        if (sensObjView) sensor_objid = cloneArray(sensObjView, Int32Array) || new Int32Array(sensObjView);
+        const eqTypeView = this.sim.eqTypeView?.();
+        const eqObj1View = this.sim.eqObj1IdView?.();
+        const eqObj2View = this.sim.eqObj2IdView?.();
+        const eqObjTypeView = this.sim.eqObjTypeView?.();
+        const eqDataView = this.sim.eqDataView?.();
+        const eqActiveView = this.sim.eqActiveView?.();
+        if (eqTypeView) eq_type = cloneArray(eqTypeView, Int32Array) || new Int32Array(eqTypeView);
+        if (eqObj1View) eq_obj1id = cloneArray(eqObj1View, Int32Array) || new Int32Array(eqObj1View);
+        if (eqObj2View) eq_obj2id = cloneArray(eqObj2View, Int32Array) || new Int32Array(eqObj2View);
+        if (eqObjTypeView) eq_objtype = cloneArray(eqObjTypeView, Int32Array) || new Int32Array(eqObjTypeView);
+        if (eqDataView) eq_data = cloneArray(eqDataView, Float64Array) || new Float64Array(eqDataView);
+        if (eqActiveView) eq_active = cloneArray(eqActiveView, Int32Array) || new Int32Array(eqActiveView);
       } catch {}
 
       let contacts = null;
@@ -1355,6 +1428,28 @@ class DirectBackend {
           bxpos,
           bxmat,
           xipos,
+          cam_xpos,
+          cam_xmat,
+          light_xpos,
+          light_xdir,
+          jtype,
+          jpos,
+          jaxis,
+          jbody,
+          act_trnid,
+          act_trntype,
+          act_cranklength,
+          site_xpos,
+          site_xmat,
+          sensor_type,
+          sensor_objid,
+          eq_type,
+          eq_obj1id,
+          eq_obj2id,
+          eq_objtype,
+          eq_data,
+          eq_active,
+          debugJoint,
         };
         this.snapshotState.frame += 1;
       }
@@ -1456,6 +1551,28 @@ class DirectBackend {
         bxpos,
         bxmat,
         xipos,
+        cam_xpos,
+        cam_xmat,
+        light_xpos,
+        light_xdir,
+        jtype,
+        jpos,
+        jaxis,
+        jbody,
+        act_trnid,
+        act_trntype,
+        act_cranklength,
+        site_xpos,
+        site_xmat,
+        sensor_type,
+        sensor_objid,
+        eq_type,
+        eq_obj1id,
+        eq_obj2id,
+        eq_objtype,
+        eq_data,
+        eq_active,
+        debugJoint,
         gesture,
         drag,
         voptFlags: Array.isArray(this.voptFlags) ? [...this.voptFlags] : [],

@@ -40,6 +40,95 @@ const FRAME_MODES = {
   CONTACT: 6,
   WORLD: 7,
 };
+const MJ_JOINT = {
+  FREE: 0,
+  BALL: 1,
+  SLIDE: 2,
+  HINGE: 3,
+};
+const MJ_TRN = {
+  JOINT: 0,
+  JOINTINPARENT: 1,
+  SLIDERCRANK: 2,
+  SITE: 3,
+  BODY: 4,
+  TENDON: 5,
+};
+const MJ_SENSOR = {
+  RANGEFINDER: 7,
+};
+const MJ_VIS = {
+  CONVEXHULL: 0,
+  TEXTURE: 1,
+  JOINT: 2,
+  CAMERA: 3,
+  ACTUATOR: 4,
+  ACTIVATION: 5,
+  LIGHT: 6,
+  TENDON: 7,
+  RANGEFINDER: 8,
+  CONSTRAINT: 9,
+  INERTIA: 10,
+  SCLINERTIA: 11,
+  PERTFORCE: 12,
+  PERTOBJ: 13,
+  CONTACTPOINT: 14,
+  ISLAND: 15,
+  CONTACTFORCE: 16,
+  CONTACTSPLIT: 17,
+  TRANSPARENT: 18,
+  AUTOCONNECT: 19,
+  COM: 20,
+  SELECT: 21,
+  STATIC: 22,
+  SKIN: 23,
+  FLEXVERT: 24,
+  FLEXEDGE: 25,
+  FLEXFACE: 26,
+  FLEXSKIN: 27,
+  BODYBVH: 28,
+  MESHBVH: 29,
+  SDFITER: 30,
+};
+const MJ_EQ = {
+  CONNECT: 0,
+  WELD: 1,
+  JOINT: 2,
+  TENDON: 3,
+  FLEX: 4,
+  DISTANCE: 5,
+};
+const MJ_OBJ = {
+  UNKNOWN: 0,
+  BODY: 1,
+  XBODY: 2,
+  JOINT: 3,
+  DOF: 4,
+  GEOM: 5,
+  SITE: 6,
+  CAMERA: 7,
+  LIGHT: 8,
+  FLEX: 9,
+  MESH: 10,
+  SKIN: 11,
+  HFIELD: 12,
+  TEXTURE: 13,
+  MATERIAL: 14,
+  PAIR: 15,
+  EXCLUDE: 16,
+  EQUALITY: 17,
+  TENDON: 18,
+  ACTUATOR: 19,
+  SENSOR: 20,
+  NUMERIC: 21,
+  TEXT: 22,
+  TUPLE: 23,
+  KEY: 24,
+  PLUGIN: 25,
+  FRAME: 100,
+  DEFAULT: 101,
+  MODEL: 102,
+};
 const LABEL_TEXTURE_CACHE = new Map();
 const LABEL_TEXTURE_VERSION = 3;
 const LABEL_DEFAULT_HEIGHT = 0.08;
@@ -78,12 +167,17 @@ const PERTURB_TEMP_AXIS = new THREE.Vector3();
 const PERTURB_TEMP_RADIAL = new THREE.Vector3();
 const PERTURB_TEMP_TANGENT = new THREE.Vector3();
 const PERTURB_TEMP_QUAT = new THREE.Quaternion();
+const PERTURB_TEMP_VEC = new THREE.Vector3();
+const PERTURB_TEMP_VEC2 = new THREE.Vector3();
 const SELECTION_HIGHLIGHT_COLOR = new THREE.Color(0x40ff99);
 const SELECTION_EMISSIVE_COLOR = new THREE.Color(0x3aff3a);
 const SELECTION_OVERLAY_COLOR = new THREE.Color(0x66ffcc);
 const SELECT_POINT_FALLBACK_COLOR = 0xff8a2b;
 const PERTURB_COLOR_RING = 0xff8a2b;   // original ring color
 const PERTURB_COLOR_ARROW = 0xffb366;  // previous arrow color (lighter)
+const CAMERA_GIZMO_GEOMETRY = new THREE.BoxGeometry(1, 0.8, 0.6);
+const LIGHT_GIZMO_GEOMETRY = new THREE.CylinderGeometry(0.6, 0.6, 1, 12, 1);
+const SLIDERCRANK_SHAFT_GEOMETRY = new THREE.CylinderGeometry(1, 1, 1, 12, 1, false);
 
 function cloneHighlightMaterial(source) {
   if (!source || typeof source.clone !== 'function') {
@@ -126,6 +220,8 @@ const HAZE_TMP_MAT_ROT = new THREE.Matrix4();
 const HAZE_TMP_MAT_LOCAL_T = new THREE.Matrix4();
 const HAZE_TMP_MAT_LOCAL_S = new THREE.Matrix4();
 const HAZE_TMP_MAT_FINAL = new THREE.Matrix4();
+const LIGHT_TMP_DIR = new THREE.Vector3();
+const LIGHT_TMP_QUAT = new THREE.Quaternion();
 
 function isMatrixLike(value) {
   return value && typeof value.copy === 'function';
@@ -791,6 +887,10 @@ function scaleAllFactor(state) {
   return 1;
 }
 
+function voptEnabled(flags, idx) {
+  return Array.isArray(flags) && idx >= 0 && !!flags[idx];
+}
+
 function meanSizeFromState(state, context = null) {
   const statSize = Number(state?.model?.stat?.meansize);
   if (Number.isFinite(statSize) && statSize > 0) return statSize;
@@ -1000,6 +1100,102 @@ function ensureFrameGroup(context) {
   return context.frameGroup;
 }
 
+function ensureCameraGroup(ctx) {
+  if (!ctx.cameraGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:cameras';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.cameraGroup = group;
+    ctx.cameraPool = [];
+  }
+  return ctx.cameraGroup;
+}
+
+function ensureLightGroup(ctx) {
+  if (!ctx.lightGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:lights';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.lightGroup = group;
+    ctx.lightPool = [];
+  }
+  return ctx.lightGroup;
+}
+
+function ensureComGroup(ctx) {
+  if (!ctx.comGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:com';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.comGroup = group;
+    ctx.comPool = [];
+  }
+  return ctx.comGroup;
+}
+
+function ensureJointGroup(ctx) {
+  if (!ctx.jointGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:joints';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.jointGroup = group;
+    ctx.jointPool = [];
+  }
+  return ctx.jointGroup;
+}
+
+function ensureActuatorGroup(ctx) {
+  if (!ctx.actuatorGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:actuators';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.actuatorGroup = group;
+    ctx.actuatorPool = [];
+  }
+  return ctx.actuatorGroup;
+}
+
+function ensureSlidercrankGroup(ctx) {
+  if (!ctx.slidercrankGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:slidercrank';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.slidercrankGroup = group;
+    ctx.slidercrankPool = [];
+  }
+  return ctx.slidercrankGroup;
+}
+
+function ensureRangefinderGroup(ctx) {
+  if (!ctx.rangefinderGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:rangefinder';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.rangefinderGroup = group;
+    ctx.rangefinderPool = [];
+  }
+  return ctx.rangefinderGroup;
+}
+
+function ensureConstraintGroup(ctx) {
+  if (!ctx.constraintGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:constraints';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.constraintGroup = group;
+    ctx.constraintPool = [];
+  }
+  return ctx.constraintGroup;
+}
+
 function hideFrameGroup(context) {
   if (Array.isArray(context?.framePool)) {
     for (const helper of context.framePool) {
@@ -1009,6 +1205,62 @@ function hideFrameGroup(context) {
   if (context?.frameGroup) {
     context.frameGroup.visible = false;
   }
+}
+
+function hideCameraGroup(ctx) {
+  if (Array.isArray(ctx?.cameraPool)) {
+    ctx.cameraPool.forEach((mesh) => { if (mesh) mesh.visible = false; });
+  }
+  if (ctx?.cameraGroup) ctx.cameraGroup.visible = false;
+}
+
+function hideLightGroup(ctx) {
+  if (Array.isArray(ctx?.lightPool)) {
+    ctx.lightPool.forEach((mesh) => { if (mesh) mesh.visible = false; });
+  }
+  if (ctx?.lightGroup) ctx.lightGroup.visible = false;
+}
+
+function hideComGroup(ctx) {
+  if (Array.isArray(ctx?.comPool)) {
+    ctx.comPool.forEach((mesh) => { if (mesh) mesh.visible = false; });
+  }
+  if (ctx?.comGroup) ctx.comGroup.visible = false;
+}
+
+function hideJointGroup(ctx) {
+  if (Array.isArray(ctx?.jointPool)) {
+    ctx.jointPool.forEach((mesh) => { if (mesh) mesh.visible = false; });
+  }
+  if (ctx?.jointGroup) ctx.jointGroup.visible = false;
+}
+
+function hideActuatorGroup(ctx) {
+  if (Array.isArray(ctx?.actuatorPool)) {
+    ctx.actuatorPool.forEach((mesh) => { if (mesh) mesh.visible = false; });
+  }
+  if (ctx?.actuatorGroup) ctx.actuatorGroup.visible = false;
+}
+
+function hideSlidercrankGroup(ctx) {
+  if (Array.isArray(ctx?.slidercrankPool)) {
+    ctx.slidercrankPool.forEach((mesh) => { if (mesh) mesh.visible = false; });
+  }
+  if (ctx?.slidercrankGroup) ctx.slidercrankGroup.visible = false;
+}
+
+function hideRangefinderGroup(ctx) {
+  if (Array.isArray(ctx?.rangefinderPool)) {
+    ctx.rangefinderPool.forEach((line) => { if (line) line.visible = false; });
+  }
+  if (ctx?.rangefinderGroup) ctx.rangefinderGroup.visible = false;
+}
+
+function hideConstraintGroup(ctx) {
+  if (Array.isArray(ctx?.constraintPool)) {
+    ctx.constraintPool.forEach((mesh) => { if (mesh) mesh.visible = false; });
+  }
+  if (ctx?.constraintGroup) ctx.constraintGroup.visible = false;
 }
 
 function updateFrameOverlays(context, snapshot, state, options = {}) {
@@ -1118,6 +1370,412 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
   frameGroup.visible = used > 0;
 }
 
+function updateCameraOverlays(ctx, snapshot, state) {
+  const camPos = snapshot?.cam_xpos;
+  const camMat = snapshot?.cam_xmat;
+  if (!camPos || !camMat || camPos.length < 3) {
+    hideCameraGroup(ctx);
+    return;
+  }
+  const group = ensureCameraGroup(ctx);
+  const pool = ctx.cameraPool || (ctx.cameraPool = []);
+  const visScale = state?.model?.vis?.scale || {};
+  const visRgba = state?.model?.vis?.rgba || {};
+  const scaleAll = scaleAllFactor(state);
+  const sizeScale = Math.max(1e-6, Number(visScale.camera) || 1) * scaleAll;
+  const meanSize = meanSizeFromState(state, ctx);
+  const colorHex = rgbaToHex(visRgba.camera, 0x6aa86a);
+  const opacity = alphaFromArray(visRgba.camera, 1);
+  const count = Math.floor(camPos.length / 3);
+  let used = 0;
+  const addMesh = () => {
+    let mesh = pool[used];
+    if (!mesh) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: opacity < 0.999,
+        opacity,
+        depthWrite: false,
+        toneMapped: false,
+        fog: false,
+      });
+      mesh = new THREE.Mesh(CAMERA_GIZMO_GEOMETRY, mat);
+      mesh.renderOrder = 55;
+      pool[used] = mesh;
+      group.add(mesh);
+    }
+    mesh.visible = true;
+    used += 1;
+    return mesh;
+  };
+  for (let i = 0; i < count; i += 1) {
+    const mesh = addMesh();
+    const base = 3 * i;
+    mesh.position.set(
+      Number(camPos[base + 0]) || 0,
+      Number(camPos[base + 1]) || 0,
+      Number(camPos[base + 2]) || 0,
+    );
+    const rotBase = 9 * i;
+    const rot = [
+      camMat?.[rotBase + 0] ?? 1,
+      camMat?.[rotBase + 1] ?? 0,
+      camMat?.[rotBase + 2] ?? 0,
+      camMat?.[rotBase + 3] ?? 0,
+      camMat?.[rotBase + 4] ?? 1,
+      camMat?.[rotBase + 5] ?? 0,
+      camMat?.[rotBase + 6] ?? 0,
+      camMat?.[rotBase + 7] ?? 0,
+      camMat?.[rotBase + 8] ?? 1,
+    ];
+    TEMP_MAT4.set(
+      rot[0], rot[1], rot[2], 0,
+      rot[3], rot[4], rot[5], 0,
+      rot[6], rot[7], rot[8], 0,
+      0, 0, 0, 1,
+    );
+    mesh.quaternion.setFromRotationMatrix(TEMP_MAT4);
+    const s = Math.max(1e-4, meanSize * 0.15 * sizeScale);
+    mesh.scale.set(s, s, s);
+    if (mesh.material) {
+      mesh.material.color.setHex(colorHex);
+      mesh.material.opacity = opacity;
+      mesh.material.transparent = opacity < 0.999;
+      mesh.material.needsUpdate = true;
+    }
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  group.visible = used > 0;
+}
+
+function updateRangefinderOverlays(ctx, snapshot, state) {
+  const sensorType = snapshot?.sensor_type;
+  const sensorObj = snapshot?.sensor_objid;
+  const sensordata = snapshot?.sensordata;
+  const siteXpos = snapshot?.site_xpos;
+  const siteXmat = snapshot?.site_xmat;
+  if (!sensorType || !sensorObj || !sensordata || !siteXpos || !siteXmat) {
+    hideRangefinderGroup(ctx);
+    return;
+  }
+  const ns = Math.floor(siteXpos.length / 3);
+  const group = ensureRangefinderGroup(ctx);
+  const pool = ctx.rangefinderPool || (ctx.rangefinderPool = []);
+  const visRgba = state?.model?.vis?.rgba || {};
+  const colorHex = rgbaToHex(visRgba.rangefinder, 0xffff66);
+  const opacity = alphaFromArray(visRgba.rangefinder, 1);
+  let used = 0;
+  const addLine = () => {
+    let line = pool[used];
+    if (!line) {
+      const geom = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 0, 1),
+      ]);
+      const mat = new THREE.LineBasicMaterial({
+        color: colorHex,
+        transparent: opacity < 0.999,
+        opacity,
+        depthWrite: false,
+        fog: false,
+      });
+      line = new THREE.Line(geom, mat);
+      line.renderOrder = 49;
+      pool[used] = line;
+      group.add(line);
+    }
+    line.visible = true;
+    used += 1;
+    return line;
+  };
+  const count = Math.min(sensorType.length, sensorObj.length, sensordata.length);
+  for (let i = 0; i < count; i += 1) {
+    const stype = Number(sensorType[i]) | 0;
+    if (stype !== MJ_SENSOR.RANGEFINDER) continue;
+    const sid = Number(sensorObj[i]) | 0;
+    if (sid < 0 || sid >= ns) continue;
+    const dist = Number(sensordata[i]) || 0;
+    if (!(dist > 0)) continue;
+    const base = 3 * sid;
+    const pos = PERTURB_TEMP_ANCHOR.set(
+      Number(siteXpos[base + 0]) || 0,
+      Number(siteXpos[base + 1]) || 0,
+      Number(siteXpos[base + 2]) || 0,
+    );
+    const rotBase = 9 * sid;
+    const rot = [
+      siteXmat?.[rotBase + 0] ?? 1, siteXmat?.[rotBase + 1] ?? 0, siteXmat?.[rotBase + 2] ?? 0,
+      siteXmat?.[rotBase + 3] ?? 0, siteXmat?.[rotBase + 4] ?? 1, siteXmat?.[rotBase + 5] ?? 0,
+      siteXmat?.[rotBase + 6] ?? 0, siteXmat?.[rotBase + 7] ?? 0, siteXmat?.[rotBase + 8] ?? 1,
+    ];
+    TEMP_MAT4.set(
+      rot[0], rot[1], rot[2], 0,
+      rot[3], rot[4], rot[5], 0,
+      rot[6], rot[7], rot[8], 0,
+      0, 0, 0, 1,
+    );
+    const forward = PERTURB_TEMP_VEC.set(0, 0, 1).applyMatrix4(TEMP_MAT4).normalize();
+    const to = PERTURB_TEMP_VEC2.copy(forward).multiplyScalar(dist).add(pos);
+    const line = addLine();
+    if (line.geometry?.attributes?.position) {
+      const attr = line.geometry.attributes.position;
+      attr.setXYZ(0, pos.x, pos.y, pos.z);
+      attr.setXYZ(1, to.x, to.y, to.z);
+      attr.needsUpdate = true;
+      line.geometry.computeBoundingSphere?.();
+    }
+    if (line.material) {
+      line.material.color.setHex(colorHex);
+      line.material.opacity = opacity;
+      line.material.transparent = opacity < 0.999;
+      line.material.needsUpdate = true;
+    }
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  group.visible = used > 0;
+}
+
+function updateConstraintOverlays(ctx, snapshot, state) {
+  const eqType = snapshot?.eq_type;
+  const eqObj1 = snapshot?.eq_obj1id;
+  const eqObj2 = snapshot?.eq_obj2id;
+  const eqObjType = snapshot?.eq_objtype;
+  const eqActive = snapshot?.eq_active;
+  const bxpos = snapshot?.bxpos;
+  const bxmat = snapshot?.bxmat;
+  const siteXpos = snapshot?.site_xpos;
+  const siteXmat = snapshot?.site_xmat;
+  if (!eqType || !eqObj1 || !eqObj2 || !eqObjType) {
+    hideConstraintGroup(ctx);
+    return;
+  }
+  const group = ensureConstraintGroup(ctx);
+  const pool = ctx.constraintPool || (ctx.constraintPool = []);
+  const visScale = state?.model?.vis?.scale || {};
+  const visRgba = state?.model?.vis?.rgba || {};
+  const scaleAll = scaleAllFactor(state);
+  const meanSize = meanSizeFromState(state, ctx);
+  const radiusConst = Math.max(1e-4, meanSize * 0.03 * Math.max(Number(visScale.constraint) || 1, 1e-6) * scaleAll);
+  const radiusConnect = Math.max(1e-4, meanSize * 0.03 * Math.max(Number(visScale.connect) || 1, 1e-6) * scaleAll);
+  const colorConnect = rgbaToHex(visRgba.connect, 0x3344dd);
+  const colorConstraint = rgbaToHex(visRgba.constraint, 0xdd3333);
+  const opacityConnect = alphaFromArray(visRgba.connect, 1);
+  const opacityConstraint = alphaFromArray(visRgba.constraint, 1);
+  const neq = Math.min(eqType.length, eqObj1.length, eqObj2.length, eqObjType.length);
+  const nsite = siteXpos ? Math.floor(siteXpos.length / 3) : 0;
+  const nbody = bxpos ? Math.floor(bxpos.length / 3) : 0;
+  let used = 0;
+  const addCapsule = () => {
+    let mesh = pool[used];
+    if (!mesh) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: colorConnect,
+        transparent: true,
+        opacity: 1,
+        depthWrite: false,
+        toneMapped: false,
+        fog: false,
+      });
+      mesh = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, mat);
+      mesh.renderOrder = 48;
+      pool[used] = mesh;
+      group.add(mesh);
+    }
+    mesh.visible = true;
+    used += 1;
+    return mesh;
+  };
+  const getPose = (objType, objId) => {
+    if (objType === MJ_OBJ.SITE && objId >= 0 && objId < nsite && siteXpos) {
+      const base = 3 * objId;
+      const pos = PERTURB_TEMP_ANCHOR.set(
+        Number(siteXpos[base + 0]) || 0,
+        Number(siteXpos[base + 1]) || 0,
+        Number(siteXpos[base + 2]) || 0,
+      );
+      return { pos };
+    }
+    if (objType === MJ_OBJ.BODY && objId >= 0 && objId < nbody && bxpos) {
+      const base = 3 * objId;
+      const pos = PERTURB_TEMP_ANCHOR.set(
+        Number(bxpos[base + 0]) || 0,
+        Number(bxpos[base + 1]) || 0,
+        Number(bxpos[base + 2]) || 0,
+      );
+      return { pos };
+    }
+    return null;
+  };
+  for (let i = 0; i < neq; i += 1) {
+    const active = !eqActive || !!eqActive[i];
+    if (!active) continue;
+    const t = Number(eqType[i]) | 0;
+    if (t !== MJ_EQ.CONNECT && t !== MJ_EQ.WELD) continue;
+    const objType = Number(eqObjType[i]) | 0;
+    const id1 = Number(eqObj1[i]) | 0;
+    const id2 = Number(eqObj2[i]) | 0;
+    const pose1 = getPose(objType, id1);
+    const pose2 = getPose(objType, id2);
+    if (!pose1 || !pose2) continue;
+    const p1 = pose1.pos.clone();
+    const p2 = pose2.pos.clone();
+    const dir = p2.clone().sub(p1);
+    const dist = dir.length();
+    if (dist < 1e-6) continue;
+    const mesh = addCapsule();
+    mesh.position.copy(p1.clone().add(p2).multiplyScalar(0.5));
+    mesh.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, dir.clone().normalize());
+    const r = t === MJ_EQ.CONNECT ? radiusConnect : radiusConst;
+    mesh.scale.set(r, dist, r);
+    if (mesh.material) {
+      const mat = mesh.material;
+      const isConnect = t === MJ_EQ.CONNECT;
+      const hex = isConnect ? colorConnect : colorConstraint;
+      const op = isConnect ? opacityConnect : opacityConstraint;
+      mat.color.setHex(hex);
+      mat.opacity = op;
+      mat.transparent = op < 0.999;
+      mat.needsUpdate = true;
+    }
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  group.visible = used > 0;
+}
+
+function updateLightOverlays(ctx, snapshot, state) {
+  const pos = snapshot?.light_xpos;
+  const dir = snapshot?.light_xdir;
+  if (!pos || !dir || pos.length < 3 || dir.length < 3) {
+    hideLightGroup(ctx);
+    return;
+  }
+  const group = ensureLightGroup(ctx);
+  const pool = ctx.lightPool || (ctx.lightPool = []);
+  const visScale = state?.model?.vis?.scale || {};
+  const visRgba = state?.model?.vis?.rgba || {};
+  const scaleAll = scaleAllFactor(state);
+  const sizeScale = Math.max(1e-6, Number(visScale.light) || 1) * scaleAll;
+  const meanSize = meanSizeFromState(state, ctx);
+  const colorHex = rgbaToHex(visRgba.light, 0x8899ff);
+  const opacity = alphaFromArray(visRgba.light, 1);
+  const count = Math.floor(pos.length / 3);
+  let used = 0;
+  const addMesh = () => {
+    let mesh = pool[used];
+    if (!mesh) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: opacity < 0.999,
+        opacity,
+        depthWrite: false,
+        toneMapped: false,
+        fog: false,
+      });
+      mesh = new THREE.Mesh(LIGHT_GIZMO_GEOMETRY, mat);
+      mesh.renderOrder = 54;
+      pool[used] = mesh;
+      group.add(mesh);
+    }
+    mesh.visible = true;
+    used += 1;
+    return mesh;
+  };
+  for (let i = 0; i < count; i += 1) {
+    const mesh = addMesh();
+    const base = 3 * i;
+    mesh.position.set(
+      Number(pos[base + 0]) || 0,
+      Number(pos[base + 1]) || 0,
+      Number(pos[base + 2]) || 0,
+    );
+    const dirBase = 3 * i;
+    LIGHT_TMP_DIR.set(
+      Number(dir[dirBase + 0]) || 0,
+      Number(dir[dirBase + 1]) || 0,
+      Number(dir[dirBase + 2]) || 1,
+    ).normalize();
+    LIGHT_TMP_QUAT.setFromUnitVectors(PERTURB_RING_NORMAL, LIGHT_TMP_DIR);
+    mesh.quaternion.copy(LIGHT_TMP_QUAT);
+    const s = Math.max(1e-4, meanSize * 0.12 * sizeScale);
+    mesh.scale.set(s, s, s);
+    if (mesh.material) {
+      mesh.material.color.setHex(colorHex);
+      mesh.material.opacity = opacity;
+      mesh.material.transparent = opacity < 0.999;
+      mesh.material.needsUpdate = true;
+    }
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  group.visible = used > 0;
+}
+
+function updateComOverlays(ctx, snapshot, state) {
+  const xipos = snapshot?.xipos;
+  if (!xipos || xipos.length < 3) {
+    hideComGroup(ctx);
+    return;
+  }
+  const group = ensureComGroup(ctx);
+  const pool = ctx.comPool || (ctx.comPool = []);
+  const visScale = state?.model?.vis?.scale || {};
+  const visRgba = state?.model?.vis?.rgba || {};
+  const scaleAll = scaleAllFactor(state);
+  const sizeScale = Math.max(1e-6, Number(visScale.com) || 1) * scaleAll;
+  const meanSize = meanSizeFromState(state, ctx);
+  const colorHex = rgbaToHex(visRgba.com, 0xe6e6e6);
+  const opacity = alphaFromArray(visRgba.com, 1);
+  const count = Math.floor(xipos.length / 3);
+  let used = 0;
+  const addMesh = () => {
+    let mesh = pool[used];
+    if (!mesh) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: opacity < 0.999,
+        opacity,
+        depthWrite: false,
+        toneMapped: false,
+        fog: false,
+      });
+      mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), mat);
+      mesh.renderOrder = 53;
+      pool[used] = mesh;
+      group.add(mesh);
+    }
+    mesh.visible = true;
+    used += 1;
+    return mesh;
+  };
+  for (let i = 1; i < count; i += 1) { // skip world body 0
+    const mesh = addMesh();
+    const base = 3 * i;
+    mesh.position.set(
+      Number(xipos[base + 0]) || 0,
+      Number(xipos[base + 1]) || 0,
+      Number(xipos[base + 2]) || 0,
+    );
+    const r = Math.max(1e-4, meanSize * 0.05 * sizeScale);
+    mesh.scale.set(r, r, r);
+    if (mesh.material) {
+      mesh.material.color.setHex(colorHex);
+      mesh.material.opacity = opacity;
+      mesh.material.transparent = opacity < 0.999;
+      mesh.material.needsUpdate = true;
+    }
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  group.visible = used > 0;
+}
 function createPerturbArrowNode(colorHex) {
   const material = new THREE.MeshBasicMaterial({
     color: colorHex,
@@ -1137,6 +1795,279 @@ function createPerturbArrowNode(colorHex) {
   return { node, shaft, head, material };
 }
 
+function updateJointOverlays(ctx, snapshot, state) {
+  const jpos = snapshot?.jpos;
+  const jaxis = snapshot?.jaxis;
+  const jtype = snapshot?.jtype;
+  const jbody = snapshot?.jbody;
+  const bxpos = snapshot?.bxpos;
+  const bxmat = snapshot?.bxmat;
+  if (!jpos || !jaxis || !jtype || !jbody || !bxpos || !bxmat) {
+    hideJointGroup(ctx);
+    return;
+  }
+  const group = ensureJointGroup(ctx);
+  const pool = ctx.jointPool || (ctx.jointPool = []);
+  const visScale = state?.model?.vis?.scale || {};
+  const visRgba = state?.model?.vis?.rgba || {};
+  const scaleAll = scaleAllFactor(state);
+  const lenScale = Math.max(1e-6, Number(visScale.jointlength) || 1) * scaleAll;
+  const widthScale = Math.max(1e-6, Number(visScale.jointwidth) || 1) * scaleAll;
+  const meanSize = meanSizeFromState(state, ctx);
+  const colorHex = rgbaToHex(visRgba.joint, 0x3399cc);
+  const opacity = alphaFromArray(visRgba.joint, 1);
+  const nj = Math.floor(jpos.length / 3);
+  const nbody = Math.floor(bxpos.length / 3);
+  let used = 0;
+  const addMesh = () => {
+    let mesh = pool[used];
+    if (!mesh) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: opacity < 0.999,
+        opacity,
+        depthWrite: false,
+        toneMapped: false,
+        fog: false,
+      });
+      mesh = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, mat);
+      mesh.renderOrder = 52;
+      pool[used] = mesh;
+      group.add(mesh);
+    }
+    mesh.visible = true;
+    used += 1;
+    return mesh;
+  };
+  for (let i = 0; i < nj; i += 1) {
+    const bodyId = Number(jbody[i]) || 0;
+    if (bodyId < 0 || bodyId >= nbody) continue;
+    const base = 3 * i;
+    const axisBase = 3 * i;
+    const bodyPos = __TMP_VEC3_A.set(
+      Number(bxpos[3 * bodyId + 0]) || 0,
+      Number(bxpos[3 * bodyId + 1]) || 0,
+      Number(bxpos[3 * bodyId + 2]) || 0,
+    );
+    const bodyMat = TEMP_MAT4.set(
+      bxmat?.[9 * bodyId + 0] ?? 1, bxmat?.[9 * bodyId + 1] ?? 0, bxmat?.[9 * bodyId + 2] ?? 0, 0,
+      bxmat?.[9 * bodyId + 3] ?? 0, bxmat?.[9 * bodyId + 4] ?? 1, bxmat?.[9 * bodyId + 5] ?? 0, 0,
+      bxmat?.[9 * bodyId + 6] ?? 0, bxmat?.[9 * bodyId + 7] ?? 0, bxmat?.[9 * bodyId + 8] ?? 1, 0,
+      0, 0, 0, 1,
+    );
+    const localAnchor = __TMP_VEC3_B.set(
+      Number(jpos[base + 0]) || 0,
+      Number(jpos[base + 1]) || 0,
+      Number(jpos[base + 2]) || 0,
+    );
+    const worldAnchor = localAnchor.clone().applyMatrix4(bodyMat).add(bodyPos);
+    const localAxis = __TMP_VEC3_C.set(
+      Number(jaxis[axisBase + 0]) || 0,
+      Number(jaxis[axisBase + 1]) || 0,
+      Number(jaxis[axisBase + 2]) || 1,
+    ).normalize();
+    const worldAxis = localAxis.clone().applyMatrix4(bodyMat).normalize();
+    const mesh = addMesh();
+    mesh.position.copy(worldAnchor);
+    const length = Math.max(1e-4, meanSize * 0.12 * lenScale);
+    const width = Math.max(1e-4, meanSize * 0.04 * widthScale);
+    mesh.scale.set(width, length, width);
+    mesh.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, worldAxis);
+    mesh.updateMatrixWorld();
+    if (mesh.material) {
+      mesh.material.color.setHex(colorHex);
+      mesh.material.opacity = opacity;
+      mesh.material.transparent = opacity < 0.999;
+      mesh.material.needsUpdate = true;
+    }
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  group.visible = used > 0;
+}
+
+function updateActuatorOverlays(ctx, snapshot, state) {
+  const trnid = snapshot?.act_trnid;
+  const trntype = snapshot?.act_trntype;
+  const jpos = snapshot?.jpos;
+  const jaxis = snapshot?.jaxis;
+  const jbody = snapshot?.jbody;
+  const bxpos = snapshot?.bxpos;
+  const bxmat = snapshot?.bxmat;
+  if (!trnid || !trntype || !jpos || !jaxis || !jbody || !bxpos || !bxmat) {
+    hideActuatorGroup(ctx);
+    return;
+  }
+  const group = ensureActuatorGroup(ctx);
+  const pool = ctx.actuatorPool || (ctx.actuatorPool = []);
+  const visScale = state?.model?.vis?.scale || {};
+  const visRgba = state?.model?.vis?.rgba || {};
+  const scaleAll = scaleAllFactor(state);
+  const lenScale = Math.max(1e-6, Number(visScale.actuatorlength) || 1) * scaleAll;
+  const widthScale = Math.max(1e-6, Number(visScale.actuatorwidth) || 1) * scaleAll;
+  const meanSize = meanSizeFromState(state, ctx);
+  const colorHex = rgbaToHex(visRgba.actuator, 0x2b90d9);
+  const opacity = alphaFromArray(visRgba.actuator, 1);
+  const na = Math.floor(trntype.length);
+  const nj = Math.floor(jpos.length / 3);
+  const nbody = Math.floor(bxpos.length / 3);
+  let used = 0;
+  const addMesh = () => {
+    let mesh = pool[used];
+    if (!mesh) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: opacity < 0.999,
+        opacity,
+        depthWrite: false,
+        toneMapped: false,
+        fog: false,
+      });
+      mesh = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, mat);
+      mesh.renderOrder = 51;
+      pool[used] = mesh;
+      group.add(mesh);
+    }
+    mesh.visible = true;
+    used += 1;
+    return mesh;
+  };
+  for (let i = 0; i < na; i += 1) {
+    const t = Number(trntype[i]) | 0;
+    if (t !== MJ_TRN.JOINT && t !== MJ_TRN.JOINTINPARENT) continue;
+    const jid = trnid ? (trnid[2 * i] | 0) : -1;
+    if (jid < 0 || jid >= nj) continue;
+    const bodyId = Number(jbody[jid]) || 0;
+    if (bodyId < 0 || bodyId >= nbody) continue;
+    const base = 3 * jid;
+    const bodyPos = __TMP_VEC3_A.set(
+      Number(bxpos[3 * bodyId + 0]) || 0,
+      Number(bxpos[3 * bodyId + 1]) || 0,
+      Number(bxpos[3 * bodyId + 2]) || 0,
+    );
+    const bodyMat = TEMP_MAT4.set(
+      bxmat?.[9 * bodyId + 0] ?? 1, bxmat?.[9 * bodyId + 1] ?? 0, bxmat?.[9 * bodyId + 2] ?? 0, 0,
+      bxmat?.[9 * bodyId + 3] ?? 0, bxmat?.[9 * bodyId + 4] ?? 1, bxmat?.[9 * bodyId + 5] ?? 0, 0,
+      bxmat?.[9 * bodyId + 6] ?? 0, bxmat?.[9 * bodyId + 7] ?? 0, bxmat?.[9 * bodyId + 8] ?? 1, 0,
+      0, 0, 0, 1,
+    );
+    const localAnchor = __TMP_VEC3_B.set(
+      Number(jpos[base + 0]) || 0,
+      Number(jpos[base + 1]) || 0,
+      Number(jpos[base + 2]) || 0,
+    );
+    const worldAnchor = localAnchor.clone().applyMatrix4(bodyMat).add(bodyPos);
+    const localAxis = __TMP_VEC3_C.set(
+      Number(jaxis[base + 0]) || 0,
+      Number(jaxis[base + 1]) || 0,
+      Number(jaxis[base + 2]) || 1,
+    ).normalize();
+    const worldAxis = localAxis.clone().applyMatrix4(bodyMat).normalize();
+    const mesh = addMesh();
+    mesh.position.copy(worldAnchor);
+    const length = Math.max(1e-4, meanSize * 0.14 * lenScale);
+    const width = Math.max(1e-4, meanSize * 0.045 * widthScale);
+    mesh.scale.set(width, length, width);
+    mesh.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, worldAxis);
+    mesh.updateMatrixWorld();
+    if (mesh.material) {
+      mesh.material.color.setHex(colorHex);
+      mesh.material.opacity = opacity;
+      mesh.material.transparent = opacity < 0.999;
+      mesh.material.needsUpdate = true;
+    }
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  group.visible = used > 0;
+}
+
+function updateSlidercrankOverlays(ctx, snapshot, state) {
+  const trnid = snapshot?.act_trnid;
+  const trntype = snapshot?.act_trntype;
+  const crankLength = snapshot?.act_cranklength;
+  const siteXpos = snapshot?.site_xpos;
+  const bxpos = snapshot?.bxpos;
+  const bxmat = snapshot?.bxmat;
+  if (!trnid || !trntype || !crankLength || !siteXpos) {
+    hideSlidercrankGroup(ctx);
+    return;
+  }
+  const group = ensureSlidercrankGroup(ctx);
+  const pool = ctx.slidercrankPool || (ctx.slidercrankPool = []);
+  const visScale = state?.model?.vis?.scale || {};
+  const visRgba = state?.model?.vis?.rgba || {};
+  const scaleAll = scaleAllFactor(state);
+  const scl = Math.max(1e-6, Number(visScale.slidercrank) || 1) * scaleAll;
+  const meanSize = meanSizeFromState(state, ctx);
+  const colorHex = rgbaToHex(visRgba.slidercrank, 0x8a6aff);
+  const brokenColorHex = rgbaToHex(visRgba.crankbroken, 0xff4d4d);
+  const opacity = alphaFromArray(visRgba.slidercrank, 1);
+  const ns = Math.floor(siteXpos.length / 3);
+  const na = Math.floor(trntype.length);
+  let used = 0;
+  const addMesh = () => {
+    let mesh = pool[used];
+    if (!mesh) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: opacity < 0.999,
+        opacity,
+        depthWrite: false,
+        toneMapped: false,
+        fog: false,
+      });
+      mesh = new THREE.Mesh(SLIDERCRANK_SHAFT_GEOMETRY, mat);
+      mesh.renderOrder = 50;
+      pool[used] = mesh;
+      group.add(mesh);
+    }
+    mesh.visible = true;
+    used += 1;
+    return mesh;
+  };
+  for (let i = 0; i < na; i += 1) {
+    const t = Number(trntype[i]) | 0;
+    if (t !== MJ_TRN.SLIDERCRANK) continue;
+    const sidCrank = trnid ? (trnid[2 * i] | 0) : -1;
+    const sidSlider = trnid ? (trnid[2 * i + 1] | 0) : -1;
+    if (sidCrank < 0 || sidSlider < 0 || sidCrank >= ns || sidSlider >= ns) continue;
+    const crank = new THREE.Vector3(
+      Number(siteXpos[3 * sidCrank + 0]) || 0,
+      Number(siteXpos[3 * sidCrank + 1]) || 0,
+      Number(siteXpos[3 * sidCrank + 2]) || 0,
+    );
+    const slider = new THREE.Vector3(
+      Number(siteXpos[3 * sidSlider + 0]) || 0,
+      Number(siteXpos[3 * sidSlider + 1]) || 0,
+      Number(siteXpos[3 * sidSlider + 2]) || 0,
+    );
+    const rodLen = Math.max(1e-4, Number(crankLength[i]) || crank.distanceTo(slider));
+    const rod = crank.clone().sub(slider);
+    const dir = rod.lengthSq() > 1e-12 ? rod.clone().normalize() : new THREE.Vector3(1, 0, 0);
+    const mesh = addMesh();
+    const mid = crank.clone().add(slider).multiplyScalar(0.5);
+    mesh.position.copy(mid);
+    mesh.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, dir);
+    const width = Math.max(1e-4, meanSize * 0.025 * scl);
+    const length = Math.max(1e-4, rodLen);
+    mesh.scale.set(width, length, width);
+    const broken = rod.length() > rodLen * 1.2;
+    const mat = mesh.material;
+    if (mat) {
+      mat.color.setHex(broken ? brokenColorHex : colorHex);
+      mat.opacity = opacity;
+      mat.transparent = opacity < 0.999;
+      mat.needsUpdate = true;
+    }
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  group.visible = used > 0;
+}
 function ensurePerturbHelpers(ctx) {
   const worldScene = getWorldScene(ctx);
   if (!ctx || !worldScene) return;
@@ -2521,9 +3452,14 @@ function renderScene(snapshot, state) {
   if (!snapshot || !state) return;
   const context = initRenderer();
   if (!context.initialized) return;
+  if (typeof window !== 'undefined') {
+    window.__renderCtx = context;
+  }
   const renderer = context.renderer;
   const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
-  const voptFlags = Array.isArray(state.rendering?.voptFlags) ? state.rendering.voptFlags : [];
+  const voptFlags = Array.isArray(state.rendering?.voptFlags)
+    ? state.rendering.voptFlags
+    : (Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : (getDefaultVopt(context, state) || []));
   const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
   const presetMode = (state?.visualSourceMode ?? 'model') === 'preset';
   const skyboxFlag = sceneFlags[4] !== false;
@@ -2979,7 +3915,7 @@ function renderScene(snapshot, state) {
     const bodyIdView = state?.model?.geomBodyId || null;
     const geomNameLookup = createGeomNameLookup(state?.model?.geoms);
 
-    const overlayOptions = {
+  const overlayOptions = {
       geomGroupIds,
       geomGroupMask,
       hideAllGeometry,
@@ -2988,7 +3924,36 @@ function renderScene(snapshot, state) {
     };
     updateFrameOverlays(context, snapshot, state, overlayOptions);
     updateLabelOverlays(context, snapshot, state, overlayOptions);
-    updatePerturbOverlay(context, snapshot, state, overlayOptions);
+    const showCamera = voptEnabled(voptFlags, MJ_VIS.CAMERA);
+    const showLight = voptEnabled(voptFlags, MJ_VIS.LIGHT);
+    const showCom = voptEnabled(voptFlags, MJ_VIS.COM);
+    const showJoint = voptEnabled(voptFlags, MJ_VIS.JOINT);
+    const showActuator = voptEnabled(voptFlags, MJ_VIS.ACTUATOR);
+    const showRangefinder = voptEnabled(voptFlags, MJ_VIS.RANGEFINDER);
+    const showConstraint = voptEnabled(voptFlags, MJ_VIS.CONSTRAINT);
+    const perturbEnabled = voptEnabled(voptFlags, MJ_VIS.PERTFORCE) || voptEnabled(voptFlags, MJ_VIS.PERTOBJ);
+
+    if (showCamera) updateCameraOverlays(context, snapshot, state);
+    else hideCameraGroup(context);
+    if (showLight) updateLightOverlays(context, snapshot, state);
+    else hideLightGroup(context);
+    if (showCom) updateComOverlays(context, snapshot, state);
+    else hideComGroup(context);
+    if (showJoint) updateJointOverlays(context, snapshot, state);
+    else hideJointGroup(context);
+    if (showActuator) updateActuatorOverlays(context, snapshot, state);
+    else hideActuatorGroup(context);
+    if (showActuator) updateSlidercrankOverlays(context, snapshot, state);
+    else hideSlidercrankGroup(context);
+    if (showRangefinder) updateRangefinderOverlays(context, snapshot, state);
+    else hideRangefinderGroup(context);
+    if (showConstraint) updateConstraintOverlays(context, snapshot, state);
+    else hideConstraintGroup(context);
+    if (perturbEnabled) updatePerturbOverlay(context, snapshot, state, overlayOptions);
+    else {
+      hidePerturbTranslate(context);
+      hidePerturbRotate(context);
+    }
 
     for (let i = 0; i < ngeom; i += 1) {
       const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
@@ -3066,7 +4031,12 @@ function renderScene(snapshot, state) {
       }
     }
 
-    updateSelectionOverlay(context, snapshot, state);
+    if (voptEnabled(voptFlags, MJ_VIS.SELECT)) {
+      updateSelectionOverlay(context, snapshot, state);
+    } else {
+      clearSelectionHighlight(context);
+      hideSelectionPoint(context);
+    }
 
     const stats = {
       drawn,

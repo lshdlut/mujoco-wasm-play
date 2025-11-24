@@ -1025,6 +1025,41 @@ function snapshot() {
   const xfrcView = sim.xfrcAppliedView?.();
   const qfrcView = sim.qfrcAppliedView?.();
   const sensordataView = sim.sensordataView?.();
+  const jntTypeView = sim.jntTypeView?.();
+  const jntPosView = sim.jntPosView?.();
+  const jntAxisView = sim.jntAxisView?.();
+  const jntBodyView = sim.jntBodyIdView?.();
+  const jointDebug = {
+    njnt: typeof sim.njnt === 'function' ? (sim.njnt() | 0) : null,
+    modelPtr: sim?.modelPtr ?? null,
+    dataPtr: sim?.dataPtr ?? null,
+    hasPos: !!jntPosView,
+    lenPos: jntPosView?.length || 0,
+    hasAxis: !!jntAxisView,
+    lenAxis: jntAxisView?.length || 0,
+    hasBody: !!jntBodyView,
+    lenBody: jntBodyView?.length || 0,
+  };
+  const actTrnidView = sim.actuatorTrnidView?.();
+  const actTrntypeView = sim.actuatorTrntypeView?.();
+  const actCrankView = sim.actuatorCranklengthView?.();
+  const siteXposView = sim.siteXposView?.();
+  const siteXmatView = sim.siteXmatView?.();
+  const sensorTypeView = sim.sensorTypeView?.();
+  const sensorObjIdView = sim.sensorObjIdView?.();
+  const eqTypeView = sim.eqTypeView?.();
+  const eqObj1View = sim.eqObj1IdView?.();
+  const eqObj2View = sim.eqObj2IdView?.();
+  const eqObjTypeView = sim.eqObjTypeView?.();
+  const eqDataView = sim.eqDataView?.();
+  const eqActiveView = sim.eqActiveView?.();
+  const bodyXposView = sim.bodyXposView?.();
+  const bodyXmatView = sim.bodyXmatView?.();
+  const bodyXiposView = sim.bodyXiposView?.();
+  const camXposView = sim.camXposView?.();
+  const camXmatView = sim.camXmatView?.();
+  const lightXposView = sim.lightXposView?.();
+  const lightXdirView = sim.lightXdirView?.();
   const tSim = sim.time?.() || 0;
   if (!diagStagesLogged.has('first_snapshot')) {
     logSimPointers('first_snapshot');
@@ -1092,6 +1127,13 @@ function snapshot() {
     nbody: nbodyLocal,
     xpos,
     xmat,
+    bxpos: bodyXposView ? new Float64Array(bodyXposView) : null,
+    bxmat: bodyXmatView ? new Float64Array(bodyXmatView) : null,
+    xipos: bodyXiposView ? new Float64Array(bodyXiposView) : null,
+    cam_xpos: camXposView ? new Float64Array(camXposView) : null,
+    cam_xmat: camXmatView ? new Float64Array(camXmatView) : null,
+    light_xpos: lightXposView ? new Float64Array(lightXposView) : null,
+    light_xdir: lightXdirView ? new Float64Array(lightXdirView) : null,
     gesture,
     drag,
     voptFlags: Array.isArray(voptFlags) ? [...voptFlags] : [],
@@ -1106,6 +1148,13 @@ function snapshot() {
     rate,
   };
   const transfers = [xpos.buffer, xmat.buffer];
+  if (msg.bxpos) transfers.push(msg.bxpos.buffer);
+  if (msg.bxmat) transfers.push(msg.bxmat.buffer);
+  if (msg.xipos) transfers.push(msg.xipos.buffer);
+  if (msg.cam_xpos) transfers.push(msg.cam_xpos.buffer);
+  if (msg.cam_xmat) transfers.push(msg.cam_xmat.buffer);
+  if (msg.light_xpos) transfers.push(msg.light_xpos.buffer);
+  if (msg.light_xdir) transfers.push(msg.light_xdir.buffer);
   const optionsStruct = readOptionStruct(mod, h);
   if (optionsStruct) {
     msg.options = optionsStruct;
@@ -1141,6 +1190,92 @@ function snapshot() {
     const gdataid = new Int32Array(gdataidView);
     msg.gdataid = gdataid;
     transfers.push(gdataid.buffer);
+  }
+  if (jntTypeView) {
+    const jtype = new Int32Array(jntTypeView);
+    msg.jtype = jtype;
+    transfers.push(jtype.buffer);
+  }
+  if (jntPosView) {
+    const jpos = new Float64Array(jntPosView);
+    msg.jpos = jpos;
+    transfers.push(jpos.buffer);
+  }
+  if (jntAxisView) {
+    const jaxis = new Float64Array(jntAxisView);
+    msg.jaxis = jaxis;
+    transfers.push(jaxis.buffer);
+  }
+  if (jntBodyView) {
+    const jbody = new Int32Array(jntBodyView);
+    msg.jbody = jbody;
+    transfers.push(jbody.buffer);
+  }
+  msg.debugJoint = jointDebug;
+  if (actTrnidView) {
+    const atrn = new Int32Array(actTrnidView);
+    msg.act_trnid = atrn;
+    transfers.push(atrn.buffer);
+  }
+  if (actTrntypeView) {
+    const atype = new Int32Array(actTrntypeView);
+    msg.act_trntype = atype;
+    transfers.push(atype.buffer);
+  }
+  if (actCrankView) {
+    const acrank = new Float64Array(actCrankView);
+    msg.act_cranklength = acrank;
+    transfers.push(acrank.buffer);
+  }
+  if (siteXposView) {
+    const sPos = new Float64Array(siteXposView);
+    msg.site_xpos = sPos;
+    transfers.push(sPos.buffer);
+  }
+  if (siteXmatView) {
+    const sMat = new Float64Array(siteXmatView);
+    msg.site_xmat = sMat;
+    transfers.push(sMat.buffer);
+  }
+  if (sensorTypeView) {
+    const stype = new Int32Array(sensorTypeView);
+    msg.sensor_type = stype;
+    transfers.push(stype.buffer);
+  }
+  if (sensorObjIdView) {
+    const sobj = new Int32Array(sensorObjIdView);
+    msg.sensor_objid = sobj;
+    transfers.push(sobj.buffer);
+  }
+  if (eqTypeView) {
+    const et = new Int32Array(eqTypeView);
+    msg.eq_type = et;
+    transfers.push(et.buffer);
+  }
+  if (eqObj1View) {
+    const eo1 = new Int32Array(eqObj1View);
+    msg.eq_obj1id = eo1;
+    transfers.push(eo1.buffer);
+  }
+  if (eqObj2View) {
+    const eo2 = new Int32Array(eqObj2View);
+    msg.eq_obj2id = eo2;
+    transfers.push(eo2.buffer);
+  }
+  if (eqObjTypeView) {
+    const eot = new Int32Array(eqObjTypeView);
+    msg.eq_objtype = eot;
+    transfers.push(eot.buffer);
+  }
+  if (eqDataView) {
+    const ed = new Float64Array(eqDataView);
+    msg.eq_data = ed;
+    transfers.push(ed.buffer);
+  }
+  if (eqActiveView) {
+    const ea = new Int32Array(eqActiveView);
+    msg.eq_active = ea;
+    transfers.push(ea.buffer);
   }
   if (matRgbaView) {
     const matrgba = new Float32Array(matRgbaView);

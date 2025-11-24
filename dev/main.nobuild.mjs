@@ -261,6 +261,9 @@ function applySnapshot(snapshot) {
   store.update((draft) => {
     mergeBackendSnapshot(draft, snapshot);
   });
+  if (typeof window !== 'undefined') {
+    window.__lastSnapshot = snapshot;
+  }
 }
 
 const initialSnapshot = await backend.snapshot();

@@ -1328,7 +1328,31 @@ function resolveSnapshot(state) {
     geom_bodyid: viewOrNull(state.geom_bodyid, Int32Array),
     body_jntadr: viewOrNull(state.body_jntadr, Int32Array),
     body_jntnum: viewOrNull(state.body_jntnum, Int32Array),
+    bxpos: viewOrNull(state.bxpos, Float64Array),
+    bxmat: viewOrNull(state.bxmat, Float64Array),
+    xipos: viewOrNull(state.xipos, Float64Array),
+    cam_xpos: viewOrNull(state.cam_xpos, Float64Array),
+    cam_xmat: viewOrNull(state.cam_xmat, Float64Array),
+    light_xpos: viewOrNull(state.light_xpos, Float64Array),
+    light_xdir: viewOrNull(state.light_xdir, Float64Array),
+    jpos: viewOrNull(state.jpos, Float64Array),
+    jaxis: viewOrNull(state.jaxis, Float64Array),
+    jbody: viewOrNull(state.jbody, Int32Array),
     jtype: viewOrNull(state.jtype, Int32Array),
+    act_trnid: viewOrNull(state.act_trnid, Int32Array),
+    act_trntype: viewOrNull(state.act_trntype, Int32Array),
+    act_cranklength: viewOrNull(state.act_cranklength, Float64Array),
+    site_xpos: viewOrNull(state.site_xpos, Float64Array),
+    site_xmat: viewOrNull(state.site_xmat, Float64Array),
+    sensor_type: viewOrNull(state.sensor_type, Int32Array),
+    sensor_objid: viewOrNull(state.sensor_objid, Int32Array),
+    eq_type: viewOrNull(state.eq_type, Int32Array),
+    eq_obj1id: viewOrNull(state.eq_obj1id, Int32Array),
+    eq_obj2id: viewOrNull(state.eq_obj2id, Int32Array),
+    eq_objtype: viewOrNull(state.eq_objtype, Int32Array),
+    eq_active: viewOrNull(state.eq_active, Int32Array),
+    eq_data: viewOrNull(state.eq_data, Float64Array),
+    debugJoint: state.debugJoint || null,
     matrgba: viewOrNull(state.matrgba, Float32Array),
     contacts:
       state.contacts && typeof state.contacts === 'object'
@@ -1681,6 +1705,31 @@ export async function createBackend(options = {}) {
     };
     lastSnapshot.xpos = makeView(data.xpos, new Float64Array(0), Float64Array);
     lastSnapshot.xmat = makeView(data.xmat, new Float64Array(0), Float64Array);
+    if (data.bxpos) lastSnapshot.bxpos = makeView(data.bxpos, null, Float64Array);
+    if (data.bxmat) lastSnapshot.bxmat = makeView(data.bxmat, null, Float64Array);
+    if (data.xipos) lastSnapshot.xipos = makeView(data.xipos, null, Float64Array);
+    if (data.jtype) lastSnapshot.jtype = makeView(data.jtype, null, Int32Array);
+    if (data.jpos) lastSnapshot.jpos = makeView(data.jpos, null, Float64Array);
+    if (data.jaxis) lastSnapshot.jaxis = makeView(data.jaxis, null, Float64Array);
+    if (data.jbody) lastSnapshot.jbody = makeView(data.jbody, null, Int32Array);
+    if (data.act_trnid) lastSnapshot.act_trnid = makeView(data.act_trnid, null, Int32Array);
+    if (data.act_trntype) lastSnapshot.act_trntype = makeView(data.act_trntype, null, Int32Array);
+    if (data.act_cranklength) lastSnapshot.act_cranklength = makeView(data.act_cranklength, null, Float64Array);
+    if (data.site_xpos) lastSnapshot.site_xpos = makeView(data.site_xpos, null, Float64Array);
+    if (data.site_xmat) lastSnapshot.site_xmat = makeView(data.site_xmat, null, Float64Array);
+    if (data.sensor_type) lastSnapshot.sensor_type = makeView(data.sensor_type, null, Int32Array);
+    if (data.sensor_objid) lastSnapshot.sensor_objid = makeView(data.sensor_objid, null, Int32Array);
+    if (data.eq_type) lastSnapshot.eq_type = makeView(data.eq_type, null, Int32Array);
+    if (data.eq_obj1id) lastSnapshot.eq_obj1id = makeView(data.eq_obj1id, null, Int32Array);
+    if (data.eq_obj2id) lastSnapshot.eq_obj2id = makeView(data.eq_obj2id, null, Int32Array);
+    if (data.eq_objtype) lastSnapshot.eq_objtype = makeView(data.eq_objtype, null, Int32Array);
+    if (data.eq_data) lastSnapshot.eq_data = makeView(data.eq_data, null, Float64Array);
+    if (data.eq_active) lastSnapshot.eq_active = makeView(data.eq_active, null, Int32Array);
+    if ('debugJoint' in data) lastSnapshot.debugJoint = data.debugJoint || null;
+    if (data.cam_xpos) lastSnapshot.cam_xpos = makeView(data.cam_xpos, null, Float64Array);
+    if (data.cam_xmat) lastSnapshot.cam_xmat = makeView(data.cam_xmat, null, Float64Array);
+    if (data.light_xpos) lastSnapshot.light_xpos = makeView(data.light_xpos, null, Float64Array);
+    if (data.light_xdir) lastSnapshot.light_xdir = makeView(data.light_xdir, null, Float64Array);
     lastSnapshot.gsize = makeView(data.gsize, null, Float64Array);
     lastSnapshot.gtype = makeView(data.gtype, null, Int32Array);
     lastSnapshot.gmatid = makeView(data.gmatid, null, Int32Array);
