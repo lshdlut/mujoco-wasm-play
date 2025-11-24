@@ -1208,6 +1208,23 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
     Number(viz.cursor?.[1]) || 0,
     Number(viz.cursor?.[2]) || 0,
   );
+  const cursorOffset = PERTURB_TEMP_DIR.copy(cursor).sub(anchor);
+  // If we have an active selection with a stored localPoint, recompute anchor in
+  // the geom's current space so it follows animated bodies instead of staying fixed.
+  const selection = state?.runtime?.selection;
+  if (selection && selection.geom >= 0 && Array.isArray(selection.localPoint) && selection.localPoint.length >= 3) {
+    const mesh = Array.isArray(ctx.meshes) ? ctx.meshes[selection.geom] : null;
+    if (mesh) {
+      anchor.set(
+        Number(selection.localPoint[0]) || 0,
+        Number(selection.localPoint[1]) || 0,
+        Number(selection.localPoint[2]) || 0,
+      );
+      mesh.localToWorld(anchor);
+      // Keep cursor relative offset so the overlay follows the moving geom.
+      cursor.copy(anchor).add(cursorOffset);
+    }
+  }
   const mode = String(viz.mode || 'translate');
   if (mode === 'rotate') {
     hidePerturbTranslate(ctx);
@@ -3337,9 +3354,6 @@ function updateSelectionOverlay(ctx, snapshot, state) {
   }
   applySelectionHighlight(ctx, mesh);
   const point = (() => {
-    if (Array.isArray(selection.point) && selection.point.length >= 3) {
-      return selection.point.map((n) => Number(n) || 0);
-    }
     if (Array.isArray(selection.localPoint) && selection.localPoint.length >= 3 && mesh.matrixWorld) {
       const lp = __TMP_VEC3_A.set(
         Number(selection.localPoint[0]) || 0,
@@ -3347,6 +3361,9 @@ function updateSelectionOverlay(ctx, snapshot, state) {
         Number(selection.localPoint[2]) || 0,
       );
       return lp.applyMatrix4(mesh.matrixWorld).toArray();
+    }
+    if (Array.isArray(selection.point) && selection.point.length >= 3) {
+      return selection.point.map((n) => Number(n) || 0);
     }
     return null;
   })();
