@@ -93,6 +93,7 @@ const {
   skyOverride,
   requestedMode,
   requestedModel,
+  skyDebugModeParam,
   hdriParam: hdriQueryParam,
 } = consumeViewerParams();
 
@@ -116,6 +117,7 @@ const { applyFallbackAppearance, ensureEnvIfNeeded } = createEnvironmentManager(
   skyOffParam,
   hdriQueryParam: hdriQueryParam,
   fallbackEnabledDefault,
+  skyDebugModeParam,
 });
 
 const rendererManager = createRendererManager({

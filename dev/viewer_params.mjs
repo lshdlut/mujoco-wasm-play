@@ -89,6 +89,7 @@ export function consumeViewerParams(params = viewerSearchParams) {
     hiddenIndexSet: readIndexSet('hide_index', params),
     skyOverride: readBoolean(['nosky', 'sky_off'], params),
     requestedModel: params.get('model'),
+    skyDebugModeParam: getParamToken('skydebug', params) || null,
     hdriParam: hdriParamRaw && hdriParamRaw.trim().length > 0
       ? hdriParamRaw
       : 'dist/assets/env/autumn_field_puresky_4k.hdr',

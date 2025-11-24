@@ -246,7 +246,7 @@ function applySkyboxVisibility(ctx, enabled, options = {}) {
   const useBlackBackground = options.useBlackOnDisable !== false;
   const skyEnabled = enabled !== false;
   if (!skyEnabled) {
-    if (ctx.sky) ctx.sky.visible = false;
+    if (ctx.skyShader) ctx.skyShader.visible = false;
     worldScene.environment = null;
     worldScene.background = new THREE.Color(useBlackBackground ? 0x000000 : DEFAULT_CLEAR_HEX);
     pushSkyDebug(ctx, { mode: 'disable', useBlack: useBlackBackground });
@@ -258,13 +258,20 @@ function applySkyboxVisibility(ctx, enabled, options = {}) {
     if (ctx.hdriBackground) {
       worldScene.background = ctx.hdriBackground;
     }
+    if (ctx.skyShader) ctx.skyShader.visible = false;
     pushSkyDebug(ctx, { mode: 'hdri', envRT: !!ctx.envRT, background: !!ctx.hdriBackground });
     return;
   }
-  if (ctx.sky && !ctx.envFromHDRI) {
-    ctx.sky.visible = true;
-    worldScene.background = ctx.sky;
-    pushSkyDebug(ctx, { mode: 'sky', skyVisible: true });
+  if (ctx.skyMode === 'shader' && ctx.skyShader) {
+    ctx.skyShader.visible = true;
+    worldScene.background = ctx.skyBackground || null;
+    pushSkyDebug(ctx, { mode: 'sky-dome', skyVisible: true, background: !!ctx.skyBackground });
+    return;
+  }
+  if (ctx.skyMode === 'cube') {
+    worldScene.background = ctx.skyBackground || ctx.skyCube || null;
+    if (ctx.skyShader) ctx.skyShader.visible = false;
+    pushSkyDebug(ctx, { mode: 'sky-cube', background: !!worldScene.background });
     return;
   }
   // If no sky resources exist, fall back to a solid clear colour
@@ -2425,7 +2432,12 @@ export function createRendererManager({
       hdriFailed: false,
       hdriLoadGen: 0,
       envDirty: true,
-      sky: null,
+      skyMode: null,
+      skyBackground: null,
+      skyCube: null,
+      skyShader: null,
+      skyPalette: null,
+      skyDebugMode: null,
       skyInit: false,
       _lastPresetMode: null,
       fallback: {
@@ -2474,11 +2486,11 @@ function renderScene(snapshot, state) {
       applyFallbackAppearance(context, state);
     }
     const worldScene = getWorldScene(context);
-    if (segmentEnabled) {
-      if (!context._segmentEnvBackup && worldScene) {
-        context._segmentEnvBackup = {
-          background: worldScene.background,
-          environment: worldScene.environment,
+      if (segmentEnabled) {
+        if (!context._segmentEnvBackup && worldScene) {
+          context._segmentEnvBackup = {
+            background: worldScene.background,
+            environment: worldScene.environment,
           shadowEnabled: context.renderer?.shadowMap?.enabled ?? null,
           toneExposure: context.renderer?.toneMappingExposure ?? null,
           light: context.light ? context.light.intensity : null,
@@ -2528,7 +2540,7 @@ function renderScene(snapshot, state) {
 
     const ground = context.ground;
     const groundData = ground?.userData?.infiniteGround || null;
-  const groundUniforms =
+    const groundUniforms =
       ground?.material?.userData?.infiniteUniforms
       || ground?.material?.uniforms
       || null;
@@ -2541,6 +2553,19 @@ function renderScene(snapshot, state) {
       const baseFade = Number(groundData?.baseFadePow);
       const defaultFade = Number.isFinite(baseFade) ? baseFade : 2.5;
       groundUniforms.uFadePow.value = hazeEnabled ? defaultFade : 1e-6;
+    }
+    // Avoid visible radial "mask" from the infinite ground quad:
+    // push fade-out far beyond typical scene extents so the plane
+    // behaves visually infinite in normal views.
+    const fadeRadius = groundDistance * 1000;
+    if (groundUniforms?.uFadeStart) {
+      groundUniforms.uFadeStart.value = 0;
+    }
+    if (groundUniforms?.uFadeEnd) {
+      groundUniforms.uFadeEnd.value = fadeRadius;
+    }
+    if (groundUniforms?.uQuadDistance) {
+      groundUniforms.uQuadDistance.value = fadeRadius;
     }
     const visStruct = state.model?.vis || null;
     const statStruct = state.model?.stat || null;
