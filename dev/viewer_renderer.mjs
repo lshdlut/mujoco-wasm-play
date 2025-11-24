@@ -1761,11 +1761,14 @@ function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
   mesh.userData = mesh.userData || {};
   mesh.userData.reflectance = reflectance;
   const baseIntensity = typeof ctx?.envIntensity === 'number' ? ctx.envIntensity : 0;
-  const active = reflectionEnabled ? reflectance : 0;
-  if (mesh.material && 'envMapIntensity' in mesh.material) {
-    mesh.material.envMapIntensity = baseIntensity * active;
-    mesh.material.needsUpdate = true;
+  const mat = mesh.material;
+  if (!mat || !('envMapIntensity' in mat)) return;
+  if (!('reflectanceBaseEnvIntensity' in mesh.userData)) {
+    mesh.userData.reflectanceBaseEnvIntensity = mat.envMapIntensity ?? 0;
   }
+  const active = reflectionEnabled && baseIntensity > 0 ? reflectance : 0;
+  mat.envMapIntensity = baseIntensity * active;
+  mat.needsUpdate = true;
 }
 
 function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}, state = null) {
