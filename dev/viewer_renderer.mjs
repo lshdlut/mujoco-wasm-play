@@ -3381,8 +3381,8 @@ function updateSelectionOverlay(ctx, snapshot, state) {
     : 0.2;
   const boundsRadius = Math.max(0.05, ctx?.bounds?.radius || 1);
   const radius = Math.max(0.003, boundsRadius * 0.0125 * scaleAll * selectScale);
-  const colorHex = rgbaToHex(rgbaStruct.force, SELECT_POINT_FALLBACK_COLOR);
-  const opacity = alphaFromArray(rgbaStruct.force, 1);
+  const colorHex = rgbaToHex(rgbaStruct.selectpoint, SELECT_POINT_FALLBACK_COLOR);
+  const opacity = alphaFromArray(rgbaStruct.selectpoint, 1);
   const normal = Array.isArray(selection.normal) && selection.normal.length >= 3
     ? __TMP_VEC3_B.set(
         Number(selection.normal[0]) || 0,
