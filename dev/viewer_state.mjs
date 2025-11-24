@@ -627,12 +627,10 @@ function mergeBackendSnapshot(draft, snapshot) {
     const rendering = ensureRenderingState(draft);
     rendering.frameMode = Math.max(0, snapshot.frameMode | 0);
   }
-  if (snapshot.renderAssets) {
-    const rendering = ensureRenderingState(draft);
-    rendering.assets = snapshot.renderAssets;
-    const backups = ensureVisualBackups(draft);
-    backups.renderAssets = snapshot.renderAssets;
-  }
+    if (snapshot.renderAssets) {
+      const rendering = ensureRenderingState(draft);
+      rendering.assets = snapshot.renderAssets;
+    }
   if (snapshot.scene) {
     // Persist scene snapshot for diagnostics / external tools
     draft.scene = snapshot.scene;
