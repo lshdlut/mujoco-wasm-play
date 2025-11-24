@@ -70,8 +70,6 @@ const PERTURB_COLOR_ROTATE = 0xffd1a6;
 const PERTURB_AXIS_DEFAULT = new THREE.Vector3(0, 1, 0);
 const PERTURB_RING_NORMAL = new THREE.Vector3(0, 0, 1);
 const PERTURB_RADIAL_DEFAULT = new THREE.Vector3(1, 0, 0);
-const PERTURB_ANCHOR_GEOMETRY = new THREE.SphereGeometry(0.04, 14, 10);
-const PERTURB_ANCHOR_COLOR = 0xff8a2b;
 const PERTURB_TEMP_ANCHOR = new THREE.Vector3();
 const PERTURB_TEMP_CURSOR = new THREE.Vector3();
 const PERTURB_TEMP_DIR = new THREE.Vector3();
@@ -83,7 +81,7 @@ const PERTURB_TEMP_QUAT = new THREE.Quaternion();
 const SELECTION_HIGHLIGHT_COLOR = new THREE.Color(0x40ff99);
 const SELECTION_EMISSIVE_COLOR = new THREE.Color(0x3aff3a);
 const SELECTION_OVERLAY_COLOR = new THREE.Color(0x66ffcc);
-const SELECT_POINT_FALLBACK_COLOR = 0xe6e619;
+const SELECT_POINT_FALLBACK_COLOR = 0xff8a2b;
 const PERTURB_COLOR_RING = 0xff8a2b;   // original ring color
 const PERTURB_COLOR_ARROW = 0xffb366;  // previous arrow color (lighter)
 
@@ -1148,22 +1146,6 @@ function ensurePerturbHelpers(ctx) {
     worldScene.add(group);
     ctx.perturbGroup = group;
   }
-  if (!ctx.perturbAnchor) {
-    const mat = new THREE.MeshBasicMaterial({
-      color: PERTURB_ANCHOR_COLOR,
-      transparent: true,
-      opacity: 0.85,
-      depthTest: true,
-      depthWrite: false,
-      toneMapped: false,
-      fog: false,
-    });
-    const mesh = new THREE.Mesh(PERTURB_ANCHOR_GEOMETRY, mat);
-    mesh.visible = false;
-    mesh.renderOrder = 58;
-    ctx.perturbGroup.add(mesh);
-    ctx.perturbAnchor = { mesh, material: mat };
-  }
   if (!ctx.perturbTranslate) {
     const material = new THREE.MeshBasicMaterial({
       color: PERTURB_COLOR_TRANSLATE,
@@ -1231,7 +1213,6 @@ function ensurePerturbHelpers(ctx) {
 function hidePerturbTranslate(ctx) {
   if (ctx?.perturbTranslate?.node) ctx.perturbTranslate.node.visible = false;
   if (ctx?.perturbTranslate?.line) ctx.perturbTranslate.line.visible = false;
-  if (ctx?.perturbAnchor?.mesh) ctx.perturbAnchor.mesh.visible = false;
 }
 
 function hidePerturbRotate(ctx) {
@@ -1396,14 +1377,6 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
       attr.needsUpdate = true;
       translate.line.geometry.computeBoundingSphere?.();
       translate.line.visible = true;
-    }
-    if (ctx.perturbAnchor?.mesh) {
-      ctx.perturbAnchor.mesh.visible = true;
-      ctx.perturbAnchor.mesh.position.copy(anchor);
-      const sceneRadius = Math.max(0.1, Number(bounds?.radius) || meanSizeFromState(state, ctx));
-      const scaleAll = scaleAllFactor(state);
-      const radius = Math.max(0.01, Math.min(0.06, sceneRadius * 0.04 * scaleAll));
-      ctx.perturbAnchor.mesh.scale.set(radius, radius, radius);
     }
   }
 }
