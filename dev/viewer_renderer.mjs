@@ -793,6 +793,14 @@ function scaleAllFactor(state) {
   return 1;
 }
 
+function meanSizeFromState(state, context = null) {
+  const statSize = Number(state?.model?.stat?.meansize);
+  if (Number.isFinite(statSize) && statSize > 0) return statSize;
+  const radius = Number(context?.bounds?.radius);
+  if (Number.isFinite(radius) && radius > 0) return radius;
+  return 1;
+}
+
 function warnOnce(cache, key, message) {
   if (!key || cache.has(key)) return;
   cache.add(key);
@@ -1015,6 +1023,16 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
   const pool = context.framePool;
   const bounds = options.bounds || context.bounds || null;
   const radius = Number.isFinite(bounds?.radius) ? bounds.radius : 1;
+  const meanSize = meanSizeFromState(state, context);
+  if (!Number.isFinite(context.frameBaseMeanSize) || context.frameBaseMeanSize <= 0) {
+    context.frameBaseMeanSize = Number.isFinite(meanSize) && meanSize > 0 ? meanSize : 1;
+  }
+  const baseMeanSize = Number.isFinite(context.frameBaseMeanSize) && context.frameBaseMeanSize > 0
+    ? context.frameBaseMeanSize
+    : 1;
+  const meanScale = Number.isFinite(meanSize) && meanSize > 0
+    ? (meanSize / baseMeanSize)
+    : 1;
   const scaleStruct = state?.model?.vis?.scale || {};
   const scaleAll = scaleAllFactor(state);
   const frameLengthScale = Number.isFinite(Number(scaleStruct.framelength)) && Number(scaleStruct.framelength) > 0
@@ -1075,10 +1093,10 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
         0, 0, 0, 1,
       );
       helper.quaternion.setFromRotationMatrix(TEMP_MAT4);
-      const axisScale = overlayScale(radius, 0.12, 0.1, 3) * 0.25 * scaleAll * frameLengthScale;
+      const axisScale = overlayScale(radius, 0.12, 0.1, 3) * 0.25 * scaleAll * frameLengthScale * meanScale;
       helper.scale.set(axisScale, axisScale, axisScale);
       if (helper.material && 'linewidth' in helper.material) {
-        helper.material.linewidth = frameWidthScale * scaleAll;
+        helper.material.linewidth = frameWidthScale * scaleAll * meanScale;
       }
     }
   } else if (mode === FRAME_MODES.WORLD) {
@@ -1086,10 +1104,10 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
     // Lift world frame slightly above ground to avoid z-fighting
     helper.position.set(0, 0, 0.01);
     helper.quaternion.set(0, 0, 0, 1);
-    const axisScale = overlayScale(radius, 0.25, 0.5, 5) * scaleAll * frameLengthScale;
+    const axisScale = overlayScale(radius, 0.25, 0.5, 5) * scaleAll * frameLengthScale * meanScale;
     helper.scale.set(axisScale, axisScale, axisScale);
     if (helper.material && 'linewidth' in helper.material) {
-      helper.material.linewidth = frameWidthScale * scaleAll;
+      helper.material.linewidth = frameWidthScale * scaleAll * meanScale;
     }
   } else {
     hideFrameGroup(context);
@@ -1382,7 +1400,7 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
     if (ctx.perturbAnchor?.mesh) {
       ctx.perturbAnchor.mesh.visible = true;
       ctx.perturbAnchor.mesh.position.copy(anchor);
-      const sceneRadius = Math.max(0.1, Number(bounds?.radius) || 1);
+      const sceneRadius = Math.max(0.1, Number(bounds?.radius) || meanSizeFromState(state, ctx));
       const scaleAll = scaleAllFactor(state);
       const radius = Math.max(0.01, Math.min(0.06, sceneRadius * 0.04 * scaleAll));
       ctx.perturbAnchor.mesh.scale.set(radius, radius, radius);
@@ -2673,12 +2691,8 @@ function renderScene(snapshot, state) {
     // Contact overlays: points (flags[14]) and force arrows (flags[16]).
     const contacts = snapshot.contacts || null;
     const visScale = visStruct?.scale || {};
-    const boundsRadius = Math.max(0.1, context.bounds?.radius || 1);
-    const meanSize = (() => {
-      const value = Number(statStruct?.meansize);
-      if (Number.isFinite(value) && value > 1e-6) return value;
-      return boundsRadius;
-    })();
+    const meanSize = meanSizeFromState(state, context);
+    const boundsRadius = Math.max(0.1, context.bounds?.radius || meanSize || 1);
     if (contactPointEnabled && contacts && typeof contacts.n === 'number' && !contacts.pos) {
       try { console.warn('[render] contact points enabled but no position array in snapshot; n=', contacts.n); } catch {}
     }
@@ -3428,7 +3442,7 @@ function updateSelectionOverlay(ctx, snapshot, state) {
   if (!overlay) return;
   const scaleStruct = state?.model?.vis?.scale || {};
   const rgbaStruct = state?.model?.vis?.rgba || {};
-  const scaleAll = Number.isFinite(Number(scaleStruct.all)) ? Math.max(1e-6, Number(scaleStruct.all)) : 1;
+  const scaleAll = scaleAllFactor(state);
   const selectScale = Number.isFinite(Number(scaleStruct.selectpoint)) && Number(scaleStruct.selectpoint) > 0
     ? Number(scaleStruct.selectpoint)
     : 0.2;
