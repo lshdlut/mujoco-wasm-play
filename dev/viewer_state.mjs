@@ -2636,6 +2636,11 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
   if (!snapshot) {
     throw new Error('Unable to resolve backend snapshot for visual source switch');
   }
+  const baselineVisual = snapshot.visualDefaults
+    ? cloneStruct(snapshot.visualDefaults)
+    : snapshot.visual
+    ? cloneStruct(snapshot.visual)
+    : null;
   const currentVisual = snapshot.visual
     ? cloneStruct(snapshot.visual)
     : snapshot.visualDefaults
@@ -2645,69 +2650,50 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
   store.update((draft) => {
     const backups = ensureVisualBackups(draft);
     const baselines = ensureVisualBaselines(draft);
-    if (!baselines.model) {
-      if (snapshot.visualDefaults) {
-        baselines.model = cloneStruct(snapshot.visualDefaults);
-        baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
-      } else if (snapshot.visual) {
-        baselines.model = cloneStruct(snapshot.visual);
-        baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
-      }
+    if (!baselines.model && baselineVisual) {
+      baselines.model = cloneStruct(baselineVisual);
+      baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
     }
     if (!baselines.preset && baselines.model) {
       baselines.preset = applyPresetOverridesToStruct(baselines.model);
       baselines.sceneFlagsPreset = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
     }
     if (currentMode === 'preset') {
-      backups.preset = cloneStruct(currentVisual);
-      backups.sceneFlagsPreset = currentSceneFlags ? [...currentSceneFlags] : null;
+      backups.preset = cloneStruct(currentVisual) || cloneStruct(baselines.preset) || null;
+      backups.sceneFlagsPreset = currentSceneFlags
+        ? [...currentSceneFlags]
+        : baselines.sceneFlagsPreset
+        ? [...baselines.sceneFlagsPreset]
+        : null;
     } else {
-      backups.model = cloneStruct(currentVisual);
-      backups.sceneFlagsModel = currentSceneFlags ? [...currentSceneFlags] : null;
+      backups.model = cloneStruct(currentVisual) || cloneStruct(baselines.model) || null;
+      backups.sceneFlagsModel = currentSceneFlags
+        ? [...currentSceneFlags]
+        : baselines.sceneFlagsModel
+        ? [...baselines.sceneFlagsModel]
+        : null;
     }
   });
   const updatedState = store.get();
   const backups = ensureVisualBackups(updatedState);
   const baselines = ensureVisualBaselines(updatedState);
-  let targetVisual =
-    targetMode === 'preset' ? cloneStruct(backups.preset) : cloneStruct(backups.model);
-  let targetSceneFlags =
+  const targetCache = targetMode === 'preset' ? backups.preset : backups.model;
+  const targetVisual =
+    cloneStruct(targetCache) ||
+    cloneStruct(targetMode === 'preset' ? baselines.preset : baselines.model) ||
+    {};
+  const targetSceneFlags =
     targetMode === 'preset'
       ? Array.isArray(backups.sceneFlagsPreset)
         ? [...backups.sceneFlagsPreset]
-        : null
+        : baselines.sceneFlagsPreset
+        ? [...baselines.sceneFlagsPreset]
+        : normaliseSceneFlagArray(null)
       : Array.isArray(backups.sceneFlagsModel)
       ? [...backups.sceneFlagsModel]
-      : null;
-  let seedTargetVisual = false;
-  let seedTargetSceneFlags = false;
-  if (!targetVisual) {
-    const fallbackBase =
-      targetMode === 'preset'
-        ? baselines.preset || (baselines.model ? applyPresetOverridesToStruct(baselines.model) : null)
-        : baselines.model;
-    if (fallbackBase) {
-      targetVisual = cloneStruct(fallbackBase);
-      seedTargetVisual = true;
-    }
-  }
-  if (!targetSceneFlags) {
-    const fallbackFlags =
-      targetMode === 'preset'
-        ? baselines.sceneFlagsPreset || baselines.sceneFlagsModel
-        : baselines.sceneFlagsModel;
-    if (fallbackFlags) {
-      targetSceneFlags = [...fallbackFlags];
-      seedTargetSceneFlags = true;
-    } else {
-      targetSceneFlags = normaliseSceneFlagArray(null);
-      seedTargetSceneFlags = true;
-    }
-  }
-  if (!targetVisual) {
-    targetVisual = {};
-    seedTargetVisual = true;
-  }
+      : baselines.sceneFlagsModel
+      ? [...baselines.sceneFlagsModel]
+      : normaliseSceneFlagArray(null);
   const diagnostics = computeVisualGroupDiffs(
     backups.model || baselines.model || {},
     backups.preset || baselines.preset || applyPresetOverridesToStruct(baselines.model || {}),

@@ -77,6 +77,7 @@ function detachEnvironment(ctx) {
     worldScene.background = null;
   }
   if (ctx.skyShader) ctx.skyShader.visible = false;
+  ctx.envIntensity = 0;
   ctx.skyMode = null;
   ctx.skyBackground = null;
   ctx.skyCube = null;
@@ -91,6 +92,7 @@ function ensureModelGradientEnv(ctx, THREE_NS) {
     worldScene.environment = cached.envRT.texture || null;
     worldScene.background = cached.background;
     ctx.envRT = cached.envRT;
+    ctx.envIntensity = 1.0;
     ctx.envFromHDRI = false;
     ctx.hdriReady = false;
     ctx.envDirty = false;
@@ -106,6 +108,7 @@ function ensureModelGradientEnv(ctx, THREE_NS) {
   worldScene.background = gradTex;
   worldScene.environment = envRT?.texture || null;
   ctx.envRT = envRT;
+  ctx.envIntensity = 1.0;
   ctx.skyBackground = gradTex;
   ctx.skyMode = 'cube';
   if (ctx.skyShader) ctx.skyShader.visible = false;
@@ -224,6 +227,7 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
     worldScene.environment = cachedModel.envRT.texture || null;
     worldScene.background = cachedModel.background;
     ctx.envRT = cachedModel.envRT;
+    ctx.envIntensity = 1.0;
     ctx.skyBackground = cachedModel.background;
     ctx.skyMode = 'shader';
     ctx.skyPalette = cachedModel.palette || null;
@@ -239,6 +243,7 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
     worldScene.background = cachedModel.cube;
     if (ctx.skyShader) ctx.skyShader.visible = false;
     ctx.envRT = cachedModel.envRT;
+    ctx.envIntensity = 1.0;
     ctx.skyBackground = cachedModel.cube;
     ctx.skyMode = 'cube';
     ctx.skyCube = cachedModel.cube;
@@ -277,6 +282,7 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
       worldScene.background = background;
     }
     ctx.envRT = envRT || null;
+    ctx.envIntensity = 1.0;
     ctx.skyBackground = background;
     ctx.skyMode = 'shader';
     ctx.skyPalette = palette;
@@ -311,6 +317,7 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
   }
   if (ctx.skyShader) ctx.skyShader.visible = false;
   ctx.envRT = envRT;
+  ctx.envIntensity = 1.0;
   ctx.skyBackground = cube;
   ctx.skyMode = 'cube';
   ctx.skyCube = cube;
@@ -788,6 +795,7 @@ function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
   if (allowHDRI && cachedPreset?.envRT && cachedPreset.background) {
     ctx.envRT = cachedPreset.envRT;
     ctx.hdriBackground = cachedPreset.background;
+    ctx.envIntensity = preset?.envIntensity ?? 1.6;
     ctx.envFromHDRI = true;
     ctx.hdriReady = true;
     ctx.hdriActiveKey = cachedPreset.key || null;
@@ -943,6 +951,7 @@ function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
       worldScene.environment = envRT?.texture || null;
       worldScene.background = grad;
       ctx.envRT = envRT;
+      ctx.envIntensity = preset?.envIntensity ?? 1.6;
       ctx.hdriBackground = grad;
       ctx.envFromHDRI = false;
       ctx.hdriReady = true;
