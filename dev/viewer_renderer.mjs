@@ -70,6 +70,8 @@ const PERTURB_COLOR_ROTATE = 0xffd1a6;
 const PERTURB_AXIS_DEFAULT = new THREE.Vector3(0, 1, 0);
 const PERTURB_RING_NORMAL = new THREE.Vector3(0, 0, 1);
 const PERTURB_RADIAL_DEFAULT = new THREE.Vector3(1, 0, 0);
+const PERTURB_ANCHOR_GEOMETRY = new THREE.SphereGeometry(0.04, 14, 10);
+const PERTURB_ANCHOR_COLOR = 0xff8a2b;
 const PERTURB_TEMP_ANCHOR = new THREE.Vector3();
 const PERTURB_TEMP_CURSOR = new THREE.Vector3();
 const PERTURB_TEMP_DIR = new THREE.Vector3();
@@ -785,6 +787,12 @@ function overlayScale(radius, factor, min = 0.05, max = 2) {
   return Math.min(max, Math.max(min, r * factor));
 }
 
+function scaleAllFactor(state) {
+  const value = Number(state?.model?.vis?.scale?.all);
+  if (Number.isFinite(value) && value > 1e-6) return value;
+  return 1;
+}
+
 function warnOnce(cache, key, message) {
   if (!key || cache.has(key)) return;
   cache.add(key);
@@ -1007,6 +1015,14 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
   const pool = context.framePool;
   const bounds = options.bounds || context.bounds || null;
   const radius = Number.isFinite(bounds?.radius) ? bounds.radius : 1;
+  const scaleStruct = state?.model?.vis?.scale || {};
+  const scaleAll = scaleAllFactor(state);
+  const frameLengthScale = Number.isFinite(Number(scaleStruct.framelength)) && Number(scaleStruct.framelength) > 0
+    ? Number(scaleStruct.framelength)
+    : 1;
+  const frameWidthScale = Number.isFinite(Number(scaleStruct.framewidth)) && Number(scaleStruct.framewidth) > 0
+    ? Number(scaleStruct.framewidth)
+    : 1;
   let used = 0;
   const addHelper = () => {
     let helper = pool[used];
@@ -1059,16 +1075,22 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
         0, 0, 0, 1,
       );
       helper.quaternion.setFromRotationMatrix(TEMP_MAT4);
-      const axisScale = overlayScale(radius, 0.12, 0.1, 3) * 0.25;
+      const axisScale = overlayScale(radius, 0.12, 0.1, 3) * 0.25 * scaleAll * frameLengthScale;
       helper.scale.set(axisScale, axisScale, axisScale);
+      if (helper.material && 'linewidth' in helper.material) {
+        helper.material.linewidth = frameWidthScale * scaleAll;
+      }
     }
   } else if (mode === FRAME_MODES.WORLD) {
     const helper = addHelper();
     // Lift world frame slightly above ground to avoid z-fighting
     helper.position.set(0, 0, 0.01);
     helper.quaternion.set(0, 0, 0, 1);
-    const axisScale = overlayScale(radius, 0.25, 0.5, 5);
+    const axisScale = overlayScale(radius, 0.25, 0.5, 5) * scaleAll * frameLengthScale;
     helper.scale.set(axisScale, axisScale, axisScale);
+    if (helper.material && 'linewidth' in helper.material) {
+      helper.material.linewidth = frameWidthScale * scaleAll;
+    }
   } else {
     hideFrameGroup(context);
     warnOnce(FRAME_MODE_WARNINGS, mode, '[render] Frame mode not yet supported in viewer (pending data)');
@@ -1107,6 +1129,22 @@ function ensurePerturbHelpers(ctx) {
     group.name = 'overlay:perturb';
     worldScene.add(group);
     ctx.perturbGroup = group;
+  }
+  if (!ctx.perturbAnchor) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: PERTURB_ANCHOR_COLOR,
+      transparent: true,
+      opacity: 0.85,
+      depthTest: true,
+      depthWrite: false,
+      toneMapped: false,
+      fog: false,
+    });
+    const mesh = new THREE.Mesh(PERTURB_ANCHOR_GEOMETRY, mat);
+    mesh.visible = false;
+    mesh.renderOrder = 58;
+    ctx.perturbGroup.add(mesh);
+    ctx.perturbAnchor = { mesh, material: mat };
   }
   if (!ctx.perturbTranslate) {
     const material = new THREE.MeshBasicMaterial({
@@ -1175,6 +1213,7 @@ function ensurePerturbHelpers(ctx) {
 function hidePerturbTranslate(ctx) {
   if (ctx?.perturbTranslate?.node) ctx.perturbTranslate.node.visible = false;
   if (ctx?.perturbTranslate?.line) ctx.perturbTranslate.line.visible = false;
+  if (ctx?.perturbAnchor?.mesh) ctx.perturbAnchor.mesh.visible = false;
 }
 
 function hidePerturbRotate(ctx) {
@@ -1339,6 +1378,14 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
       attr.needsUpdate = true;
       translate.line.geometry.computeBoundingSphere?.();
       translate.line.visible = true;
+    }
+    if (ctx.perturbAnchor?.mesh) {
+      ctx.perturbAnchor.mesh.visible = true;
+      ctx.perturbAnchor.mesh.position.copy(anchor);
+      const sceneRadius = Math.max(0.1, Number(bounds?.radius) || 1);
+      const scaleAll = scaleAllFactor(state);
+      const radius = Math.max(0.01, Math.min(0.06, sceneRadius * 0.04 * scaleAll));
+      ctx.perturbAnchor.mesh.scale.set(radius, radius, radius);
     }
   }
 }
@@ -1763,11 +1810,13 @@ function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
   const baseIntensity = typeof ctx?.envIntensity === 'number' ? ctx.envIntensity : 0;
   const mat = mesh.material;
   if (!mat || !('envMapIntensity' in mat)) return;
-  if (!('reflectanceBaseEnvIntensity' in mesh.userData)) {
-    mesh.userData.reflectanceBaseEnvIntensity = mat.envMapIntensity ?? 0;
+  if (!('reflectanceBaseEnvIntensity' in mesh.userData) || mesh.userData.reflectanceBaseEnvIntensity == null) {
+    mesh.userData.reflectanceBaseEnvIntensity = typeof mat.envMapIntensity === 'number' ? mat.envMapIntensity : 0;
   }
-  const active = reflectionEnabled && baseIntensity > 0 ? reflectance : 0;
-  mat.envMapIntensity = baseIntensity * active;
+  const active = reflectionEnabled && baseIntensity > 0 && reflectance > 0 ? reflectance : null;
+  mat.envMapIntensity = active != null
+    ? baseIntensity * active
+    : mesh.userData.reflectanceBaseEnvIntensity || 0;
   mat.needsUpdate = true;
 }
 
@@ -2635,18 +2684,18 @@ function renderScene(snapshot, state) {
     }
     if (contactPointEnabled && contacts && contacts.pos && typeof contacts.n === 'number') {
       // Ensure overlay group
-      if (!context.contactGroup) {
-        context.contactGroup = new THREE.Group();
-        context.contactGroup.name = 'overlay:contacts';
-        const worldScene = getWorldScene(context);
-        if (worldScene) worldScene.add(context.contactGroup);
+    if (!context.contactGroup) {
+      context.contactGroup = new THREE.Group();
+      context.contactGroup.name = 'overlay:contacts';
+      const worldScene = getWorldScene(context);
+      if (worldScene) worldScene.add(context.contactGroup);
         context.contactPool = [];
       }
       const group = context.contactGroup;
       const pool = context.contactPool || [];
       const n = Math.max(0, contacts.n | 0);
       // Contact visual size scales by vis.scale.{contactwidth,contactheight} * vis.scale.all * meansize.
-      const scaleAll = Number.isFinite(Number(visScale?.all)) ? Math.max(1e-6, Number(visScale.all)) : 1;
+      const scaleAll = scaleAllFactor(state);
       const base = Math.max(1e-6, meanSize * scaleAll);
       const widthScale = Number(visScale?.contactwidth);
       const heightScale = Number(visScale?.contactheight);
@@ -2757,6 +2806,7 @@ function renderScene(snapshot, state) {
           if (Number.isFinite(value) && value > 1e-9) return value;
           return 1;
         })();
+        const scaleAll = scaleAllFactor(state);
         const mapForce = (() => {
           const value = Number(visStruct?.map?.force);
           if (Number.isFinite(value) && value > 0) return value;
@@ -2767,11 +2817,11 @@ function renderScene(snapshot, state) {
           if (Number.isFinite(value) && value > 0) return value;
           return 0.1;
         })();
-        const shaftRadius = Math.max(meanSize * 0.015, forceWidthScale * meanSize * 0.5, 0.008);
+        const shaftRadius = Math.max(meanSize * 0.015, forceWidthScale * meanSize * 0.5, 0.008) * scaleAll;
         const minLength = Math.max(shaftRadius * 2.5, meanSize * 0.02);
         const fallbackLength = Math.max(minLength, shaftRadius * 3);
         const maxLength = Math.max(meanSize * 6, (context.bounds?.radius || meanSize) * 8);
-        const lengthScale = mapForce / meanMass;
+        const lengthScale = (mapForce / meanMass) * scaleAll;
         const frame = ArrayBuffer.isView(contacts.frame) ? contacts.frame : null;
         const force = ArrayBuffer.isView(contacts.force) ? contacts.force : null;
       const rgbaContactForce = visStruct?.rgba?.contactforce;

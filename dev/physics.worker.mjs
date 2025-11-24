@@ -1106,8 +1106,7 @@ function snapshot() {
     rate,
   };
   const transfers = [xpos.buffer, xmat.buffer];
-  const optSup = (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] };
-  const optionsStruct = optSup.supported ? readOptionStruct(mod, h) : null;
+  const optionsStruct = readOptionStruct(mod, h);
   if (optionsStruct) {
     msg.options = optionsStruct;
   }

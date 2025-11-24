@@ -378,6 +378,7 @@ function normaliseControlValue(control, raw) {
     case 'slider_num':
     case 'slidernum':
       return toNumber(raw);
+    case 'edit_vec3':
     case 'edit_vec3_string': {
       if (Array.isArray(raw)) {
         return raw.map((value) => toNumber(value));
@@ -393,7 +394,6 @@ function normaliseControlValue(control, raw) {
       }
       return raw ?? '';
     }
-    case 'edit_vec3':
     case 'edit_rgba':
       if (Array.isArray(raw)) {
         return raw.map((value) => String(value ?? '')).join(' ');
@@ -1602,6 +1602,9 @@ export async function createBackend(options = {}) {
     if (data.groups && typeof data.groups === 'object') {
       lastSnapshot.groups = normaliseGroupState(data.groups);
     }
+    if (data.options) {
+      lastSnapshot.options = data.options;
+    }
   }
 
   function setRunState(run, source = 'ui', notifyBackend = true) {
@@ -1933,10 +1936,13 @@ export async function createBackend(options = {}) {
             ...data.drag,
           };
         }
-    applyOptionSnapshot(data);
-    notifyListeners();
-    break;
-  }
+        if (data.options) {
+          lastSnapshot.options = data.options;
+        }
+        applyOptionSnapshot(data);
+        notifyListeners();
+        break;
+      }
   case 'render_assets':
     if (data.assets) {
       lastSnapshot.renderAssets = data.assets;

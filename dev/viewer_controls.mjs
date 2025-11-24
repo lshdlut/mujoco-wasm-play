@@ -42,24 +42,9 @@ export function createControlManager({
   }
 
   function applyOptionAvailability(control, element) {
-    if (!element) return;
-    if (!isOptionBinding(control)) return;
-    const support = getOptionSupport();
-    const enabled = !!support.supported;
-    element.disabled = !enabled;
-    if (!enabled) {
-      element.classList.add('is-disabled');
-      const pointers = Array.isArray(support.pointers) && support.pointers.length > 0
-        ? support.pointers.join(', ')
-        : 'mjOption pointer exports';
-      element.title = `mjOption editing unavailable: Forge build missing ${pointers}`;
-      if ('placeholder' in element) {
-        element.placeholder = element.placeholder || 'unsupported';
-      }
-    } else {
-      element.classList.remove('is-disabled');
-      element.title = '';
-    }
+    // Keep option inputs always editable and avoid injecting placeholders;
+    // mirrors visualization/headlight behavior (pure state-driven value).
+    return;
   }
 
 function formatNumber(value) {
@@ -1093,7 +1078,11 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       },
     });
 
-    if (control.default !== undefined) {
+    // Seed with current state value if present; fallback to default only when the state is empty.
+    const current = readControlValue(store.get(), control);
+    if (current !== undefined && current !== null) {
+      binding.setValue(current);
+    } else if (control.default !== undefined) {
       if (mode === 'text' && typeof control.default === 'string') {
         input.placeholder = String(control.default);
       } else if (typeof control.default === 'number') {
@@ -1195,7 +1184,10 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       },
     });
 
-    if (control.default !== undefined) {
+    const currentVector = readControlValue(store.get(), control);
+    if (currentVector !== undefined && currentVector !== null) {
+      binding.setValue(currentVector);
+    } else if (control.default !== undefined) {
       if (typeof control.default === 'string') {
         input.placeholder = control.default;
       } else if (Array.isArray(control.default)) {
@@ -1258,6 +1250,13 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     const targetLength = 3;
     let lastValidText = '';
 
+    const formatNumber = (num) => {
+      if (!Number.isFinite(num)) return '';
+      // Keep a stable, short representation similar to other vector inputs
+      const fixed = Number(num).toPrecision(6);
+      const trimmed = fixed.replace(/\.?0+$/, '');
+      return trimmed;
+    };
     const formatVector = (vec) => vec.map(formatNumber).join(' ');
     const parseVec3 = (value) => {
       if (Array.isArray(value)) {
@@ -1303,12 +1302,11 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       },
     });
 
-    if (control.default !== undefined) {
-      if (typeof control.default === 'string') {
-        input.placeholder = control.default;
-      } else if (Array.isArray(control.default)) {
-        binding.setValue(control.default);
-      }
+    const current = readControlValue(store.get(), control);
+    if (current !== undefined && current !== null) {
+      binding.setValue(current);
+    } else if (control.default !== undefined && Array.isArray(control.default)) {
+      binding.setValue(control.default);
     }
 
     const showInvalid = () => {
@@ -1543,7 +1541,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     edit_float: (container, control) => renderEditInput(container, control, 'float'),
     edit_text: (container, control) => renderEditInput(container, control, 'text'),
     edit_vec2: (container, control) => renderVectorInput(container, control, 2),
-    edit_vec3: (container, control) => renderVectorInput(container, control, 3),
+    edit_vec3: (container, control) => renderVec3StringInput(container, control),
     edit_vec3_string: (container, control) => renderVec3StringInput(container, control),
     edit_vec5: (container, control) => renderVectorInput(container, control, 5),
     edit_rgba: (container, control) => renderVectorInput(container, control, 4),

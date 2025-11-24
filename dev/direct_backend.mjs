@@ -1477,10 +1477,10 @@ class DirectBackend {
       if (Number.isFinite(this.keySliderIndex)) {
         msg.keyIndex = this.keySliderIndex | 0;
       }
-      const optionsStruct = this.optionSupport.supported ? readOptionStruct(this.mod, this.handle | 0) : null;
-    if (optionsStruct) {
-      msg.options = optionsStruct;
-    }
+      const optionsStruct = readOptionStruct(this.mod, this.handle | 0);
+      if (optionsStruct) {
+        msg.options = optionsStruct;
+      }
     if (ctrlArray) {
       msg.ctrl = ctrlArray;
       if (this.debug && !this._loggedCtrlSample) {
