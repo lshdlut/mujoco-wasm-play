@@ -56,6 +56,12 @@ let renderAssets = null;
 let frameSeq = 0;
 let optionSupport = { supported: false, pointers: [] };
 const diagStagesLogged = new Set();
+let lastSyncWallTime = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+let lastSyncSimTime = 0;
+let simTimeApprox = 0;
+let hasLoggedNoSim = false;
+
+const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
 
 const snapshotDebug = (() => {
   if (typeof self !== 'undefined') {
@@ -104,6 +110,21 @@ function setRunning(next, source = 'backend', notify = true) {
   const target = !!next;
   const changed = running !== target;
   running = target;
+  if (running && changed) {
+    const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+    let tSim = 0;
+    try {
+      if (sim && typeof sim.time === 'function') {
+        tSim = sim.time() || 0;
+      } else {
+        tSim = simTimeApprox || 0;
+      }
+    } catch {
+      tSim = simTimeApprox || 0;
+    }
+    lastSyncWallTime = nowSec;
+    lastSyncSimTime = tSim;
+  }
   if (notify && changed) {
     try {
       postMessage({ kind: 'run_state', running: target, source });
@@ -1413,10 +1434,16 @@ function collectAssetBuffersForTransfer(assets) {
   return buffers;
 }
 
-// Physics fixed-step timer (decoupled from render)
-let lastSimNow = performance.now();
+// Physics fixed-step timer (decoupled from render, simulate-like time management)
 setInterval(() => {
   if (!mod || !h || !running) return;
+  if (!sim || typeof sim.step !== 'function') {
+    if (!hasLoggedNoSim) {
+      try { console.error('[physics.worker] sim is not available, cannot step simulation'); } catch {}
+      hasLoggedNoSim = true;
+    }
+    return;
+  }
   // Flush pending control writes (coalesce burst updates)
   try {
     if (pendingCtrl.size && sim) {
@@ -1440,26 +1467,43 @@ setInterval(() => {
       }
     }
   } catch {}
-  const now = performance.now();
-  let acc = Math.min(0.1, (now - lastSimNow) / 1000) * rate;
-  lastSimNow = now;
-  let guard = 0;
-  while (acc >= dt && guard < 1000) {
-    try {
-      if (sim) {
-        sim.step(1);
-      } else if (mod && h) {
-        const modelPtr = typeof mod._mjwf_helper_model_ptr === 'function' ? (mod._mjwf_helper_model_ptr(h) | 0) : 0;
-        const dataPtr = typeof mod._mjwf_helper_data_ptr === 'function' ? (mod._mjwf_helper_data_ptr(h) | 0) : 0;
-        const stepFn = mod._mjwf_mj_step;
-        if (stepFn && modelPtr && dataPtr) {
-          stepFn.call(mod, modelPtr, dataPtr);
-        }
-      }
-    } catch {}
-    acc -= dt;
-    guard += 1;
+  const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+  let wallDelta = nowSec - lastSyncWallTime;
+  if (!(wallDelta > 0)) return;
+  if (wallDelta > MAX_WALL_DELTA) {
+    wallDelta = MAX_WALL_DELTA;
   }
+  let currentSim = 0;
+  try {
+    if (sim && typeof sim.time === 'function') {
+      currentSim = sim.time() || 0;
+    } else {
+      currentSim = simTimeApprox || 0;
+    }
+  } catch {
+    currentSim = simTimeApprox || 0;
+  }
+  const targetSim = lastSyncSimTime + wallDelta * rate;
+  if (!Number.isFinite(targetSim)) return;
+  let guard = 0;
+  const maxSteps = 10000;
+  // Primary path: MjSimLite with access to sim.time()
+  while (sim && typeof sim.step === 'function' && currentSim < targetSim && guard < maxSteps) {
+    try {
+      sim.step(1);
+    } catch {
+      break;
+    }
+    guard += 1;
+    try {
+      currentSim = sim.time() || currentSim;
+    } catch {
+      break;
+    }
+  }
+  lastSyncWallTime = nowSec;
+  lastSyncSimTime = currentSim;
+  simTimeApprox = currentSim;
 }, 8);
 
 // Snapshot timer at ~60Hz
@@ -1559,11 +1603,22 @@ onmessage = async (ev) => {
         captureHistorySample(true);
         emitHistoryMeta();
         snapshot();
+        try {
+          const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+          const tSim = (sim && typeof sim.time === 'function') ? (sim.time() || 0) : 0;
+          lastSyncWallTime = nowSec;
+          lastSyncSimTime = tSim;
+          simTimeApprox = tSim;
+        } catch {}
       }
     } else if (msg.cmd === 'step') {
       if (sim) {
         const n = Math.max(1, Math.min(10000, (msg.n | 0) || 1));
         sim.step(n);
+        try {
+          const tSim = (sim && typeof sim.time === 'function') ? (sim.time() || 0) : simTimeApprox;
+          simTimeApprox = tSim;
+        } catch {}
         snapshot();
       }
     } else if (msg.cmd === 'gesture') {
@@ -1751,6 +1806,13 @@ onmessage = async (ev) => {
       try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch {}
     } else if (msg.cmd === 'setRate') {
       rate = Math.max(0.0625, Math.min(16, +msg.rate || 1));
+      try {
+        const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+        const tSim = (sim && typeof sim.time === 'function') ? (sim.time() || 0) : simTimeApprox || 0;
+        lastSyncWallTime = nowSec;
+        lastSyncSimTime = tSim;
+        simTimeApprox = tSim;
+      } catch {}
     } else if (msg.cmd === 'setPaused') {
       const nextRunning = !msg.paused;
       setRunning(nextRunning, msg.source || 'ui');
