@@ -313,16 +313,7 @@ export class MjSimLite {
   }
 
   async maybeInstallShimFromQuery() {
-    try {
-      if (typeof location !== 'undefined') {
-        // Forbid shim injection when nofallback=1 is present
-        if (location.search.includes('nofallback=1')) return;
-        if (location.search.includes('shim=1')) {
-          const shim = await import(/* @vite-ignore */ '/dist/src/forge_shim.js');
-          shim.installForgeShim?.(this.mod);
-        }
-      }
-    } catch {}
+    // Shim injection is no longer supported; keep as a no-op placeholder.
   }
 
   // Helpers
@@ -432,10 +423,11 @@ export class MjSimLite {
   initFromXmlStrict(xmlText){
     const m = this.mod; this.pref = 'mjwf'; this.mode = 'handle';
     try { if (typeof m._mjwf_init === 'function') m._mjwf_init(); } catch {}
-    try { if (typeof m._mjwf_abi_version==='function') console.log('mjwf abi:', m._mjwf_abi_version()|0); } catch {}
-    try { if (typeof m._mjwf_version_string==='function') console.log('mjwf ver:', this._cstr(m._mjwf_version_string()|0)); } catch {}
     const required = ['_mjwf_make_from_xml','_mjwf_step','_mjwf_reset','_mjwf_free'];
-    console.log('mjwf required present:', required.every(k=>typeof m[k]==='function'));
+    const requiredOk = required.every((name) => typeof m[name] === 'function');
+    if (!requiredOk) {
+      throw new Error('Required mjwf functions missing');
+    }
     // FS path only: write XML to /mem/model.xml then call helper wrapper with PATH
     const xmlStr = String(xmlText);
     this._mkdirTree('/mem');
@@ -467,7 +459,6 @@ export class MjSimLite {
     const called = [];
     for (const fn of stage){ try { if (typeof m[fn] === 'function') { m[fn](h); called.push(fn); } } catch {}
     }
-    if (called.length) console.log('second-stage called:', called);
 
     // Counts (prefer model_* when available)
     const readInt = (name)=> (typeof m[name]==='function') ? (m[name](h)|0) : 0;
@@ -481,7 +472,6 @@ export class MjSimLite {
       console.error('loaded counts all zero', { eno, emsg });
       throw new Error('model empty');
     }
-    console.log('loaded counts', { h, nq, nv, ngeom: ng });
     // Regression self-check: require nq>0 && nv>0 && ngeom>2
     if (!((nq|0) > 0 && (nv|0) > 0 && (ng|0) > 2)) {
       throw new Error(`counts assertion failed: nq=${nq}, nv=${nv}, ngeom=${ng}`);
@@ -1009,40 +999,4 @@ export class MjSimLite {
   }
 }
 
-// Build a minimal in-memory module and attach a tiny shim with 2 geoms.
-export function createLocalModule() {
-  const MEM_BYTES = 4 * 1024 * 1024;
-  const buf = new ArrayBuffer(MEM_BYTES);
-  const HEAPU8 = new Uint8Array(buf);
-  const HEAPF64 = new Float64Array(buf);
-  let brk = 1024; // simple bump allocator
-  function _malloc(n) { n = (n|0); if (n<=0) return 0; const align = 8; brk = (brk + (align-1)) & ~(align-1); if (brk + n >= MEM_BYTES) return 0; const p = brk; brk += n; return p; }
-  function _free(_p) {}
-  const files = new Map();
-  const FS = { writeFile: (p,d)=>files.set(String(p), d instanceof Uint8Array ? d : new TextEncoder().encode(String(d))), readFile:(p)=>files.get(String(p))||new Uint8Array(0) };
-  const mod = { __heapBuffer: buf, HEAPU8, HEAPF64, _malloc, _free, FS };
-  mod.ccall = (name, _ret, _argt, args) => { const fn = mod['_' + name] || mod[name]; if (typeof fn==='function') return fn.apply(mod, args||[]); return 0; };
-  // Install tiny local shim
-  try {
-    const f64 = mod.HEAPF64;
-    function alloc(n){ const p = mod._malloc(n|0); new Uint8Array(mod.__heapBuffer, p, n).fill(0); return p; }
-    function writeF64(p,arr){ const off=p>>>3; for(let i=0;i<arr.length;i++) f64[off+i]=+arr[i]||0; }
-    const state = { h:1, dt:0.002, t:0, ngeom:2, geomXpos:0, geomXmat:0 };
-    state.geomXpos = alloc(2*3*8); state.geomXmat = alloc(2*9*8);
-    writeF64(state.geomXpos,[0,0,0.05, 0.2,0,0.08]);
-    writeF64(state.geomXmat,[1,0,0,0,1,0,0,0,1, 1,0,0,0,1,0,0,0,1]);
-    mod._mjwf_abi_version = () => 337;
-    mod._mjwf_make_from_xml = () => state.h;
-    mod._mjwf_free = () => {};
-    mod._mjwf_timestep = () => state.dt;
-    mod._mjwf_time = () => state.t;
-    mod._mjwf_step = (_h,n)=>{ state.t += (n|0)*state.dt; return 1; };
-    mod._mjwf_reset = ()=>{ state.t=0; return 1; };
-    mod._mjwf_ngeom = ()=> state.ngeom;
-    mod._mjwf_nu = ()=> 0;
-    mod._mjwf_geom_xpos_ptr = ()=> state.geomXpos;
-    mod._mjwf_geom_xmat_ptr = ()=> state.geomXmat;
-    mod.__localShimState = state;
-  } catch {}
-  return mod;
-}
+// Local in-memory shim module has been removed; forge module must load correctly.

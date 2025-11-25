@@ -99,8 +99,8 @@ const {
 
 const dumpBigParam = dumpToken === 'big' || findToken === 'big';
 const skyOffParam = skyOverride === true;
-const backendMode =
-  requestedMode === 'worker' || requestedMode === 'direct' ? requestedMode : 'auto';
+// Play UI runs on worker backend only; ignore direct/auto requests for now.
+const backendMode = 'worker';
 const backend = await createBackend({ mode: backendMode, debug: debugMode, model: requestedModel });
 const store = createViewerStore({});
 viewerStoreRef = store;

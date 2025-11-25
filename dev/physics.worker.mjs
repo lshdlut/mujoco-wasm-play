@@ -1,6 +1,6 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
-import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite, createLocalModule } from './bridge.mjs';
+import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
 import { withCacheTag } from './paths.mjs';
 import { writeOptionField, readOptionStruct, detectOptionSupport } from '../../viewer_option_struct.mjs';
 import { writeVisualField, readVisualStruct } from '../../viewer_visual_struct.mjs';
@@ -80,6 +80,12 @@ const verboseWorkerLogs = (() => {
   return false;
 })();
 const snapshotLogEnabled = snapshotDebug && verboseWorkerLogs;
+const verboseLogEnabled = verboseWorkerLogs;
+
+function emitLog(message, extra, { force = false } = {}) {
+  if (!force && !verboseLogEnabled) return;
+  try { postMessage({ kind: 'log', message, extra }); } catch {}
+}
 
 const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
 
@@ -652,7 +658,7 @@ function collectWatchSources() {
 function wasmUrl(rel) { return new URL(rel, import.meta.url).href; }
 
 // Boot log for diagnostics
-try { postMessage({ kind:'log', message:'worker: boot' }); } catch {}
+emitLog('worker: boot');
 
 function cstr(modRef, ptr) {
   return readCString(modRef, ptr);
@@ -677,17 +683,13 @@ function logHandleFailure(stage, info) {
       helperMsg = cstr(mod, mod._mjwf_helper_errmsg_last_global() | 0);
     }
   } catch {}
-  try {
-    postMessage({
-      kind: 'log',
-      message: `worker: handle failure (${stage})`,
-      errno: eno,
-      errmsg: emsg,
-      helperErrno: helperErr,
-      helperErrmsg: helperMsg,
-      extra: info ?? null,
-    });
-  } catch {}
+  emitLog(`worker: handle failure (${stage})`, {
+    errno: eno,
+    errmsg: emsg,
+    helperErrno: helperErr,
+    helperErrmsg: helperMsg,
+    extra: info ?? null,
+  }, { force: true });
 }
 
 function readModelCount(name) {
@@ -740,13 +742,9 @@ function logSimPointers(stage, { force = false } = {}) {
     diag.modMatch = sim.mod === mod;
     diag.moduleTag = sim.mod?.__forgeModuleId || null;
     diagStagesLogged.add(stage);
-    try {
-      postMessage({ kind: 'log', message: `worker: sim pointer diag (${stage})`, extra: diag });
-    } catch {}
+    emitLog(`worker: sim pointer diag (${stage})`, diag, { force });
   } catch (err) {
-    try {
-      postMessage({ kind: 'log', message: `worker: sim pointer diag failed (${stage})`, extra: String(err || '') });
-    } catch {}
+    emitLog(`worker: sim pointer diag failed (${stage})`, String(err || ''), { force });
   }
 }
 
@@ -873,18 +871,7 @@ function captureCopyState(precision) {
 }
 
 async function loadModule() {
-  // If explicitly forced to local shim, build a minimal module and return immediately.
-  try {
-    const u = new URL(import.meta.url);
-    const s = (u.searchParams.get('shim') || '').toLowerCase();
-    if (s === 'local') {
-      mod = createLocalModule();
-      try { installForgeAbiCompat(mod); } catch {}
-      try { postMessage({ kind:'log', message:'Local shim installed (forced)' }); } catch {}
-      return mod;
-    }
-  } catch {}
-  try { postMessage({ kind:'log', message:'worker: loading forge module...' }); } catch {}
+  emitLog('worker: loading forge module...');
   // Build absolute URLs and import dynamically to avoid ref path/caching pitfalls
   // Versioned dist base from worker URL (?ver=...)
   let ver = '3.3.7';
@@ -905,52 +892,22 @@ async function loadModule() {
     mod = await load_mujoco({ locateFile: (p) => (p.endsWith('.wasm') ? wasmUrl.href : p) });
     try { installForgeAbiCompat(mod); } catch {}
   } catch (e) {
-    // If forge import fails, fallback to a local in-memory shim so model still shows
-    mod = createLocalModule();
-    try { installForgeAbiCompat(mod); } catch {}
-    try { postMessage({ kind:'log', message:'Local shim installed (forge import failed)' }); } catch {}
-    return mod;
+    throw e;
   }
-  // Optional: install ForgeShim when enabled
   try {
-    const url = new URL(import.meta.url);
-    const shimParam = url.searchParams.get('shim');
-    const wantShim = (shimParam !== null) || (typeof self !== 'undefined' && (self.PLAY_FORGE_SHIM === 1 || self.PLAY_FORGE_SHIM === '1')) || (typeof process !== 'undefined' && process.env && process.env.PLAY_FORGE_SHIM === '1');
-    const forceLocal = (shimParam && shimParam.toLowerCase() === 'local');
-    const needShim = !(typeof (mod)._mjwf_helper_make_from_xml === 'function' || typeof (mod).mjwf_helper_make_from_xml === 'function');
-    if (forceLocal) {
-      postMessage({ kind: 'log', message: 'Local shim installed (forced)' });
-    } else if (wantShim || needShim) {
-      const shimAbs = new URL('../../dist/src/forge_shim.js', import.meta.url);
-      try {
-        const modShim = await import(/* @vite-ignore */ shimAbs.href);
-        if (typeof modShim.installForgeShim === 'function') {
-          modShim.installForgeShim(mod);
-          postMessage({ kind: 'log', message: 'ForgeShim installed' });
-        }
-      } catch (e) {
-        postMessage({ kind: 'log', message: 'ForgeShim unavailable, skipping shim install', extra: String(e || '') });
-      }
-    }
-  } catch {}
-  try {
-    postMessage({
-      kind:'log',
-      message:'worker: forge module ready',
-      extra: {
-        hasMake: typeof (mod)._mjwf_helper_make_from_xml === 'function',
-        hasCcall: typeof mod.ccall === 'function'
-      }
+    emitLog('worker: forge module ready', {
+      hasMake: typeof (mod)._mjwf_helper_make_from_xml === 'function',
+      hasCcall: typeof mod.ccall === 'function',
     });
     const geomKeys = Object.keys(mod || {}).filter((k) => k.includes('_geom_')).slice(0, 16);
-    postMessage({ kind: 'log', message: 'worker: geom export sample', extra: geomKeys });
+    emitLog('worker: geom export sample', geomKeys);
     const contactKeys = Object.keys(mod || {})
       .filter((k) => k.includes('_contact') || k.includes('_data_contact'))
       .slice(0, 24);
     if (contactKeys.length > 0) {
-      postMessage({ kind: 'log', message: 'worker: contact export sample', extra: contactKeys });
+      emitLog('worker: contact export sample', contactKeys);
     } else {
-      postMessage({ kind: 'log', message: 'worker: no contact exports detected' });
+      emitLog('worker: no contact exports detected');
     }
   } catch {}
   return mod;
@@ -969,20 +926,6 @@ async function loadXmlWithFallback(xmlText) {
   if (typeof xmlText === 'string' && xmlText.trim().length) {
     attempts.push({ stage: 'primary', loader: async () => xmlText });
   }
-  attempts.push({
-    stage: 'demo',
-    loader: async () => {
-      const res = await fetch(wasmUrl('./demo_box.xml'));
-      if (!res.ok) {
-        logHandleFailure('demo_box_failed', { status: res.status });
-        throw new Error(`demo fetch failed (${res.status})`);
-      }
-      return res.text();
-    },
-  });
-  const emptyXml = `<?xml version='1.0'?>\n<mujoco model='empty'><option timestep='0.002'/><worldbody/></mujoco>`;
-  attempts.push({ stage: 'empty', loader: async () => emptyXml });
-
   for (const attempt of attempts) {
     try {
       const text = await attempt.loader();
@@ -991,14 +934,14 @@ async function loadXmlWithFallback(xmlText) {
       sim.initFromXmlStrict(text);
       h = sim.h | 0;
       logSimPointers(`load:${attempt.stage}`, { force: true });
-      try { postMessage({ kind:'log', message:`worker: loaded via ${attempt.stage}`, extra: { abi } }); } catch {}
+      emitLog(`worker: loaded via ${attempt.stage}`, { abi });
       return { ok: true, abi, handle: h };
     } catch (err) {
       logHandleFailure('tryMakeHandle_fail', {
         stage: attempt.stage,
         error: String(err || ''),
         eno: readErrno(mod || {}),
-        file: attempt.stage === 'primary' ? 'primary' : (attempt.stage === 'demo' ? 'demo_box.xml' : 'empty'),
+        file: attempt.stage === 'primary' ? 'primary' : 'fallback-none',
       });
     }
   }
@@ -1287,7 +1230,7 @@ function snapshot() {
     transfers.push(ctrl.buffer);
     if (!snapshotState.loggedCtrlSample) {
       snapshotState.loggedCtrlSample = true;
-      try { postMessage({ kind:'log', message:'worker: ctrl sample', extra:{ len: ctrl.length, sample: Array.from(ctrl.slice(0, Math.min(4, ctrl.length))) } }); } catch {}
+      emitLog('worker: ctrl sample', { len: ctrl.length, sample: Array.from(ctrl.slice(0, Math.min(4, ctrl.length))) });
     }
   }
   if (xfrcView) {
@@ -1770,7 +1713,7 @@ onmessage = async (ev) => {
         const px=+msg.point?.[0]||0, py=+msg.point?.[1]||0, pz=+msg.point?.[2]||0;
         const gi=msg.geomIndex|0;
         if (!sim?.applyXfrcByGeom?.(gi, [fx, fy, fz], [tx, ty, tz], [px, py, pz]) && snapshotDebug) {
-          postMessage({ kind:'log', message:'worker: applyForce unsupported in current mode' });
+          emitLog('worker: applyForce unsupported in current mode');
         }
       } catch {}
     } else if (msg.cmd === 'applyBodyForce') {
@@ -1779,7 +1722,7 @@ onmessage = async (ev) => {
         const tx=+msg.torque?.[0]||0, ty=+msg.torque?.[1]||0, tz=+msg.torque?.[2]||0;
         const body=msg.bodyId|0;
         if (!sim?.applyXfrcByBody?.(body, [fx, fy, fz], [tx, ty, tz]) && snapshotDebug) {
-          postMessage({ kind:'log', message:'worker: applyBodyForce unsupported in current mode' });
+          emitLog('worker: applyBodyForce unsupported in current mode');
         }
       } catch {}
     } else if (msg.cmd === 'align') {

@@ -13,7 +13,7 @@ def main() -> None:
   url = (
       "http://127.0.0.1:4173/index.html"
       "?model=RKOB_simplified_upper_with_marker_CAMS.xml"
-      "&mode=direct&debug=1&skydebug=cube"
+      "&mode=worker&debug=1&skydebug=cube"
   )
   repo_root = Path(__file__).resolve().parents[2]
   out_dir = repo_root / "local_temp"

@@ -220,11 +220,11 @@ const CAMERA_BASE_LABELS = ['Free', 'Tracking'];
 let latestHudTime = 0;
 const TIME_RESET_EPSILON = 1e-6;
 const MODEL_ALIASES = {
-  demo: 'demo_box.xml',
-  box: 'demo_box.xml',
-  pendulum: 'pendulum.xml',
   rkob: 'RKOB_simplified_upper_with_marker_CAMS.xml',
 };
+const MODEL_POOL = [
+  'RKOB_simplified_upper_with_marker_CAMS.xml',
+];
 
 const SNAPSHOT_DEBUG_FLAG = (() => {
   try {
@@ -1245,7 +1245,6 @@ export function applyGesture(store, backend, payload) {
 }
 
 const WORKER_URL = new URL('../../physics.worker.mjs', import.meta.url);
-const DIRECT_URL = new URL('../../direct_backend.mjs', import.meta.url);
 
 function resolveSnapshot(state) {
   const viewOrNull = (value, Ctor) => {
@@ -1437,7 +1436,7 @@ function resolveSnapshot(state) {
 }
 
 export async function createBackend(options = {}) {
-  const mode = options.mode ?? 'auto';
+  const mode = 'worker'; // play UI only supports worker backend
   const debug = !!options.debug;
   const snapshotDebug =
     typeof window !== 'undefined'
@@ -1457,7 +1456,7 @@ export async function createBackend(options = {}) {
     return Number.isFinite(num) ? (num | 0) : fallback;
   };
   let client = null;
-  let kind = 'direct';
+  const kind = 'worker';
   let paused = false;
   let rate = 1;
   let historyScrubbing = false;
@@ -1513,73 +1512,49 @@ export async function createBackend(options = {}) {
     return worker;
   }
 
-  async function spawnDirectBackend() {
-    const mod = await import(/* @vite-ignore */ DIRECT_URL.href);
-    if (typeof mod.createDirectBackend !== 'function') {
-      throw new Error('createDirectBackend missing');
-    }
-    return mod.createDirectBackend({
-      ver: options.ver ?? '3.3.7',
-      shimParam: options.shimParam ?? 'local',
-      debug,
-      snapshotDebug,
-    });
-  }
-
   async function loadDefaultXml() {
-    const fallback = `<?xml version='1.0'?>
-<mujoco model='empty'>
-  <option timestep='0.002'/>
-  <worldbody>
-    <body name='box' pos='0 0 0.1'>
-      <geom type='box' size='0.05 0.05 0.05' rgba='0.2 0.6 0.9 1'/>
-    </body>
-  </worldbody>
-</mujoco>`;
-
-    const candidates = [];
-    const seen = new Set();
-    if (modelFile) {
-      candidates.push({ file: modelFile, label: modelToken || modelFile });
-    }
-    candidates.push({ file: 'demo_box.xml', label: 'demo_box.xml' });
-
-    for (const candidate of candidates) {
-      const file = candidate.file;
-      if (!file || seen.has(file)) continue;
-      seen.add(file);
-      try {
-        const url = new URL(`../../${file}`, import.meta.url);
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) {
-          if (debug) console.warn(`[backend] fetch ${file} failed with status ${res.status}`);
-          continue;
-        }
-        const text = await res.text();
-        if (text && text.trim().length > 0) {
-          if (debug) console.log('[backend] loaded xml', file);
-          return text;
-        }
-      } catch (err) {
-        if (debug) console.warn('[backend] failed to fetch xml', { file, err });
-      }
-    }
-    if (debug) console.warn('[backend] falling back to inline demo xml');
-    return fallback;
+  const candidates = [];
+  const seen = new Set();
+  if (modelFile) {
+    candidates.push({ file: modelFile, label: modelToken || modelFile });
+  }
+  // Always ensure we have a pool-backed fallback; no empty model fallback.
+  for (const file of MODEL_POOL) {
+    candidates.push({ file, label: file });
   }
 
-  if (mode === 'worker' || mode === 'auto') {
+  const errors = [];
+  for (const candidate of candidates) {
+    const file = candidate.file;
+    if (!file || seen.has(file)) continue;
+    seen.add(file);
     try {
-      client = await spawnWorkerBackend();
-      kind = 'worker';
+      const url = new URL(`../../${file}`, import.meta.url);
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) {
+        errors.push(`fetch ${file} status ${res.status}`);
+        if (debug) console.warn(`[backend] fetch ${file} failed with status ${res.status}`);
+        continue;
+      }
+      const text = await res.text();
+      if (text && text.trim().length > 0) {
+        if (debug) console.log('[backend] loaded xml', file);
+        return text;
+      }
+      errors.push(`empty content for ${file}`);
     } catch (err) {
-      if (debug) console.warn('[backend] worker init failed', err);
-      if (mode === 'worker') throw err;
+      errors.push(`fetch ${file} error ${String(err)}`);
+      if (debug) console.warn('[backend] failed to fetch xml', { file, err });
     }
   }
-  if (!client) {
-    client = await spawnDirectBackend();
-    kind = 'direct';
+  throw new Error(`No model loaded. Tried: ${Array.from(seen).join(', ')}. Errors: ${errors.join('; ')}`);
+  }
+
+  try {
+    client = await spawnWorkerBackend();
+  } catch (err) {
+    if (debug) console.warn('[backend] worker init failed', err);
+    throw err;
   }
 
   function notifyListeners() {
@@ -1888,15 +1863,7 @@ export async function createBackend(options = {}) {
           lastFrameId = frameId;
           lastSnapshot.frameId = frameId;
         }
-        if (debug) {
-          handleMessage.__ctrlLog = handleMessage.__ctrlLog || { count: 0 };
-          const info = handleMessage.__ctrlLog;
-          if (info.count < 5) {
-            const len = data.ctrl && typeof data.ctrl.length === 'number' ? data.ctrl.length : null;
-            console.log('[backend] snapshot ctrl len', len);
-            info.count += 1;
-          }
-        }
+        // Legacy snapshot ctrl length logging removed to avoid noisy console output.
         if (typeof data.tSim === 'number') lastSnapshot.t = data.tSim;
         if (typeof data.ngeom === 'number') lastSnapshot.ngeom = data.ngeom;
         if (typeof data.nq === 'number') lastSnapshot.nq = data.nq;
@@ -2072,7 +2039,9 @@ export async function createBackend(options = {}) {
         notifyListeners();
         break;
       case 'log':
-        if (debug) console.log('[backend]', data.message ?? '', data.extra ?? '');
+        if (debug && VERBOSE_DEBUG_LOGS) {
+          console.log('[backend]', data.message ?? '', data.extra ?? '');
+        }
         break;
       case 'error':
         if (debug) console.error('[backend error]', data);
@@ -2484,11 +2453,7 @@ export async function createBackend(options = {}) {
     if (messageHandler) {
       try { client.removeEventListener?.('message', messageHandler); } catch {}
     }
-    if (kind === 'worker' && client?.terminate) {
-      client.terminate();
-    } else {
-      client?.terminate?.();
-    }
+    client?.terminate?.();
   }
 
   return {

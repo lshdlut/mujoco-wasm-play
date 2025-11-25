@@ -7,8 +7,8 @@ Glue-layer and playground for consuming MuJoCo WASM artifacts produced by 'mujoc
 
 ## Legacy UI Notice
 
-- Runtime backends (`physics.worker.mjs`, `direct_backend.mjs`, `bridge.mjs`, etc.) now sit at the repository root; there is no standalone legacy UI under `local_tools/viewer_demo/`.
-- Use the Simulate-like UI at `index.html` for every workflow (worker/direct).
+- Runtime backend is worker-only (`physics.worker.mjs` plus `bridge.mjs` helpers); there is no standalone legacy UI under `local_tools/viewer_demo/`.
+- Use the Simulate-like UI at `index.html` for every workflow (worker backend).
 - The debug script `scripts/worker_debug.py` now launches the main entry (`/index.html`).
 - Shared utilities such as `snapshots.mjs` are common to both backends and do not represent a separate UI surface.
 

@@ -223,6 +223,22 @@ const HAZE_TMP_MAT_FINAL = new THREE.Matrix4();
 const LIGHT_TMP_DIR = new THREE.Vector3();
 const LIGHT_TMP_QUAT = new THREE.Quaternion();
 
+function warnLogEnabled() {
+  try {
+    if (typeof window !== 'undefined') {
+      return window.PLAY_VERBOSE_DEBUG === true;
+    }
+  } catch {}
+  return false;
+}
+
+function warnLog(message, ...extra) {
+  if (!warnLogEnabled()) return;
+  try {
+    console.warn(message, ...extra);
+  } catch {}
+}
+
 function isMatrixLike(value) {
   return value && typeof value.copy === 'function';
 }
@@ -900,6 +916,7 @@ function meanSizeFromState(state, context = null) {
 }
 
 function warnOnce(cache, key, message) {
+  if (!warnLogEnabled()) return;
   if (!key || cache.has(key)) return;
   cache.add(key);
   try {
@@ -2794,7 +2811,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
             ownGeometry: false,
           };
         } else if (!ctx.meshAssetMissingLogged) {
-          console.warn('[render] mesh geometry missing', { dataId });
+          warnLog('[render] mesh geometry missing', { dataId });
           ctx.meshAssetMissingLogged = true;
         }
       }
@@ -3151,14 +3168,15 @@ export function createRendererManager({
 
   function debugHazeState(summary) {
     const globalDebug = typeof window !== 'undefined' ? window.__PLAY_HAZE_DEBUG : undefined;
-    const logEnabled = debugMode || globalDebug !== false;
+    const verbose = typeof window !== 'undefined' ? window.PLAY_VERBOSE_DEBUG === true : false;
+    const logEnabled = globalDebug === true || verbose;
     if (!logEnabled) return;
     const payload = summary || { mode: 'overlay', enabled: false };
     const key = JSON.stringify(payload);
     if (ctx._lastHazeDebugKey === key) return;
     ctx._lastHazeDebugKey = key;
     try {
-      console.log('[viewer][haze]', payload);
+      if (logEnabled) console.log('[viewer][haze]', payload);
       if (typeof window !== 'undefined') {
         window.__viewerHazeDebug = payload;
       }
@@ -3307,7 +3325,7 @@ export function createRendererManager({
             }
             return url || null;
           } catch (err) {
-            try { console.warn('[render] exportExactPNG failed', err); } catch {}
+            try { warnLog('[render] exportExactPNG failed', err); } catch {}
             return null;
           }
         };
@@ -3349,7 +3367,7 @@ export function createRendererManager({
             try { for (const [o, m] of saved) { o.material.depthTest = m.dt; o.material.depthWrite = m.dw; o.material.transparent = m.tr; o.renderOrder = m.ro; } } catch {}
             return url || null;
           } catch (err) {
-            try { console.warn('[render] exportPNG failed', err); } catch {}
+            try { warnLog('[render] exportPNG failed', err); } catch {}
             return null;
           }
         };
@@ -3603,7 +3621,7 @@ function renderScene(snapshot, state) {
     const meanSize = meanSizeFromState(state, context);
     const boundsRadius = Math.max(0.1, context.bounds?.radius || meanSize || 1);
     if (contactPointEnabled && contacts && typeof contacts.n === 'number' && !contacts.pos) {
-      try { console.warn('[render] contact points enabled but no position array in snapshot; n=', contacts.n); } catch {}
+      try { warnLog('[render] contact points enabled but no position array in snapshot; n=', contacts.n); } catch {}
     }
     if (contactPointEnabled && contacts && contacts.pos && typeof contacts.n === 'number') {
       // Ensure overlay group
@@ -3931,7 +3949,6 @@ function renderScene(snapshot, state) {
     const showActuator = voptEnabled(voptFlags, MJ_VIS.ACTUATOR);
     const showRangefinder = voptEnabled(voptFlags, MJ_VIS.RANGEFINDER);
     const showConstraint = voptEnabled(voptFlags, MJ_VIS.CONSTRAINT);
-    const perturbEnabled = voptEnabled(voptFlags, MJ_VIS.PERTFORCE) || voptEnabled(voptFlags, MJ_VIS.PERTOBJ);
 
     if (showCamera) updateCameraOverlays(context, snapshot, state);
     else hideCameraGroup(context);
@@ -3949,11 +3966,8 @@ function renderScene(snapshot, state) {
     else hideRangefinderGroup(context);
     if (showConstraint) updateConstraintOverlays(context, snapshot, state);
     else hideConstraintGroup(context);
-    if (perturbEnabled) updatePerturbOverlay(context, snapshot, state, overlayOptions);
-    else {
-      hidePerturbTranslate(context);
-      hidePerturbRotate(context);
-    }
+    // Perturb overlay is driven by runtime.pertViz in state; do not gate on vopt flags.
+    updatePerturbOverlay(context, snapshot, state, overlayOptions);
 
     for (let i = 0; i < ngeom; i += 1) {
       const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
@@ -4133,7 +4147,7 @@ function renderScene(snapshot, state) {
           }
         }
         context.autoAligned = true;
-        if (debugMode) {
+        if (typeof window !== 'undefined' && window.PLAY_VERBOSE_DEBUG === true) {
           console.log('[render] auto align', { radius, center: bounds.center });
         }
       }
@@ -4195,42 +4209,8 @@ function renderScene(snapshot, state) {
       context.copySeq = copyState.seq;
     }
     const gl = renderer && typeof renderer.getContext === 'function' ? renderer.getContext() : null;
-    if (typeof debugMode !== 'undefined' && debugMode && gl && !context.__debugMagentaTested) {
-      try {
-        if (typeof renderer?.setRenderTarget === 'function') {
-          renderer.setRenderTarget(null);
-        }
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.disable(gl.SCISSOR_TEST);
-        gl.colorMask(true, true, true, true);
-        gl.depthMask(true);
-        const prevClear = gl.getParameter(gl.COLOR_CLEAR_VALUE);
-        // Also capture renderer clear color as a robust fallback
-        const prevRendererColor = (() => {
-          try {
-            const c = renderer.getClearColor(new THREE.Color());
-            const a = renderer.getClearAlpha?.() ?? 1;
-            return [c.r, c.g, c.b, a];
-          } catch { return null; }
-        })();
-        gl.clearColor(1, 0, 1, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        const pixels = new Uint8Array(4);
-        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-        console.log('[render] magenta test sample', Array.from(pixels));
-        const restore = (arr) => { try { gl.clearColor(arr[0], arr[1], arr[2], arr[3]); } catch {} };
-        if (Array.isArray(prevClear) && prevClear.length === 4) {
-          restore(prevClear);
-        } else if (Array.isArray(prevRendererColor) && prevRendererColor.length === 4) {
-          restore(prevRendererColor);
-        } else {
-          // Final fallback to the light UI background
-          const c = new THREE.Color(0xd6dce4);
-          restore([c.r, c.g, c.b, 1]);
-        }
-      } catch (err) {
-        console.warn('[render] magenta test failed', err);
-      }
+    // Legacy magenta framebuffer test removed; keep flag to avoid re-running in old sessions.
+    if (gl && !context.__debugMagentaTested) {
       context.__debugMagentaTested = true;
     }
   }
