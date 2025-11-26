@@ -1529,7 +1529,18 @@ export async function createBackend(options = {}) {
     if (!file || seen.has(file)) continue;
     seen.add(file);
     try {
-      const url = new URL(`../../${file}`, import.meta.url);
+      let url;
+      try {
+        if (typeof location !== 'undefined' && location?.href) {
+          url = new URL(file, location.href);
+        } else {
+          url = new URL(`../../${file}`, import.meta.url);
+        }
+      } catch (err) {
+        errors.push(`url ${file} error ${String(err)}`);
+        if (debug) console.warn('[backend] failed to build xml url', { file, err });
+        continue;
+      }
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) {
         errors.push(`fetch ${file} status ${res.status}`);
