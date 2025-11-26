@@ -1246,26 +1246,6 @@ export function applyGesture(store, backend, payload) {
 
 const WORKER_URL = new URL('./physics.worker.mjs', import.meta.url);
 
-function resolveWorkerUrl() {
-  const workerUrl = new URL(WORKER_URL.href);
-  // Propagate debug flags
-  if (SNAPSHOT_DEBUG_FLAG) workerUrl.searchParams.set('snapshot', '1');
-  if (VERBOSE_DEBUG_LOGS) workerUrl.searchParams.set('verbose', '1');
-  // Propagate forgeBase / ver so the worker can resolve dist from forge CDN
-  try {
-    if (typeof location !== 'undefined' && location?.search) {
-      const params = new URLSearchParams(location.search);
-      const forgeBase = params.get('forgeBase');
-      const ver = params.get('ver');
-      if (forgeBase) workerUrl.searchParams.set('forgeBase', forgeBase);
-      if (ver) workerUrl.searchParams.set('ver', ver);
-    }
-  } catch {}
-  // Cache-bust worker itself
-  workerUrl.searchParams.set('cb', String(Date.now()));
-  return workerUrl;
-}
-
 function resolveSnapshot(state) {
   const viewOrNull = (value, Ctor) => {
     if (ArrayBuffer.isView(value)) return value;
@@ -1524,15 +1504,24 @@ export async function createBackend(options = {}) {
   let messageHandler = null;
 
   async function spawnWorkerBackend() {
-    const workerUrl = resolveWorkerUrl();
-    const worker = new Worker(workerUrl, { type: 'module' });
+    const workerUrl = new URL(WORKER_URL.href);
+    if (SNAPSHOT_DEBUG_FLAG) workerUrl.searchParams.set('snapshot', '1');
+    if (VERBOSE_DEBUG_LOGS) workerUrl.searchParams.set('verbose', '1');
+    // Propagate forgeBase (if present) so the worker can choose
+    // between local dist/ and forge CDN artifacts.
     try {
-      worker.addEventListener('error', (ev) => {
-        // Surface worker errors explicitly in the main console
-        // eslint-disable-next-line no-console
-        console.error('[backend worker error event]', ev);
-      });
-    } catch {}
+      if (typeof location !== 'undefined' && location.search) {
+        const params = new URLSearchParams(location.search);
+        const forgeBase = params.get('forgeBase');
+        if (forgeBase) {
+          workerUrl.searchParams.set('forgeBase', forgeBase);
+        }
+      }
+    } catch {
+      // ignore query parsing issues
+    }
+    workerUrl.searchParams.set('cb', String(Date.now()));
+    const worker = new Worker(workerUrl, { type: 'module' });
     return worker;
   }
 
@@ -1553,18 +1542,7 @@ export async function createBackend(options = {}) {
     if (!file || seen.has(file)) continue;
     seen.add(file);
     try {
-      let url;
-      try {
-        if (typeof location !== 'undefined' && location?.href) {
-          url = new URL(file, location.href);
-        } else {
-          url = new URL(`../../${file}`, import.meta.url);
-        }
-      } catch (err) {
-        errors.push(`url ${file} error ${String(err)}`);
-        if (debug) console.warn('[backend] failed to build xml url', { file, err });
-        continue;
-      }
+      const url = new URL(file, import.meta.url);
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) {
         errors.push(`fetch ${file} status ${res.status}`);
@@ -2089,9 +2067,6 @@ export async function createBackend(options = {}) {
   if (typeof client.addEventListener === 'function') {
     messageHandler = (evt) => handleMessage(evt);
     client.addEventListener('message', messageHandler);
-    if (kind === 'worker') {
-      client.addEventListener('error', (evt) => console.error('[backend worker error]', evt));
-    }
   } else if ('onmessage' in client) {
     messageHandler = (evt) => handleMessage(evt);
     client.onmessage = messageHandler;
