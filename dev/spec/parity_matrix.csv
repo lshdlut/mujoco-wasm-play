@@ -1,0 +1,36 @@
+feature,status,notes,backend_binding,web_equivalent
+File menu actions,Missing,Hook buttons to download/save/backends,pending_.save_xml / save_mjb / print_model / print_data / exitrequest,"Implement via backend.saveModel(), backend.quit()"
+Screenshot capture,Missing,Mirror lodepng pipeline using canvas readback,screenshotrequest,Use WebGL readPixels + download blob
+Option toggles,Implemented,"Help/Info/Profiler/Sensor/Fullscreen/VSync wired via ui_spec controls",Simulate::help/info/profiler/sensor/fullscreen/vsync/busywait,Dynamic panels drive backend.apply + overlay state
+Layout theme selectors,Missing,Spacing/Color/Font propagate to panel theme,Simulate::spacing/color/font,Map to CSS theme + font scaling
+Simulation run controls,Implemented,"Run/Pause/Step/Reset/Align/Copy wired to backend; align/copy snapshots surfaced",Simulate::run/pending_.reset/uiloadrequest/pending_.align/pending_.copy_key,Transport hotkeys + toolbar invoke backend commands + align/copy payload
+Keyframe slider & load/save,Missing,Support reading/writing keys to worker,Simulate::key/pending_.load_key/pending_.save_key,Implement backend keyframe RPC
+Control noise sliders,Missing,Ornstein-Uhlenbeck noise configuration,Simulate::ctrl_noise_std/ctrl_noise_rate,Pipe to worker noise injection
+History scrubber,Missing,Needs ring buffer playback UI,Simulate::scrub_index/AddToHistory,Timeline widget + state cache
+Watch inspector,Missing,Dynamic field lookup against mjData,Simulate::field/index,Textbox + validation + data binding
+Physics integrator & solver params,Missing,Expose mjOption editing,mjOption::*,Two-way bind to backend option struct
+Disable/Enable flags,Missing,Bitflag toggles for mjOption,Simulate::disable/enable -> mjOption::disableflags/enableflags,Checkbox grid writing to worker
+Actuator group enable,Missing,Bitmask mirrored into disableactuator,Simulate::enableactuator,Checkbox updating actuator visibility & control UI
+Rendering camera/label/frame,Implemented,Select widgets reflect backend camera/label/frame state,Simulate::camera/mjvOption::label/frame,UI dropdown updates backend.setCameraMode/LabelMode/FrameMode
+Rendering model flags,Implemented,Checkbox grid toggles mjvOption flags in backend,Simulate::opt.flags[i],UI checkboxes call backend.setVoptFlag
+OpenGL effect flags,Implemented,Checkbox grid toggles scene flags,Simulate::scn.flags[i],UI checkboxes call backend.setSceneFlag
+BVH sliders,Missing,Tree depth & flex layer sliders,Simulate::opt.bvh_depth/flex_layer,Expose as number inputs
+Visualization headlight & camera,Missing,mjVisual.headlight/global tuning,mjVisual::headlight/global/stat,Panel of numeric inputs
+Visualization map params,Missing,Force/torque/fog map tuning,mjVisual::map.*,Vector form inputs
+Visualization scaling,Missing,Display scale knobs,mjVisual::scale/mjStatistic::meansize,UI numeric editors
+Visualization RGBA,Missing,Color pickers for overlay elements,mjVisual::rgba.*,Color picker components
+Group toggles,Missing,Geom/Site/Joint/Tendon/etc groups,mjvOption::*group,Checkbox matrix with shortcuts
+Joint sliders,Missing,Per-DOF monitoring,Simulate::jnt_type_/qpos,Dynamic slider list
+Control sliders,Missing,Actuator command editing,Simulate::d_->ctrl / ctrl_,Control list with disable state
+Equality toggles,Missing,Enable/disable constraints,Simulate::d_->eq_active,Checkbox list
+Help overlay,Missing,Cheat sheet replication,Simulate::help_title/content,Modal overlay or side panel
+Info overlay,Missing,Solver stats HUD,UpdateInfoText outputs,HUD component refreshed each frame
+Profiler overlay,Missing,Timer/Size/Cost/Constraint charts,figtimer/figsize/figcost/figconstraint,Canvas charts fed by profiling stream
+Sensor overlay,Missing,Sensor bar plots,figsensor,Chart component for sensor data
+Real-time HUD,Missing,Desired vs actual % label,rtlabel computed in Render(),Top-left badge
+Keyboard camera cycling,Missing,[ / ] / F6 / F7 parity,UiEvent key switch,Keyboard handler bridging to camera controller
+Mouse orbit/pan/zoom,Missing,Match GLFW gesture semantics,mjv_moveCamera paths,Pointer capture in canvas
+Perturb tool,Missing,Ctrl-drag apply forces/torques,Simulate::pert / pending_.newperturb,Pointer+modifier interactions with overlays
+Selection & tracking,Missing,"Double-click select, tracking camera",pending_.select / cam.trackbodyid,Entity pick + camera follow
+UI shortcut hint,Missing,Right-button hold shows shortcuts,mjuiState.mousehelp,Tooltip layer listing shortcuts
+Passive mode sync,Missing,User-supplied figures/text/images,user_figures_/user_texts_/user_images_,Message channel for HUD injections

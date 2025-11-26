@@ -1,0 +1,12 @@
+<mujoco model="demo_box">
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+  <worldbody>
+    <geom type="plane" size="2 2 0.1" rgba="0.8 0.9 1 1"/>
+    <body pos="0 0 0.5">
+      <joint type="free"/>
+      <geom type="box" size="0.05 0.05 0.05" rgba="0.8 0.6 0.6 1"/>
+    </body>
+  </worldbody>
+  <actuator/>
+</mujoco>
+

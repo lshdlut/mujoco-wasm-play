@@ -1,0 +1,14 @@
+<mujoco model="pendulum">
+  <compiler angle="degree" coordinate="global" inertiafromgeom="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+  <worldbody>
+    <body name="base" pos="0 0 0">
+      <geom type="plane" size="2 2 0.1" rgba="0.8 0.9 1 1"/>
+    </body>
+    <body name="link" pos="0 0 1">
+      <joint name="hinge" type="hinge" axis="0 1 0" pos="0 0 0"/>
+      <geom type="capsule" fromto="0 0 0 0 0 -1" size="0.04" rgba="0.6 0.6 0.6 1"/>
+    </body>
+  </worldbody>
+</mujoco>
+

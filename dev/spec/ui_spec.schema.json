@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Simulate UI Specification",
+  "type": "object",
+  "required": ["left_panel", "right_panel"],
+  "properties": {
+    "source": { "type": "string" },
+    "left_panel": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/section" }
+    },
+    "right_panel": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/section" }
+    }
+  },
+  "definitions": {
+    "section": {
+      "type": "object",
+      "required": ["section_id", "items"],
+      "properties": {
+        "section_id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "shortcut": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "default_open": { "type": "boolean" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/control" }
+        },
+        "dynamic_groups": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/dynamicGroup" }
+        },
+        "post_groups": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/control" }
+        },
+        "trail_groups": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/dynamicGroup" }
+        }
+      }
+    },
+    "control": {
+      "type": "object",
+      "required": ["item_id", "type"],
+      "properties": {
+        "item_id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "name": { "type": "string" },
+        "binding": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "options": {
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          ]
+        }
+      }
+    },
+    "dynamicGroup": {
+      "type": "object",
+      "required": ["group_id", "entries"],
+      "properties": {
+        "group_id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "binding"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "binding": { "type": "string", "minLength": 1 },
+              "type": { "type": "string" },
+              "options": {
+                "oneOf": [
+                  { "type": "string" },
+                  { "type": "array", "items": { "type": "string" } }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

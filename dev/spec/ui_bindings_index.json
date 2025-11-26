@@ -1,0 +1,4200 @@
+{
+  "mjOption::ccd_iterations": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.ccd_iterations",
+        "control_type": "edit_int",
+        "label": "CCD Iter",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::ccd_tolerance": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.ccd_tolerance",
+        "control_type": "edit_float",
+        "label": "CCD Tol",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::cone": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.cone",
+        "control_type": "select",
+        "label": "Cone",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::density": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.density",
+        "control_type": "edit_float",
+        "label": "Density",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::gravity": {
+    "value": {
+      "kind": "float_vec",
+      "size": 3
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.gravity",
+        "control_type": "edit_vec3",
+        "label": "Gravity",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::impratio": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.impratio",
+        "control_type": "edit_float",
+        "label": "Imp Ratio",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::integrator": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.integrator",
+        "control_type": "select",
+        "label": "Integrator",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::iterations": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.iterations",
+        "control_type": "edit_int",
+        "label": "Iterations",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::jacobian": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.jacobian",
+        "control_type": "select",
+        "label": "Jacobian",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::ls_iterations": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.ls_iterations",
+        "control_type": "edit_int",
+        "label": "LS Iter",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::ls_tolerance": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.ls_tolerance",
+        "control_type": "edit_float",
+        "label": "LS Tol",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::magnetic": {
+    "value": {
+      "kind": "float_vec",
+      "size": 3
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.magnetic",
+        "control_type": "edit_vec3",
+        "label": "Magnetic",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::noslip_iterations": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.noslip_iterations",
+        "control_type": "edit_int",
+        "label": "Noslip Iter",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::noslip_tolerance": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.noslip_tolerance",
+        "control_type": "edit_float",
+        "label": "Noslip Tol",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::o_friction": {
+    "value": {
+      "kind": "float_vec",
+      "size": 5
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.o_friction",
+        "control_type": "edit_vec5",
+        "label": "Friction",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::o_margin": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.o_margin",
+        "control_type": "edit_float",
+        "label": "Margin",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::o_solimp": {
+    "value": {
+      "kind": "float_vec",
+      "size": 5
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.o_solimp",
+        "control_type": "edit_vec5",
+        "label": "Sol Imp",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::o_solref": {
+    "value": {
+      "kind": "float_vec",
+      "size": 2
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.o_solref",
+        "control_type": "edit_vec2",
+        "label": "Sol Ref",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::sdf_initpoints": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.sdf_init",
+        "control_type": "edit_int",
+        "label": "SDF Init",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::sdf_iterations": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.sdf_iterations",
+        "control_type": "edit_int",
+        "label": "SDF Iter",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::solver": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.solver",
+        "control_type": "select",
+        "label": "Solver",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::timestep": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.timestep",
+        "control_type": "edit_float",
+        "label": "Timestep",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::tolerance": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.tolerance",
+        "control_type": "edit_float",
+        "label": "Tolerance",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::viscosity": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.viscosity",
+        "control_type": "edit_float",
+        "label": "Viscosity",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjOption::wind": {
+    "value": {
+      "kind": "float_vec",
+      "size": 3
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.wind",
+        "control_type": "edit_vec3",
+        "label": "Wind",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjStatistic::center": {
+    "value": {
+      "kind": "float_vec",
+      "size": 3
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.center",
+        "control_type": "edit_vec3",
+        "label": "Center",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjStatistic::extent": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.extent",
+        "control_type": "edit_float",
+        "label": "Extent",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjStatistic::meansize": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_meansize",
+        "control_type": "edit_float",
+        "label": "All (meansize)",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::global.azimuth": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.azimuth",
+        "control_type": "edit_float",
+        "label": "Azimuth",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::global.bvactive": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.bvh",
+        "control_type": "radio",
+        "label": "BVH active",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::global.elevation": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.elevation",
+        "control_type": "edit_float",
+        "label": "Elevation",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::global.ellipsoidinertia": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.inertia",
+        "control_type": "radio",
+        "label": "Inertia",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::global.fovy": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.fovy",
+        "control_type": "edit_float",
+        "label": "Field of view",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::global.orthographic": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.orthographic",
+        "control_type": "radio",
+        "label": "Orthographic",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::headlight.active": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.headlight_active",
+        "control_type": "radio",
+        "label": "Active",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::headlight.ambient": {
+    "value": {
+      "kind": "float_vec",
+      "size": 3
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.headlight_ambient",
+        "control_type": "edit_vec3_string",
+        "label": "Ambient",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::headlight.diffuse": {
+    "value": {
+      "kind": "float_vec",
+      "size": 3
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.headlight_diffuse",
+        "control_type": "edit_vec3_string",
+        "label": "Diffuse",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::headlight.specular": {
+    "value": {
+      "kind": "float_vec",
+      "size": 3
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.headlight_specular",
+        "control_type": "edit_vec3_string",
+        "label": "Specular",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.alpha": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_alpha",
+        "control_type": "edit_float",
+        "label": "alpha",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.fogend": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_fogend",
+        "control_type": "edit_float",
+        "label": "fogend",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.fogstart": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_fogstart",
+        "control_type": "edit_float",
+        "label": "fogstart",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.force": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_force",
+        "control_type": "edit_float",
+        "label": "force",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.haze": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_haze",
+        "control_type": "edit_float",
+        "label": "haze",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.shadowclip": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_shadowclip",
+        "control_type": "edit_float",
+        "label": "shadowclip",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.shadowscale": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_shadowscale",
+        "control_type": "edit_float",
+        "label": "shadowscale",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.stiffness": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_stiffness",
+        "control_type": "edit_float",
+        "label": "stiffness",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.stiffnessrot": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_stiffnessrot",
+        "control_type": "edit_float",
+        "label": "stiffnessrot",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.torque": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_torque",
+        "control_type": "edit_float",
+        "label": "torque",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.zfar": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_zfar",
+        "control_type": "edit_float",
+        "label": "zfar",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::map.znear": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.map_znear",
+        "control_type": "edit_float",
+        "label": "Z near",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.actuator": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_actuator",
+        "control_type": "edit_rgba",
+        "label": "actuator",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.actuatornegative": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_actuatornegative",
+        "control_type": "edit_rgba",
+        "label": "actuatornegative",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.actuatorpositive": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_actuatorpositive",
+        "control_type": "edit_rgba",
+        "label": "actuatorpositive",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.bv": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_bv",
+        "control_type": "edit_rgba",
+        "label": "bv",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.bvactive": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_bvactive",
+        "control_type": "edit_rgba",
+        "label": "bvactive",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.camera": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_camera",
+        "control_type": "edit_rgba",
+        "label": "camera",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.com": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_com",
+        "control_type": "edit_rgba",
+        "label": "com",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.connect": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_connect",
+        "control_type": "edit_rgba",
+        "label": "connect",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.constraint": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_constraint",
+        "control_type": "edit_rgba",
+        "label": "constraint",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.contactforce": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_contactforce",
+        "control_type": "edit_rgba",
+        "label": "contactforce",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.contactfriction": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_contactfriction",
+        "control_type": "edit_rgba",
+        "label": "contactfriction",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.contactgap": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_contactgap",
+        "control_type": "edit_rgba",
+        "label": "contactgap",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.contactpoint": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_contactpoint",
+        "control_type": "edit_rgba",
+        "label": "contactpoint",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.contacttorque": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_contacttorque",
+        "control_type": "edit_rgba",
+        "label": "contacttorque",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.crankbroken": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_crankbroken",
+        "control_type": "edit_rgba",
+        "label": "crankbroken",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.fog": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_fog",
+        "control_type": "edit_rgba",
+        "label": "fog",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.force": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_force",
+        "control_type": "edit_rgba",
+        "label": "force",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.frustum": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_frustum",
+        "control_type": "edit_rgba",
+        "label": "frustum",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.haze": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_haze",
+        "control_type": "edit_rgba",
+        "label": "haze",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.inertia": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_inertia",
+        "control_type": "edit_rgba",
+        "label": "inertia",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.joint": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_joint",
+        "control_type": "edit_rgba",
+        "label": "joint",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.light": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_light",
+        "control_type": "edit_rgba",
+        "label": "light",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.rangefinder": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_rangefinder",
+        "control_type": "edit_rgba",
+        "label": "rangefinder",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.selectpoint": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_selectpoint",
+        "control_type": "edit_rgba",
+        "label": "selectpoint",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::rgba.slidercrank": {
+    "value": {
+      "kind": "float_vec",
+      "size": 4
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.rgba_slidercrank",
+        "control_type": "edit_rgba",
+        "label": "slidercrank",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.actuatorlength": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_actuatorlength",
+        "control_type": "edit_float",
+        "label": "Actuator length",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.actuatorwidth": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_actuatorwidth",
+        "control_type": "edit_float",
+        "label": "Actuator width",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.camera": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_camera",
+        "control_type": "edit_float",
+        "label": "Camera",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.com": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_com",
+        "control_type": "edit_float",
+        "label": "Com",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.connect": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_connect",
+        "control_type": "edit_float",
+        "label": "Connect",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.constraint": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_constraint",
+        "control_type": "edit_float",
+        "label": "Constraint",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.contactheight": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_contactheight",
+        "control_type": "edit_float",
+        "label": "Contact height",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.contactwidth": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_contactwidth",
+        "control_type": "edit_float",
+        "label": "Contact width",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.forcewidth": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_forcewidth",
+        "control_type": "edit_float",
+        "label": "Force width",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.framelength": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_framelength",
+        "control_type": "edit_float",
+        "label": "Frame length",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.framewidth": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_framewidth",
+        "control_type": "edit_float",
+        "label": "Frame width",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.jointlength": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_jointlength",
+        "control_type": "edit_float",
+        "label": "Joint length",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.jointwidth": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_jointwidth",
+        "control_type": "edit_float",
+        "label": "Joint width",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.light": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_light",
+        "control_type": "edit_float",
+        "label": "Light",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.selectpoint": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_selectpoint",
+        "control_type": "edit_float",
+        "label": "Select point",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjVisual::scale.slidercrank": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "visualization",
+        "section_title": "Visualization",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "visualization.scale_slidercrank",
+        "control_type": "edit_float",
+        "label": "Slider-crank",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::actuatorgroup[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.actuator0",
+        "control_type": "checkbox",
+        "label": "Actuator 0",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::actuatorgroup[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.actuator1",
+        "control_type": "checkbox",
+        "label": "Actuator 1",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::actuatorgroup[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.actuator2",
+        "control_type": "checkbox",
+        "label": "Actuator 2",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::actuatorgroup[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.actuator3",
+        "control_type": "checkbox",
+        "label": "Actuator 3",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::actuatorgroup[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.actuator4",
+        "control_type": "checkbox",
+        "label": "Actuator 4",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::actuatorgroup[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.actuator5",
+        "control_type": "checkbox",
+        "label": "Actuator 5",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flags[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Convex Hull",
+        "shortcut": "H"
+      }
+    ]
+  },
+  "mjvOption::flags[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Texture",
+        "shortcut": "X"
+      }
+    ]
+  },
+  "mjvOption::flags[10]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Inertia",
+        "shortcut": "I"
+      }
+    ]
+  },
+  "mjvOption::flags[11]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Scale Inertia",
+        "shortcut": "'"
+      }
+    ]
+  },
+  "mjvOption::flags[12]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Perturb Force",
+        "shortcut": "B"
+      }
+    ]
+  },
+  "mjvOption::flags[13]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Perturb Object",
+        "shortcut": "O"
+      }
+    ]
+  },
+  "mjvOption::flags[14]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Contact Point",
+        "shortcut": "C"
+      }
+    ]
+  },
+  "mjvOption::flags[15]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Island",
+        "shortcut": "N"
+      }
+    ]
+  },
+  "mjvOption::flags[16]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Contact Force",
+        "shortcut": "F"
+      }
+    ]
+  },
+  "mjvOption::flags[17]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Contact Split",
+        "shortcut": "P"
+      }
+    ]
+  },
+  "mjvOption::flags[18]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Transparent",
+        "shortcut": "T"
+      }
+    ]
+  },
+  "mjvOption::flags[19]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Auto Connect",
+        "shortcut": "A"
+      }
+    ]
+  },
+  "mjvOption::flags[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Joint",
+        "shortcut": "J"
+      }
+    ]
+  },
+  "mjvOption::flags[20]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Center of Mass",
+        "shortcut": "M"
+      }
+    ]
+  },
+  "mjvOption::flags[21]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Select Point",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flags[22]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Static Body",
+        "shortcut": "D"
+      }
+    ]
+  },
+  "mjvOption::flags[23]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Skin",
+        "shortcut": ";"
+      }
+    ]
+  },
+  "mjvOption::flags[24]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Flex Vert",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flags[25]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Flex Edge",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flags[26]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Flex Face",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flags[27]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Flex Skin",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flags[28]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Body Tree",
+        "shortcut": "`"
+      }
+    ]
+  },
+  "mjvOption::flags[29]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Mesh Tree",
+        "shortcut": "\\"
+      }
+    ]
+  },
+  "mjvOption::flags[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Camera",
+        "shortcut": "Q"
+      }
+    ]
+  },
+  "mjvOption::flags[30]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "SDF iters",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flags[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Actuator",
+        "shortcut": "U"
+      }
+    ]
+  },
+  "mjvOption::flags[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Activation",
+        "shortcut": ","
+      }
+    ]
+  },
+  "mjvOption::flags[6]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Light",
+        "shortcut": "Z"
+      }
+    ]
+  },
+  "mjvOption::flags[7]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Tendon",
+        "shortcut": "V"
+      }
+    ]
+  },
+  "mjvOption::flags[8]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Range Finder",
+        "shortcut": "Y"
+      }
+    ]
+  },
+  "mjvOption::flags[9]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.model_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Equality",
+        "shortcut": "E"
+      }
+    ]
+  },
+  "mjvOption::flexgroup[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.flex0",
+        "control_type": "checkbox",
+        "label": "Flex 0",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flexgroup[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.flex1",
+        "control_type": "checkbox",
+        "label": "Flex 1",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flexgroup[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.flex2",
+        "control_type": "checkbox",
+        "label": "Flex 2",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flexgroup[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.flex3",
+        "control_type": "checkbox",
+        "label": "Flex 3",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flexgroup[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.flex4",
+        "control_type": "checkbox",
+        "label": "Flex 4",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::flexgroup[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.flex5",
+        "control_type": "checkbox",
+        "label": "Flex 5",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::frame": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "rendering.frame_mode",
+        "control_type": "select",
+        "label": "Frame",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::geomgroup[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.geom0",
+        "control_type": "checkbox",
+        "label": "Geom 0",
+        "shortcut": [
+          "0"
+        ]
+      }
+    ]
+  },
+  "mjvOption::geomgroup[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.geom1",
+        "control_type": "checkbox",
+        "label": "Geom 1",
+        "shortcut": [
+          "1"
+        ]
+      }
+    ]
+  },
+  "mjvOption::geomgroup[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.geom2",
+        "control_type": "checkbox",
+        "label": "Geom 2",
+        "shortcut": [
+          "2"
+        ]
+      }
+    ]
+  },
+  "mjvOption::geomgroup[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.geom3",
+        "control_type": "checkbox",
+        "label": "Geom 3",
+        "shortcut": [
+          "3"
+        ]
+      }
+    ]
+  },
+  "mjvOption::geomgroup[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.geom4",
+        "control_type": "checkbox",
+        "label": "Geom 4",
+        "shortcut": [
+          "4"
+        ]
+      }
+    ]
+  },
+  "mjvOption::geomgroup[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.geom5",
+        "control_type": "checkbox",
+        "label": "Geom 5",
+        "shortcut": [
+          "5"
+        ]
+      }
+    ]
+  },
+  "mjvOption::jointgroup[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.joint0",
+        "control_type": "checkbox",
+        "label": "Joint 0",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::jointgroup[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.joint1",
+        "control_type": "checkbox",
+        "label": "Joint 1",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::jointgroup[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.joint2",
+        "control_type": "checkbox",
+        "label": "Joint 2",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::jointgroup[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.joint3",
+        "control_type": "checkbox",
+        "label": "Joint 3",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::jointgroup[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.joint4",
+        "control_type": "checkbox",
+        "label": "Joint 4",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::jointgroup[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.joint5",
+        "control_type": "checkbox",
+        "label": "Joint 5",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::label": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "rendering.label_mode",
+        "control_type": "select",
+        "label": "Label",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::sitegroup[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.site0",
+        "control_type": "checkbox",
+        "label": "Site 0",
+        "shortcut": [
+          "Shift",
+          "0"
+        ]
+      }
+    ]
+  },
+  "mjvOption::sitegroup[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.site1",
+        "control_type": "checkbox",
+        "label": "Site 1",
+        "shortcut": [
+          "Shift",
+          "1"
+        ]
+      }
+    ]
+  },
+  "mjvOption::sitegroup[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.site2",
+        "control_type": "checkbox",
+        "label": "Site 2",
+        "shortcut": [
+          "Shift",
+          "2"
+        ]
+      }
+    ]
+  },
+  "mjvOption::sitegroup[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.site3",
+        "control_type": "checkbox",
+        "label": "Site 3",
+        "shortcut": [
+          "Shift",
+          "3"
+        ]
+      }
+    ]
+  },
+  "mjvOption::sitegroup[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.site4",
+        "control_type": "checkbox",
+        "label": "Site 4",
+        "shortcut": [
+          "Shift",
+          "4"
+        ]
+      }
+    ]
+  },
+  "mjvOption::sitegroup[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.site5",
+        "control_type": "checkbox",
+        "label": "Site 5",
+        "shortcut": [
+          "Shift",
+          "5"
+        ]
+      }
+    ]
+  },
+  "mjvOption::skingroup[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.skin0",
+        "control_type": "checkbox",
+        "label": "Skin 0",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::skingroup[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.skin1",
+        "control_type": "checkbox",
+        "label": "Skin 1",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::skingroup[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.skin2",
+        "control_type": "checkbox",
+        "label": "Skin 2",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::skingroup[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.skin3",
+        "control_type": "checkbox",
+        "label": "Skin 3",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::skingroup[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.skin4",
+        "control_type": "checkbox",
+        "label": "Skin 4",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::skingroup[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.skin5",
+        "control_type": "checkbox",
+        "label": "Skin 5",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::tendongroup[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.tendon0",
+        "control_type": "checkbox",
+        "label": "Tendon 0",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::tendongroup[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.tendon1",
+        "control_type": "checkbox",
+        "label": "Tendon 1",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::tendongroup[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.tendon2",
+        "control_type": "checkbox",
+        "label": "Tendon 2",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::tendongroup[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.tendon3",
+        "control_type": "checkbox",
+        "label": "Tendon 3",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::tendongroup[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.tendon4",
+        "control_type": "checkbox",
+        "label": "Tendon 4",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvOption::tendongroup[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "group",
+        "section_title": "Group enable",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "group.tendon5",
+        "control_type": "checkbox",
+        "label": "Tendon 5",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvScene::flags[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Shadow",
+        "shortcut": "S"
+      }
+    ]
+  },
+  "mjvScene::flags[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Wireframe",
+        "shortcut": "W"
+      }
+    ]
+  },
+  "mjvScene::flags[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Reflection",
+        "shortcut": "R"
+      }
+    ]
+  },
+  "mjvScene::flags[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Additive",
+        "shortcut": "L"
+      }
+    ]
+  },
+  "mjvScene::flags[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Skybox",
+        "shortcut": "K"
+      }
+    ]
+  },
+  "mjvScene::flags[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Fog",
+        "shortcut": "G"
+      }
+    ]
+  },
+  "mjvScene::flags[6]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Haze",
+        "shortcut": "/"
+      }
+    ]
+  },
+  "mjvScene::flags[7]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Segment",
+        "shortcut": ","
+      }
+    ]
+  },
+  "mjvScene::flags[8]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Id Color",
+        "shortcut": null
+      }
+    ]
+  },
+  "mjvScene::flags[9]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Cull Face",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::busywait": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.busywait",
+        "control_type": "checkbox",
+        "label": "Busy Wait",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::camera": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "rendering.camera_mode",
+        "control_type": "select",
+        "label": "Camera",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::color": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.color",
+        "control_type": "select",
+        "label": "Color",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::ctrl_noise_rate": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "simulation",
+        "section_title": "Simulation",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "simulation.noise_rate",
+        "control_type": "slider_float",
+        "label": "Noise rate",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::ctrl_noise_std": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "simulation",
+        "section_title": "Simulation",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "simulation.noise_scale",
+        "control_type": "slider_float",
+        "label": "Noise scale",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::d_->ctrl": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "control",
+        "section_title": "Control",
+        "group_id": null,
+        "group_type": null,
+        "item_id": null,
+        "control_type": "slider_float",
+        "label": "Actuator control",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::d_->eq_active": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "equality",
+        "section_title": "Equality",
+        "group_id": null,
+        "group_type": null,
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Equality constraint",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Constraint",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Equality",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[10]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Filterparent",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[11]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Actuation",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[12]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Refsafe",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[13]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Sensor",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[14]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Midphase",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[15]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Eulerdamp",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[16]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "AutoReset",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[17]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "NativeCCD",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[18]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Island",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Frictionloss",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Limit",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Contact",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Spring",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[6]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Damper",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[7]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Gravity",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[8]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Clampctrl",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::disable[9]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.disable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Warmstart",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enable[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.enable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Override",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enable[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.enable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Energy",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enable[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.enable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "Fwdinv",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enable[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.enable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "InvDiscrete",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enable[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": "physics.enable_flags",
+        "group_type": "checkbox_list",
+        "item_id": null,
+        "control_type": "checkbox",
+        "label": "MultiCCD",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enableactuator[0]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.actuator_group_0",
+        "control_type": "checkbox",
+        "label": "Act Group 0",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enableactuator[1]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.actuator_group_1",
+        "control_type": "checkbox",
+        "label": "Act Group 1",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enableactuator[2]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.actuator_group_2",
+        "control_type": "checkbox",
+        "label": "Act Group 2",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enableactuator[3]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.actuator_group_3",
+        "control_type": "checkbox",
+        "label": "Act Group 3",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enableactuator[4]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.actuator_group_4",
+        "control_type": "checkbox",
+        "label": "Act Group 4",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::enableactuator[5]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.actuator_group_5",
+        "control_type": "checkbox",
+        "label": "Act Group 5",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::field": {
+    "value": {
+      "kind": "string",
+      "size": 0
+    },
+    "occurrences": [
+      {
+        "section_id": "watch",
+        "section_title": "Watch",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "watch.field",
+        "control_type": "edit_text",
+        "label": "Field",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::font": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.font",
+        "control_type": "select",
+        "label": "Font",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::fullscreen": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.fullscreen",
+        "control_type": "checkbox",
+        "label": "Fullscreen",
+        "shortcut": [
+          "F5"
+        ]
+      }
+    ]
+  },
+  "Simulate::help": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.help",
+        "control_type": "checkbox",
+        "label": "Help",
+        "shortcut": [
+          "F1"
+        ]
+      }
+    ]
+  },
+  "Simulate::index": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "watch",
+        "section_title": "Watch",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "watch.index",
+        "control_type": "edit_int",
+        "label": "Index",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::info": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.info",
+        "control_type": "checkbox",
+        "label": "Info",
+        "shortcut": [
+          "F2"
+        ]
+      }
+    ]
+  },
+  "Simulate::joint slider": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "joint",
+        "section_title": "Joint",
+        "group_id": null,
+        "group_type": null,
+        "item_id": null,
+        "control_type": "slider_float",
+        "label": "Joint DOF",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::key": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "simulation",
+        "section_title": "Simulation",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "simulation.key_slider",
+        "control_type": "slider_int",
+        "label": "Key",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::opt.bvh_depth": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "rendering.tree_depth",
+        "control_type": "slider_int",
+        "label": "Tree depth",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::opt.flex_layer": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "rendering.flex_layer",
+        "control_type": "slider_int",
+        "label": "Flex layer",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::pause_update": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.pause_update",
+        "control_type": "checkbox",
+        "label": "Pause update",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::profiler": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.profiler",
+        "control_type": "checkbox",
+        "label": "Profiler",
+        "shortcut": [
+          "F3"
+        ]
+      }
+    ]
+  },
+  "Simulate::run": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "simulation",
+        "section_title": "Simulation",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "simulation.run",
+        "control_type": "radio",
+        "label": "Run",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::scrub_index": {
+    "value": {
+      "kind": "int",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "simulation",
+        "section_title": "Simulation",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "simulation.history_scrubber",
+        "control_type": "slider_int",
+        "label": "History index",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::sensor": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.sensor",
+        "control_type": "checkbox",
+        "label": "Sensor",
+        "shortcut": [
+          "F4"
+        ]
+      }
+    ]
+  },
+  "Simulate::spacing": {
+    "value": {
+      "kind": "enum",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.spacing",
+        "control_type": "select",
+        "label": "Spacing",
+        "shortcut": null
+      }
+    ]
+  },
+  "Simulate::vsync": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "option",
+        "section_title": "Option",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "option.vsync",
+        "control_type": "checkbox",
+        "label": "Vertical Sync",
+        "shortcut": null
+      }
+    ]
+  },
+  "UpdateWatch": {
+    "value": {
+      "kind": "static",
+      "size": 0
+    },
+    "occurrences": [
+      {
+        "section_id": "watch",
+        "section_title": "Watch",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "watch.value",
+        "control_type": "static",
+        "label": "Value",
+        "shortcut": null
+      }
+    ]
+  }
+}
