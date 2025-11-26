@@ -1,5 +1,9 @@
 # mujoco-wasm-play
 
+[**Live Demo (RKOB, MuJoCo 3.3.7)**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=RKOB_simplified_upper_with_marker_CAMS.xml&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.7-r1/dist/3.3.7/)
+
+> Active development: APIs, query parameters, and file layout may change without notice; expect breaking changes between revisions.
+
 Glue-layer and playground for consuming MuJoCo WASM artifacts produced by 'mujoco-wasm-forge'.
 
 - Status: scaffolded; TODO: add JS/TS API, zero-copy typed array accessors, and examples.

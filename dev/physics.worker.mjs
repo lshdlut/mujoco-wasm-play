@@ -894,10 +894,36 @@ function captureCopyState(precision) {
 async function loadModule() {
   emitLog('worker: loading forge module...');
   // Build absolute URLs and import dynamically to avoid ref path/caching pitfalls
-  // Versioned dist base from worker URL (?ver=...)
+  // Versioned dist base from worker URL (?ver=...) and optional forgeBase override
   let ver = '3.3.7';
-  try { const urlSelf = new URL(import.meta.url); const v = urlSelf.searchParams.get('ver'); if (v) ver = v; } catch {}
-  const distBase = new URL(`../../dist/${ver}/`, import.meta.url);
+  let forgeBaseOverride = '';
+  try {
+    const urlSelf = new URL(import.meta.url);
+    const v = urlSelf.searchParams.get('ver');
+    if (v) ver = v;
+    const fb = urlSelf.searchParams.get('forgeBase');
+    if (fb) forgeBaseOverride = fb;
+  } catch {}
+
+  let distBase;
+  try {
+    if (forgeBaseOverride) {
+      // Use forge CDN / external dist when provided
+      distBase = new URL(forgeBaseOverride, (typeof self !== 'undefined' && self.location?.href) || import.meta.url);
+    } else {
+      // Fallback to same-origin /dist/<ver>/ for local dev
+      const baseOrigin =
+        (typeof self !== 'undefined' && self.location?.origin) ||
+        (typeof location !== 'undefined' && (location as any).origin) ||
+        undefined;
+      const baseHref = baseOrigin ? `${baseOrigin}/dist/${ver}/` : `../../dist/${ver}/`;
+      distBase = new URL(baseHref, import.meta.url);
+    }
+  } catch {
+    // Final fallback: relative dist path
+    distBase = new URL(`../../dist/${ver}/`, import.meta.url);
+  }
+
   const jsAbs = new URL(`mujoco.js`, distBase);
   const wasmAbs = new URL(`mujoco.wasm`, distBase);
   // Optional cache tag from version.json (sha8) to avoid stale caching
@@ -1829,7 +1855,6 @@ onmessage = async (ev) => {
     try { postMessage({ kind:'error', message: String(e) }); } catch {}
   }
 };
-
 
 
 
