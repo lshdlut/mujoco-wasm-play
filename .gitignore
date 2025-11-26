@@ -7,6 +7,12 @@ coverage/
 tmp/
 *.log
 
+# Playwright e2e (local-only)
+dev/playwright.config.ts
+dev/scripts/e2e/
+dev/scripts/test-utils.ts
+dev/scripts/sky_debug_playwright.py
+
 # Local notes (ignored)
 local/
 local_tools/docs/

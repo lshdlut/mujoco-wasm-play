@@ -7,7 +7,22 @@ export function normalizeVer(v) {
 
 export function getForgeDistBase(ver) {
   const v = normalizeVer(ver);
+  const override = resolveForgeDistBaseOverride(v);
+  if (override) return override;
   return `/dist/${v}/`;
+}
+
+function resolveForgeDistBaseOverride(v) {
+  if (typeof window !== 'undefined' && typeof window.__FORGE_DIST_BASE__ === 'string' && window.__FORGE_DIST_BASE__) {
+    return window.__FORGE_DIST_BASE__.replace('{ver}', v);
+  }
+  if (typeof location !== 'undefined') {
+    const search = typeof location.search === 'string' ? location.search : '';
+    const params = new URLSearchParams(search);
+    const tpl = params.get('forgeBase');
+    if (tpl) return tpl.replace('{ver}', v);
+  }
+  return null;
 }
 
 export async function getVersionInfo(distBase) {
