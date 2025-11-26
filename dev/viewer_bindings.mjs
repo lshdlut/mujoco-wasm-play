@@ -4,7 +4,10 @@ let bindingIndexPromise = null;
 async function ensureBindingIndex() {
   if (bindingIndex) return bindingIndex;
   if (!bindingIndexPromise) {
-    const url = new URL('../../spec/ui_bindings_index.json', import.meta.url);
+    // Struct/binding index lives under dev/spec/; resolve relative to the
+    // viewer module so both local dev (dev/) and GitHub Pages
+    // (/mujoco-wasm-play/dev/) layouts work.
+    const url = new URL('./spec/ui_bindings_index.json', import.meta.url);
     bindingIndexPromise = fetch(url, { cache: 'no-store' })
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load ui_bindings_index.json (${res.status})`);
