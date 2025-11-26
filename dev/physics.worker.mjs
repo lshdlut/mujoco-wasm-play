@@ -2,9 +2,9 @@
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
 import { withCacheTag } from './paths.mjs';
-import { writeOptionField, readOptionStruct, detectOptionSupport } from '../../viewer_option_struct.mjs';
-import { writeVisualField, readVisualStruct } from '../../viewer_visual_struct.mjs';
-import { writeStatisticField, readStatisticStruct } from '../../viewer_stat_struct.mjs';
+import { writeOptionField, readOptionStruct, detectOptionSupport } from './viewer_option_struct.mjs';
+import { writeVisualField, readVisualStruct } from './viewer_visual_struct.mjs';
+import { writeStatisticField, readStatisticStruct } from './viewer_stat_struct.mjs';
 import installForgeAbiCompat from './forge_abi_compat.js';
 import { createSceneSnap } from './snapshots.mjs';
 
@@ -1855,7 +1855,6 @@ onmessage = async (ev) => {
     try { postMessage({ kind:'error', message: String(e) }); } catch {}
   }
 };
-
 
 
 

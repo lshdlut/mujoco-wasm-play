@@ -1244,7 +1244,7 @@ export function applyGesture(store, backend, payload) {
   }
 }
 
-const WORKER_URL = new URL('../../physics.worker.mjs', import.meta.url);
+const WORKER_URL = new URL('./physics.worker.mjs', import.meta.url);
 
 function resolveWorkerUrl() {
   const workerUrl = new URL(WORKER_URL.href);
