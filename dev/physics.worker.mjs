@@ -992,7 +992,7 @@ async function loadXmlWithFallback(xmlText) {
 
 
 
-function snapshot() {
+  function snapshot() {
   if (!sim || !(sim.h > 0)) return;
   captureHistorySample();
   const n = sim.ngeom?.() | 0;
@@ -1271,6 +1271,16 @@ function snapshot() {
     const ea = new Int32Array(eqActiveView);
     msg.eq_active = ea;
     transfers.push(ea.buffer);
+  }
+  if (snapshotDebug && !diagStagesLogged.has('eq_snapshot')) {
+    diagStagesLogged.add('eq_snapshot');
+    const neqVal = typeof sim?.neq === 'function' ? (sim.neq() | 0) : 0;
+    const eqActiveLen = ArrayBuffer.isView(eqActiveView) ? eqActiveView.length : 0;
+    emitLog('worker: eq snapshot diag', {
+      neq: neqVal,
+      hasEqActiveView: !!eqActiveView,
+      eqActiveLen,
+    }, { force: true });
   }
   if (matRgbaView) {
     const matrgba = new Float32Array(matRgbaView);
@@ -1861,28 +1871,40 @@ onmessage = async (ev) => {
       const payload = captureCopyState(precision);
       payload.source = msg.source || 'backend';
       try { postMessage(payload); } catch {}
-      } else if (msg.cmd === 'clearForces') {
-        try { sim?.clearAllXfrc?.(); } catch {}
-      } else if (msg.cmd === 'setCtrl') {
-        // Write a single actuator control value if pointers available
-        try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch {}
-      } else if (msg.cmd === 'setQpos') {
-        try {
-          const idx = Number(msg.index) | 0;
-          if (idx < 0) throw new Error('invalid qpos index');
-          const target = Number(msg.value);
-          if (!Number.isFinite(target)) throw new Error('invalid qpos value');
-          const qpos = sim?.qposView?.();
-          if (!qpos || idx >= qpos.length) throw new Error('qpos view missing');
-          let v = target;
-          if (Number.isFinite(msg.min)) v = Math.max(Number(msg.min), v);
-          if (Number.isFinite(msg.max)) v = Math.min(Number(msg.max), v);
-          qpos[idx] = v;
-          try { sim.forward?.(); } catch {}
-        } catch (err) {
-          if (snapshotDebug) emitLog('worker: setQpos failed', { err: String(err) });
-        }
-      } else if (msg.cmd === 'setRate') {
+    } else if (msg.cmd === 'clearForces') {
+      try { sim?.clearAllXfrc?.(); } catch {}
+    } else if (msg.cmd === 'setCtrl') {
+      // Write a single actuator control value if pointers available
+      try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch {}
+    } else if (msg.cmd === 'setQpos') {
+      try {
+        const idx = Number(msg.index) | 0;
+        if (idx < 0) throw new Error('invalid qpos index');
+        const target = Number(msg.value);
+        if (!Number.isFinite(target)) throw new Error('invalid qpos value');
+        const qpos = sim?.qposView?.();
+        if (!qpos || idx >= qpos.length) throw new Error('qpos view missing');
+        let v = target;
+        if (Number.isFinite(msg.min)) v = Math.max(Number(msg.min), v);
+        if (Number.isFinite(msg.max)) v = Math.min(Number(msg.max), v);
+        qpos[idx] = v;
+        try { sim.forward?.(); } catch {}
+      } catch (err) {
+        if (snapshotDebug) emitLog('worker: setQpos failed', { err: String(err) });
+      }
+    } else if (msg.cmd === 'setEqualityActive') {
+      try {
+        const idx = Number(msg.index) | 0;
+        const active = !!msg.active;
+        if (idx < 0) throw new Error('invalid equality index');
+        const eqActive = sim?.eqActiveView?.();
+        if (!eqActive || idx >= eqActive.length) throw new Error('eq_active view missing');
+        eqActive[idx] = active ? 1 : 0;
+        try { sim.forward?.(); } catch {}
+      } catch (err) {
+        if (snapshotDebug) emitLog('worker: setEqualityActive failed', { err: String(err) });
+      }
+    } else if (msg.cmd === 'setRate') {
         rate = Math.max(0.0625, Math.min(16, +msg.rate || 1));
         try {
           const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
@@ -1907,6 +1929,3 @@ onmessage = async (ev) => {
     try { postMessage({ kind:'error', message: String(e) }); } catch {}
   }
 };
-
-
-

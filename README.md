@@ -1,6 +1,6 @@
 # mujoco-wasm-play
 
-[**Live Demo (RKOB, MuJoCo 3.3.7)**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=RKOB_simplified_upper_with_marker_CAMS.xml&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.7-r1/dist/3.3.7/)
+[**Live Demo (Rajagopal2015, MuJoCo 3.3.7)**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=mujoco_Rajagopal2015_simple.xml&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.7-r1/dist/3.3.7/)
 
 > Active development: APIs, query parameters, and file layout may change without notice; expect breaking changes between revisions.
 
@@ -22,11 +22,11 @@ Glue-layer and playground for consuming MuJoCo WASM artifacts produced by 'mujoc
 ### Example URLs
 
 - Local dev (serve from `dev/` with `dev_server.py` on port 4173):
-  - `http://127.0.0.1:4173/index.html?model=RKOB_simplified_upper_with_marker_CAMS.xml&mode=worker`
-- Public demo (GitHub Pages, stable MuJoCo 3.3.7, RKOB model):
-  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=RKOB_simplified_upper_with_marker_CAMS.xml&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.7-r1/dist/3.3.7/`
-- Optional prerelease demo (MuJoCo 3.3.8-alpha, RKOB model):
-  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=RKOB_simplified_upper_with_marker_CAMS.xml&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.8-alpha1/dist/3.3.8-alpha/`
+  - `http://127.0.0.1:4173/index.html?model=mujoco_Rajagopal2015_simple.xml&mode=worker`
+- Public demo (GitHub Pages, stable MuJoCo 3.3.7, Rajagopal2015 model):
+  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=mujoco_Rajagopal2015_simple.xml&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.7-r1/dist/3.3.7/`
+- Optional prerelease demo (MuJoCo 3.3.8-alpha, Rajagopal2015 model):
+  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=mujoco_Rajagopal2015_simple.xml&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.8-alpha1/dist/3.3.8-alpha/`
 
 For the full upstream surface and version/tag mapping, see `lshdlut/mujoco-wasm-forge/docs/forge_dist_contract.md`.
 

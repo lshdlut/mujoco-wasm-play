@@ -2002,6 +2002,84 @@ function registerShortcutHandlers(shortcutSpec, handler) {
         console.warn('[ui] ensureJointSliders error', err);
       }
     },
+    // Dynamic: ensure Equality toggles exist under right panel 'equality' section
+    ensureEqualityToggles: (eqs = []) => {
+      try {
+        if (!rightPanel) return;
+        const section = rightPanel.querySelector('[data-section-id="equality"]');
+        if (!section) return;
+        const body = section.querySelector('.section-body');
+        if (!body) return;
+        let container = body.querySelector('[data-dynamic="equality"]');
+        if (!container) {
+          container = document.createElement('div');
+          container.setAttribute('data-dynamic', 'equality');
+          container.style.marginTop = '8px';
+          body.appendChild(container);
+        }
+        if (!Array.isArray(eqs) || eqs.length === 0) {
+          container.innerHTML = '';
+          container.setAttribute('data-count', '0');
+          return;
+        }
+        const prevCount = Number(container.getAttribute('data-count') || '0');
+        if (prevCount === eqs.length && container.childElementCount > 0) {
+          for (const eq of eqs) {
+            const checkbox = container.querySelector(`input[type="checkbox"][data-eq-index="${eq.index}"]`);
+            if (!checkbox) continue;
+            const active = !!eq.active;
+            checkbox.checked = active;
+            checkbox.setAttribute('aria-checked', active ? 'true' : 'false');
+            const label = checkbox.closest('label.bool-button');
+            if (label) {
+              label.classList.toggle('is-active', active);
+            }
+          }
+          return;
+        }
+        container.innerHTML = '';
+        for (const eq of eqs) {
+          const control = { item_id: `equality.${eq.index}`, label: eq.label || `Equality ${eq.index}` };
+          const row = createControlRow(control);
+          row.classList.add('bool-row', 'half');
+          const label = document.createElement('label');
+          label.className = 'bool-button bool-label';
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.setAttribute('role', 'switch');
+          input.setAttribute('data-testid', control.item_id);
+          input.setAttribute('data-eq-index', String(eq.index));
+          const active = !!eq.active;
+          input.checked = active;
+          input.setAttribute('aria-checked', active ? 'true' : 'false');
+          if (active) label.classList.add('is-active');
+          const span = document.createElement('span');
+          span.className = 'bool-text';
+          span.textContent = control.label;
+          label.append(input, span);
+          row.append(label);
+          container.appendChild(row);
+          input.addEventListener('change', async (event) => {
+            event.stopPropagation();
+            const next = !!input.checked;
+            label.classList.toggle('is-active', next);
+            try {
+              await backend.apply?.({
+                kind: 'ui',
+                id: 'equality.toggle',
+                value: { index: eq.index, active: next },
+                control: { item_id: control.item_id },
+              });
+            } catch (err) {
+              console.warn('[ui] equality toggle failed', err);
+            }
+          });
+        }
+        container.setAttribute('data-count', String(eqs.length));
+      } catch (err) {
+        console.warn('[ui] ensureEqualityToggles error', err);
+      }
+    },
     dispose,
   };
   const getCameraModeCount = () => {

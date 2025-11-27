@@ -308,6 +308,12 @@ store.subscribe((state) => {
       controlManager.ensureJointSliders(dofs);
     }
   } catch {}
+  try {
+    const eqs = deriveEqualityList(latestSnapshot);
+    if (typeof controlManager.ensureEqualityToggles === 'function') {
+      controlManager.ensureEqualityToggles(eqs);
+    }
+  } catch {}
 });
 
 rendererManager.renderScene(latestSnapshot, store.get());
@@ -369,6 +375,29 @@ function deriveJointDofs(snapshot, state) {
     const value = qpos && qpos.length > qposIndex ? qpos[qposIndex] : 0;
     const label = names[i] ? String(names[i]) : `Joint ${i}`;
     out.push({ index: qposIndex, jointIndex: i, min, max, value, label });
+  }
+  return out;
+}
+
+function deriveEqualityList(snapshot) {
+  if (!snapshot) return [];
+  const eqActive = snapshot.eq_active instanceof Int32Array
+    ? snapshot.eq_active
+    : (Array.isArray(snapshot.eq_active) ? Int32Array.from(snapshot.eq_active) : null);
+  if (!eqActive || !eqActive.length) return [];
+  const eqType = snapshot.eq_type instanceof Int32Array
+    ? snapshot.eq_type
+    : (Array.isArray(snapshot.eq_type) ? Int32Array.from(snapshot.eq_type) : null);
+  const n = eqActive.length | 0;
+  const out = [];
+  for (let i = 0; i < n; i += 1) {
+    const active = eqActive ? !!eqActive[i] : true;
+    let label = `Equality ${i}`;
+    if (eqType && i < eqType.length) {
+      const t = eqType[i] | 0;
+      label = `Eq ${i} (type ${t})`;
+    }
+    out.push({ index: i, active, label });
   }
   return out;
 }
@@ -640,4 +669,3 @@ function triggerDownload(blob, filename) {
   }
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-

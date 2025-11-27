@@ -2310,6 +2310,22 @@ export async function createBackend(options = {}) {
         }
         return resolveSnapshot(lastSnapshot);
       }
+      if (id === 'equality.toggle') {
+        try {
+          const idx = Number(value?.index ?? value?.i);
+          const active = !!(value?.active ?? value?.value ?? value?.v);
+          if (Number.isFinite(idx) && idx >= 0) {
+            client.postMessage?.({ cmd: 'setEqualityActive', index: idx | 0, active });
+            if (lastSnapshot.eq_active && idx < lastSnapshot.eq_active.length) {
+              lastSnapshot.eq_active[idx] = active ? 1 : 0;
+            }
+            notifyListeners();
+          }
+        } catch (err) {
+          if (debug) console.warn('[backend equality.toggle] failed', err);
+        }
+        return resolveSnapshot(lastSnapshot);
+      }
     if (id === 'control.clear') {
       try {
         const acts = Array.isArray(lastSnapshot.actuators) ? lastSnapshot.actuators : [];
