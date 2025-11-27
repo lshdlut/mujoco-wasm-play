@@ -381,23 +381,62 @@ function deriveJointDofs(snapshot, state) {
 
 function deriveEqualityList(snapshot) {
   if (!snapshot) return [];
-  const eqActive = snapshot.eq_active instanceof Int32Array
+  const eqActive = snapshot.eq_active instanceof Uint8Array
     ? snapshot.eq_active
-    : (Array.isArray(snapshot.eq_active) ? Int32Array.from(snapshot.eq_active) : null);
+    : (Array.isArray(snapshot.eq_active) ? Uint8Array.from(snapshot.eq_active) : null);
   if (!eqActive || !eqActive.length) return [];
   const eqType = snapshot.eq_type instanceof Int32Array
     ? snapshot.eq_type
     : (Array.isArray(snapshot.eq_type) ? Int32Array.from(snapshot.eq_type) : null);
+  const eqObj1 = snapshot.eq_obj1id instanceof Int32Array
+    ? snapshot.eq_obj1id
+    : (Array.isArray(snapshot.eq_obj1id) ? Int32Array.from(snapshot.eq_obj1id) : null);
+  const eqObj2 = snapshot.eq_obj2id instanceof Int32Array
+    ? snapshot.eq_obj2id
+    : (Array.isArray(snapshot.eq_obj2id) ? Int32Array.from(snapshot.eq_obj2id) : null);
+  const eqObjType = snapshot.eq_objtype instanceof Int32Array
+    ? snapshot.eq_objtype
+    : (Array.isArray(snapshot.eq_objtype) ? Int32Array.from(snapshot.eq_objtype) : null);
+  const eqNames = Array.isArray(snapshot.eq_names) ? snapshot.eq_names : null;
+  const jointNames = Array.isArray(snapshot.jnt_names) ? snapshot.jnt_names : [];
   const n = eqActive.length | 0;
   const out = [];
+  const typeLabels = ['connect', 'weld', 'joint', 'tendon', 'flex', 'contact'];
   for (let i = 0; i < n; i += 1) {
-    const active = eqActive ? !!eqActive[i] : true;
-    let label = `Equality ${i}`;
-    if (eqType && i < eqType.length) {
-      const t = eqType[i] | 0;
-      label = `Eq ${i} (type ${t})`;
+    const active = !!eqActive[i];
+    const t = eqType && i < eqType.length ? (eqType[i] | 0) : -1;
+    const typeName = t >= 0 && t < typeLabels.length ? typeLabels[t] : null;
+    const objStride = eqObj1 && eqObj1.length >= 2 * n ? 2 : 1;
+    const objTypeStride = eqObjType && eqObjType.length >= 2 * n ? 2 : 1;
+    const obj1Id = eqObj1 ? eqObj1[(objStride * i) | 0] : -1;
+    const obj2Id = eqObj2 ? eqObj2[(objStride * i) | 0] : -1;
+    const objType1 = eqObjType ? eqObjType[(objTypeStride * i) | 0] : -1;
+    const objType2 = eqObjType ? eqObjType[(objTypeStride * i) + 1] ?? objType1 : objType1;
+    const nameFromEq = eqNames && eqNames[i] ? String(eqNames[i]) : null;
+    const name1 = objType1 === 3 && obj1Id >= 0 && obj1Id < jointNames.length
+      ? String(jointNames[obj1Id] ?? '')
+      : null;
+    const name2 = objType2 === 3 && obj2Id >= 0 && obj2Id < jointNames.length
+      ? String(jointNames[obj2Id] ?? '')
+      : null;
+    let label = nameFromEq || `Eq ${i}`;
+    let fullLabel = label;
+    if (!nameFromEq) {
+      if (name1 && name2 && name1 !== name2) {
+        label = typeName ? `[${typeName}] ${name1} \u2194 ${name2}` : `${name1} \u2194 ${name2}`;
+      } else if (name1) {
+        label = typeName ? `[${typeName}] ${name1}` : name1;
+      } else if (typeName) {
+        label = `[${typeName}] Eq ${i}`;
+      } else {
+        label = `Eq ${i}`;
+      }
+      fullLabel = label;
+    } else {
+      fullLabel = nameFromEq;
+      label = nameFromEq;
     }
-    out.push({ index: i, active, label });
+    out.push({ index: i, active, label, fullLabel, typeName, objType1, objType2, obj1Id, obj2Id });
   }
   return out;
 }

@@ -2015,6 +2015,9 @@ function registerShortcutHandlers(shortcutSpec, handler) {
           container = document.createElement('div');
           container.setAttribute('data-dynamic', 'equality');
           container.style.marginTop = '8px';
+          container.style.display = 'grid';
+          container.style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))';
+          container.style.gap = '12px';
           body.appendChild(container);
         }
         if (!Array.isArray(eqs) || eqs.length === 0) {
@@ -2024,24 +2027,32 @@ function registerShortcutHandlers(shortcutSpec, handler) {
         }
         const prevCount = Number(container.getAttribute('data-count') || '0');
         if (prevCount === eqs.length && container.childElementCount > 0) {
+          // Stable update: only sync active state and label,不重建 DOM，避免交互时节点被移除
           for (const eq of eqs) {
-            const checkbox = container.querySelector(`input[type="checkbox"][data-eq-index="${eq.index}"]`);
+            const checkbox = container.querySelector(
+              `input[type="checkbox"][data-eq-index="${eq.index}"]`,
+            );
             if (!checkbox) continue;
             const active = !!eq.active;
             checkbox.checked = active;
             checkbox.setAttribute('aria-checked', active ? 'true' : 'false');
-            const label = checkbox.closest('label.bool-button');
-            if (label) {
-              label.classList.toggle('is-active', active);
+            const labelEl = checkbox.closest('label.bool-button');
+            if (labelEl) {
+              labelEl.classList.toggle('is-active', active);
+            }
+            const text = checkbox.nextElementSibling;
+            if (text && text.classList.contains('bool-text')) {
+              text.textContent = eq.label || `Equality ${eq.index}`;
             }
           }
           return;
         }
+        // 重建：数量发生变化时
         container.innerHTML = '';
         for (const eq of eqs) {
           const control = { item_id: `equality.${eq.index}`, label: eq.label || `Equality ${eq.index}` };
           const row = createControlRow(control);
-          row.classList.add('bool-row', 'half');
+          row.classList.add('bool-row');
           const label = document.createElement('label');
           label.className = 'bool-button bool-label';
           const input = document.createElement('input');
@@ -2063,6 +2074,8 @@ function registerShortcutHandlers(shortcutSpec, handler) {
             event.stopPropagation();
             const next = !!input.checked;
             label.classList.toggle('is-active', next);
+            const eqName = eq.fullLabel || eq.label || `Eq ${eq.index}`;
+            pushToast(`${next ? 'Enabled' : 'Disabled'} equality: ${eqName}`);
             try {
               await backend.apply?.({
                 kind: 'ui',

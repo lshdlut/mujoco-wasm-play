@@ -1355,7 +1355,9 @@ function resolveSnapshot(state) {
     eq_obj1id: viewOrNull(state.eq_obj1id, Int32Array),
     eq_obj2id: viewOrNull(state.eq_obj2id, Int32Array),
     eq_objtype: viewOrNull(state.eq_objtype, Int32Array),
-    eq_active: viewOrNull(state.eq_active, Int32Array),
+    eq_active0: viewOrNull(state.eq_active0, Uint8Array),
+    eq_active: viewOrNull(state.eq_active, Uint8Array),
+    eq_names: Array.isArray(state.eq_names) ? state.eq_names.slice() : null,
     eq_data: viewOrNull(state.eq_data, Float64Array),
     debugJoint: state.debugJoint || null,
     matrgba: viewOrNull(state.matrgba, Float32Array),
@@ -1718,7 +1720,9 @@ export async function createBackend(options = {}) {
       if (data.eq_obj2id) lastSnapshot.eq_obj2id = makeView(data.eq_obj2id, null, Int32Array);
       if (data.eq_objtype) lastSnapshot.eq_objtype = makeView(data.eq_objtype, null, Int32Array);
       if (data.eq_data) lastSnapshot.eq_data = makeView(data.eq_data, null, Float64Array);
-      if (data.eq_active) lastSnapshot.eq_active = makeView(data.eq_active, null, Int32Array);
+      if (data.eq_active0) lastSnapshot.eq_active0 = makeView(data.eq_active0, null, Uint8Array);
+      if (data.eq_active) lastSnapshot.eq_active = makeView(data.eq_active, null, Uint8Array);
+      if (Array.isArray(data.eq_names)) lastSnapshot.eq_names = data.eq_names.slice();
       if ('debugJoint' in data) lastSnapshot.debugJoint = data.debugJoint || null;
       if (data.qpos) lastSnapshot.qpos = makeView(data.qpos, null, Float64Array);
       if (data.cam_xpos) lastSnapshot.cam_xpos = makeView(data.cam_xpos, null, Float64Array);

@@ -1038,6 +1038,7 @@ async function loadXmlWithFallback(xmlText) {
   const eqObjTypeView = sim.eqObjTypeView?.();
   const eqDataView = sim.eqDataView?.();
   const eqActiveView = sim.eqActiveView?.();
+  const eqActive0View = sim.eqActive0View?.();
   const bodyXposView = sim.bodyXposView?.();
   const bodyXmatView = sim.bodyXmatView?.();
   const bodyXiposView = sim.bodyXiposView?.();
@@ -1268,9 +1269,28 @@ async function loadXmlWithFallback(xmlText) {
     transfers.push(ed.buffer);
   }
   if (eqActiveView) {
-    const ea = new Int32Array(eqActiveView);
+    const ea = new Uint8Array(eqActiveView);
     msg.eq_active = ea;
     transfers.push(ea.buffer);
+  }
+  if (eqActive0View) {
+    const ea0 = new Uint8Array(eqActive0View);
+    msg.eq_active0 = ea0;
+    transfers.push(ea0.buffer);
+  }
+  // Equality names: match simulate's equality_names_ = m->names + m->name_eqadr[i]
+  // via mj_id2name(mjOBJ_EQUALITY, i).
+  if (eqTypeView && typeof sim.id2name === 'function') {
+    const names = [];
+    const eqCount = eqTypeView.length | 0;
+    const MJOBJ_EQUALITY = 17; // from mjOBJ_EQUALITY enum
+    for (let i = 0; i < eqCount; i += 1) {
+      const nm = sim.id2name(MJOBJ_EQUALITY, i) || '';
+      names.push(nm || `equality ${i}`);
+    }
+    if (names.length === eqCount) {
+      msg.eq_names = names;
+    }
   }
   if (snapshotDebug && !diagStagesLogged.has('eq_snapshot')) {
     diagStagesLogged.add('eq_snapshot');

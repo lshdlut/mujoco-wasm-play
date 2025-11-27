@@ -52,6 +52,7 @@ const POINTER_ALIASES = {
   _mjwf_eq_obj2id_ptr: '_mjwf_model_eq_obj2id_ptr',
   _mjwf_eq_objtype_ptr: '_mjwf_model_eq_objtype_ptr',
   _mjwf_eq_data_ptr: '_mjwf_model_eq_data_ptr',
+  _mjwf_eq_active0_ptr: '_mjwf_model_eq_active0_ptr',
   _mjwf_body_jntadr_ptr: '_mjwf_model_body_jntadr_ptr',
   _mjwf_body_jntnum_ptr: '_mjwf_model_body_jntnum_ptr',
   _mjwf_jnt_qposadr_ptr: '_mjwf_model_jnt_qposadr_ptr',
@@ -316,6 +317,16 @@ export function installForgeAbiCompat(mod) {
 
   aliasFunctions(mod, POINTER_ALIASES);
   aliasFunctions(mod, COUNT_ALIASES);
+  if (typeof mod._mjwf_mj_id2name !== 'function') {
+    const fn = getOfficial(mod, 'mj_id2name', 'number', ['number', 'number', 'number']);
+    if (typeof fn === 'function') {
+      mod._mjwf_mj_id2name = function id2nameLegacy(handle, objtype, objid) {
+        const ptrs = ensurePointers(mod, handle | 0);
+        if (!ptrs) return 0;
+        try { return fn(ptrs.model, objtype | 0, objid | 0) | 0; } catch { return 0; }
+      };
+    }
+  }
   installErrnoAliases(mod);
   installLifecycleWrappers(mod);
   installNameAccessors(mod);
