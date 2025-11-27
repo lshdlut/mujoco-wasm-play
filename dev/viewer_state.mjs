@@ -220,10 +220,11 @@ const CAMERA_BASE_LABELS = ['Free', 'Tracking'];
 let latestHudTime = 0;
 const TIME_RESET_EPSILON = 1e-6;
 const MODEL_ALIASES = {
-  rkob: 'RKOB_simplified_upper_with_marker_CAMS.xml',
+  rkob: 'mujoco_Rajagopal2015_simple.xml',
+  raj: 'mujoco_Rajagopal2015_simple.xml',
 };
 const MODEL_POOL = [
-  'RKOB_simplified_upper_with_marker_CAMS.xml',
+  'mujoco_Rajagopal2015_simple.xml',
 ];
 
 const SNAPSHOT_DEBUG_FLAG = (() => {
