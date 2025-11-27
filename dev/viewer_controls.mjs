@@ -1835,11 +1835,11 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       return ids.filter((id) => id.startsWith(prefix));
     },
     getControl: (id) => controlById.get(id) ?? null,
-    // Dynamic: ensure Actuator sliders exist under right panel 'control' section
+      // Dynamic: ensure Actuator sliders exist under right panel 'control' section
     ensureActuatorSliders: (actuators, ctrlValues = []) => {
-      try {
-        if (!rightPanel || !Array.isArray(actuators)) return;
-        const section = rightPanel.querySelector('[data-section-id="control"]');
+        try {
+          if (!rightPanel || !Array.isArray(actuators)) return;
+          const section = rightPanel.querySelector('[data-section-id="control"]');
         if (!section) return;
         const body = section.querySelector('.section-body');
         if (!body) return;
@@ -1917,11 +1917,93 @@ function registerShortcutHandlers(shortcutSpec, handler) {
         container.setAttribute('data-count', String(actuators.length));
       } catch (err) {
         console.warn('[ui] ensureActuatorSliders error', err);
+        }
+      },
+    // Dynamic: ensure Joint sliders exist under right panel 'joint' section
+    ensureJointSliders: (dofs = []) => {
+      try {
+        if (!rightPanel) return;
+        const section = rightPanel.querySelector('[data-section-id="joint"]');
+        if (!section) return;
+        const body = section.querySelector('.section-body');
+        if (!body) return;
+        let container = body.querySelector('[data-dynamic="joints"]');
+        if (!container) {
+          container = document.createElement('div');
+          container.setAttribute('data-dynamic', 'joints');
+          container.style.marginTop = '8px';
+          body.appendChild(container);
+        }
+        if (!Array.isArray(dofs) || dofs.length === 0) {
+          container.innerHTML = '';
+          container.setAttribute('data-count', '0');
+          return;
+        }
+        const prevCount = Number(container.getAttribute('data-count') || '0');
+        if (prevCount === dofs.length && container.childElementCount > 0) {
+          for (const dof of dofs) {
+            const slider = container.querySelector(`input[type="range"][data-joint-index="${dof.index}"]`);
+            if (!slider) continue;
+            if (!slider.dataset.editing) slider.dataset.editing = '0';
+            if (slider.dataset.editing === '1') continue;
+            if (Number(slider.min) !== dof.min) slider.min = String(dof.min);
+            if (Number(slider.max) !== dof.max) slider.max = String(dof.max);
+            const val = Number.isFinite(dof.value) ? dof.value : 0;
+            if (Number(slider.value) !== val) slider.value = String(val);
+          }
+          return;
+        }
+        container.innerHTML = '';
+        for (const dof of dofs) {
+          const row = createControlRow({ item_id: `joint.${dof.index}` });
+          row.classList.add('half');
+          const label = document.createElement('label');
+          label.className = 'control-label';
+          label.textContent = dof.label || `Joint ${dof.index}`;
+          const field = document.createElement('div');
+          field.className = 'control-field';
+          const input = document.createElement('input');
+          input.type = 'range';
+          input.min = String(dof.min);
+          input.max = String(dof.max);
+          const step = Number.isFinite(dof.step) && dof.step > 0
+            ? dof.step
+            : Math.max((dof.max - dof.min) / 500, 0.0001);
+          input.step = String(step);
+          input.value = String(Number.isFinite(dof.value) ? dof.value : 0);
+          input.setAttribute('data-joint-index', String(dof.index));
+          input.setAttribute('data-testid', `joint.${dof.index}`);
+          input.dataset.editing = '0';
+          field.appendChild(input);
+          row.append(label, field);
+          container.appendChild(row);
+          input.addEventListener('focus', () => { input.dataset.editing = '1'; });
+          const clearEditing = () => { input.dataset.editing = '0'; };
+          input.addEventListener('blur', clearEditing);
+          input.addEventListener('pointerup', clearEditing);
+          input.addEventListener('pointerleave', clearEditing);
+          input.addEventListener('input', async () => {
+            const idx = Number(dof.index) | 0;
+            const v = Number(input.value) || 0;
+            try {
+              await backend.apply?.({
+                kind: 'ui',
+                id: 'joint.slider',
+                value: { index: idx, value: v, min: dof.min, max: dof.max },
+                control: { item_id: `joint.${idx}` },
+              });
+            } catch (err) {
+              console.warn('[ui] set joint qpos failed', err);
+            }
+          });
+        }
+        container.setAttribute('data-count', String(dofs.length));
+      } catch (err) {
+        console.warn('[ui] ensureJointSliders error', err);
       }
     },
     dispose,
   };
-}
   const getCameraModeCount = () => {
     try {
       return Math.max(1, 2 + (store.get()?.model?.cameras?.length || 0));
@@ -1930,3 +2012,4 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     }
   };
 
+}

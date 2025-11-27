@@ -1075,13 +1075,21 @@ function snapshot() {
     }
   }
   lastBounds = computeBoundsFromPositions(xpos, n);
-  const nq = sim.nq?.() | 0;
-  const nv = sim.nv?.() | 0;
-  const nuLocal = sim.nu?.() | 0;
-  let ctrl = null;
-  if (nuLocal > 0 && ctrlView) {
-    ctrl = new Float64Array(ctrlView);
-  }
+    const nq = sim.nq?.() | 0;
+    const nv = sim.nv?.() | 0;
+    const nuLocal = sim.nu?.() | 0;
+    let ctrl = null;
+    if (nuLocal > 0 && ctrlView) {
+      ctrl = new Float64Array(ctrlView);
+    }
+    let qpos = null;
+    const qposView = sim.qposView?.();
+    if (qposView && nq > 0) {
+      // Avoid shipping huge buffers; cap to moderate size while keeping simulate parity for typical models
+      if (nq <= 512) {
+        qpos = new Float64Array(qposView);
+      }
+    }
 
   const gesture = gestureState
     ? {
@@ -1126,20 +1134,22 @@ function snapshot() {
     labelMode,
     frameMode,
     cameraMode,
-    frameId,
-    optionSupport: (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] },
-    paused: !running,
-    pausedSource: historyState?.scrubActive ? 'history' : 'backend',
-    rate,
-  };
-  const transfers = [xpos.buffer, xmat.buffer];
-  if (msg.bxpos) transfers.push(msg.bxpos.buffer);
-  if (msg.bxmat) transfers.push(msg.bxmat.buffer);
-  if (msg.xipos) transfers.push(msg.xipos.buffer);
-  if (msg.cam_xpos) transfers.push(msg.cam_xpos.buffer);
-  if (msg.cam_xmat) transfers.push(msg.cam_xmat.buffer);
-  if (msg.light_xpos) transfers.push(msg.light_xpos.buffer);
-  if (msg.light_xdir) transfers.push(msg.light_xdir.buffer);
+      frameId,
+      optionSupport: (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] },
+      paused: !running,
+      pausedSource: historyState?.scrubActive ? 'history' : 'backend',
+      rate,
+      qpos,
+    };
+    const transfers = [xpos.buffer, xmat.buffer];
+    if (msg.bxpos) transfers.push(msg.bxpos.buffer);
+    if (msg.bxmat) transfers.push(msg.bxmat.buffer);
+    if (msg.xipos) transfers.push(msg.xipos.buffer);
+    if (msg.cam_xpos) transfers.push(msg.cam_xpos.buffer);
+    if (msg.cam_xmat) transfers.push(msg.cam_xmat.buffer);
+    if (msg.light_xpos) transfers.push(msg.light_xpos.buffer);
+    if (msg.light_xdir) transfers.push(msg.light_xdir.buffer);
+    if (msg.qpos) transfers.push(msg.qpos.buffer);
   const optionsStruct = readOptionStruct(mod, h);
   if (optionsStruct) {
     msg.options = optionsStruct;
@@ -1585,17 +1595,48 @@ onmessage = async (ev) => {
       // Send joint/geom mapping meta for picking->joint association (optional)
       try {
         const geomBody = sim?.geomBodyIdView?.();
-        const bodyAdr = sim?.bodyJntAdrView?.();
-        const bodyNum = sim?.bodyJntNumView?.();
-        const jtypeView = sim?.jntTypeView?.();
-        const nbody = sim?.nbody?.() | 0;
-        const nj = sim?.njnt?.() | 0;
-        const geom_bodyid = geomBody ? new Int32Array(geomBody) : null;
-        const body_jntadr = bodyAdr ? new Int32Array(bodyAdr) : null;
-        const body_jntnum = bodyNum ? new Int32Array(bodyNum) : null;
-        const jtype = jtypeView ? new Int32Array(jtypeView) : null;
-        const transfers = [geom_bodyid?.buffer, body_jntadr?.buffer, body_jntnum?.buffer, jtype?.buffer].filter(Boolean);
-        postMessage({ kind:'meta_joints', ngeom, nbody, njnt: nj, geom_bodyid, body_jntadr, body_jntnum, jtype }, transfers);
+          const bodyAdr = sim?.bodyJntAdrView?.();
+          const bodyNum = sim?.bodyJntNumView?.();
+          const jtypeView = sim?.jntTypeView?.();
+          const jqposAdr = sim?.jntQposAdrView?.();
+          const jrangeView = sim?.jntRangeView?.();
+          const nbody = sim?.nbody?.() | 0;
+          const nj = sim?.njnt?.() | 0;
+          const geom_bodyid = geomBody ? new Int32Array(geomBody) : null;
+          const body_jntadr = bodyAdr ? new Int32Array(bodyAdr) : null;
+          const body_jntnum = bodyNum ? new Int32Array(bodyNum) : null;
+          const jtype = jtypeView ? new Int32Array(jtypeView) : null;
+          const jnt_qposadr = jqposAdr ? new Int32Array(jqposAdr) : null;
+          const jnt_range = jrangeView ? new Float64Array(jrangeView) : null;
+          const jnt_names = (() => {
+            if (!(nj > 0) || typeof sim?.jntNameOf !== 'function') return null;
+            const names = [];
+            for (let i = 0; i < nj; i += 1) {
+              try { names.push(sim.jntNameOf(i) || `jnt ${i}`); } catch { names.push(`jnt ${i}`); }
+            }
+            return names;
+          })();
+          const transfers = [
+            geom_bodyid?.buffer,
+            body_jntadr?.buffer,
+            body_jntnum?.buffer,
+            jtype?.buffer,
+            jnt_qposadr?.buffer,
+            jnt_range?.buffer,
+          ].filter(Boolean);
+          postMessage({
+            kind:'meta_joints',
+            ngeom,
+            nbody,
+            njnt: nj,
+            geom_bodyid,
+            body_jntadr,
+            body_jntnum,
+            jtype,
+            jnt_qposadr,
+            jnt_range,
+            jnt_names,
+          }, transfers);
       } catch {}
       // Send meta for control panel (always). If nu==0, send empty to clear UI.
       try {
@@ -1820,16 +1861,32 @@ onmessage = async (ev) => {
       const payload = captureCopyState(precision);
       payload.source = msg.source || 'backend';
       try { postMessage(payload); } catch {}
-    } else if (msg.cmd === 'clearForces') {
-      try { sim?.clearAllXfrc?.(); } catch {}
-    } else if (msg.cmd === 'setCtrl') {
-      // Write a single actuator control value if pointers available
-      try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch {}
-    } else if (msg.cmd === 'setRate') {
-      rate = Math.max(0.0625, Math.min(16, +msg.rate || 1));
-      try {
-        const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
-        const tSim = (sim && typeof sim.time === 'function') ? (sim.time() || 0) : simTimeApprox || 0;
+      } else if (msg.cmd === 'clearForces') {
+        try { sim?.clearAllXfrc?.(); } catch {}
+      } else if (msg.cmd === 'setCtrl') {
+        // Write a single actuator control value if pointers available
+        try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch {}
+      } else if (msg.cmd === 'setQpos') {
+        try {
+          const idx = Number(msg.index) | 0;
+          if (idx < 0) throw new Error('invalid qpos index');
+          const target = Number(msg.value);
+          if (!Number.isFinite(target)) throw new Error('invalid qpos value');
+          const qpos = sim?.qposView?.();
+          if (!qpos || idx >= qpos.length) throw new Error('qpos view missing');
+          let v = target;
+          if (Number.isFinite(msg.min)) v = Math.max(Number(msg.min), v);
+          if (Number.isFinite(msg.max)) v = Math.min(Number(msg.max), v);
+          qpos[idx] = v;
+          try { sim.forward?.(); } catch {}
+        } catch (err) {
+          if (snapshotDebug) emitLog('worker: setQpos failed', { err: String(err) });
+        }
+      } else if (msg.cmd === 'setRate') {
+        rate = Math.max(0.0625, Math.min(16, +msg.rate || 1));
+        try {
+          const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+          const tSim = (sim && typeof sim.time === 'function') ? (sim.time() || 0) : simTimeApprox || 0;
         lastSyncWallTime = nowSec;
         lastSyncSimTime = tSim;
         simTimeApprox = tSim;
@@ -1850,10 +1907,6 @@ onmessage = async (ev) => {
     try { postMessage({ kind:'error', message: String(e) }); } catch {}
   }
 };
-
-
-
-
 
 
 

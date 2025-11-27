@@ -1320,18 +1320,23 @@ function resolveSnapshot(state) {
     statistic: cloneStruct(state.statistic),
     visualDefaults: cloneStruct(state.visualDefaults),
     xpos: viewOrNull(state.xpos, Float64Array),
-    xmat: viewOrNull(state.xmat, Float64Array),
-    gsize: viewOrNull(state.gsize, Float64Array),
-    gtype: viewOrNull(state.gtype, Int32Array),
-    gmatid: viewOrNull(state.gmatid, Int32Array),
-    geom_bodyid: viewOrNull(state.geom_bodyid, Int32Array),
-    body_jntadr: viewOrNull(state.body_jntadr, Int32Array),
-    body_jntnum: viewOrNull(state.body_jntnum, Int32Array),
-    bxpos: viewOrNull(state.bxpos, Float64Array),
-    bxmat: viewOrNull(state.bxmat, Float64Array),
-    xipos: viewOrNull(state.xipos, Float64Array),
-    cam_xpos: viewOrNull(state.cam_xpos, Float64Array),
-    cam_xmat: viewOrNull(state.cam_xmat, Float64Array),
+      xmat: viewOrNull(state.xmat, Float64Array),
+      gsize: viewOrNull(state.gsize, Float64Array),
+      gtype: viewOrNull(state.gtype, Int32Array),
+      gmatid: viewOrNull(state.gmatid, Int32Array),
+      geom_bodyid: viewOrNull(state.geom_bodyid, Int32Array),
+      body_jntadr: viewOrNull(state.body_jntadr, Int32Array),
+      body_jntnum: viewOrNull(state.body_jntnum, Int32Array),
+      jtype: viewOrNull(state.jtype, Int32Array),
+      jnt_qposadr: viewOrNull(state.jnt_qposadr, Int32Array),
+      jnt_range: viewOrNull(state.jnt_range, Float64Array),
+      jnt_names: Array.isArray(state.jnt_names) ? state.jnt_names.slice() : null,
+      qpos: viewOrNull(state.qpos, Float64Array),
+      bxpos: viewOrNull(state.bxpos, Float64Array),
+      bxmat: viewOrNull(state.bxmat, Float64Array),
+      xipos: viewOrNull(state.xipos, Float64Array),
+      cam_xpos: viewOrNull(state.cam_xpos, Float64Array),
+      cam_xmat: viewOrNull(state.cam_xmat, Float64Array),
     light_xpos: viewOrNull(state.light_xpos, Float64Array),
     light_xdir: viewOrNull(state.light_xdir, Float64Array),
     jpos: viewOrNull(state.jpos, Float64Array),
@@ -1709,16 +1714,17 @@ export async function createBackend(options = {}) {
     if (data.sensor_objid) lastSnapshot.sensor_objid = makeView(data.sensor_objid, null, Int32Array);
     if (data.eq_type) lastSnapshot.eq_type = makeView(data.eq_type, null, Int32Array);
     if (data.eq_obj1id) lastSnapshot.eq_obj1id = makeView(data.eq_obj1id, null, Int32Array);
-    if (data.eq_obj2id) lastSnapshot.eq_obj2id = makeView(data.eq_obj2id, null, Int32Array);
-    if (data.eq_objtype) lastSnapshot.eq_objtype = makeView(data.eq_objtype, null, Int32Array);
-    if (data.eq_data) lastSnapshot.eq_data = makeView(data.eq_data, null, Float64Array);
-    if (data.eq_active) lastSnapshot.eq_active = makeView(data.eq_active, null, Int32Array);
-    if ('debugJoint' in data) lastSnapshot.debugJoint = data.debugJoint || null;
-    if (data.cam_xpos) lastSnapshot.cam_xpos = makeView(data.cam_xpos, null, Float64Array);
-    if (data.cam_xmat) lastSnapshot.cam_xmat = makeView(data.cam_xmat, null, Float64Array);
-    if (data.light_xpos) lastSnapshot.light_xpos = makeView(data.light_xpos, null, Float64Array);
-    if (data.light_xdir) lastSnapshot.light_xdir = makeView(data.light_xdir, null, Float64Array);
-    lastSnapshot.gsize = makeView(data.gsize, null, Float64Array);
+      if (data.eq_obj2id) lastSnapshot.eq_obj2id = makeView(data.eq_obj2id, null, Int32Array);
+      if (data.eq_objtype) lastSnapshot.eq_objtype = makeView(data.eq_objtype, null, Int32Array);
+      if (data.eq_data) lastSnapshot.eq_data = makeView(data.eq_data, null, Float64Array);
+      if (data.eq_active) lastSnapshot.eq_active = makeView(data.eq_active, null, Int32Array);
+      if ('debugJoint' in data) lastSnapshot.debugJoint = data.debugJoint || null;
+      if (data.qpos) lastSnapshot.qpos = makeView(data.qpos, null, Float64Array);
+      if (data.cam_xpos) lastSnapshot.cam_xpos = makeView(data.cam_xpos, null, Float64Array);
+      if (data.cam_xmat) lastSnapshot.cam_xmat = makeView(data.cam_xmat, null, Float64Array);
+      if (data.light_xpos) lastSnapshot.light_xpos = makeView(data.light_xpos, null, Float64Array);
+      if (data.light_xdir) lastSnapshot.light_xdir = makeView(data.light_xdir, null, Float64Array);
+      lastSnapshot.gsize = makeView(data.gsize, null, Float64Array);
     lastSnapshot.gtype = makeView(data.gtype, null, Int32Array);
     lastSnapshot.gmatid = makeView(data.gmatid, null, Int32Array);
     lastSnapshot.matrgba = makeView(data.matrgba, null, Float32Array);
@@ -1822,11 +1828,11 @@ export async function createBackend(options = {}) {
         notifyListeners();
         break;
       }
-      case 'meta_joints': {
-        const toI32 = (value) => {
-          if (!value) return null;
-          if (ArrayBuffer.isView(value)) {
-            try { return new Int32Array(value); } catch { return null; }
+        case 'meta_joints': {
+          const toI32 = (value) => {
+            if (!value) return null;
+            if (ArrayBuffer.isView(value)) {
+              try { return new Int32Array(value); } catch { return null; }
           }
           if (value instanceof ArrayBuffer) {
             try { return new Int32Array(value); } catch { return null; }
@@ -1842,13 +1848,29 @@ export async function createBackend(options = {}) {
         if (bodyAdr) lastSnapshot.body_jntadr = bodyAdr;
         const bodyNum = toI32(data.body_jntnum);
         if (bodyNum) lastSnapshot.body_jntnum = bodyNum;
-        const jtype = toI32(data.jtype);
-        if (jtype) lastSnapshot.jtype = jtype;
-        if (typeof data.nbody === 'number') lastSnapshot.nbody = data.nbody | 0;
-        if (typeof data.njnt === 'number') lastSnapshot.njnt = data.njnt | 0;
-        notifyListeners();
-        break;
-      }
+          const jtype = toI32(data.jtype);
+          if (jtype) lastSnapshot.jtype = jtype;
+          if (typeof data.nbody === 'number') lastSnapshot.nbody = data.nbody | 0;
+          if (typeof data.njnt === 'number') lastSnapshot.njnt = data.njnt | 0;
+          const jqposadr = toI32(data.jnt_qposadr);
+          if (jqposadr) lastSnapshot.jnt_qposadr = jqposadr;
+          const jrange = (() => {
+            const source = data.jnt_range;
+            if (!source) return null;
+            try {
+              if (ArrayBuffer.isView(source)) return new Float64Array(source);
+              if (Array.isArray(source)) return Float64Array.from(source);
+              if (source instanceof ArrayBuffer) return new Float64Array(source);
+            } catch {}
+            return null;
+          })();
+          if (jrange) lastSnapshot.jnt_range = jrange;
+          if (Array.isArray(data.jnt_names)) {
+            lastSnapshot.jnt_names = data.jnt_names.map((name, idx) => String(name ?? `jnt ${idx}`));
+          }
+          notifyListeners();
+          break;
+        }
       case 'meta': {
         try {
           // Actuator metadata for dynamic control UI
@@ -2252,23 +2274,41 @@ export async function createBackend(options = {}) {
       return resolveSnapshot(lastSnapshot);
     }
     // Generic actuator control (dynamic UI)
-    if (id === 'control.actuator') {
-      try {
-        const idx = Number(value?.index ?? value?.i ?? value?.id);
-        const v = Number(value?.value ?? value?.v ?? 0);
-        if (Number.isFinite(idx) && idx >= 0) {
-          client.postMessage?.({ cmd: 'setCtrl', index: idx | 0, value: v });
-          // Optimistically update local copy if present
-          if (Array.isArray(lastSnapshot.actuators) && lastSnapshot.actuators[idx|0]) {
-            lastSnapshot.actuators[idx|0].value = v;
+      if (id === 'control.actuator') {
+        try {
+          const idx = Number(value?.index ?? value?.i ?? value?.id);
+          const v = Number(value?.value ?? value?.v ?? 0);
+          if (Number.isFinite(idx) && idx >= 0) {
+            client.postMessage?.({ cmd: 'setCtrl', index: idx | 0, value: v });
+            // Optimistically update local copy if present
+            if (Array.isArray(lastSnapshot.actuators) && lastSnapshot.actuators[idx|0]) {
+              lastSnapshot.actuators[idx|0].value = v;
+            }
+            notifyListeners();
           }
-          notifyListeners();
+        } catch (err) {
+          if (debug) console.warn('[backend control.actuator] failed', err);
         }
-      } catch (err) {
-        if (debug) console.warn('[backend control.actuator] failed', err);
+        return resolveSnapshot(lastSnapshot);
       }
-      return resolveSnapshot(lastSnapshot);
-    }
+      if (id === 'joint.slider') {
+        try {
+          const idx = Number(value?.index ?? value?.qposIndex ?? value?.i);
+          const v = Number(value?.value ?? value?.v);
+          if (Number.isFinite(idx) && idx >= 0 && Number.isFinite(v)) {
+            const min = Number.isFinite(value?.min) ? Number(value.min) : null;
+            const max = Number.isFinite(value?.max) ? Number(value.max) : null;
+            client.postMessage?.({ cmd: 'setQpos', index: idx | 0, value: v, min, max });
+            if (lastSnapshot.qpos && idx < lastSnapshot.qpos.length) {
+              lastSnapshot.qpos[idx] = v;
+            }
+            notifyListeners();
+          }
+        } catch (err) {
+          if (debug) console.warn('[backend joint.slider] failed', err);
+        }
+        return resolveSnapshot(lastSnapshot);
+      }
     if (id === 'control.clear') {
       try {
         const acts = Array.isArray(lastSnapshot.actuators) ? lastSnapshot.actuators : [];

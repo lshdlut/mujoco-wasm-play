@@ -302,6 +302,12 @@ store.subscribe((state) => {
       controlManager.ensureActuatorSliders(acts, ctrlValues);
     }
   } catch {}
+  try {
+    const dofs = deriveJointDofs(latestSnapshot, state);
+    if (typeof controlManager.ensureJointSliders === 'function') {
+      controlManager.ensureJointSliders(dofs);
+    }
+  } catch {}
 });
 
 rendererManager.renderScene(latestSnapshot, store.get());
@@ -329,6 +335,43 @@ const pickingController = createPickingController({
   getSnapshot: () => latestSnapshot,
 });
 pickingController.setup();
+
+function deriveJointDofs(snapshot, state) {
+  if (!snapshot) return [];
+  const jtype = snapshot.jtype instanceof Int32Array
+    ? snapshot.jtype
+    : (Array.isArray(snapshot.jtype) ? Int32Array.from(snapshot.jtype) : null);
+  const jqpos = snapshot.jnt_qposadr instanceof Int32Array
+    ? snapshot.jnt_qposadr
+    : (Array.isArray(snapshot.jnt_qposadr) ? Int32Array.from(snapshot.jnt_qposadr) : null);
+  const jrange = snapshot.jnt_range instanceof Float64Array
+    ? snapshot.jnt_range
+    : (Array.isArray(snapshot.jnt_range) ? Float64Array.from(snapshot.jnt_range) : null);
+  const names = Array.isArray(snapshot.jnt_names) ? snapshot.jnt_names : [];
+  const qpos = snapshot.qpos instanceof Float64Array
+    ? snapshot.qpos
+    : (Array.isArray(snapshot.qpos) ? Float64Array.from(snapshot.qpos) : null);
+  const nq = snapshot.nq | 0;
+  const out = [];
+  const nj = jtype?.length || 0;
+  const groupState = state?.rendering?.groups?.joint;
+  const jointGroupEnabled = Array.isArray(groupState) ? groupState.some(Boolean) : true;
+  if (!jointGroupEnabled) return out;
+  for (let i = 0; i < nj; i += 1) {
+    const type = jtype[i] | 0;
+    if (type !== 2 && type !== 3) continue; // slide / hinge
+    const qposIndex = jqpos && i < jqpos.length ? jqpos[i] : -1;
+    if (qposIndex < 0 || qposIndex >= nq) continue;
+    const r0 = jrange && jrange.length >= 2 * (i + 1) ? jrange[2 * i] : null;
+    const r1 = jrange && jrange.length >= 2 * (i + 1) ? jrange[2 * i + 1] : null;
+    const min = Number.isFinite(r0) ? r0 : (type === 3 ? -Math.PI : -1);
+    const max = Number.isFinite(r1) ? r1 : (type === 3 ? Math.PI : 1);
+    const value = qpos && qpos.length > qposIndex ? qpos[qposIndex] : 0;
+    const label = names[i] ? String(names[i]) : `Joint ${i}`;
+    out.push({ index: qposIndex, jointIndex: i, min, max, value, label });
+  }
+  return out;
+}
 
 function isTextEditingTarget(event) {
   const target = event?.target;
@@ -597,6 +640,4 @@ function triggerDownload(blob, filename) {
   }
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-
-
 
