@@ -14,6 +14,8 @@ export function createControlManager({
   let shortcutsInstalled = false;
   const shortcutHandlers = new Map();
   const CAMERA_FALLBACK_PRESETS = ['Free', 'Tracking'];
+  const modelLibrary = [];
+  let modelSelectEl = null;
 
   function sanitiseName(name) {
     return (
@@ -520,6 +522,138 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       await applySpecAction(store, backend, control, input.checked);
     });
     return wrapper;
+  }
+
+  function renderFileSectionExtras(body) {
+    const { row, label, field } = createNamedRow('Models', { full: true });
+    label.textContent = 'Models';
+    field.style.display = 'flex';
+    field.style.flexWrap = 'nowrap';
+    field.style.gap = '8px';
+
+    const loadButton = document.createElement('button');
+    loadButton.type = 'button';
+    loadButton.className = 'btn-primary';
+    loadButton.textContent = 'Load xml';
+    loadButton.setAttribute('data-testid', 'file.load_xml_custom');
+    loadButton.style.flex = '1 1 0';
+
+    const select = document.createElement('select');
+    select.setAttribute('data-testid', 'file.model_select');
+    select.style.flex = '1 1 0';
+
+    field.append(loadButton, select);
+    body.append(row);
+
+    modelSelectEl = select;
+
+    const refreshModelSelectOptions = () => {
+      if (!modelSelectEl) return;
+      modelSelectEl.innerHTML = '';
+      if (modelLibrary.length === 0) {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'No models loaded';
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        modelSelectEl.appendChild(placeholder);
+        modelSelectEl.disabled = true;
+        return;
+      }
+      modelSelectEl.disabled = false;
+      for (let i = 0; i < modelLibrary.length; i += 1) {
+        const entry = modelLibrary[i];
+        const opt = document.createElement('option');
+        opt.value = entry.id;
+        opt.textContent = entry.label || `Model ${i + 1}`;
+        modelSelectEl.appendChild(opt);
+      }
+    };
+
+    const addModelEntry = (entry) => {
+      const existingIndex = modelLibrary.findIndex((item) => item.id === entry.id);
+      if (existingIndex >= 0) {
+        modelLibrary[existingIndex] = entry;
+      } else {
+        modelLibrary.push(entry);
+      }
+      refreshModelSelectOptions();
+      if (modelSelectEl && entry.id) {
+        modelSelectEl.value = entry.id;
+      }
+    };
+
+    loadButton.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.xml';
+      input.style.display = 'none';
+      const root = body.ownerDocument?.body || document.body;
+      root.appendChild(input);
+      const cleanup = () => {
+        if (input.parentNode) {
+          input.parentNode.removeChild(input);
+        }
+      };
+      input.addEventListener(
+        'change',
+        async () => {
+          const file = input.files && input.files[0];
+          if (!file) {
+            cleanup();
+            return;
+          }
+          try {
+            const text = await file.text();
+            const label = file.name || `Model ${modelLibrary.length + 1}`;
+            const entry = {
+              id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              label,
+              kind: 'xmlText',
+              xmlText: text,
+            };
+            addModelEntry(entry);
+            if (typeof backend?.loadXmlText === 'function') {
+              await backend.loadXmlText(text);
+              pushToast?.(`Loaded model: ${label}`);
+            }
+          } catch (err) {
+            console.error('[ui] load xml from file failed', err);
+            pushToast?.('Failed to load xml from file');
+            throw err;
+          } finally {
+            cleanup();
+          }
+        },
+        { once: true },
+      );
+      input.click();
+    });
+
+    select.addEventListener('change', async () => {
+      const id = select.value;
+      if (!id) return;
+      const entry = modelLibrary.find((item) => item.id === id);
+      if (!entry || entry.kind !== 'xmlText' || !entry.xmlText) return;
+      try {
+        if (typeof backend?.loadXmlText === 'function') {
+          await backend.loadXmlText(entry.xmlText);
+          pushToast?.(`Loaded model: ${entry.label || id}`);
+        }
+      } catch (err) {
+        console.error('[ui] model select reload failed', err);
+        pushToast?.('Failed to load selected model');
+        throw err;
+      }
+    });
+
+    refreshModelSelectOptions();
+
+    const noteRow = createFullRow();
+    noteRow.field.classList.add('control-static');
+    noteRow.field.textContent =
+      'Native Simulate File actions (save/print/quit/screenshot) are hidden in this Play UI because they are not functional here.';
+    body.append(noteRow.row);
   }
 
   function createLabeledRow(control) {
@@ -1656,12 +1790,16 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     sectionEl.append(header, body);
 
     const resetTargets = [];
-    for (const item of section.items ?? []) {
-      renderControl(body, item);
-      if (!item?.item_id) continue;
-      const resetValue = resolveResetValue(item);
-      if (resetValue !== undefined) {
-        resetTargets.push({ id: item.item_id, value: resetValue });
+    if (section.section_id === 'file') {
+      renderFileSectionExtras(body);
+    } else {
+      for (const item of section.items ?? []) {
+        renderControl(body, item);
+        if (!item?.item_id) continue;
+        const resetValue = resolveResetValue(item);
+        if (resetValue !== undefined) {
+          resetTargets.push({ id: item.item_id, value: resetValue });
+        }
       }
     }
 

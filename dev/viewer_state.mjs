@@ -1650,6 +1650,22 @@ export async function createBackend(options = {}) {
     return notifyListeners();
   }
 
+  async function loadXmlText(xmlText) {
+    const payload = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
+    if (!client || typeof client.postMessage !== 'function') {
+      return resolveSnapshot(lastSnapshot);
+    }
+    try {
+      lastSnapshot.visualDefaults = null;
+      client.postMessage({ cmd: 'load', rate, xmlText: payload });
+      client.postMessage({ cmd: 'snapshot' });
+    } catch (err) {
+      console.error('[backend loadXmlText] failed', err);
+      throw err;
+    }
+    return resolveSnapshot(lastSnapshot);
+  }
+
   function applyVisualStatePayload(payload) {
     if (!payload || typeof client?.postMessage !== 'function') {
       return resolveSnapshot(lastSnapshot);
@@ -2539,6 +2555,7 @@ export async function createBackend(options = {}) {
     applyBodyForce: applyBodyForceCommand,
     clearForces: clearForcesCommand,
     setVisualState: applyVisualStatePayload,
+    loadXmlText,
     dispose,
   };
 }
