@@ -2436,7 +2436,11 @@ function createMeshGeometryFromAssets(assets, meshId) {
     texcoordadr,
     texcoordnum,
   } = assets.meshes;
-  if (!vert || !vertadr || !vertnum) return null;
+  const hasValidVert =
+    vert
+    && typeof vert.length === 'number'
+    && typeof vert.slice === 'function';
+  if (!hasValidVert || !vertadr || !vertnum) return null;
   const count = vertnum[meshId] | 0;
   if (!(count > 0)) return null;
   const start = (vertadr[meshId] | 0) * 3;

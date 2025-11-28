@@ -34,7 +34,7 @@ let sim = null;
 let h = 0;
 let dt = 0.002;
 let rate = 1.0;
-let running = true;
+let running = false;
 let ngeom = 0;
 let nu = 0;
 let pendingCtrl = new Map(); // index -> value (clamped later)
@@ -129,6 +129,26 @@ function setRunning(next, source = 'backend', notify = true) {
     try {
       postMessage({ kind: 'run_state', running: target, source });
     } catch {}
+  }
+}
+
+function resetTimingForCurrentSim(initialRate = null) {
+  const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+  let tSim = 0;
+  try {
+    if (sim && typeof sim.time === 'function') {
+      tSim = sim.time() || 0;
+    } else {
+      tSim = simTimeApprox || 0;
+    }
+  } catch {
+    tSim = simTimeApprox || 0;
+  }
+  lastSyncWallTime = nowSec;
+  lastSyncSimTime = tSim;
+  simTimeApprox = tSim;
+  if (initialRate != null && Number.isFinite(initialRate)) {
+    rate = Math.max(0.0625, Math.min(16, Number(initialRate) || 1));
   }
 }
 
@@ -1574,12 +1594,17 @@ onmessage = async (ev) => {
   const msg = ev.data || {};
   try {
     if (msg.cmd === 'load') {
+      // Stop stepping during reload and clear handle so timers are gated.
+      try {
+        setRunning(false, 'load', false);
+      } catch {}
       if (sim) {
         try { sim.term(); } catch {}
       }
       if (mod && h && typeof mod._mjwf_helper_free === 'function') {
         try { mod._mjwf_helper_free(h); } catch {}
       }
+      h = 0;
       const { ok, abi, handle } = await loadXmlWithFallback(msg.xmlText || '');
       h = handle | 0;
       frameSeq = 0;
@@ -1601,8 +1626,9 @@ onmessage = async (ev) => {
       emitHistoryMeta();
       emitKeyframeMeta();
       emitWatchState();
+      // Fresh sync of stepping timeline and rate for new model.
+      resetTimingForCurrentSim(typeof msg.rate === 'number' ? msg.rate : 1.0);
       setRunning(true, 'load');
-      rate = typeof msg.rate === 'number' ? msg.rate : 1.0;
       gestureState = { mode: 'idle', phase: 'idle', pointer: null };
       dragState = { dx: 0, dy: 0 };
       voptFlags = Array.from({ length: 32 }, () => 0);
@@ -1695,13 +1721,7 @@ onmessage = async (ev) => {
         captureHistorySample(true);
         emitHistoryMeta();
         snapshot();
-        try {
-          const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
-          const tSim = (sim && typeof sim.time === 'function') ? (sim.time() || 0) : 0;
-          lastSyncWallTime = nowSec;
-          lastSyncSimTime = tSim;
-          simTimeApprox = tSim;
-        } catch {}
+        resetTimingForCurrentSim(rate);
       }
     } else if (msg.cmd === 'step') {
       if (sim) {
@@ -1925,14 +1945,8 @@ onmessage = async (ev) => {
         if (snapshotDebug) emitLog('worker: setEqualityActive failed', { err: String(err) });
       }
     } else if (msg.cmd === 'setRate') {
-        rate = Math.max(0.0625, Math.min(16, +msg.rate || 1));
-        try {
-          const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
-          const tSim = (sim && typeof sim.time === 'function') ? (sim.time() || 0) : simTimeApprox || 0;
-        lastSyncWallTime = nowSec;
-        lastSyncSimTime = tSim;
-        simTimeApprox = tSim;
-      } catch {}
+      const nextRate = +msg.rate || 1;
+      resetTimingForCurrentSim(nextRate);
     } else if (msg.cmd === 'setPaused') {
       const nextRunning = !msg.paused;
       setRunning(nextRunning, msg.source || 'ui');

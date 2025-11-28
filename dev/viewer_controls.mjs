@@ -1,3 +1,5 @@
+import { resetModelFrontendState } from './viewer_state.mjs';
+
 export function createControlManager({
   store,
   backend,
@@ -525,8 +527,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
   }
 
   function renderFileSectionExtras(body) {
-    const { row, label, field } = createNamedRow('Models', { full: true });
-    label.textContent = 'Models';
+    const { row, field } = createFullRow();
     field.style.display = 'flex';
     field.style.flexWrap = 'nowrap';
     field.style.gap = '8px';
@@ -583,6 +584,21 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       }
     };
 
+    const initialInfo = typeof backend?.getInitialModelInfo === 'function'
+      ? backend.getInitialModelInfo()
+      : null;
+    if (initialInfo && initialInfo.file) {
+      const file = initialInfo.file;
+      const label = initialInfo.label || file;
+      const entry = {
+        id: `builtin_${file}`,
+        label,
+        kind: 'builtinUrl',
+        file,
+      };
+      addModelEntry(entry);
+    }
+
     loadButton.addEventListener('click', () => {
       const input = document.createElement('input');
       input.type = 'file';
@@ -613,6 +629,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
               xmlText: text,
             };
             addModelEntry(entry);
+            resetModelFrontendState(store);
             if (typeof backend?.loadXmlText === 'function') {
               await backend.loadXmlText(text);
               pushToast?.(`Loaded model: ${label}`);
@@ -634,11 +651,31 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       const id = select.value;
       if (!id) return;
       const entry = modelLibrary.find((item) => item.id === id);
-      if (!entry || entry.kind !== 'xmlText' || !entry.xmlText) return;
+      if (!entry) return;
       try {
-        if (typeof backend?.loadXmlText === 'function') {
-          await backend.loadXmlText(entry.xmlText);
-          pushToast?.(`Loaded model: ${entry.label || id}`);
+        if (entry.kind === 'xmlText' && entry.xmlText) {
+          resetModelFrontendState(store);
+          if (typeof backend?.loadXmlText === 'function') {
+            await backend.loadXmlText(entry.xmlText);
+            pushToast?.(`Loaded model: ${entry.label || id}`);
+          }
+          return;
+        }
+        if (entry.kind === 'builtinUrl' && entry.file) {
+          const url = new URL(entry.file, import.meta.url);
+          const res = await fetch(url, { cache: 'no-store' });
+          if (!res.ok) {
+            pushToast?.(`Failed to fetch model: ${entry.label || entry.file}`);
+            return;
+          }
+          const text = await res.text();
+          entry.kind = 'xmlText';
+          entry.xmlText = text;
+          resetModelFrontendState(store);
+          if (typeof backend?.loadXmlText === 'function') {
+            await backend.loadXmlText(text);
+            pushToast?.(`Loaded model: ${entry.label || id}`);
+          }
         }
       } catch (err) {
         console.error('[ui] model select reload failed', err);
@@ -651,8 +688,7 @@ function registerShortcutHandlers(shortcutSpec, handler) {
 
     const noteRow = createFullRow();
     noteRow.field.classList.add('control-static');
-    noteRow.field.textContent =
-      'Native Simulate File actions (save/print/quit/screenshot) are hidden in this Play UI because they are not functional here.';
+    noteRow.field.textContent = 'Simulate File actions are disabled here.';
     body.append(noteRow.row);
   }
 

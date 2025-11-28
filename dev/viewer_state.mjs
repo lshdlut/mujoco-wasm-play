@@ -347,6 +347,55 @@ function assignStructPath(target, pathSegments, value) {
   }
 }
 
+function createInitialSnapshot() {
+  return {
+    t: 0,
+    rate: 1,
+    paused: false,
+    ngeom: 0,
+    nq: 0,
+    nv: 0,
+    pausedSource: 'backend',
+    rateSource: 'backend',
+    gesture: { mode: 'idle', phase: 'idle', pointer: null },
+    drag: { dx: 0, dy: 0 },
+    voptFlags: Array.from({ length: 32 }, () => 0),
+    sceneFlags: SCENE_FLAG_DEFAULTS.map((flag) => (flag ? 1 : 0)),
+    labelMode: 0,
+    frameMode: 0,
+    cameraMode: 0,
+    groups: createViewerGroupState(true),
+    align: null,
+    copyState: null,
+    xpos: new Float64Array(0),
+    xmat: new Float64Array(0),
+    gsize: null,
+    gtype: null,
+    gmatid: null,
+    matrgba: null,
+    contacts: null,
+    renderAssets: null,
+    scene: null,
+    options: null,
+    ctrl: null,
+    optionSupport: { supported: false, pointers: [] },
+    visual: null,
+    statistic: null,
+    visualDefaults: null,
+    cameras: [],
+    history: createDefaultHistoryState(),
+    keyframes: createDefaultKeyframeState(),
+    watch: createDefaultWatchState(),
+    keyIndex: -1,
+  };
+}
+
+export function resetModelFrontendState(store) {
+  latestHudTime = 0;
+  if (!store || typeof store.replace !== 'function') return;
+  store.replace(DEFAULT_VIEWER_STATE);
+}
+
 function resolveModelFileName(raw) {
   if (raw === null || raw === undefined) return null;
   const token = String(raw).trim();
@@ -1458,6 +1507,12 @@ export async function createBackend(options = {}) {
   const modelToken = typeof options.model === 'string' ? options.model.trim() : '';
   const modelKey = modelToken.toLowerCase();
   const modelFile = resolveModelFileName(modelToken);
+  const defaultModelFile = modelFile || MODEL_POOL[0] || null;
+  const initialModelInfo = {
+    token: modelToken || '',
+    file: defaultModelFile,
+    label: modelToken || defaultModelFile || '',
+  };
   const listeners = new Set();
   const normaliseInt = (value, fallback = 0) => {
     const num = Number(value);
@@ -1468,46 +1523,7 @@ export async function createBackend(options = {}) {
   let paused = false;
   let rate = 1;
   let historyScrubbing = false;
-  let lastSnapshot = {
-    t: 0,
-    rate: 1,
-    paused: false,
-    ngeom: 0,
-    nq: 0,
-    nv: 0,
-    pausedSource: 'backend',
-    rateSource: 'backend',
-    gesture: { mode: 'idle', phase: 'idle', pointer: null },
-    drag: { dx: 0, dy: 0 },
-    voptFlags: Array.from({ length: 32 }, () => 0),
-    sceneFlags: SCENE_FLAG_DEFAULTS.map((flag) => (flag ? 1 : 0)),
-    labelMode: 0,
-    frameMode: 0,
-    cameraMode: 0,
-    groups: createViewerGroupState(true),
-    align: null,
-    copyState: null,
-    xpos: new Float64Array(0),
-    xmat: new Float64Array(0),
-    gsize: null,
-    gtype: null,
-    gmatid: null,
-    matrgba: null,
-    contacts: null,
-    renderAssets: null,
-    scene: null,
-    options: null,
-    ctrl: null,
-    optionSupport: { supported: false, pointers: [] },
-    visual: null,
-    statistic: null,
-    visualDefaults: null,
-    cameras: [],
-    history: createDefaultHistoryState(),
-    keyframes: createDefaultKeyframeState(),
-    watch: createDefaultWatchState(),
-    keyIndex: -1,
-  };
+  let lastSnapshot = createInitialSnapshot();
   let lastFrameId = -1;
   let messageHandler = null;
 
@@ -1656,7 +1672,10 @@ export async function createBackend(options = {}) {
       return resolveSnapshot(lastSnapshot);
     }
     try {
+      lastSnapshot = createInitialSnapshot();
+      lastFrameId = -1;
       lastSnapshot.visualDefaults = null;
+      notifyListeners();
       client.postMessage({ cmd: 'load', rate, xmlText: payload });
       client.postMessage({ cmd: 'snapshot' });
     } catch (err) {
@@ -2556,6 +2575,7 @@ export async function createBackend(options = {}) {
     clearForces: clearForcesCommand,
     setVisualState: applyVisualStatePayload,
     loadXmlText,
+    getInitialModelInfo: () => initialModelInfo,
     dispose,
   };
 }

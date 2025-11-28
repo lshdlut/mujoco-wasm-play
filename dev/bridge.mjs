@@ -454,8 +454,9 @@ export class MjSimLite {
     }
     this._validateHandleOrThrow(h);
     this.h = h;
-    // Second-stage init (if present)
-    const stage = ['_mjwf_make_data','_mjwf_bind','_mjwf_attach','_mjwf_finalize','_mjwf_forward','_mjwf_reset','_mjwf_resetData'];
+    // Second-stage init (if present). Keep this lightweight: avoid mj_resetData
+    // here to prevent large one-off workspace allocations on heavy models.
+    const stage = ['_mjwf_make_data','_mjwf_bind','_mjwf_attach','_mjwf_finalize','_mjwf_forward'];
     const called = [];
     for (const fn of stage){ try { if (typeof m[fn] === 'function') { m[fn](h); called.push(fn); } } catch {}
     }
