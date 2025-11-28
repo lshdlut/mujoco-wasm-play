@@ -893,8 +893,10 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     button.setAttribute('data-testid', control.item_id);
 
     let resolvedVariant = variant;
-    if (control.item_id.startsWith('simulation.') || control.item_id.startsWith('file.')) {
+    if (control.item_id === 'simulation.run') {
       resolvedVariant = 'primary';
+    } else if (control.item_id.startsWith('simulation.') || control.item_id.startsWith('file.')) {
+      resolvedVariant = 'pill';
     }
     if (variant === 'pill') {
       resolvedVariant = 'pill';
