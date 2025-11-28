@@ -528,7 +528,6 @@ function registerShortcutHandlers(shortcutSpec, handler) {
 
   function renderFileSectionExtras(body) {
     const row = createControlRow(null);
-    row.classList.add('action-row');
 
     const loadButton = document.createElement('button');
     loadButton.type = 'button';
@@ -536,10 +535,14 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     loadButton.textContent = 'Load xml';
     loadButton.setAttribute('data-testid', 'file.load_xml_custom');
 
+    const field = document.createElement('div');
+    field.className = 'control-field';
+
     const select = document.createElement('select');
     select.setAttribute('data-testid', 'file.model_select');
 
-    row.append(loadButton, select);
+    field.append(select);
+    row.append(loadButton, field);
     body.append(row);
 
     modelSelectEl = select;
@@ -890,10 +893,8 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     button.setAttribute('data-testid', control.item_id);
 
     let resolvedVariant = variant;
-    if (control.item_id === 'simulation.run') {
+    if (control.item_id.startsWith('simulation.') || control.item_id.startsWith('file.')) {
       resolvedVariant = 'primary';
-    } else if (control.item_id.startsWith('simulation.') || control.item_id.startsWith('file.')) {
-      resolvedVariant = 'pill';
     }
     if (variant === 'pill') {
       resolvedVariant = 'pill';
