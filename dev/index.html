@@ -322,7 +322,7 @@ body.fullscreen {
   align-items: stretch;
   gap: 8px;
 }
-.action-row button {
+.action-row > * {
   flex: 1 1 100%;
 }
 .compact-pills {
@@ -506,6 +506,15 @@ body.fullscreen {
   border-color: rgba(59, 130, 246, 0.35);
   color: var(--color-primary);
 }
+.btn-primary:hover,
+.btn-secondary:hover,
+.btn-pill:hover,
+.run-toggle:hover,
+.bool-button:hover,
+.compact-pill:hover {
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.55);
+  transform: translateY(-0.5px);
+}
 .run-toggle-row {
   margin-top: 4px;
 }
@@ -563,6 +572,8 @@ body.fullscreen {
   color: #0f172a;
   font-size: 13px;
   max-width: min(320px, 45%);
+  word-break: break-word;
+  overflow-wrap: anywhere;
   opacity: 0;
   transform: translateY(12px);
   transition: opacity 0.2s ease, transform 0.2s ease;

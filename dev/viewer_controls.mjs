@@ -527,23 +527,19 @@ function registerShortcutHandlers(shortcutSpec, handler) {
   }
 
   function renderFileSectionExtras(body) {
-    const { row, field } = createFullRow();
-    field.style.display = 'flex';
-    field.style.flexWrap = 'nowrap';
-    field.style.gap = '8px';
+    const row = createControlRow(null);
+    row.classList.add('action-row');
 
     const loadButton = document.createElement('button');
     loadButton.type = 'button';
     loadButton.className = 'btn-primary';
     loadButton.textContent = 'Load xml';
     loadButton.setAttribute('data-testid', 'file.load_xml_custom');
-    loadButton.style.flex = '1 1 0';
 
     const select = document.createElement('select');
     select.setAttribute('data-testid', 'file.model_select');
-    select.style.flex = '1 1 0';
 
-    field.append(loadButton, select);
+    row.append(loadButton, select);
     body.append(row);
 
     modelSelectEl = select;
