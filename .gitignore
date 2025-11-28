@@ -36,6 +36,10 @@ FORGE_*.md
 
 # Large local models (keep untracked)
 dev/RKOB_simplified_upper_with_marker_CAMS.xml
+dev/horse_17D50M_full.xml
+dev/RKOB_full_no_hand_STAR_OSSO.xml
+dev/RKOB_simplified_upper_STAR_OSSO.xml
+dev/stark2021_with_muscles.xml
 
 # Package manager lock (keep root local-only)
 /package-lock.json

@@ -1541,15 +1541,15 @@ export async function createBackend(options = {}) {
           workerUrl.searchParams.set('forgeBase', forgeBase);
         }
       }
-    } catch {
-      // ignore query parsing issues
-    }
-    workerUrl.searchParams.set('cb', String(Date.now()));
-    const worker = new Worker(workerUrl, { type: 'module' });
-    return worker;
+  } catch {
+    // ignore query parsing issues
   }
+  workerUrl.searchParams.set('cb', String(Date.now()));
+  const worker = new Worker(workerUrl, { type: 'module' });
+  return worker;
+}
 
-  async function loadDefaultXml() {
+async function loadDefaultXml() {
   const candidates = [];
   const seen = new Set();
   if (modelFile) {
@@ -1585,14 +1585,7 @@ export async function createBackend(options = {}) {
     }
   }
   throw new Error(`No model loaded. Tried: ${Array.from(seen).join(', ')}. Errors: ${errors.join('; ')}`);
-  }
-
-  try {
-    client = await spawnWorkerBackend();
-  } catch (err) {
-    if (debug) console.warn('[backend] worker init failed', err);
-    throw err;
-  }
+}
 
   function notifyListeners() {
     lastSnapshot.rate = rate;
@@ -1608,6 +1601,52 @@ export async function createBackend(options = {}) {
       }
     }
     return snapshot;
+  }
+
+  function detachClient() {
+    if (messageHandler) {
+      try { client?.removeEventListener?.('message', messageHandler); } catch {}
+      try { if (client && 'onmessage' in client) client.onmessage = null; } catch {}
+    }
+  }
+
+  async function restartWorkerWithXml(xmlText) {
+    const payload = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
+    if (!payload || payload.trim().length === 0) {
+      return resolveSnapshot(lastSnapshot);
+    }
+    // Tear down old worker (if any).
+    try { detachClient(); } catch {}
+    try { client?.terminate?.(); } catch {}
+    client = null;
+    // Spawn a fresh worker (new wasm instance).
+    try {
+      client = await spawnWorkerBackend();
+    } catch (err) {
+      if (debug) console.warn('[backend] worker init failed', err);
+      throw err;
+    }
+    // Attach message handler to the new worker.
+    if (typeof client.addEventListener === 'function') {
+      messageHandler = (evt) => handleMessage(evt);
+      client.addEventListener('message', messageHandler);
+    } else if ('onmessage' in client) {
+      messageHandler = (evt) => handleMessage(evt);
+      client.onmessage = messageHandler;
+    }
+    // Reset local snapshot state and kick off load on the fresh worker.
+    lastSnapshot = createInitialSnapshot();
+    lastFrameId = -1;
+    lastSnapshot.visualDefaults = null;
+    notifyListeners();
+    try {
+      client.postMessage({ cmd: 'load', rate, xmlText: payload });
+      client.postMessage({ cmd: 'snapshot' });
+    } catch (err) {
+      console.error('[backend load] failed', err);
+      throw err;
+    }
+    return resolveSnapshot(lastSnapshot);
   }
 
   function applyOptionSnapshot(data) {
@@ -1667,22 +1706,7 @@ export async function createBackend(options = {}) {
   }
 
   async function loadXmlText(xmlText) {
-    const payload = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
-    if (!client || typeof client.postMessage !== 'function') {
-      return resolveSnapshot(lastSnapshot);
-    }
-    try {
-      lastSnapshot = createInitialSnapshot();
-      lastFrameId = -1;
-      lastSnapshot.visualDefaults = null;
-      notifyListeners();
-      client.postMessage({ cmd: 'load', rate, xmlText: payload });
-      client.postMessage({ cmd: 'snapshot' });
-    } catch (err) {
-      console.error('[backend loadXmlText] failed', err);
-      throw err;
-    }
-    return resolveSnapshot(lastSnapshot);
+    return restartWorkerWithXml(xmlText);
   }
 
   function applyVisualStatePayload(payload) {
@@ -2126,24 +2150,8 @@ export async function createBackend(options = {}) {
     }
   }
 
-  if (typeof client.addEventListener === 'function') {
-    messageHandler = (evt) => handleMessage(evt);
-    client.addEventListener('message', messageHandler);
-  } else if ('onmessage' in client) {
-    messageHandler = (evt) => handleMessage(evt);
-    client.onmessage = messageHandler;
-  }
-
-  let initialXml = await loadDefaultXml();
-  if (typeof client.postMessage === 'function') {
-    try {
-      lastSnapshot.visualDefaults = null;
-      client.postMessage({ cmd: 'load', rate, xmlText: initialXml });
-      client.postMessage({ cmd: 'snapshot' });
-    } catch (err) {
-      console.error('[backend load] failed', err);
-    }
-  }
+  const initialXml = await loadDefaultXml();
+  await restartWorkerWithXml(initialXml);
 
   async function apply(payload) {
     if (!payload) {
