@@ -18,6 +18,7 @@ export function createControlManager({
   const CAMERA_FALLBACK_PRESETS = ['Free', 'Tracking'];
   const modelLibrary = [];
   let modelSelectEl = null;
+  let visualPresetButtonIndex = 0;
 
   function sanitiseName(name) {
     return (
@@ -1021,12 +1022,100 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     );
   }
 
-  function renderRadio(container, control) {
-    const options = normaliseOptions(control.options);
-    const { row, label, field } = createLabeledRow(control);
-    const group = document.createElement('div');
-    group.className = 'segmented';
-    group.setAttribute('data-testid', control.item_id);
+    function renderVisualSourceControl(container, control) {
+      const labelRow = createControlRow(control, { full: true });
+      const label = document.createElement('label');
+      label.className = 'control-label';
+      label.textContent = control.label ?? control.name ?? control.item_id;
+      labelRow.append(label);
+      container.append(labelRow);
+
+      const { row: groupRow, field } = createFullRow({ full: true });
+      groupRow.dataset.controlId = control.item_id;
+      const group = document.createElement('div');
+      group.className = 'segmented';
+      group.setAttribute('data-testid', control.item_id);
+      field.append(group);
+      container.append(groupRow);
+
+      const config = [
+        { key: 'preset1', label: 'Preset☀️', modeValue: 'Preset' },
+        { key: 'preset2', label: 'Preset🌙️', modeValue: 'Preset' },
+        { key: 'model', label: 'Model', modeValue: 'Model' },
+      ];
+
+      const radios = config.map((entry, index) => {
+        const radioId = `${sanitiseName(control.item_id)}__${entry.key}`;
+        const wrapper = document.createElement('label');
+        wrapper.className = 'segmented-option';
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = control.item_id;
+        input.value = entry.modeValue;
+        input.id = radioId;
+        input.dataset.key = entry.key;
+        input.dataset.index = String(index);
+        const span = document.createElement('span');
+        span.textContent = entry.label;
+        wrapper.append(input, span);
+        group.append(wrapper);
+        return input;
+      });
+
+      let logicalValue = 'Preset';
+
+      const binding = createBinding(control, {
+        getValue: () => logicalValue,
+        applyValue: (value) => {
+          const token = typeof value === 'string' ? value.toLowerCase() : '';
+          logicalValue = token.startsWith('model') ? 'Model' : 'Preset';
+          const isModel = logicalValue === 'Model';
+          let targetKey;
+          if (isModel) {
+            targetKey = 'model';
+          } else {
+            const idx = Number.isFinite(Number(visualPresetButtonIndex))
+              ? Number(visualPresetButtonIndex)
+              : 0;
+            targetKey = idx === 1 ? 'preset2' : 'preset1';
+          }
+          radios.forEach((input) => {
+            const key = input.dataset.key || '';
+            const active = key === targetKey;
+            input.checked = active;
+          });
+        },
+      });
+
+      radios.forEach((input) => {
+        input.addEventListener(
+          'change',
+          guardBinding(binding, async () => {
+            if (!input.checked) return;
+            const key = input.dataset.key || '';
+            if (key === 'preset1') {
+              visualPresetButtonIndex = 0;
+            } else if (key === 'preset2') {
+              visualPresetButtonIndex = 1;
+            }
+            const modeValue = input.value || (key === 'model' ? 'Model' : 'Preset');
+            binding.setValue(modeValue);
+            try {
+              await applySpecAction(store, backend, control, modeValue);
+            } catch (err) {
+              console.warn('[ui] visual source toggle failed', err);
+            }
+          }),
+        );
+      });
+    }
+
+    function renderRadio(container, control) {
+      const options = normaliseOptions(control.options);
+      const { row, label, field } = createLabeledRow(control);
+      const group = document.createElement('div');
+      group.className = 'segmented';
+      group.setAttribute('data-testid', control.item_id);
 
     const radios = [];
     options.forEach((opt, idx) => {
@@ -1719,12 +1808,12 @@ function registerShortcutHandlers(shortcutSpec, handler) {
   };
 
   function renderControl(container, control) {
-    const type = typeof control.type === 'string' ? control.type.toLowerCase() : 'static';
-    if (control?.shortcut) {
-      registerShortcutHandlers(control.shortcut, async (event) => {
-        event?.preventDefault?.();
-        if (type.startsWith('button')) {
-          await applySpecAction(store, backend, control, {
+      const type = typeof control.type === 'string' ? control.type.toLowerCase() : 'static';
+      if (control?.shortcut) {
+        registerShortcutHandlers(control.shortcut, async (event) => {
+          event?.preventDefault?.();
+          if (type.startsWith('button')) {
+            await applySpecAction(store, backend, control, {
             trigger: 'shortcut',
             shiftKey: !!event?.shiftKey,
             ctrlKey: !!event?.ctrlKey,
@@ -1736,12 +1825,15 @@ function registerShortcutHandlers(shortcutSpec, handler) {
         await toggleControl(control.item_id);
       });
     }
-      if (control?.item_id === 'simulation.run') {
-        return renderRunToggle(container, control);
-      }
-      if (control?.item_id === 'watch.field') {
-        return renderWatchField(container, control);
-      }
+        if (control?.item_id === 'simulation.run') {
+          return renderRunToggle(container, control);
+        }
+        if (control?.item_id === 'watch.field') {
+          return renderWatchField(container, control);
+        }
+        if (control?.item_id === 'option.visual_source') {
+          return renderVisualSourceControl(container, control);
+        }
       if (control?.item_id === 'simulation.key_slider') {
         return renderKeyframeSelect(container, control);
       }

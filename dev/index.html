@@ -376,6 +376,7 @@ body.fullscreen {
   font-size: 12px;
   font-weight: 500;
   color: var(--color-text-muted);
+  white-space: nowrap;
   transition: background 0.2s ease, color 0.2s ease;
 }
 .segmented-option input:checked + span {
@@ -466,16 +467,21 @@ body.fullscreen {
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
   width: 100%;
 }
-.bool-button.is-active {
-  background: var(--color-primary);
-  border-color: var(--color-border-strong);
-  color: var(--color-primary-contrast);
-}
-.bool-button:focus-visible,
-.bool-button.has-focus {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
-}
+  .bool-button.is-active {
+    background: var(--color-primary);
+    border-color: var(--color-border-strong);
+    color: var(--color-primary-contrast);
+  }
+  .btn-pill.is-active {
+    background: var(--color-primary);
+    border-color: var(--color-border-strong);
+    color: var(--color-primary-contrast);
+  }
+  .bool-button:focus-visible,
+  .bool-button.has-focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  }
 .btn-primary, .btn-secondary, .btn-pill {
   display: inline-flex;
   align-items: center;
@@ -552,9 +558,9 @@ body.fullscreen {
   display: flex;
   gap: 8px;
 }
-.pill-row .btn-pill {
-  flex: 1 1 100%;
-}
+  .pill-row .btn-pill {
+    flex: 1 1 100%;
+  }
 .control-static {
   font-size: 12px;
   font-weight: 500;
