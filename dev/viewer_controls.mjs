@@ -433,15 +433,20 @@ function shortcutFromEvent(event) {
   return [...mods, key].join('+');
 }
 
-function registerShortcutHandlers(shortcutSpec, handler) {
-  const combos = normaliseShortcutSpec(shortcutSpec);
-  combos.forEach((combo) => {
-    const list = shortcutHandlers.get(combo) || [];
-    list.push(handler);
-    shortcutHandlers.set(combo, list);
-  });
-}
-
+  function registerShortcutHandlers(shortcutSpec, handler) {
+    const combos = normaliseShortcutSpec(shortcutSpec);
+    combos.forEach((combo) => {
+      const list = shortcutHandlers.get(combo) || [];
+      list.push(handler);
+      shortcutHandlers.set(combo, list);
+    });
+  }
+  
+  function registerGlobalShortcut(shortcutSpec, handler) {
+    if (!shortcutSpec || typeof handler !== 'function') return;
+    registerShortcutHandlers(shortcutSpec, handler);
+  }
+  
   function registerControl(control, binding) {
     controlById.set(control.item_id, control);
     controlBindings.set(control.item_id, binding);
@@ -2118,11 +2123,11 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     shortcutsInstalled = true;
   }
 
-  function dispose() {
-    while (eventCleanup.length) {
-      const fn = eventCleanup.pop();
-      try {
-        fn();
+    function dispose() {
+      while (eventCleanup.length) {
+        const fn = eventCleanup.pop();
+        try {
+          fn();
       } catch {}
     }
     controlById.clear();
@@ -2135,10 +2140,11 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     loadUiSpec,
     renderPanels,
     updateControls,
-    toggleControl,
-    cycleCamera,
-    getBinding: (id) => controlBindings.get(id) ?? null,
-    listIds: (prefix) => {
+      toggleControl,
+      cycleCamera,
+      getBinding: (id) => controlBindings.get(id) ?? null,
+      registerGlobalShortcut,
+      listIds: (prefix) => {
       const ids = Array.from(controlById.keys()).sort();
       if (!prefix) return ids;
       return ids.filter((id) => id.startsWith(prefix));

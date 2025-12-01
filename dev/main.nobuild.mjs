@@ -145,7 +145,60 @@ const controlManager = createControlManager({
   rightPanel,
   cameraPresets: CAMERA_PRESETS,
 });
-const { loadUiSpec, renderPanels, updateControls, toggleControl, cycleCamera } = controlManager;
+const { loadUiSpec, renderPanels, updateControls, toggleControl, cycleCamera, registerGlobalShortcut } = controlManager;
+
+if (typeof registerGlobalShortcut === 'function') {
+  registerGlobalShortcut(['Space'], async (event) => {
+    event?.preventDefault?.();
+    await toggleControl('simulation.run');
+  });
+
+  registerGlobalShortcut(['ArrowRight'], async (event) => {
+    event?.preventDefault?.();
+    await backend.step?.(1);
+  });
+
+  registerGlobalShortcut(['ArrowLeft'], async (event) => {
+    event?.preventDefault?.();
+    await backend.step?.(-1);
+  });
+
+  registerGlobalShortcut(['Escape'], async (event) => {
+    event?.preventDefault?.();
+    await toggleControl('rendering.camera_mode', 0);
+  });
+
+  registerGlobalShortcut(['Tab'], (event) => {
+    event?.preventDefault?.();
+    store.update((draft) => {
+      if (event?.shiftKey) {
+        draft.panels.right = !draft.panels.right;
+      } else {
+        draft.panels.left = !draft.panels.left;
+      }
+    });
+  });
+
+  registerGlobalShortcut([']'], async (event) => {
+    event?.preventDefault?.();
+    await cycleCamera(1);
+  });
+
+  registerGlobalShortcut(['['], async (event) => {
+    event?.preventDefault?.();
+    await cycleCamera(-1);
+  });
+
+  registerGlobalShortcut(['Ctrl', 'P'], async (event) => {
+    event?.preventDefault?.();
+    await toggleControl('file.screenshot');
+  });
+
+  registerGlobalShortcut(['Meta', 'P'], async (event) => {
+    event?.preventDefault?.();
+    await toggleControl('file.screenshot');
+  });
+}
 
 function updateOverlay(card, visible) {
   if (!card) return;
@@ -440,99 +493,6 @@ function deriveEqualityList(snapshot) {
   }
   return out;
 }
-
-function isTextEditingTarget(event) {
-  const target = event?.target;
-  if (target && typeof target.closest === 'function') {
-    const editable = target.closest('input, textarea, select, [contenteditable=\"true\"], [role=\"textbox\"], [role=\"combobox\"]');
-    if (editable) return true;
-  }
-  const doc = window.document;
-  let active = doc.activeElement;
-  while (active && active.shadowRoot && active.shadowRoot.activeElement) {
-    active = active.shadowRoot.activeElement;
-  }
-  if (!active) return false;
-  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement) {
-    return !active.disabled && !active.readOnly;
-  }
-  if (active.isContentEditable) return true;
-  const role = typeof active.getAttribute === 'function' ? active.getAttribute('role') : null;
-  return role === 'textbox' || role === 'combobox';
-}
-
-  window.addEventListener('keydown', async (event) => {
-    if (isTextEditingTarget(event)) return;
-    switch (event.key) {
-    case 'F1':
-      event.preventDefault();
-      await toggleControl('option.help');
-      break;
-    case 'F2':
-      event.preventDefault();
-      await toggleControl('option.info');
-      break;
-    case 'F3':
-      event.preventDefault();
-      await toggleControl('option.profiler');
-      break;
-    case 'F4':
-      event.preventDefault();
-      await toggleControl('option.sensor');
-      break;
-    case 'F5':
-      event.preventDefault();
-      await toggleControl('option.fullscreen');
-      break;
-    case ' ':
-      event.preventDefault();
-      await toggleControl('simulation.run');
-      break;
-    case 'ArrowRight':
-      event.preventDefault();
-      await backend.step?.(1);
-      break;
-      case 'ArrowLeft':
-        event.preventDefault();
-        await backend.step?.(-1);
-        break;
-      case 'Escape':
-        event.preventDefault();
-        await toggleControl('rendering.camera_mode', 0);
-        break;
-      case 'Control':
-        store.update((draft) => {
-          draft.runtime.lastAction = 'rotate';
-        });
-      break;
-  case 'Tab':
-    event.preventDefault();
-    store.update((draft) => {
-      if (event.shiftKey) {
-        draft.panels.right = !draft.panels.right;
-      } else {
-        draft.panels.left = !draft.panels.left;
-      }
-    });
-    break;
-    case ']':
-      event.preventDefault();
-      await cycleCamera(1);
-      break;
-    case '[':
-      event.preventDefault();
-      await cycleCamera(-1);
-      break;
-    case 'p':
-      if (event.ctrlKey || event.metaKey) {
-        event.preventDefault();
-        await toggleControl('file.screenshot');
-      }
-      break;
-  default:
-      break;
-  }
-});
 
 const spec = await loadUiSpec();
 renderPanels(spec);
