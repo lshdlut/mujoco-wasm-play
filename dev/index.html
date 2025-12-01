@@ -24,6 +24,7 @@
   --color-text-muted: #94a3b8;
   --color-bg: #0f172a;
   --color-overlay: rgba(15, 23, 42, 0.92);
+  --color-overlay-soft: rgba(15, 23, 42, 0.6);
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 body.theme-light {
@@ -35,6 +36,7 @@ body.theme-light {
   --color-text-muted: #475569;
   --color-border: rgba(148, 163, 184, 0.45);
   --color-overlay: rgba(248, 250, 252, 0.96);
+  --color-overlay-soft: rgba(248, 250, 252, 0.6);
 }
 body {
   margin: 0;
@@ -188,6 +190,10 @@ body.fullscreen {
   opacity: 0;
   transform: translateY(-12px);
   transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.overlay-card[data-testid="overlay-help"],
+.overlay-card[data-testid="overlay-info"] {
+  background: var(--color-overlay-soft);
 }
 .overlay-card.visible {
   opacity: 1;
@@ -752,7 +758,7 @@ body.layout-main {
       <div class="help-subtitle help-subtitle-unimplemented">Unimplemented / web differences</div>
       <div class="help-grid">
        <div class="help-key">+  -</div>
-       <div class="help-desc">Real-time scale (not wired yet)</div>
+       <div class="help-desc">Real-time scale (TODO, not wired yet)</div>
        <div class="help-key">F3</div>
        <div class="help-desc">Profiler overlay (not implemented)</div>
        <div class="help-key">F4</div>

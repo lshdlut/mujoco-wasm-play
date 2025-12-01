@@ -33,6 +33,8 @@ release_assets/
 scripts/
 wrappers/
 FORGE_*.md
+/mjmodel_tmp.h
+/simulate_tmp.cc
 
 # Large local models (keep untracked)
 dev/RKOB_simplified_upper_with_marker_CAMS.xml
