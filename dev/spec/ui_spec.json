@@ -139,38 +139,12 @@
           "default": 0
         },
         {
-          "item_id": "option.pause_update",
-          "type": "checkbox",
-          "label": "Pause update",
+          "item_id": "option.runtime_note",
+          "type": "static",
+          "label": "Fullscreen / VSync / Pause update / Busy Wait are disabled in web viewer",
           "shortcut": null,
-          "binding": "Simulate::pause_update",
-          "default": 0
-        },
-        {
-          "item_id": "option.fullscreen",
-          "type": "checkbox",
-          "label": "Fullscreen",
-          "shortcut": [
-            "F5"
-          ],
-          "binding": "Simulate::fullscreen",
-          "default": 0
-        },
-        {
-          "item_id": "option.vsync",
-          "type": "checkbox",
-          "label": "Vertical Sync",
-          "shortcut": null,
-          "binding": "Simulate::vsync",
-          "default": 1
-        },
-        {
-          "item_id": "option.busywait",
-          "type": "checkbox",
-          "label": "Busy Wait",
-          "shortcut": null,
-          "binding": "Simulate::busywait",
-          "default": 0
+          "binding": null,
+          "default": null
         },
         {
           "item_id": "option.spacing",

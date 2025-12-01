@@ -771,11 +771,33 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     };
   }
 
-  function renderCheckbox(container, control) {
-    const row = createControlRow(control);
-    row.classList.add('bool-row');
-    const label = document.createElement('label');
-    label.className = 'bool-button bool-label';
+    function renderDisabledCheckbox(container, control) {
+      const row = createControlRow(control);
+      row.classList.add('bool-row');
+      const label = document.createElement('label');
+      label.className = 'bool-button bool-label is-disabled';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.id = `${sanitiseName(control.item_id)}__checkbox`;
+      input.setAttribute('role', 'switch');
+      input.setAttribute('data-testid', control.item_id);
+      input.setAttribute('aria-checked', 'false');
+      input.setAttribute('aria-disabled', 'true');
+      input.disabled = true;
+      const span = document.createElement('span');
+      span.className = 'bool-text';
+      span.textContent = control.label ?? control.name ?? control.item_id;
+      label.append(input, span);
+      row.append(label);
+      container.append(row);
+      return row;
+    }
+
+    function renderCheckbox(container, control) {
+      const row = createControlRow(control);
+      row.classList.add('bool-row');
+      const label = document.createElement('label');
+      label.className = 'bool-button bool-label';
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.id = `${sanitiseName(control.item_id)}__checkbox`;
@@ -1807,33 +1829,38 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     separator: renderSeparator,
   };
 
-  function renderControl(container, control) {
+    function renderControl(container, control) {
       const type = typeof control.type === 'string' ? control.type.toLowerCase() : 'static';
-      if (control?.shortcut) {
+      const isDisabledOverlay =
+        control?.item_id === 'option.profiler' || control?.item_id === 'option.sensor';
+      if (control?.shortcut && !isDisabledOverlay) {
         registerShortcutHandlers(control.shortcut, async (event) => {
           event?.preventDefault?.();
           if (type.startsWith('button')) {
             await applySpecAction(store, backend, control, {
-            trigger: 'shortcut',
-            shiftKey: !!event?.shiftKey,
-            ctrlKey: !!event?.ctrlKey,
-            altKey: !!event?.altKey,
-            metaKey: !!event?.metaKey,
-          });
-          return;
-        }
-        await toggleControl(control.item_id);
-      });
-    }
-        if (control?.item_id === 'simulation.run') {
-          return renderRunToggle(container, control);
-        }
-        if (control?.item_id === 'watch.field') {
-          return renderWatchField(container, control);
-        }
-        if (control?.item_id === 'option.visual_source') {
-          return renderVisualSourceControl(container, control);
-        }
+              trigger: 'shortcut',
+              shiftKey: !!event?.shiftKey,
+              ctrlKey: !!event?.ctrlKey,
+              altKey: !!event?.altKey,
+              metaKey: !!event?.metaKey,
+            });
+            return;
+          }
+          await toggleControl(control.item_id);
+        });
+      }
+      if (control?.item_id === 'simulation.run') {
+        return renderRunToggle(container, control);
+      }
+      if (control?.item_id === 'watch.field') {
+        return renderWatchField(container, control);
+      }
+      if (control?.item_id === 'option.visual_source') {
+        return renderVisualSourceControl(container, control);
+      }
+      if (isDisabledOverlay) {
+        return renderDisabledCheckbox(container, control);
+      }
       if (control?.item_id === 'simulation.key_slider') {
         return renderKeyframeSelect(container, control);
       }

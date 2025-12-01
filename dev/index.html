@@ -468,16 +468,23 @@ body.fullscreen {
   width: 100%;
 }
   .bool-button.is-active {
+      background: var(--color-primary);
+      border-color: var(--color-border-strong);
+      color: var(--color-primary-contrast);
+    }
+  .bool-button.is-disabled {
+      background: #b0b0b0;
+      border-color: #9ca3af;
+      color: #000000;
+      cursor: default;
+      opacity: 1;
+    }
+    .btn-pill.is-active {
     background: var(--color-primary);
     border-color: var(--color-border-strong);
     color: var(--color-primary-contrast);
   }
-  .btn-pill.is-active {
-    background: var(--color-primary);
-    border-color: var(--color-border-strong);
-    color: var(--color-primary-contrast);
-  }
-  .bool-button:focus-visible,
+  .bool-button:not(.is-disabled):focus-visible,
   .bool-button.has-focus {
     outline: none;
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
@@ -524,8 +531,8 @@ body.fullscreen {
 .btn-secondary:hover,
 .btn-pill:hover,
 .run-toggle:hover,
-.bool-button:hover,
-.compact-pill:hover {
+.bool-button:not(.is-disabled):hover,
+  .compact-pill:hover {
   box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.55);
   transform: translateY(-0.5px);
 }
