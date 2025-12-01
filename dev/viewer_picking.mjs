@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applySpecAction } from './viewer_state.mjs';
 
 function clampVector(vec, max = Infinity) {
   if (!Number.isFinite(max) || max <= 0) return vec;
@@ -83,6 +84,9 @@ export function createPickingController({
   const tempBodyRot = new Float64Array(9);
   const tempVecLocal = new THREE_NS.Vector3();
   const tempVecWorld = new THREE_NS.Vector3();
+  const tempCameraOffset = new THREE_NS.Vector3();
+  let lastRightDownTime = 0;
+  let lastRightDownCtrl = false;
 
   function hasSelection() {
     const sel = store.get()?.runtime?.selection;
@@ -781,8 +785,89 @@ const TORQUE_ACCUM = 0.08;
       clearSelection({ toast: true });
     }
   }
+  function centerCameraOnHit(hit) {
+    if (!hit || !hit.worldPoint || !renderCtx?.camera) return;
+    const camera = renderCtx.camera;
+    if (!camera) return;
+    const target = renderCtx.cameraTarget || new THREE_NS.Vector3(0, 0, 0);
+    if (!renderCtx.cameraTarget) {
+      renderCtx.cameraTarget = target;
+    }
+    tempCameraOffset.copy(camera.position).sub(target);
+    target.set(hit.worldPoint.x, hit.worldPoint.y, hit.worldPoint.z);
+    camera.position.copy(target).add(tempCameraOffset);
+    camera.lookAt(target);
+    const ts = Date.now();
+    store.update((draft) => {
+      if (!draft.runtime) draft.runtime = draft.runtime || {};
+      draft.runtime.lastAction = 'camera-center';
+      draft.toast = { message: `Camera centered on ${hit.geomName}`, ts };
+    });
+  }
+
+  function trackingCameraFromHit(hit) {
+    if (!hit) return;
+    const geomIndex = hit.geomIndex | 0;
+    const trackingCtrl = {
+      item_id: 'rendering.tracking_geom',
+      type: 'select',
+      label: 'Tracking geom',
+      binding: 'Simulate::tracking_geom',
+      default: -1,
+    };
+    const cameraCtrl = {
+      item_id: 'rendering.camera_mode',
+      type: 'select',
+      label: 'Camera',
+      binding: 'Simulate::camera',
+      default: 0,
+    };
+    Promise.resolve(
+      applySpecAction(store, backend, trackingCtrl, geomIndex),
+    )
+      .then(() => applySpecAction(store, backend, cameraCtrl, 1))
+      .catch((err) => {
+        console.warn('[pick] tracking camera apply failed', err);
+      });
+    const ts = Date.now();
+    store.update((draft) => {
+      if (!draft.runtime) draft.runtime = draft.runtime || {};
+      draft.runtime.lastAction = 'camera-track';
+      draft.toast = { message: `Tracking ${hit.geomName}`, ts };
+    });
+  }
+
+  function maybeHandleRightDoubleCamera(event) {
+    if (event.button !== 2) return false;
+    const now = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now()
+      : Date.now();
+    const dt = now - lastRightDownTime;
+    const ctrl = !!event.ctrlKey;
+    const sameChord = ctrl === lastRightDownCtrl;
+    lastRightDownTime = now;
+    lastRightDownCtrl = ctrl;
+    if (!sameChord || dt > 350) {
+      return false;
+    }
+    const hit = pickGeom(event);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (hit?.blocked === 'static') {
+      showToast('Ground / static geometry cannot be used for camera focus');
+      return true;
+    }
+    if (!hit) return true;
+    if (ctrl) {
+      trackingCameraFromHit(hit);
+    } else {
+      centerCameraOnHit(hit);
+    }
+    return true;
+  }
 
   function handlePointerDown(event) {
+    if (maybeHandleRightDoubleCamera(event)) return;
     if (!event.isPrimary || !event.ctrlKey) return;
     if (!hasSelection()) {
       return;

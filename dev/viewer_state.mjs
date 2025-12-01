@@ -729,6 +729,10 @@ function mergeBackendSnapshot(draft, snapshot) {
     if (!draft.model) draft.model = {};
     draft.model.geomBodyId = snapshot.geom_bodyid;
   }
+  if (snapshot.body_parentid) {
+    if (!draft.model) draft.model = {};
+    draft.model.bodyParentId = snapshot.body_parentid;
+  }
   if (snapshot.body_jntadr) {
     if (!draft.model) draft.model = {};
     draft.model.bodyJntAdr = snapshot.body_jntadr;
@@ -1375,6 +1379,7 @@ function resolveSnapshot(state) {
       gtype: viewOrNull(state.gtype, Int32Array),
       gmatid: viewOrNull(state.gmatid, Int32Array),
       geom_bodyid: viewOrNull(state.geom_bodyid, Int32Array),
+      body_parentid: viewOrNull(state.body_parentid, Int32Array),
       body_jntadr: viewOrNull(state.body_jntadr, Int32Array),
       body_jntnum: viewOrNull(state.body_jntnum, Int32Array),
       jtype: viewOrNull(state.jtype, Int32Array),
@@ -1892,11 +1897,11 @@ async function loadDefaultXml() {
         notifyListeners();
         break;
       }
-        case 'meta_joints': {
-          const toI32 = (value) => {
-            if (!value) return null;
-            if (ArrayBuffer.isView(value)) {
-              try { return new Int32Array(value); } catch { return null; }
+      case 'meta_joints': {
+        const toI32 = (value) => {
+          if (!value) return null;
+          if (ArrayBuffer.isView(value)) {
+            try { return new Int32Array(value); } catch { return null; }
           }
           if (value instanceof ArrayBuffer) {
             try { return new Int32Array(value); } catch { return null; }
@@ -1912,29 +1917,31 @@ async function loadDefaultXml() {
         if (bodyAdr) lastSnapshot.body_jntadr = bodyAdr;
         const bodyNum = toI32(data.body_jntnum);
         if (bodyNum) lastSnapshot.body_jntnum = bodyNum;
-          const jtype = toI32(data.jtype);
-          if (jtype) lastSnapshot.jtype = jtype;
-          if (typeof data.nbody === 'number') lastSnapshot.nbody = data.nbody | 0;
-          if (typeof data.njnt === 'number') lastSnapshot.njnt = data.njnt | 0;
-          const jqposadr = toI32(data.jnt_qposadr);
-          if (jqposadr) lastSnapshot.jnt_qposadr = jqposadr;
-          const jrange = (() => {
-            const source = data.jnt_range;
-            if (!source) return null;
-            try {
-              if (ArrayBuffer.isView(source)) return new Float64Array(source);
-              if (Array.isArray(source)) return Float64Array.from(source);
-              if (source instanceof ArrayBuffer) return new Float64Array(source);
-            } catch {}
-            return null;
-          })();
-          if (jrange) lastSnapshot.jnt_range = jrange;
-          if (Array.isArray(data.jnt_names)) {
-            lastSnapshot.jnt_names = data.jnt_names.map((name, idx) => String(name ?? `jnt ${idx}`));
-          }
-          notifyListeners();
-          break;
+        const bodyParent = toI32(data.body_parentid);
+        if (bodyParent) lastSnapshot.body_parentid = bodyParent;
+        const jtype = toI32(data.jtype);
+        if (jtype) lastSnapshot.jtype = jtype;
+        if (typeof data.nbody === 'number') lastSnapshot.nbody = data.nbody | 0;
+        if (typeof data.njnt === 'number') lastSnapshot.njnt = data.njnt | 0;
+        const jqposadr = toI32(data.jnt_qposadr);
+        if (jqposadr) lastSnapshot.jnt_qposadr = jqposadr;
+        const jrange = (() => {
+          const source = data.jnt_range;
+          if (!source) return null;
+          try {
+            if (ArrayBuffer.isView(source)) return new Float64Array(source);
+            if (Array.isArray(source)) return Float64Array.from(source);
+            if (source instanceof ArrayBuffer) return new Float64Array(source);
+          } catch {}
+          return null;
+        })();
+        if (jrange) lastSnapshot.jnt_range = jrange;
+        if (Array.isArray(data.jnt_names)) {
+          lastSnapshot.jnt_names = data.jnt_names.map((name, idx) => String(name ?? `jnt ${idx}`));
         }
+        notifyListeners();
+        break;
+      }
       case 'meta': {
         try {
           // Actuator metadata for dynamic control UI

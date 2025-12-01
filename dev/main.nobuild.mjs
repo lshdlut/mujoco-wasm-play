@@ -490,6 +490,110 @@ if (typeof registerGlobalShortcut === 'function') {
     await cycleCamera(-1);
   });
 
+  registerGlobalShortcut(['PageUp'], (event) => {
+    event?.preventDefault?.();
+    const state = store.get();
+    const selection = state?.runtime?.selection;
+    const parents = state?.model?.bodyParentId;
+    if (!selection || !parents) return;
+    const bodyArr = ArrayBuffer.isView(parents) ? parents : null;
+    if (!bodyArr || typeof bodyArr.length !== 'number') return;
+    let bodyId = Number(selection.body) | 0;
+    if (!(bodyId >= 0) && Number.isInteger(selection.geom) && selection.geom >= 0) {
+      const geomBody = state?.model?.geomBodyId;
+      if (ArrayBuffer.isView(geomBody) && selection.geom < geomBody.length) {
+        bodyId = geomBody[selection.geom] | 0;
+      }
+    }
+    if (!(bodyId > 0) || bodyId >= bodyArr.length) return;
+    let parentId = -1;
+    try {
+      parentId = bodyArr[bodyId] ?? -1;
+    } catch {
+      parentId = -1;
+    }
+    if (!(parentId >= 0) || parentId === bodyId) return;
+    const geomBodyIds = state?.model?.geomBodyId;
+    const ngeom = ArrayBuffer.isView(geomBodyIds) ? geomBodyIds.length : 0;
+    let nextGeom = -1;
+    if (ArrayBuffer.isView(geomBodyIds)) {
+      const currentGeom = Number(selection.geom) | 0;
+      if (currentGeom >= 0 && currentGeom < ngeom && (geomBodyIds[currentGeom] | 0) === parentId) {
+        nextGeom = currentGeom;
+      } else {
+        for (let i = 0; i < ngeom; i += 1) {
+          if ((geomBodyIds[i] | 0) === parentId) {
+            nextGeom = i;
+            break;
+          }
+        }
+      }
+    }
+    const bxpos = latestSnapshot?.bxpos;
+    const hasBxpos = ArrayBuffer.isView(bxpos) && typeof latestSnapshot?.nbody === 'number';
+    const nbody = hasBxpos ? (latestSnapshot.nbody | 0) : 0;
+    let point = null;
+    if (hasBxpos && parentId >= 0 && parentId < nbody && bxpos.length >= (parentId + 1) * 3) {
+      const base = parentId * 3;
+      const px = Number(bxpos[base + 0]) || 0;
+      const py = Number(bxpos[base + 1]) || 0;
+      const pz = Number(bxpos[base + 2]) || 0;
+      point = [px, py, pz];
+    } else if (Array.isArray(selection.point) && selection.point.length >= 3) {
+      point = [
+        Number(selection.point[0]) || 0,
+        Number(selection.point[1]) || 0,
+        Number(selection.point[2]) || 0,
+      ];
+    } else {
+      point = [0, 0, 0];
+    }
+    let label = '';
+    if (nextGeom >= 0 && Array.isArray(state?.model?.geoms)) {
+      const geoms = state.model.geoms;
+      const found = geoms.find((g) => (g?.index | 0) === (nextGeom | 0));
+      label = typeof found?.name === 'string' && found.name.trim().length > 0
+        ? found.name.trim()
+        : `Geom ${nextGeom}`;
+    } else {
+      label = `Body ${parentId}`;
+    }
+    const ts = Date.now();
+    store.update((draft) => {
+      if (!draft.runtime) draft.runtime = { ...(draft.runtime || {}) };
+      const prevSel = draft.runtime.selection || {};
+      const prevSeq = Number(prevSel.seq) || 0;
+      const localPoint = Array.isArray(prevSel.localPoint) && prevSel.localPoint.length >= 3
+        ? [
+            Number(prevSel.localPoint[0]) || 0,
+            Number(prevSel.localPoint[1]) || 0,
+            Number(prevSel.localPoint[2]) || 0,
+          ]
+        : [0, 0, 0];
+      const normal = Array.isArray(prevSel.normal) && prevSel.normal.length >= 3
+        ? [
+            Number(prevSel.normal[0]) || 0,
+            Number(prevSel.normal[1]) || 0,
+            Number(prevSel.normal[2]) || 1,
+          ]
+        : [0, 0, 1];
+      draft.runtime.selection = {
+        geom: nextGeom,
+        body: parentId,
+        joint: -1,
+        name: label,
+        kind: 'geom',
+        point,
+        localPoint,
+        normal,
+        seq: prevSeq + 1,
+        timestamp: ts,
+      };
+      draft.runtime.lastAction = 'select-parent';
+      draft.toast = { message: `Selected parent: ${label}`, ts };
+    });
+  });
+
   registerGlobalShortcut(['Ctrl', 'P'], async (event) => {
     event?.preventDefault?.();
     await toggleControl('file.screenshot');

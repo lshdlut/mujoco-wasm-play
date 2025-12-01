@@ -1653,6 +1653,7 @@ onmessage = async (ev) => {
         const geomBody = sim?.geomBodyIdView?.();
           const bodyAdr = sim?.bodyJntAdrView?.();
           const bodyNum = sim?.bodyJntNumView?.();
+          const bodyParent = sim?.bodyParentIdView?.();
           const jtypeView = sim?.jntTypeView?.();
           const jqposAdr = sim?.jntQposAdrView?.();
           const jrangeView = sim?.jntRangeView?.();
@@ -1661,6 +1662,7 @@ onmessage = async (ev) => {
           const geom_bodyid = geomBody ? new Int32Array(geomBody) : null;
           const body_jntadr = bodyAdr ? new Int32Array(bodyAdr) : null;
           const body_jntnum = bodyNum ? new Int32Array(bodyNum) : null;
+          const body_parentid = bodyParent ? new Int32Array(bodyParent) : null;
           const jtype = jtypeView ? new Int32Array(jtypeView) : null;
           const jnt_qposadr = jqposAdr ? new Int32Array(jqposAdr) : null;
           const jnt_range = jrangeView ? new Float64Array(jrangeView) : null;
@@ -1676,6 +1678,7 @@ onmessage = async (ev) => {
             geom_bodyid?.buffer,
             body_jntadr?.buffer,
             body_jntnum?.buffer,
+            body_parentid?.buffer,
             jtype?.buffer,
             jnt_qposadr?.buffer,
             jnt_range?.buffer,
@@ -1688,6 +1691,7 @@ onmessage = async (ev) => {
             geom_bodyid,
             body_jntadr,
             body_jntnum,
+            body_parentid,
             jtype,
             jnt_qposadr,
             jnt_range,
