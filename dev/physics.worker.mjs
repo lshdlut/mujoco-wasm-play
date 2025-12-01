@@ -9,6 +9,11 @@ import installForgeAbiCompat from './forge_abi_compat.js';
 import { createSceneSnap } from './snapshots.mjs';
 
 const FORCE_EPS = 1e-9;
+const MJ_TIMER_STEP = 0;
+const MJ_TIMER_FORWARD = 1;
+const MJ_NTIMER = 15;
+const MJ_NSOLVER = 50;
+const SOLVER_LOG_EPS = 1e-15;
 const MJ_STATE_SIG = 0x1fff;
 // Minimal local getView to avoid path issues in buildless mode
 function getView(mod, ptr, dtype, len) {
@@ -380,6 +385,160 @@ function emitHistoryMeta() {
   try {
     postMessage({ kind: 'history', ...serializeHistoryMeta() });
   } catch {}
+}
+
+function buildInfoStats(sim, tSim, nconLocal) {
+  const mod = sim?.mod;
+  const h = sim?.h | 0;
+  if (!mod || !(h > 0)) return null;
+  const out = {
+    time: Number(tSim) || 0,
+    nefc: 0,
+    ncon: Number(nconLocal) || 0,
+    cpuStepMs: null,
+    cpuForwardMs: null,
+    solverSolerr: null,
+    solverNiter: null,
+    solverFwdinv: null,
+    energy: null,
+    nisland: null,
+    maxuseCon: null,
+    maxuseEfc: null,
+  };
+
+  try {
+    if (typeof mod.data_nefc === 'function') {
+      out.nefc = (mod.data_nefc(h) | 0) || 0;
+    } else if (typeof mod.data_nefc_ptr === 'function') {
+      const ptr = mod.data_nefc_ptr(h) | 0;
+      if (ptr) {
+        const view = heapViewI32(mod, ptr, 1);
+        out.nefc = (view && view.length > 0 ? view[0] : 0) | 0;
+      }
+    }
+  } catch {}
+
+  try {
+    const durFn = mod.data_timer_duration_ptr;
+    const numFn = mod.data_timer_number_ptr;
+    if (typeof durFn === 'function' && typeof numFn === 'function') {
+      const durPtr = durFn.call(mod, h) | 0;
+      const numPtr = numFn.call(mod, h) | 0;
+      if (durPtr && numPtr) {
+        const durations = heapViewF64(mod, durPtr, MJ_NTIMER);
+        const numbers = heapViewI32(mod, numPtr, MJ_NTIMER);
+        const stepDur = Number(durations[MJ_TIMER_STEP]) || 0;
+        const stepNum = Math.max(1, Number(numbers[MJ_TIMER_STEP]) || 0);
+        const fwdDur = Number(durations[MJ_TIMER_FORWARD]) || 0;
+        const fwdNum = Math.max(1, Number(numbers[MJ_TIMER_FORWARD]) || 0);
+        out.cpuStepMs = (stepDur / stepNum) * 1000;
+        out.cpuForwardMs = (fwdDur / fwdNum) * 1000;
+      }
+    }
+  } catch {}
+
+  let nisland = 0;
+  try {
+    if (typeof mod.data_nisland_ptr === 'function') {
+      const ptr = mod.data_nisland_ptr(h) | 0;
+      if (ptr) {
+        const view = heapViewI32(mod, ptr, 1);
+        nisland = (view && view.length > 0 ? view[0] : 0) | 0;
+      }
+    }
+  } catch {}
+  out.nisland = nisland;
+
+  try {
+    if (nisland > 0 && typeof mod.data_solver_niter_ptr === 'function') {
+      const niterPtr = mod.data_solver_niter_ptr(h) | 0;
+      if (niterPtr) {
+        const niterArr = heapViewI32(mod, niterPtr, nisland);
+        let totalIter = 0;
+        for (let i = 0; i < nisland; i += 1) {
+          const it = Number(niterArr[i]) || 0;
+          if (it > 0) totalIter += it;
+        }
+        out.solverNiter = totalIter;
+        const imprFn = mod.data_solver_improvement_ptr;
+        const gradFn = mod.data_solver_gradient_ptr;
+        if (typeof imprFn === 'function' && typeof gradFn === 'function') {
+          const baseCount = nisland * MJ_NSOLVER;
+          const imprPtr = imprFn.call(mod, h) | 0;
+          const gradPtr = gradFn.call(mod, h) | 0;
+          if (imprPtr && gradPtr && baseCount > 0) {
+            const impr = heapViewF64(mod, imprPtr, baseCount);
+            const grad = heapViewF64(mod, gradPtr, baseCount);
+            let worst = 0;
+            for (let i = 0; i < nisland; i += 1) {
+              const it = Math.min(MJ_NSOLVER, Math.max(0, Number(niterArr[i]) || 0));
+              if (!(it > 0)) continue;
+              const idx = i * MJ_NSOLVER + (it - 1);
+              const a = Number(impr[idx]) || 0;
+              const b = Number(grad[idx]) || 0;
+              if (a === 0 && b === 0) continue;
+              let solerr_i = 0;
+              if (a === 0) {
+                solerr_i = b;
+              } else if (b === 0) {
+                solerr_i = a;
+              } else {
+                solerr_i = Math.min(a, b);
+                if (solerr_i === 0) solerr_i = Math.max(a, b);
+              }
+              if (solerr_i > worst) worst = solerr_i;
+            }
+            if (worst > 0) {
+              out.solverSolerr = Math.log10(Math.max(SOLVER_LOG_EPS, worst));
+            }
+          }
+        }
+      }
+    }
+    if (typeof mod.data_solver_fwdinv_ptr === 'function') {
+      const fptr = mod.data_solver_fwdinv_ptr(h) | 0;
+      if (fptr) {
+        const fv = heapViewF64(mod, fptr, 2);
+        const f0 = Number(fv[0]) || 0;
+        const f1 = Number(fv[1]) || 0;
+        out.solverFwdinv = [
+          Math.log10(Math.max(SOLVER_LOG_EPS, Math.abs(f0))),
+          Math.log10(Math.max(SOLVER_LOG_EPS, Math.abs(f1))),
+        ];
+      }
+    }
+  } catch {}
+
+  try {
+    if (typeof mod.data_energy_ptr === 'function') {
+      const eptr = mod.data_energy_ptr(h) | 0;
+      if (eptr) {
+        const ev = heapViewF64(mod, eptr, 2);
+        const e0 = Number(ev[0]) || 0;
+        const e1 = Number(ev[1]) || 0;
+        out.energy = e0 + e1;
+      }
+    }
+  } catch {}
+
+  try {
+    if (typeof mod.data_maxuse_con_ptr === 'function') {
+      const p = mod.data_maxuse_con_ptr(h) | 0;
+      if (p) {
+        const v = heapViewI32(mod, p, 1);
+        out.maxuseCon = (v && v.length > 0 ? v[0] : 0) | 0;
+      }
+    }
+    if (typeof mod.data_maxuse_efc_ptr === 'function') {
+      const p = mod.data_maxuse_efc_ptr(h) | 0;
+      if (p) {
+        const v = heapViewI32(mod, p, 1);
+        out.maxuseEfc = (v && v.length > 0 ? v[0] : 0) | 0;
+      }
+    }
+  } catch {}
+
+  return out;
 }
 
 function captureHistorySample(force = false) {
@@ -1160,6 +1319,13 @@ async function loadXmlWithFallback(xmlText) {
       rate,
       qpos,
     };
+    try {
+      const nconLocal = sim.ncon?.() | 0;
+      const info = buildInfoStats(sim, tSim, nconLocal);
+      if (info) {
+        msg.info = info;
+      }
+    } catch {}
     const transfers = [xpos.buffer, xmat.buffer];
     if (msg.bxpos) transfers.push(msg.bxpos.buffer);
     if (msg.bxmat) transfers.push(msg.bxmat.buffer);

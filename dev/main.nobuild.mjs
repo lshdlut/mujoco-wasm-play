@@ -146,6 +146,18 @@ const controlManager = createControlManager({
   cameraPresets: CAMERA_PRESETS,
 });
 const { loadUiSpec, renderPanels, updateControls, toggleControl, cycleCamera, registerGlobalShortcut } = controlManager;
+try {
+  const initialInfo = typeof backend?.getInitialModelInfo === 'function'
+    ? backend.getInitialModelInfo()
+    : null;
+  if (initialInfo && (initialInfo.label || initialInfo.file)) {
+    const label = initialInfo.label || initialInfo.file || '';
+    store.update((draft) => {
+      if (!draft.hud) draft.hud = {};
+      draft.hud.modelLabel = label;
+    });
+  }
+} catch {}
 
 function updateOverlay(card, visible) {
   if (!card) return;
@@ -218,6 +230,97 @@ function updateHud(state) {
   }
 }
 
+function updateInfoOverlayCard(state) {
+  if (!overlayInfo) return;
+  let grid = overlayInfo.querySelector('.info-grid');
+  if (!grid) {
+    overlayInfo.innerHTML = '';
+    grid = document.createElement('div');
+    grid.className = 'info-grid';
+    const addRow = (key, label) => {
+      const labelEl = document.createElement('div');
+      labelEl.className = 'info-label';
+      labelEl.textContent = label;
+      const valueEl = document.createElement('div');
+      valueEl.className = 'info-value';
+      valueEl.setAttribute('data-info-field', key);
+      grid.append(labelEl, valueEl);
+    };
+    addRow('model', 'Model');
+    addRow('state', 'State');
+    addRow('time', 'Time');
+    addRow('size', 'Size');
+    addRow('cpu', 'CPU');
+    addRow('solver', 'Solver');
+    addRow('fps', 'FPS');
+    addRow('memory', 'Memory');
+    addRow('energy', 'Energy');
+    addRow('islands', 'Islands');
+    overlayInfo.appendChild(grid);
+  }
+  const info = state?.hud?.info || null;
+  const getFieldEl = (key) => grid.querySelector(`.info-value[data-info-field="${key}"]`);
+  const modelLabel = state?.hud?.modelLabel || '';
+  const simRun = !!state?.simulation?.run;
+  const time = Number(state?.hud?.time) || 0;
+  const fps = Number(state?.hud?.fps) || 0;
+  const nefc = Number(info?.nefc) || 0;
+  const ncon = Number(info?.ncon) || Number(state?.hud?.contacts) || 0;
+  const cpuMs = (() => {
+    const step = Number(info?.cpuStepMs);
+    const fwd = Number(info?.cpuForwardMs);
+    const val = simRun ? step : fwd;
+    return Number.isFinite(val) && val > 0 ? val : null;
+  })();
+  const solverErr = Number(info?.solverSolerr);
+  const solverIter = Number(info?.solverNiter) || 0;
+  const maxCon = Number(info?.maxuseCon) || 0;
+  const maxEfc = Number(info?.maxuseEfc) || 0;
+  const energy = Number(info?.energy);
+  const nisland = Number(info?.nisland) || 0;
+
+  const modelEl = getFieldEl('model');
+  if (modelEl) modelEl.textContent = modelLabel || '(default model)';
+  const stateEl = getFieldEl('state');
+  if (stateEl) stateEl.textContent = simRun ? 'Running' : 'Paused';
+  const timeEl = getFieldEl('time');
+  if (timeEl) timeEl.textContent = `${time.toFixed(3)} s`;
+  const sizeEl = getFieldEl('size');
+  if (sizeEl) sizeEl.textContent = nefc ? `${nefc}  (${ncon} con)` : `${ncon} con`;
+  const cpuEl = getFieldEl('cpu');
+  if (cpuEl) cpuEl.textContent = cpuMs != null ? `${cpuMs.toFixed(3)} ms` : 'n/a';
+  const solverEl = getFieldEl('solver');
+  if (solverEl) {
+    if (Number.isFinite(solverErr)) {
+      solverEl.textContent = `${solverErr.toFixed(2)}  (${solverIter | 0} it)`;
+    } else if (solverIter > 0) {
+      solverEl.textContent = `${solverIter | 0} it`;
+    } else {
+      solverEl.textContent = 'n/a';
+    }
+  }
+  const fpsEl = getFieldEl('fps');
+  if (fpsEl) {
+    fpsEl.textContent = fps < 1 ? `${fps.toFixed(1)} fps` : `${Math.round(fps)} fps`;
+  }
+  const memEl = getFieldEl('memory');
+  if (memEl) {
+    if (maxCon > 0 || maxEfc > 0) {
+      memEl.textContent = `max con/efc: ${maxCon} / ${maxEfc}`;
+    } else {
+      memEl.textContent = 'n/a';
+    }
+  }
+  const energyEl = getFieldEl('energy');
+  if (energyEl) {
+    energyEl.textContent = Number.isFinite(energy) ? energy.toFixed(3) : 'n/a';
+  }
+  const islandsEl = getFieldEl('islands');
+  if (islandsEl) {
+    islandsEl.textContent = nisland > 0 ? String(nisland | 0) : '0';
+  }
+}
+
 function updatePanels(state) {
   const leftVisible = !!state.panels.left;
   const rightVisible = !!state.panels.right;
@@ -284,6 +387,7 @@ store.subscribe((state) => {
   updatePanels(state);
   updateToast(state);
   updateControls(state);
+  updateInfoOverlayCard(state);
   const screenshotSeq = Number(state.runtime?.screenshotSeq) || 0;
   if (screenshotSeq > lastScreenshotSeq) {
     pendingScreenshotSeq = Math.max(pendingScreenshotSeq, screenshotSeq);

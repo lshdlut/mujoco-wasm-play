@@ -195,6 +195,24 @@ body.fullscreen {
 .overlay-card[data-testid="overlay-info"] {
   background: var(--color-overlay-soft);
 }
+.overlay-card[data-testid="overlay-info"] {
+  align-self: flex-start;
+  margin-top: auto;
+}
+.info-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 11px;
+}
+.info-label {
+  color: var(--color-text-muted);
+}
+.info-value {
+  color: var(--color-text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .overlay-card.visible {
   opacity: 1;
   transform: translateY(0);

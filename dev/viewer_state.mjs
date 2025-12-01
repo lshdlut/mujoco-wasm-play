@@ -203,6 +203,8 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     contacts: 0,
     pausedSource: 'backend',
     rateSource: 'backend',
+    modelLabel: '',
+    info: null,
   },
   toast: null,
   visualDiagnostics: {
@@ -512,6 +514,9 @@ function mergeBackendSnapshot(draft, snapshot) {
   }
   if (typeof snapshot.rateSource === 'string') {
     draft.hud.rateSource = snapshot.rateSource;
+  }
+  if (snapshot.info) {
+    draft.hud.info = { ...snapshot.info };
   }
   if (typeof snapshot.paused === 'boolean') {
     draft.simulation.run = !snapshot.paused;
