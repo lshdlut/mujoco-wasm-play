@@ -587,6 +587,15 @@ function shortcutFromEvent(event) {
       if (modelSelectEl && entry.id) {
         modelSelectEl.value = entry.id;
       }
+      try {
+        const label = entry.label || entry.file || entry.id || '';
+        if (label) {
+          store.update((draft) => {
+            if (!draft.hud) draft.hud = {};
+            draft.hud.modelLabel = label;
+          });
+        }
+      } catch {}
     };
 
     const initialInfo = typeof backend?.getInitialModelInfo === 'function'

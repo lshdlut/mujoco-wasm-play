@@ -1516,13 +1516,13 @@ export async function createBackend(options = {}) {
   }
   const modelToken = typeof options.model === 'string' ? options.model.trim() : '';
   const modelKey = modelToken.toLowerCase();
-  const modelFile = resolveModelFileName(modelToken);
-  const defaultModelFile = modelFile || MODEL_POOL[0] || null;
-  const initialModelInfo = {
-    token: modelToken || '',
-    file: defaultModelFile,
-    label: modelToken || defaultModelFile || '',
-  };
+    const modelFile = resolveModelFileName(modelToken);
+    const defaultModelFile = modelFile || MODEL_POOL[0] || null;
+    const initialModelInfo = {
+      token: modelToken || '',
+      file: defaultModelFile,
+      label: defaultModelFile || modelToken || '',
+    };
   const listeners = new Set();
   const normaliseInt = (value, fallback = 0) => {
     const num = Number(value);

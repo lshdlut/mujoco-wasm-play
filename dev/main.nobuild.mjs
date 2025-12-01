@@ -40,14 +40,21 @@ const overlayInfo = document.querySelector('[data-testid="overlay-info"]');
 const overlayProfiler = document.querySelector('[data-testid="overlay-profiler"]');
 const overlaySensor = document.querySelector('[data-testid="overlay-sensor"]');
 const toastEl = document.querySelector('[data-testid="toast"]');
-const simTimeEl = document.querySelector('[data-testid="sim-time"]');
-const simStatusEl = document.querySelector('[data-testid="sim-status"]');
-const cameraSummaryEl = document.querySelector('[data-testid="camera-summary"]');
-const gestureEl = document.querySelector('[data-testid="perturb-state"]');
+// TODO(play): legacy header HUD elements (sim time/status/camera/gesture) are no longer used.
+// Leave the queries commented out for now; remove once header is fully deleted.
+// const simTimeEl = document.querySelector('[data-testid="sim-time"]');
+// const simStatusEl = document.querySelector('[data-testid="sim-status"]');
+// const cameraSummaryEl = document.querySelector('[data-testid="camera-summary"]');
+// const gestureEl = document.querySelector('[data-testid="perturb-state"]');
 let viewerStoreRef = null;
 
 let latestSnapshot = null;
 let renderStats = { drawn: 0, hidden: 0 };
+let fpsEstimate = 0;
+let lastFpsFrameSample = 0;
+let lastFpsSampleTimeMs = (typeof performance !== 'undefined' && performance.now)
+  ? performance.now()
+  : Date.now();
 const panelStateCache = {
   left: null,
   right: null,
@@ -132,6 +139,27 @@ const rendererManager = createRendererManager({
   debugMode,
   setRenderStats: (stats) => {
     renderStats = { ...renderStats, ...stats };
+    try {
+      const frame = Number(stats?.frame);
+      const now = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now()
+        : Date.now();
+      if (Number.isFinite(frame) && frame > lastFpsFrameSample) {
+        const deltaFrame = frame - lastFpsFrameSample;
+        const deltaMs = Math.max(1, now - lastFpsSampleTimeMs);
+        const instFps = (deltaFrame * 1000) / deltaMs;
+        if (Number.isFinite(instFps) && instFps > 0) {
+          if (!Number.isFinite(fpsEstimate) || fpsEstimate <= 0) {
+            fpsEstimate = instFps;
+          } else {
+            const alpha = 0.2;
+            fpsEstimate = fpsEstimate * (1 - alpha) + instFps * alpha;
+          }
+          lastFpsFrameSample = frame;
+          lastFpsSampleTimeMs = now;
+        }
+      }
+    } catch {}
   },
 });
 rendererManager.setup();
@@ -200,35 +228,36 @@ function updateToast(state) {
   }
 }
 
-function updateHud(state) {
-  const displayTime = typeof state.hud?.time === 'number' ? state.hud.time : 0;
-  if (simTimeEl) {
-    simTimeEl.textContent = `t = ${displayTime.toFixed(3)}`;
-  }
-  if (simStatusEl) {
-    const status = state.simulation.run ? 'running' : 'paused';
-    const ngeom = state.hud?.ngeom ?? 0;
-    const contacts = state.hud?.contacts ?? 0;
-    const rate = Number.isFinite(state.hud?.rate) ? state.hud.rate : 1;
-    const drawn = renderStats.drawn ?? 0;
-    const pausedSource = state.hud?.pausedSource ?? 'backend';
-    const rateSource = state.hud?.rateSource ?? 'backend';
-    simStatusEl.textContent = `${status} | ngeom=${ngeom} (visible ${drawn}) | contacts=${contacts} | rate=${rate.toFixed(2)}x [${rateSource}] | pause:${pausedSource}`;
-  }
-  if (cameraSummaryEl) {
-    cameraSummaryEl.textContent = `camera: ${state.runtime.cameraLabel}`;
-  }
-  if (gestureEl) {
-    const action = state.runtime.perturb?.active
-      ? (state.runtime.perturb.mode === 'translate' ? 'perturb-translate' : 'perturb-rotate')
-      : (state.runtime.lastAction || 'idle');
-    const selection = state.runtime.selection;
-    const selLabel = selection && selection.geom >= 0
-      ? (selection.name || `geom ${selection.geom}`)
-      : 'none';
-    gestureEl.textContent = `gesture: ${action} | sel: ${selLabel}`;
-  }
-}
+// TODO(play): legacy header HUD updater (superseded by F2 info overlay).
+// function updateHud(state) {
+//   const displayTime = typeof state.hud?.time === 'number' ? state.hud.time : 0;
+//   if (simTimeEl) {
+//     simTimeEl.textContent = `t = ${displayTime.toFixed(3)}`;
+//   }
+//   if (simStatusEl) {
+//     const status = state.simulation.run ? 'running' : 'paused';
+//     const ngeom = state.hud?.ngeom ?? 0;
+//     const contacts = state.hud?.contacts ?? 0;
+//     const rate = Number.isFinite(state.hud?.rate) ? state.hud.rate : 1;
+//     const drawn = renderStats.drawn ?? 0;
+//     const pausedSource = state.hud?.pausedSource ?? 'backend';
+//     const rateSource = state.hud?.rateSource ?? 'backend';
+//     simStatusEl.textContent = `${status} | ngeom=${ngeom} (visible ${drawn}) | contacts=${contacts} | rate=${rate.toFixed(2)}x [${rateSource}] | pause:${pausedSource}`;
+//   }
+//   if (cameraSummaryEl) {
+//     cameraSummaryEl.textContent = `camera: ${state.runtime.cameraLabel}`;
+//   }
+//   if (gestureEl) {
+//     const action = state.runtime.perturb?.active
+//       ? (state.runtime.perturb.mode === 'translate' ? 'perturb-translate' : 'perturb-rotate')
+//       : (state.runtime.lastAction || 'idle');
+//     const selection = state.runtime.selection;
+//     const selLabel = selection && selection.geom >= 0
+//       ? (selection.name || `geom ${selection.geom}`)
+//       : 'none';
+//     gestureEl.textContent = `gesture: ${action} | sel: ${selLabel}`;
+//   }
+// }
 
 function updateInfoOverlayCard(state) {
   if (!overlayInfo) return;
@@ -263,7 +292,10 @@ function updateInfoOverlayCard(state) {
   const modelLabel = state?.hud?.modelLabel || '';
   const simRun = !!state?.simulation?.run;
   const time = Number(state?.hud?.time) || 0;
-  const fps = Number(state?.hud?.fps) || 0;
+  const fpsState = Number(state?.hud?.fps);
+  const fps = Number.isFinite(fpsEstimate) && fpsEstimate > 0
+    ? fpsEstimate
+    : (Number.isFinite(fpsState) ? fpsState : 0);
   const nefc = Number(info?.nefc) || 0;
   const ncon = Number(info?.ncon) || Number(state?.hud?.contacts) || 0;
   const cpuMs = (() => {
@@ -280,7 +312,11 @@ function updateInfoOverlayCard(state) {
   const nisland = Number(info?.nisland) || 0;
 
   const modelEl = getFieldEl('model');
-  if (modelEl) modelEl.textContent = modelLabel || '(default model)';
+  if (modelEl) {
+    const label = modelLabel || '(default model)';
+    modelEl.textContent = label;
+    modelEl.title = label;
+  }
   const stateEl = getFieldEl('state');
   if (stateEl) stateEl.textContent = simRun ? 'Running' : 'Paused';
   const timeEl = getFieldEl('time');
@@ -301,7 +337,8 @@ function updateInfoOverlayCard(state) {
   }
   const fpsEl = getFieldEl('fps');
   if (fpsEl) {
-    fpsEl.textContent = fps < 1 ? `${fps.toFixed(1)} fps` : `${Math.round(fps)} fps`;
+    const value = simRun ? (Number(fps) || 0) : 0;
+    fpsEl.textContent = value < 1 ? `${value.toFixed(1)} fps` : `${Math.round(value)} fps`;
   }
   const memEl = getFieldEl('memory');
   if (memEl) {
@@ -383,7 +420,7 @@ store.subscribe((state) => {
   updateOverlay(overlayInfo, state.overlays.info);
   updateOverlay(overlayProfiler, state.overlays.profiler);
   updateOverlay(overlaySensor, state.overlays.sensor);
-  updateHud(state);
+  // updateHud(state); // legacy header HUD (kept for reference, replaced by F2 info overlay)
   updatePanels(state);
   updateToast(state);
   updateControls(state);

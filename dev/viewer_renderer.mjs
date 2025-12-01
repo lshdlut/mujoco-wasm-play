@@ -4064,6 +4064,7 @@ function renderScene(snapshot, state) {
       hidden: Math.max(0, ngeom - drawn),
       contacts: snapshot.contacts?.n ?? 0,
       t: typeof snapshot.t === 'number' ? snapshot.t : null,
+      frame: ctx._frameCounter | 0,
     };
     setRenderStats(stats);
     try {

@@ -46,7 +46,7 @@ body {
   overflow: hidden;
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr) 360px;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   max-height: 100vh;
   min-height: 100vh;
@@ -88,18 +88,11 @@ body.fullscreen {
     padding-right: 0;
   }
 }
+/* TODO(play): legacy header HUD styles (replaced by F2/F1 overlays).
+   Kept commented for now and can be deleted once the new overlays are stable.
 .app-header {
   grid-column: 1 / -1;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 24px;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-  backdrop-filter: blur(10px);
-  position: sticky;
-  top: 0;
-  z-index: 20;
+  display: none;
 }
 .app-header h1 {
   margin: 0;
@@ -116,12 +109,12 @@ body.fullscreen {
 #hud span {
   white-space: nowrap;
 }
+*/
 .panel {
-  grid-row: 2;
-  height: 100%;
+  grid-row: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px 18px;
+  padding: 16px 18px 72px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -150,11 +143,10 @@ body.fullscreen {
   border-radius: 999px;
 }
 .viewer {
-  grid-row: 2;
+  grid-row: 1;
   grid-column: 2;
   position: relative;
   overflow: hidden;
-  height: 100%;
   background: radial-gradient(circle at 50% 25%, rgba(59, 130, 246, 0.22), rgba(15, 23, 42, 0.95));
   min-height: 0;
   min-width: 0;
@@ -196,14 +188,18 @@ body.fullscreen {
   background: var(--color-overlay-soft);
 }
 .overlay-card[data-testid="overlay-info"] {
-  align-self: flex-start;
-  margin-top: auto;
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  min-width: 0;
+  width: 150px;
 }
 .info-grid {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 4px 12px;
   font-size: 11px;
+  min-width: 0;
 }
 .info-label {
   color: var(--color-text-muted);
@@ -212,6 +208,13 @@ body.fullscreen {
   color: var(--color-text);
   text-align: right;
   font-variant-numeric: tabular-nums;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.info-value[data-info-field="model"] {
+  text-align: left;
 }
 .overlay-card.visible {
   opacity: 1;
@@ -659,6 +662,9 @@ body.fullscreen {
   opacity: 1;
   transform: translateY(0);
 }
+/* TODO(play): legacy footer strip (hotkey summary).
+   The footer surface has been superseded by Help/Info overlays and is kept
+   commented out until we delete the HTML scaffolding entirely.
 .app-footer {
   grid-column: 1 / -1;
   grid-row: 3;
@@ -673,9 +679,14 @@ body.fullscreen {
   text-align: center;
   z-index: 10;
 }
-/* Clean grid layout via template areas */ .app-header {
+.app-footer {
+  grid-area: footer;
+}
+.app-header {
   grid-area: header;
 }
+*/
+/* Clean grid layout via template areas */
 .viewer {
   grid-area: main;
 }
@@ -685,32 +696,31 @@ body.fullscreen {
 .panel-right {
   grid-area: right;
 }
-.app-footer {
-  grid-area: footer;
-}
 body.layout-3col {
-  grid-template-areas: "header header header" "left main right" "footer footer footer";
+  grid-template-areas: "left main right";
   grid-template-columns: 320px minmax(0, 1fr) 360px;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
 }
 body.layout-left {
-  grid-template-areas: "header header header" "left main main" "footer footer footer";
+  grid-template-areas: "left main";
   grid-template-columns: 320px minmax(0, 1fr) 0;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
 }
 body.layout-right {
-  grid-template-areas: "header header header" "main main right" "footer footer footer";
+  grid-template-areas: "main right";
   grid-template-columns: 0 minmax(0, 1fr) 360px;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
 }
 body.layout-main {
-  grid-template-areas: "header header header" "main main main" "footer footer footer";
+  grid-template-areas: "main";
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
 }
 </style>
  </head>
- <body class="theme-light">
+ <body class="theme-light layout-3col">
+  <!-- TODO(play): legacy header HUD scaffold (superseded by overlays).
+       Commented out for now; safe to delete once parity validation is complete.
   <header class="app-header">
    <h1>
     Simulate Parity Scaffold
@@ -730,6 +740,7 @@ body.layout-main {
     </span>
    </div>
   </header>
+  -->
   <aside class="panel panel-left" data-testid="panel-left">
   </aside>
   <main class="viewer">
@@ -804,9 +815,6 @@ body.layout-main {
   </main>
   <aside class="panel panel-right" data-testid="panel-right">
   </aside>
-  <footer class="app-footer" role="contentinfo">
-   Hotkeys: Space (run/pause) • F1/F2/F3/F4 overlays • Tab toggles sidebars • [ / ] camera cycle
-  </footer>
   <script src="./main.nobuild.mjs" type="module">
   </script>
  </body>
