@@ -2504,8 +2504,56 @@ async function loadDefaultXml() {
   }
 
   async function step(direction = 1) {
+    const dir = direction >= 0 ? 1 : -1;
+    const history = lastSnapshot.history || createDefaultHistoryState();
+    const currentOffset = Number.isFinite(history.scrubIndex) ? history.scrubIndex : 0;
+    const count = Number.isFinite(history.count) ? history.count : 0;
+    const cameFromHistory = currentOffset < 0;
+    let nextOffset = currentOffset;
+
+    if (currentOffset !== 0 || (dir < 0 && count > 0)) {
+      if (currentOffset === 0) {
+        if (dir < 0) {
+          nextOffset = -1;
+        }
+      } else if (dir > 0) {
+        nextOffset = Math.min(0, currentOffset + 1);
+      } else if (dir < 0) {
+        const minOffset = -Math.max(0, count);
+        nextOffset = Math.max(minOffset, currentOffset - 1);
+      }
+
+      if (nextOffset === currentOffset) {
+        return resolveSnapshot(lastSnapshot);
+      }
+
+      history.scrubIndex = nextOffset;
+      history.live = nextOffset === 0;
+      lastSnapshot.history = history;
+      historyScrubbing = nextOffset < 0;
+
+      if (nextOffset < 0) {
+        setRunState(false, 'history', false);
+      } else if (cameFromHistory && nextOffset === 0) {
+        setRunState(false, 'history');
+      }
+
+      try {
+        client.postMessage?.({ cmd: 'historyScrub', offset: nextOffset });
+      } catch (err) {
+        if (debug) console.warn('[backend history step] post failed', err);
+      }
+      notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+
+    setRunState(false, 'ui');
     const n = Math.max(1, Math.abs(direction | 0) || 1);
-    client.postMessage?.({ cmd: 'step', n });
+    try {
+      client.postMessage?.({ cmd: 'step', n });
+    } catch (err) {
+      if (debug) console.warn('[backend step] post failed', err);
+    }
     return resolveSnapshot(lastSnapshot);
   }
 

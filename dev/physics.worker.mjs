@@ -403,9 +403,8 @@ function releaseHistoryScrub() {
   historyState.scrubIndex = 0;
   if (historyState.scrubActive) {
     historyState.scrubActive = false;
-    const resume = historyState.resumeRun;
-    historyState.resumeRun = true;
-    setRunning(resume, 'history');
+    historyState.resumeRun = false;
+    setRunning(false, 'history');
   }
 }
 
@@ -431,7 +430,7 @@ function loadHistoryOffset(offset) {
   historyState.scrubIndex = -steps;
   if (!historyState.scrubActive) {
     historyState.scrubActive = true;
-    historyState.resumeRun = running;
+    historyState.resumeRun = false;
   }
   setRunning(false, 'history');
   return true;
@@ -1014,7 +1013,6 @@ async function loadXmlWithFallback(xmlText) {
 
   function snapshot() {
   if (!sim || !(sim.h > 0)) return;
-  captureHistorySample();
   const n = sim.ngeom?.() | 0;
   const nbodyLocal = sim.nbody?.() | 0;
   const xposView = sim.geomXposView?.();
@@ -1571,6 +1569,7 @@ setInterval(() => {
   // Primary path: MjSimLite with access to sim.time()
   while (sim && typeof sim.step === 'function' && currentSim < targetSim && guard < maxSteps) {
     try {
+      captureHistorySample(true);
       sim.step(1);
     } catch {
       break;
@@ -1615,6 +1614,10 @@ onmessage = async (ev) => {
       }
       optionSupport = detectOptionSupport(mod);
       dt = sim?.timestep?.() || 0.002;
+      if (Number.isFinite(dt) && dt > 0) {
+        const targetHz = clamp(Math.round(1 / dt), 5, 240);
+        historyConfig = { ...historyConfig, captureHz: targetHz };
+      }
       ngeom = sim?.ngeom?.() | 0;
       nu = sim?.nu?.() | 0;
       pendingCtrl.clear();
@@ -1730,7 +1733,16 @@ onmessage = async (ev) => {
     } else if (msg.cmd === 'step') {
       if (sim) {
         const n = Math.max(1, Math.min(10000, (msg.n | 0) || 1));
-        sim.step(n);
+        let steps = 0;
+        while (steps < n) {
+          try { captureHistorySample(true); } catch {}
+          try {
+            sim.step(1);
+          } catch {
+            break;
+          }
+          steps += 1;
+        }
         try {
           const tSim = (sim && typeof sim.time === 'function') ? (sim.time() || 0) : simTimeApprox;
           simTimeApprox = tSim;
