@@ -466,7 +466,7 @@ if (typeof registerGlobalShortcut === 'function') {
     await toggleControl('rendering.camera_mode', 0);
   });
 
-  registerGlobalShortcut(['Tab'], (event) => {
+  const togglePanelsWithTab = (event) => {
     event?.preventDefault?.();
     store.update((draft) => {
       if (event?.shiftKey) {
@@ -475,7 +475,10 @@ if (typeof registerGlobalShortcut === 'function') {
         draft.panels.left = !draft.panels.left;
       }
     });
-  });
+  };
+
+  registerGlobalShortcut(['Tab'], togglePanelsWithTab);
+  registerGlobalShortcut(['Shift', 'Tab'], togglePanelsWithTab);
 
   registerGlobalShortcut([']'], async (event) => {
     event?.preventDefault?.();
