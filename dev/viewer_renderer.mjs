@@ -730,9 +730,9 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
   return true;
 }
 
-function syncCameraPoseFromMode(ctx, state, bounds, helpers, trackingCtx = {}) {
-  if (!ctx?.camera || !state) return;
-  const runtimeMode = Number(state.runtime?.cameraIndex ?? 0) | 0;
+  function syncCameraPoseFromMode(ctx, state, bounds, helpers, trackingCtx = {}) {
+    if (!ctx?.camera || !state) return;
+    const runtimeMode = Number(state.runtime?.cameraIndex ?? 0) | 0;
   const cameraList = Array.isArray(state.model?.cameras) ? state.model.cameras : [];
   const maxMode = FIXED_CAMERA_OFFSET + cameraList.length - 1;
   const desired = Math.max(
@@ -741,15 +741,18 @@ function syncCameraPoseFromMode(ctx, state, bounds, helpers, trackingCtx = {}) {
   );
   const previous =
     typeof ctx.currentCameraMode === 'number' ? ctx.currentCameraMode : 0;
-  if (desired !== previous) {
-    if (previous === 0) {
-      rememberFreeCameraPose(ctx, bounds);
+    if (desired !== previous) {
+      if (previous === 0) {
+        rememberFreeCameraPose(ctx, bounds);
+      }
+      // When returning from fixed cameras, restore the saved free pose.
+      // When returning from tracking (mode 1), keep the current camera pose
+      // and simply stop tracking so the transition stays lightweight.
+      if (desired === 0 && previous >= FIXED_CAMERA_OFFSET) {
+        restoreFreeCameraPose(ctx);
+      }
+      ctx.currentCameraMode = desired;
     }
-    if (desired === 0 && previous !== 0) {
-      restoreFreeCameraPose(ctx);
-    }
-    ctx.currentCameraMode = desired;
-  }
   if (desired >= FIXED_CAMERA_OFFSET) {
     if (!applyFixedCameraPreset(ctx, state, helpers)) {
       ctx.fixedCameraActive = false;

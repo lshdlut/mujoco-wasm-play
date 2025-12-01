@@ -1919,10 +1919,10 @@ function registerShortcutHandlers(shortcutSpec, handler) {
     const initialCollapsed = isLeftPanel && section.section_id !== 'simulation';
     setCollapsed(initialCollapsed);
 
-    const toggleCollapsed = () => {
-      const next = !sectionEl.classList.contains('is-collapsed');
-      setCollapsed(next);
-    };
+      const toggleCollapsed = () => {
+        const next = !sectionEl.classList.contains('is-collapsed');
+        setCollapsed(next);
+      };
 
     if (section?.shortcut) {
       registerShortcutHandlers(section.shortcut, (event) => {
@@ -1931,15 +1931,32 @@ function registerShortcutHandlers(shortcutSpec, handler) {
       });
     }
 
-    toggle.addEventListener('click', () => {
-      toggleCollapsed();
-    });
-    header.addEventListener('click', (event) => {
-      if (event.target === reset) return;
-      if (event.target !== toggle) {
+      toggle.addEventListener('click', () => {
         toggleCollapsed();
-      }
-    });
+      });
+      header.addEventListener('click', (event) => {
+        if (event.target === reset) return;
+        if (event.target !== toggle) {
+          toggleCollapsed();
+        }
+      });
+
+      header.addEventListener('dblclick', (event) => {
+        if (event.target === reset) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const sections = Array.from(container.querySelectorAll('.ui-section'));
+        if (sections.length === 0) return;
+        const allCollapsed = sections.every((sec) => sec.classList.contains('is-collapsed'));
+        const collapseAll = !allCollapsed;
+        sections.forEach((sec) => {
+          sec.classList.toggle('is-collapsed', collapseAll);
+          const btn = sec.querySelector('.section-toggle');
+          if (btn) {
+            btn.setAttribute('aria-expanded', collapseAll ? 'false' : 'true');
+          }
+        });
+      });
 
     sectionEl.append(header, body);
 

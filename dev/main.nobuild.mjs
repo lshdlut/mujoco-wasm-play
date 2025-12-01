@@ -461,9 +461,9 @@ function isTextEditingTarget(event) {
   return role === 'textbox' || role === 'combobox';
 }
 
-window.addEventListener('keydown', async (event) => {
-  if (isTextEditingTarget(event)) return;
-  switch (event.key) {
+  window.addEventListener('keydown', async (event) => {
+    if (isTextEditingTarget(event)) return;
+    switch (event.key) {
     case 'F1':
       event.preventDefault();
       await toggleControl('option.help');
@@ -492,14 +492,18 @@ window.addEventListener('keydown', async (event) => {
       event.preventDefault();
       await backend.step?.(1);
       break;
-    case 'ArrowLeft':
-      event.preventDefault();
-      await backend.step?.(-1);
-      break;
-    case 'Control':
-      store.update((draft) => {
-        draft.runtime.lastAction = 'rotate';
-      });
+      case 'ArrowLeft':
+        event.preventDefault();
+        await backend.step?.(-1);
+        break;
+      case 'Escape':
+        event.preventDefault();
+        await toggleControl('rendering.camera_mode', 0);
+        break;
+      case 'Control':
+        store.update((draft) => {
+          draft.runtime.lastAction = 'rotate';
+        });
       break;
   case 'Tab':
     event.preventDefault();

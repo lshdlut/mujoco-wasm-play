@@ -193,6 +193,35 @@ body.fullscreen {
   opacity: 1;
   transform: translateY(0);
 }
+.overlay-card .help-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--color-text);
+}
+.overlay-card .help-subtitle {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+.overlay-card .help-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr);
+  gap: 4px 10px;
+  font-size: 11px;
+}
+.overlay-card .help-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: var(--color-text);
+}
+.overlay-card .help-desc {
+  color: var(--color-text-muted);
+}
+.overlay-card .help-subtitle-unimplemented {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+}
 .ui-section {
   background: var(--color-panel-strong);
   border: 1px solid var(--color-border);
@@ -683,9 +712,59 @@ body.layout-main {
    <canvas data-testid="viewer-canvas">
    </canvas>
    <div class="overlay-stack">
-    <div class="overlay-card" data-testid="overlay-help">
-     Help overlay • F1 toggles this panel.
-    </div>
+     <div class="overlay-card" data-testid="overlay-help">
+      <div class="help-title">Help</div>
+      <div class="help-subtitle">Keyboard & mouse shortcuts (Simulate parity)</div>
+      <div class="help-grid">
+       <div class="help-key">Space</div>
+       <div class="help-desc">Play / Pause</div>
+       <div class="help-key">Left / Right arrow</div>
+       <div class="help-desc">Step Back / Forward (history aware)</div>
+       <div class="help-key">Tab / Shift-Tab</div>
+       <div class="help-desc">Toggle Left / Right UI</div>
+       <div class="help-key">[  ]</div>
+       <div class="help-desc">Cycle cameras</div>
+       <div class="help-key">Esc</div>
+       <div class="help-desc">Return to Free camera</div>
+       <div class="help-key">Double-click</div>
+       <div class="help-desc">Select body / geom</div>
+       <div class="help-key">Scroll / middle drag</div>
+       <div class="help-desc">Zoom</div>
+       <div class="help-key">Left drag</div>
+       <div class="help-desc">View Orbit</div>
+       <div class="help-key">[Shift] right drag</div>
+       <div class="help-desc">View Pan</div>
+       <div class="help-key">Ctrl [Shift] drag</div>
+       <div class="help-desc">Object Rotate</div>
+       <div class="help-key">Ctrl [Shift] right drag</div>
+       <div class="help-desc">Object Translate</div>
+       <div class="help-key">F1</div>
+       <div class="help-desc">Help overlay</div>
+       <div class="help-key">F2</div>
+       <div class="help-desc">Info overlay</div>
+      </div>
+      <div class="help-subtitle help-subtitle-unimplemented">Unimplemented / web differences</div>
+      <div class="help-grid">
+       <div class="help-key">+  -</div>
+       <div class="help-desc">Real-time scale (not wired yet)</div>
+       <div class="help-key">Page Up</div>
+       <div class="help-desc">Select parent body (TBD)</div>
+       <div class="help-key">Right double-click</div>
+       <div class="help-desc">Center camera on selection (TBD)</div>
+       <div class="help-key">Ctrl Right double-click</div>
+       <div class="help-desc">Switch to tracking camera (TBD)</div>
+       <div class="help-key">F3</div>
+       <div class="help-desc">Profiler overlay (not implemented)</div>
+       <div class="help-key">F4</div>
+       <div class="help-desc">Sensor overlay (not implemented)</div>
+       <div class="help-key">F5</div>
+       <div class="help-desc">Fullscreen (use browser fullscreen instead)</div>
+       <div class="help-key">UI right-button hold</div>
+       <div class="help-desc">Show UI shortcuts (not implemented)</div>
+       <div class="help-key">UI title double-click</div>
+       <div class="help-desc">Expand / collapse all sections (web: global expand/collapse)</div>
+      </div>
+     </div>
     <div class="overlay-card" data-testid="overlay-info">
      Info overlay • Displays simulation stats.
     </div>
