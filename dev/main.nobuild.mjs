@@ -147,59 +147,6 @@ const controlManager = createControlManager({
 });
 const { loadUiSpec, renderPanels, updateControls, toggleControl, cycleCamera, registerGlobalShortcut } = controlManager;
 
-if (typeof registerGlobalShortcut === 'function') {
-  registerGlobalShortcut(['Space'], async (event) => {
-    event?.preventDefault?.();
-    await toggleControl('simulation.run');
-  });
-
-  registerGlobalShortcut(['ArrowRight'], async (event) => {
-    event?.preventDefault?.();
-    await backend.step?.(1);
-  });
-
-  registerGlobalShortcut(['ArrowLeft'], async (event) => {
-    event?.preventDefault?.();
-    await backend.step?.(-1);
-  });
-
-  registerGlobalShortcut(['Escape'], async (event) => {
-    event?.preventDefault?.();
-    await toggleControl('rendering.camera_mode', 0);
-  });
-
-  registerGlobalShortcut(['Tab'], (event) => {
-    event?.preventDefault?.();
-    store.update((draft) => {
-      if (event?.shiftKey) {
-        draft.panels.right = !draft.panels.right;
-      } else {
-        draft.panels.left = !draft.panels.left;
-      }
-    });
-  });
-
-  registerGlobalShortcut([']'], async (event) => {
-    event?.preventDefault?.();
-    await cycleCamera(1);
-  });
-
-  registerGlobalShortcut(['['], async (event) => {
-    event?.preventDefault?.();
-    await cycleCamera(-1);
-  });
-
-  registerGlobalShortcut(['Ctrl', 'P'], async (event) => {
-    event?.preventDefault?.();
-    await toggleControl('file.screenshot');
-  });
-
-  registerGlobalShortcut(['Meta', 'P'], async (event) => {
-    event?.preventDefault?.();
-    await toggleControl('file.screenshot');
-  });
-}
-
 function updateOverlay(card, visible) {
   if (!card) return;
   card.classList.toggle('visible', !!visible);
@@ -497,6 +444,59 @@ function deriveEqualityList(snapshot) {
 const spec = await loadUiSpec();
 renderPanels(spec);
 updateControls(store.get());
+
+if (typeof registerGlobalShortcut === 'function') {
+  registerGlobalShortcut(['Space'], async (event) => {
+    event?.preventDefault?.();
+    await toggleControl('simulation.run');
+  });
+
+  registerGlobalShortcut(['ArrowRight'], async (event) => {
+    event?.preventDefault?.();
+    await backend.step?.(1);
+  });
+
+  registerGlobalShortcut(['ArrowLeft'], async (event) => {
+    event?.preventDefault?.();
+    await backend.step?.(-1);
+  });
+
+  registerGlobalShortcut(['Escape'], async (event) => {
+    event?.preventDefault?.();
+    await toggleControl('rendering.camera_mode', 0);
+  });
+
+  registerGlobalShortcut(['Tab'], (event) => {
+    event?.preventDefault?.();
+    store.update((draft) => {
+      if (event?.shiftKey) {
+        draft.panels.right = !draft.panels.right;
+      } else {
+        draft.panels.left = !draft.panels.left;
+      }
+    });
+  });
+
+  registerGlobalShortcut([']'], async (event) => {
+    event?.preventDefault?.();
+    await cycleCamera(1);
+  });
+
+  registerGlobalShortcut(['['], async (event) => {
+    event?.preventDefault?.();
+    await cycleCamera(-1);
+  });
+
+  registerGlobalShortcut(['Ctrl', 'P'], async (event) => {
+    event?.preventDefault?.();
+    await toggleControl('file.screenshot');
+  });
+
+  registerGlobalShortcut(['Meta', 'P'], async (event) => {
+    event?.preventDefault?.();
+    await toggleControl('file.screenshot');
+  });
+}
 if (typeof window !== 'undefined') {
   try {
     window.__viewerStore = store;
