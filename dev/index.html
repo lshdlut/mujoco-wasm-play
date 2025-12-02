@@ -29,32 +29,32 @@
   --color-text-subtle: #81868d;       /* tertiary text */
   --color-overlay: rgba(19, 20, 22, 0.96);
   --color-overlay-soft: rgba(19, 20, 22, 0.6);
-  /* UI spacing tokens */
+  /* UI spacing tokens (Tight preset) */
   --ui-panel-padding-y: 16px;
   --ui-panel-padding-x: 18px;
   --ui-panel-padding-bottom: 72px;
-  --ui-panel-gap: 12px;
-  --ui-overlay-gap: 8px;
-  --ui-overlay-padding: 12px;
-  --ui-overlay-card-padding-y: 12px;
-  --ui-overlay-card-padding-x: 14px;
-  --ui-info-grid-gap: 4px 12px;
-  --ui-help-grid-gap: 4px 10px;
-  --ui-section-header-padding-y: 10px;
-  --ui-section-header-padding-x: 14px;
+  --ui-panel-gap: 8px;
+  --ui-overlay-gap: 6px;
+  --ui-overlay-padding: 10px;
+  --ui-overlay-card-padding-y: 10px;
+  --ui-overlay-card-padding-x: 12px;
+  --ui-info-grid-gap: 3px 10px;
+  --ui-help-grid-gap: 3px 8px;
+  --ui-section-header-padding-y: 8px;
+  --ui-section-header-padding-x: 10px;
   --ui-section-header-gap: 10px;
-  --ui-section-body-gap: 12px;
-  --ui-section-body-padding: 12px;
-  --ui-control-row-gap: 6px 12px;
-  --ui-control-row-full-gap: 8px;
-  --ui-control-field-gap: 6px;
-  --ui-action-row-gap: 8px;
-  --ui-compact-pills-gap: 6px;
-  --ui-segmented-gap: 4px;
-  --ui-segmented-padding: 4px;
-  --ui-pill-row-gap: 8px;
+  --ui-section-body-gap: 8px;
+  --ui-section-body-padding: 10px;
+  --ui-control-row-gap: 4px 8px;
+  --ui-control-row-full-gap: 6px;
+  --ui-control-field-gap: 4px;
+  --ui-action-row-gap: 6px;
+  --ui-compact-pills-gap: 4px;
+  --ui-segmented-gap: 3px;
+  --ui-segmented-padding: 3px;
+  --ui-pill-row-gap: 6px;
   --ui-equality-container-margin-top: 8px;
-  --ui-equality-container-gap: 12px;
+  --ui-equality-container-gap: 10px;
   --ui-run-toggle-margin-top: 4px;
   --ui-toast-offset-x: 24px;
   --ui-toast-offset-y: 24px;
@@ -87,6 +87,30 @@ body {
   min-height: 100vh;
   gap: 0;
   transition: background 0.3s ease;
+}
+body.spacing-wide {
+  /* Wide uses the previous “tight” defaults */
+  --ui-panel-gap: 12px;
+  --ui-overlay-gap: 8px;
+  --ui-overlay-padding: 12px;
+  --ui-overlay-card-padding-y: 12px;
+  --ui-overlay-card-padding-x: 14px;
+  --ui-info-grid-gap: 4px 12px;
+  --ui-help-grid-gap: 4px 10px;
+  --ui-section-header-padding-y: 10px;
+  --ui-section-header-padding-x: 14px;
+  --ui-section-header-gap: 10px;
+  --ui-section-body-gap: 12px;
+  --ui-section-body-padding: 12px;
+  --ui-control-row-gap: 6px 12px;
+  --ui-control-row-full-gap: 8px;
+  --ui-control-field-gap: 6px;
+  --ui-action-row-gap: 8px;
+  --ui-compact-pills-gap: 6px;
+  --ui-segmented-gap: 4px;
+  --ui-segmented-padding: 4px;
+  --ui-pill-row-gap: 8px;
+  --ui-equality-container-gap: 12px;
 }
 body.fullscreen {
   background: #050608;

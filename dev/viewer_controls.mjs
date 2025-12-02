@@ -31,6 +31,20 @@ export function createControlManager({
     document.body.classList.toggle('theme-light', isLight);
   }
 
+  function applySpacingFromControl(value) {
+    if (typeof document === 'undefined' || !document.body) return;
+    let isWide = false;
+    const raw = value;
+    if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))) {
+      const idx = Number(raw) | 0;
+      isWide = idx === 1;
+    } else if (typeof raw === 'string') {
+      const token = raw.trim().toLowerCase();
+      isWide = token.startsWith('wide');
+    }
+    document.body.classList.toggle('spacing-wide', isWide);
+  }
+
   function sanitiseName(name) {
     return (
       String(name ?? '')
@@ -1035,9 +1049,14 @@ function shortcutFromEvent(event) {
             } else {
               const token = String(raw ?? '').toLowerCase();
               if (token.startsWith('light')) {
-                label = palette.find((opt) => String(opt).toLowerCase().startsWith('light')) ?? palette[1] ?? palette[0];
+                label =
+                  palette.find((opt) => String(opt).toLowerCase().startsWith('light')) ??
+                  palette[1] ??
+                  palette[0];
               } else if (token.startsWith('dark')) {
-                label = palette.find((opt) => String(opt).toLowerCase().startsWith('dark')) ?? palette[0];
+                label =
+                  palette.find((opt) => String(opt).toLowerCase().startsWith('dark')) ??
+                  palette[0];
               } else {
                 label = palette[0];
               }
@@ -1047,6 +1066,33 @@ function shortcutFromEvent(event) {
             }
             select.value = label;
             applyThemeFromColorControl(select.value);
+            return;
+          }
+          if (control?.item_id === 'option.spacing') {
+            const labels = options.length > 0 ? options : ['Tight', 'Wide'];
+            let label;
+            const raw = value;
+            if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))) {
+              const idx = Number(raw) | 0;
+              label = labels[idx] ?? labels[0];
+            } else if (typeof raw === 'string') {
+              const token = raw.trim().toLowerCase();
+              if (token.startsWith('wide')) {
+                label =
+                  labels.find((opt) => String(opt).toLowerCase().startsWith('wide')) ??
+                  labels[1] ??
+                  labels[0];
+              } else {
+                label = labels[0];
+              }
+            } else {
+              label = labels[0];
+            }
+            if (!labels.includes(label)) {
+              label = labels[0];
+            }
+            select.value = label;
+            applySpacingFromControl(label);
             return;
           }
 
@@ -1091,6 +1137,8 @@ function shortcutFromEvent(event) {
               : select.value;
           if (control?.item_id === 'option.color') {
             applyThemeFromColorControl(value);
+          } else if (control?.item_id === 'option.spacing') {
+            applySpacingFromControl(value);
           }
           await applySpecAction(store, backend, control, value);
         }),
@@ -1098,6 +1146,8 @@ function shortcutFromEvent(event) {
 
       if (control?.item_id === 'option.color') {
         applyThemeFromColorControl(select.value);
+      } else if (control?.item_id === 'option.spacing') {
+        applySpacingFromControl(select.value);
       }
     }
 

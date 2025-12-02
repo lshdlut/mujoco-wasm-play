@@ -164,6 +164,11 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     ctrl: [],
     optSupport: { supported: false, pointers: [] },
   },
+  theme: {
+    color: 0,   // 0 = Dark, 1 = Light
+    spacing: 0, // 0 = Tight, 1 = Wide
+    font: 0,    // index into option.font options (50%, 100%, ...)
+  },
   visualSourceMode: 'model',
   visualBackups: {
     preset: null,
@@ -841,6 +846,27 @@ function ensureKeyframeState(target) {
   }
   return target.keyframes;
 }
+
+function ensureThemeState(target) {
+  if (!target.theme) {
+    target.theme = {
+      color: 0,
+      spacing: 0,
+      font: 0,
+    };
+  } else {
+    if (typeof target.theme.color !== 'number' || !Number.isFinite(target.theme.color)) {
+      target.theme.color = 0;
+    }
+    if (typeof target.theme.spacing !== 'number' || !Number.isFinite(target.theme.spacing)) {
+      target.theme.spacing = 0;
+    }
+    if (typeof target.theme.font !== 'number' || !Number.isFinite(target.theme.font)) {
+      target.theme.font = 0;
+    }
+  }
+  return target.theme;
+}
 function applyBinding(draft, binding, value, control) {
   switch (binding) {
     case 'Simulate::help':
@@ -867,6 +893,74 @@ function applyBinding(draft, binding, value, control) {
     case 'Simulate::pause_update':
       draft.overlays.pauseUpdate = bool(value);
       return true;
+    case 'Simulate::spacing': {
+      const theme = ensureThemeState(draft);
+      let idx = 0;
+      if (typeof value === 'number') {
+        idx = Math.max(0, Math.trunc(value));
+      } else if (typeof value === 'string') {
+        const token = value.trim().toLowerCase();
+        if (/^[01]$/.test(token)) {
+          idx = token === '1' ? 1 : 0;
+        } else if (token.startsWith('wide')) {
+          idx = 1;
+        } else {
+          idx = 0;
+        }
+      }
+      theme.spacing = idx;
+      return true;
+    }
+    case 'Simulate::color': {
+      const theme = ensureThemeState(draft);
+      let idx = 0;
+      if (typeof value === 'number') {
+        idx = Math.max(0, Math.trunc(value));
+      } else if (typeof value === 'string') {
+        const token = value.trim().toLowerCase();
+        if (/^[01]$/.test(token)) {
+          idx = token === '1' ? 1 : 0;
+        } else if (token.startsWith('light')) {
+          idx = 1;
+        } else if (token.startsWith('dark')) {
+          idx = 0;
+        } else {
+          idx = 0;
+        }
+      }
+      theme.color = idx;
+      return true;
+    }
+    case 'Simulate::font': {
+      const theme = ensureThemeState(draft);
+      const options = Array.isArray(control?.options) ? control.options : [];
+      let idx = 0;
+      if (typeof value === 'number') {
+        idx = Math.max(0, Math.trunc(value));
+      } else if (typeof value === 'string') {
+        const trimmed = value.trim();
+        const lower = trimmed.toLowerCase();
+        const direct = options.findIndex(
+          (opt) => String(opt).trim().toLowerCase() === lower,
+        );
+        if (direct >= 0) {
+          idx = direct;
+        } else {
+          const match = lower.match(/(\d+)/);
+          if (match) {
+            const num = Number(match[1]);
+            if (Number.isFinite(num) && num >= 50) {
+              idx = Math.round((num - 50) / 50);
+            }
+          }
+        }
+      }
+      if (options.length > 0) {
+        idx = Math.min(Math.max(0, idx), options.length - 1);
+      }
+      theme.font = idx;
+      return true;
+    }
     case 'Simulate::run': {
       if (typeof value === 'string') {
         draft.simulation.run = value.toLowerCase() !== 'pause';
@@ -1076,14 +1170,12 @@ function readBindingValue(state, binding, control) {
       return state.watch?.field ?? 'qpos';
     case 'Simulate::index':
       return Number.isFinite(state.watch?.index) ? state.watch.index | 0 : 0;
-    case 'Simulate::color': {
-      try {
-        if (typeof document !== 'undefined' && document.body) {
-          return document.body.classList.contains('theme-light') ? 1 : 0;
-        }
-      } catch {}
-      return 0;
-    }
+    case 'Simulate::spacing':
+      return Number.isFinite(state.theme?.spacing) ? state.theme.spacing | 0 : 0;
+    case 'Simulate::color':
+      return Number.isFinite(state.theme?.color) ? state.theme.color | 0 : 0;
+    case 'Simulate::font':
+      return Number.isFinite(state.theme?.font) ? state.theme.font | 0 : 0;
     case 'UpdateWatch': {
       if (state.watch?.summary) return state.watch.summary;
       if (typeof state.watch?.value === 'number' && Number.isFinite(state.watch.value)) {
