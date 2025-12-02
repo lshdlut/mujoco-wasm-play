@@ -43,6 +43,9 @@ let running = false;
 let ngeom = 0;
 let nu = 0;
 let pendingCtrl = new Map(); // index -> value (clamped later)
+let ctrlNoiseStd = 0;
+let ctrlNoiseRate = 0;
+let ctrlNoiseSpare = null;
 let gestureState = { mode: 'idle', phase: 'idle', pointer: null };
 let dragState = { dx: 0, dy: 0 };
 let voptFlags = Array.from({ length: 32 }, () => 0);
@@ -96,6 +99,62 @@ const verboseLogEnabled = verboseWorkerLogs;
 function emitLog(message, extra, { force = false } = {}) {
   if (!force && !verboseLogEnabled) return;
   try { postMessage({ kind: 'log', message, extra }); } catch {}
+}
+
+function standardNormalNoise() {
+  if (ctrlNoiseSpare != null) {
+    const v = ctrlNoiseSpare;
+    ctrlNoiseSpare = null;
+    return v;
+  }
+  let u = 0;
+  let v = 0;
+  let s = 0;
+  do {
+    u = Math.random() * 2 - 1;
+    v = Math.random() * 2 - 1;
+    s = u * u + v * v;
+  } while (!s || s >= 1);
+  const mul = Math.sqrt(-2 * Math.log(s) / s);
+  ctrlNoiseSpare = v * mul;
+  return u * mul;
+}
+
+function applyCtrlNoise() {
+  if (!sim || !(ctrlNoiseStd > 0)) return;
+  const ctrlView = sim.ctrlView?.();
+  if (!ctrlView || !ctrlView.length) return;
+  const rangeView = sim.actuatorCtrlRangeView?.();
+  const nuLocal = ctrlView.length | 0;
+  const dtLocal = (Number.isFinite(dt) && dt > 0) ? dt : (sim.timestep?.() || 0.002);
+  if (!(dtLocal > 0)) return;
+  const rate = Math.exp(-dtLocal / Math.max(ctrlNoiseRate || 1, 1e-6));
+  const scale = ctrlNoiseStd * Math.sqrt(Math.max(0, 1 - rate * rate));
+  if (!(scale > 0)) return;
+  for (let i = 0; i < nuLocal; i += 1) {
+    let bottom = 0;
+    let top = 0;
+    let midpoint = 0;
+    let halfrange = 1;
+    if (rangeView && (2 * i + 1) < rangeView.length) {
+      bottom = Number(rangeView[2 * i]) || 0;
+      top = Number(rangeView[2 * i + 1]) || 0;
+      midpoint = 0.5 * (top + bottom);
+      halfrange = 0.5 * (top - bottom);
+    }
+    let value = Number(ctrlView[i]) || 0;
+    value = rate * value + (1 - rate) * midpoint;
+    value += scale * halfrange * standardNormalNoise();
+    if (rangeView && (2 * i + 1) < rangeView.length) {
+      const lo = Number(rangeView[2 * i]);
+      const hi = Number(rangeView[2 * i + 1]);
+      if (Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
+        if (value < lo) value = lo;
+        else if (value > hi) value = hi;
+      }
+    }
+    ctrlView[i] = value;
+  }
 }
 
 const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
@@ -1777,6 +1836,7 @@ setInterval(() => {
   while (sim && typeof sim.step === 'function' && currentSim < targetSim && guard < maxSteps) {
     try {
       captureHistorySample(true);
+      applyCtrlNoise();
       sim.step(1);
     } catch {
       break;
@@ -2134,6 +2194,9 @@ onmessage = async (ev) => {
       const payload = captureCopyState(precision);
       payload.source = msg.source || 'backend';
       try { postMessage(payload); } catch {}
+    } else if (msg.cmd === 'setCtrlNoise') {
+      ctrlNoiseStd = +msg.std || 0;
+      ctrlNoiseRate = +msg.rate || 0;
     } else if (msg.cmd === 'clearForces') {
       try { sim?.clearAllXfrc?.(); } catch {}
     } else if (msg.cmd === 'setCtrl') {

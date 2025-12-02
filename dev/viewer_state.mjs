@@ -116,6 +116,8 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     scrubIndex: 0,
     keyIndex: -1,
     realTimeIndex: 0,
+    noiseStd: 0,
+    noiseRate: 0,
   },
   runtime: {
     cameraIndex: 0,
@@ -991,6 +993,17 @@ function applyBinding(draft, binding, value, control) {
     case 'Simulate::key':
       draft.simulation.keyIndex = Math.trunc(toNumber(value));
       return true;
+    case 'Simulate::ctrl_noise_std': {
+      const std = Math.max(0, toNumber(value));
+      draft.simulation.noiseStd = std;
+      return true;
+    }
+    case 'Simulate::ctrl_noise_rate': {
+      let rateVal = toNumber(value);
+      if (!Number.isFinite(rateVal) || rateVal < 0) rateVal = 0;
+      draft.simulation.noiseRate = rateVal;
+      return true;
+    }
     case 'Simulate::field': {
       const watch = ensureWatchState(draft);
       watch.field = typeof value === 'string' ? value.trim() : String(value ?? '');
@@ -1071,6 +1084,10 @@ function applyControl(draft, control, value) {
     draft.toast = { message: 'Simulation reset', ts: Date.now() };
     return true;
   }
+  if (control.item_id === 'simulation.reload') {
+    draft.toast = { message: 'Model reloaded', ts: Date.now() };
+    return true;
+  }
   if (control.item_id === 'simulation.align') {
     draft.toast = { message: 'View aligned', ts: Date.now() };
     return true;
@@ -1081,11 +1098,17 @@ function applyControl(draft, control, value) {
     return true;
   }
   if (control.item_id === 'simulation.save_key') {
-    draft.toast = { message: 'Saved keyframe', ts: Date.now() };
+    const idxRaw = draft.simulation?.keyIndex;
+    const idx = Number.isFinite(idxRaw) ? (idxRaw | 0) : -1;
+    const label = idx >= 0 ? `[${idx}]` : '[?]';
+    draft.toast = { message: `Saved keyframe ${label}`, ts: Date.now() };
     return true;
   }
   if (control.item_id === 'simulation.load_key') {
-    draft.toast = { message: 'Loaded keyframe', ts: Date.now() };
+    const idxRaw = draft.simulation?.keyIndex;
+    const idx = Number.isFinite(idxRaw) ? (idxRaw | 0) : -1;
+    const label = idx >= 0 ? `[${idx}]` : '[?]';
+    draft.toast = { message: `Loaded keyframe ${label}`, ts: Date.now() };
     return true;
   }
   if (control.item_id === 'file.screenshot') {
@@ -1166,6 +1189,14 @@ function readBindingValue(state, binding, control) {
       return state.simulation.scrubIndex | 0;
     case 'Simulate::key':
       return state.simulation.keyIndex | 0;
+    case 'Simulate::ctrl_noise_std':
+      return Number.isFinite(state.simulation?.noiseStd)
+        ? state.simulation.noiseStd
+        : 0;
+    case 'Simulate::ctrl_noise_rate':
+      return Number.isFinite(state.simulation?.noiseRate)
+        ? state.simulation.noiseRate
+        : 0;
     case 'Simulate::field':
       return state.watch?.field ?? 'qpos';
     case 'Simulate::index':
@@ -1637,6 +1668,7 @@ export async function createBackend(options = {}) {
   let lastSnapshot = createInitialSnapshot();
   let lastFrameId = -1;
   let messageHandler = null;
+  let lastXmlText = null;
 
   async function spawnWorkerBackend() {
     const workerUrl = new URL(WORKER_URL.href);
@@ -1760,6 +1792,56 @@ async function loadDefaultXml() {
     return resolveSnapshot(lastSnapshot);
   }
 
+  function formatCopyNumber(value, precision) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '0';
+    if (precision === 'full') {
+      return num.toPrecision(16);
+    }
+    return num.toPrecision(6);
+  }
+
+  function buildCopyKeyXmlFromPayload(data) {
+    if (!data || typeof data !== 'object') return null;
+    const precision = data.precision === 'full' ? 'full' : 'standard';
+    const nq = Number(data.nq) || 0;
+    const nv = Number(data.nv) || 0;
+    const tSim = typeof data.tSim === 'number' ? data.tSim : 0;
+    const hasFullQpos = Array.isArray(data.qpos) && data.qpos.length >= nq && nq > 0;
+    const hasFullQvel = Array.isArray(data.qvel) && data.qvel.length >= nv && nv > 0;
+    const qpos = hasFullQpos
+      ? data.qpos
+      : (Array.isArray(data.qposPreview) ? data.qposPreview : []);
+    const qvel = hasFullQvel
+      ? data.qvel
+      : (Array.isArray(data.qvelPreview) ? data.qvelPreview : []);
+    const format = (v) => formatCopyNumber(v, precision);
+    let xml = '<key\n';
+    xml += `  time=\"${format(tSim)}\"\n`;
+    if (qpos.length) {
+      xml += `  qpos=\"${qpos.map(format).join(' ')}\"\n`;
+    }
+    if (qvel.length) {
+      xml += `  qvel=\"${qvel.map(format).join(' ')}\"\n`;
+    }
+    xml += '/>';
+    return xml;
+  }
+
+  async function writeCopyKeyToClipboard(xml) {
+    if (!xml) return;
+    if (typeof navigator === 'undefined' || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+      if (debug) console.warn('[backend copyState] clipboard API unavailable');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(xml);
+    } catch (err) {
+      console.error('[backend copyState] clipboard write failed', err);
+      throw err;
+    }
+  }
+
   function applyOptionSnapshot(data) {
     if (!data || typeof data !== 'object') return;
     if (Array.isArray(data.voptFlags)) {
@@ -1817,7 +1899,9 @@ async function loadDefaultXml() {
   }
 
   async function loadXmlText(xmlText) {
-    return restartWorkerWithXml(xmlText);
+    const payload = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
+    lastXmlText = payload;
+    return restartWorkerWithXml(payload);
   }
 
   function applyVisualStatePayload(payload) {
@@ -2244,6 +2328,7 @@ async function loadDefaultXml() {
         const qvelPreview = Array.isArray(data.qvelPreview)
           ? data.qvelPreview.map((n) => Number(n) || 0)
           : lastSnapshot.copyState?.qvelPreview ?? [];
+        const keyXml = buildCopyKeyXmlFromPayload(data);
         lastSnapshot.copyState = {
           seq,
           precision,
@@ -2253,7 +2338,12 @@ async function loadDefaultXml() {
           complete: !!data.complete,
           qposPreview,
           qvelPreview,
+          keyXml: keyXml || null,
         };
+        if (keyXml) {
+          // Fire-and-forget clipboard write; errors are logged inside helper.
+          void writeCopyKeyToClipboard(keyXml);
+        }
         notifyListeners();
         break;
       }
@@ -2275,6 +2365,7 @@ async function loadDefaultXml() {
   }
 
   const initialXml = await loadDefaultXml();
+  lastXmlText = typeof initialXml === 'string' ? initialXml : String(initialXml ?? '');
   await restartWorkerWithXml(initialXml);
 
   async function apply(payload) {
@@ -2582,6 +2673,14 @@ async function loadDefaultXml() {
         lastSnapshot.pausedSource = 'ui';
         notifyListeners();
         break;
+      case 'simulation.reload': {
+        if (lastXmlText && typeof lastXmlText === 'string' && lastXmlText.trim().length > 0) {
+          return restartWorkerWithXml(lastXmlText);
+        }
+        const xmlText = await loadDefaultXml();
+        lastXmlText = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
+        return restartWorkerWithXml(xmlText);
+      }
       case 'simulation.align': {
         try {
           client.postMessage?.({ cmd: 'align', source: 'ui' });
@@ -2600,8 +2699,31 @@ async function loadDefaultXml() {
         }
         break;
       }
-      case 'simulation.noise_rate':
-      case 'simulation.noise_scale':
+      case 'simulation.noise_scale': {
+        const std = Math.max(0, toNumber(value));
+        if (!lastSnapshot.ctrlNoise) lastSnapshot.ctrlNoise = { std: 0, rate: 0 };
+        lastSnapshot.ctrlNoise.std = std;
+        const rateVal = Number(lastSnapshot.ctrlNoise.rate) || 0;
+        try {
+          client.postMessage?.({ cmd: 'setCtrlNoise', std, rate: rateVal });
+        } catch (err) {
+          if (debug) console.warn('[backend ctrl noise std] post failed', err);
+        }
+        break;
+      }
+      case 'simulation.noise_rate': {
+        let rateVal = toNumber(value);
+        if (!Number.isFinite(rateVal) || rateVal < 0) rateVal = 0;
+        if (!lastSnapshot.ctrlNoise) lastSnapshot.ctrlNoise = { std: 0, rate: 0 };
+        lastSnapshot.ctrlNoise.rate = rateVal;
+        const std = Number(lastSnapshot.ctrlNoise.std) || 0;
+        try {
+          client.postMessage?.({ cmd: 'setCtrlNoise', std, rate: rateVal });
+        } catch (err) {
+          if (debug) console.warn('[backend ctrl noise rate] post failed', err);
+        }
+        break;
+      }
       case 'rendering.camera_mode':
       case 'option.help':
       default:
