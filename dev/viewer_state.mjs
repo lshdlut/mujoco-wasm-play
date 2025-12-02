@@ -167,7 +167,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   theme: {
     color: 0,   // 0 = Dark, 1 = Light
     spacing: 0, // 0 = Tight, 1 = Wide
-    font: 0,    // index into option.font options (50%, 100%, ...)
+    font: 2,    // index into option.font options (50%, 75%, 100%, 150%, 200%)
   },
   visualSourceMode: 'model',
   visualBackups: {

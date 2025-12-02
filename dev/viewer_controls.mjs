@@ -50,12 +50,21 @@ export function createControlManager({
     const root = document.documentElement;
     if (!root || typeof root.style?.setProperty !== 'function') return;
     let scale = 1;
+    let panelScale = 1;
     const raw = value;
     if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))) {
       const idx = Number(raw) | 0;
       const lookup = [50, 75, 100, 150, 200];
       const pct = lookup[idx] ?? 100;
       if (pct > 0) scale = pct / 100;
+      const panelLookup = {
+        50: 0.7,
+        75: 0.85,
+        100: 1.0,
+        150: 1.3,
+        200: 1.6,
+      };
+      panelScale = panelLookup[pct] ?? 1.0;
     } else if (typeof raw === 'string') {
       const token = raw.trim().toLowerCase();
       const match = token.match(/(\d+)\s*%/);
@@ -63,11 +72,21 @@ export function createControlManager({
         const pct = Number(match[1]);
         if (Number.isFinite(pct) && pct > 0) {
           scale = pct / 100;
+          const panelLookup = {
+            50: 0.7,
+            75: 0.85,
+            100: 1.0,
+            150: 1.3,
+            200: 1.6,
+          };
+          panelScale = panelLookup[pct] ?? 1.0;
         }
       }
     }
     if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+    if (!Number.isFinite(panelScale) || panelScale <= 0) panelScale = 1;
     root.style.setProperty('--viewer-font-scale', String(scale));
+    root.style.setProperty('--viewer_panel_scale', String(panelScale));
   }
 
   function sanitiseName(name) {

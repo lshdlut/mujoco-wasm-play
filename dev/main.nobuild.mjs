@@ -432,6 +432,9 @@ backend.subscribe((snapshot) => {
   applySnapshot(snapshot);
 });
 
+let lastLayoutKey = null;
+let lastFontIndex = null;
+
 store.subscribe((state) => {
   if (latestSnapshot) {
     rendererManager.renderScene(latestSnapshot, state);
@@ -442,6 +445,19 @@ store.subscribe((state) => {
   updateOverlay(overlaySensor, state.overlays.sensor);
   // updateHud(state); // legacy header HUD (kept for reference, replaced by F2 info overlay)
   updatePanels(state);
+
+  try {
+    const leftVisible = !!state.panels?.left;
+    const rightVisible = !!state.panels?.right;
+    const fullscreen = !!state.overlays?.fullscreen;
+    const layoutKey = `${leftVisible ? '1' : '0'}${rightVisible ? '1' : '0'}${fullscreen ? '1' : '0'}`;
+    const fontIndex = Number.isFinite(state.theme?.font) ? (state.theme.font | 0) : null;
+    if (layoutKey !== lastLayoutKey || fontIndex !== lastFontIndex) {
+      lastLayoutKey = layoutKey;
+      lastFontIndex = fontIndex;
+      queueResizeCanvas();
+    }
+  } catch {}
   updateToast(state);
   updateControls(state);
   updateInfoOverlayCard(state);
@@ -791,8 +807,22 @@ function resizeCanvas() {
     rendererManager.updateViewport();
   }
 }
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
+
+function queueResizeCanvas() {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    resizeCanvas();
+    return;
+  }
+  if (queueResizeCanvas._pending) return;
+  queueResizeCanvas._pending = true;
+  window.requestAnimationFrame(() => {
+    queueResizeCanvas._pending = false;
+    resizeCanvas();
+  });
+}
+
+queueResizeCanvas();
+window.addEventListener('resize', queueResizeCanvas);
 
 function processScreenshotQueue(state) {
   if (!pendingScreenshotSeq || screenshotInFlight) return;

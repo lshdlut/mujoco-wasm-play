@@ -184,7 +184,7 @@
       "label": "Font",
       "shortcut": null,
       "binding": "Simulate::font",
-      "default": 0,
+      "default": 2,
       "options": [
         "50 %",
         "75 %",
@@ -192,9 +192,9 @@
         "150 %",
         "200 %"
       ],
-          "applies_to": [
-            "mjr_changeFont"
-          ]
+      "applies_to": [
+        "mjr_changeFont"
+      ]
         }
       ]
     },
