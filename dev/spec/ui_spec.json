@@ -165,15 +165,13 @@
         {
           "item_id": "option.color",
           "type": "select",
-          "label": "Color",
+          "label": "Color theme",
           "shortcut": null,
           "binding": "Simulate::color",
           "default": 0,
           "options": [
-            "Default",
-            "Orange",
-            "White",
-            "Black"
+            "Dark",
+            "Light"
           ],
           "applies_to": [
             "ui0.color",

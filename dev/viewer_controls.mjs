@@ -20,6 +20,17 @@ export function createControlManager({
   let modelSelectEl = null;
   let visualPresetButtonIndex = 0;
 
+  function applyThemeFromColorControl(value) {
+    if (typeof document === 'undefined' || !document.body) return;
+    const token = String(value ?? '').toLowerCase();
+    const isLight =
+      token === 'light' ||
+      token === '1' ||
+      token === 'white' ||
+      token === 'default';
+    document.body.classList.toggle('theme-light', isLight);
+  }
+
   function sanitiseName(name) {
     return (
       String(name ?? '')
@@ -968,97 +979,129 @@ function shortcutFromEvent(event) {
     });
   }
 
-  function renderSelect(container, control) {
-    const { row, label, field } = createLabeledRow(control);
-    const inputId = `${sanitiseName(control.item_id)}__select`;
-    label.setAttribute('for', inputId);
-    const select = document.createElement('select');
-    select.setAttribute('data-testid', control.item_id);
-    select.id = inputId;
-    const isCameraModeSelect = control.item_id === 'rendering.camera_mode';
-    const isTrackingGeomSelect = control.item_id === 'rendering.tracking_geom';
-    const isLabelModeSelect = control.binding === 'mjvOption::label';
-    const isFrameModeSelect = control.binding === 'mjvOption::frame';
-    const isNumericSelect = isLabelModeSelect || isFrameModeSelect;
-    const options = isCameraModeSelect || isTrackingGeomSelect ? [] : normaliseOptions(control.options);
-    if (isCameraModeSelect) {
-      syncCameraSelectOptions(select, control);
-    } else if (isTrackingGeomSelect) {
-      syncTrackingGeomSelectOptions(select, control);
-    } else {
-      options.forEach((opt, idx) => {
-        const option = document.createElement('option');
-        option.value = isNumericSelect ? String(idx) : opt;
-        option.textContent = opt;
-        select.appendChild(option);
-      });
-    }
-    field.append(select);
-    container.append(row);
+    function renderSelect(container, control) {
+      const { row, label, field } = createLabeledRow(control);
+      const inputId = `${sanitiseName(control.item_id)}__select`;
+      label.setAttribute('for', inputId);
+      const select = document.createElement('select');
+      select.setAttribute('data-testid', control.item_id);
+      select.id = inputId;
+      const isCameraModeSelect = control.item_id === 'rendering.camera_mode';
+      const isTrackingGeomSelect = control.item_id === 'rendering.tracking_geom';
+      const isLabelModeSelect = control.binding === 'mjvOption::label';
+      const isFrameModeSelect = control.binding === 'mjvOption::frame';
+      const isNumericSelect = isLabelModeSelect || isFrameModeSelect;
+      const options = isCameraModeSelect || isTrackingGeomSelect ? [] : normaliseOptions(control.options);
+      if (isCameraModeSelect) {
+        syncCameraSelectOptions(select, control);
+      } else if (isTrackingGeomSelect) {
+        syncTrackingGeomSelectOptions(select, control);
+      } else {
+        options.forEach((opt, idx) => {
+          const option = document.createElement('option');
+          option.value = isNumericSelect ? String(idx) : opt;
+          option.textContent = opt;
+          select.appendChild(option);
+        });
+      }
+      field.append(select);
+      container.append(row);
 
-    applyOptionAvailability(control, select);
+      applyOptionAvailability(control, select);
 
-    const binding = createBinding(control, {
-      getValue: () => {
-        if (isCameraModeSelect) {
-          syncCameraSelectOptions(select, control);
-          return toNumber(select.value);
-        }
-        if (isTrackingGeomSelect) {
-          syncTrackingGeomSelectOptions(select, control);
-          return toNumber(select.value);
-        }
-        if (isNumericSelect) {
-          return Math.max(0, Math.trunc(toNumber(select.value)));
-        }
-        return select.value;
-      },
-      applyValue: (value) => {
-        if (isCameraModeSelect) {
-          const entries = syncCameraSelectOptions(select, control);
-          const numericValue = Math.max(0, Math.trunc(toNumber(value)));
-          const match = entries.find((entry) => entry.value === String(numericValue));
-          const fallbackValue = entries[0]?.value ?? '0';
-          select.value = match ? match.value : fallbackValue;
-        } else if (isTrackingGeomSelect) {
-          const entries = syncTrackingGeomSelectOptions(select, control);
-          const numericValue = Math.trunc(toNumber(value));
-          const match = entries.find((entry) => entry.value === String(numericValue));
-          const fallbackValue = entries[0]?.value ?? '-1';
-          select.value = match ? match.value : fallbackValue;
-        } else if (isNumericSelect) {
-          const numericValue = Math.max(0, Math.trunc(toNumber(value)));
-          const clamped = Math.min(numericValue, Math.max(0, options.length - 1));
-          select.value = String(clamped);
-        } else if (value == null) {
-          select.value = options[0] ?? '';
-        } else {
-          const next = String(value);
-          if (!options.includes(next) && options.length > 0) {
-            select.value = options[0];
-          } else {
-            select.value = next;
+      const binding = createBinding(control, {
+        getValue: () => {
+          if (isCameraModeSelect) {
+            syncCameraSelectOptions(select, control);
+            return toNumber(select.value);
           }
-        }
-      },
-    });
+          if (isTrackingGeomSelect) {
+            syncTrackingGeomSelectOptions(select, control);
+            return toNumber(select.value);
+          }
+          if (isNumericSelect) {
+            return Math.max(0, Math.trunc(toNumber(select.value)));
+          }
+          return select.value;
+        },
+        applyValue: (value) => {
+          if (control?.item_id === 'option.color') {
+            const palette = options.length > 0 ? options : ['Dark', 'Light'];
+            let label;
+            const raw = value;
+            if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))) {
+              const idx = Number(raw) | 0;
+              label = idx === 1 && palette.length > 1 ? palette[1] : palette[0];
+            } else {
+              const token = String(raw ?? '').toLowerCase();
+              if (token.startsWith('light')) {
+                label = palette.find((opt) => String(opt).toLowerCase().startsWith('light')) ?? palette[1] ?? palette[0];
+              } else if (token.startsWith('dark')) {
+                label = palette.find((opt) => String(opt).toLowerCase().startsWith('dark')) ?? palette[0];
+              } else {
+                label = palette[0];
+              }
+            }
+            if (!palette.includes(label)) {
+              label = palette[0];
+            }
+            select.value = label;
+            applyThemeFromColorControl(select.value);
+            return;
+          }
 
-    select.addEventListener(
-      'change',
-      guardBinding(binding, async () => {
-        const value = isCameraModeSelect
-          ? Math.max(0, Math.trunc(toNumber(select.value)))
-          : isTrackingGeomSelect
-            ? Math.trunc(toNumber(select.value))
-            : isNumericSelect
-              ? Math.max(0, Math.trunc(toNumber(select.value)))
-            : select.value;
-        await applySpecAction(store, backend, control, value);
-      }),
-    );
-  }
+          if (isCameraModeSelect) {
+            const entries = syncCameraSelectOptions(select, control);
+            const numericValue = Math.max(0, Math.trunc(toNumber(value)));
+            const match = entries.find((entry) => entry.value === String(numericValue));
+            const fallbackValue = entries[0]?.value ?? '0';
+            select.value = match ? match.value : fallbackValue;
+          } else if (isTrackingGeomSelect) {
+            const entries = syncTrackingGeomSelectOptions(select, control);
+            const numericValue = Math.trunc(toNumber(value));
+            const match = entries.find((entry) => entry.value === String(numericValue));
+            const fallbackValue = entries[0]?.value ?? '-1';
+            select.value = match ? match.value : fallbackValue;
+          } else if (isNumericSelect) {
+            const numericValue = Math.max(0, Math.trunc(toNumber(value)));
+            const clamped = Math.min(numericValue, Math.max(0, options.length - 1));
+            select.value = String(clamped);
+          } else if (value == null) {
+            select.value = options[0] ?? '';
+          } else {
+            const next = String(value);
+            if (!options.includes(next) && options.length > 0) {
+              select.value = options[0];
+            } else {
+              select.value = next;
+            }
+          }
+        },
+      });
 
-    function renderVisualSourceControl(container, control) {
+      select.addEventListener(
+        'change',
+        guardBinding(binding, async () => {
+          const value = isCameraModeSelect
+            ? Math.max(0, Math.trunc(toNumber(select.value)))
+            : isTrackingGeomSelect
+              ? Math.trunc(toNumber(select.value))
+              : isNumericSelect
+                ? Math.max(0, Math.trunc(toNumber(select.value)))
+              : select.value;
+          if (control?.item_id === 'option.color') {
+            applyThemeFromColorControl(value);
+          }
+          await applySpecAction(store, backend, control, value);
+        }),
+      );
+
+      if (control?.item_id === 'option.color') {
+        applyThemeFromColorControl(select.value);
+      }
+    }
+
+      function renderVisualSourceControl(container, control) {
       const labelRow = createControlRow(control, { full: true });
       const label = document.createElement('label');
       label.className = 'control-label';

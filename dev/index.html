@@ -638,26 +638,26 @@ body.fullscreen {
   border-bottom: 1px solid var(--color-border);
   padding-bottom: 4px;
 }
-.toast {
-  position: absolute;
-  right: 24px;
-  bottom: 24px;
-  padding: 12px 18px;
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 12px;
-  border: 1px solid rgba(20, 30, 50, 0.45);
-  color: #0f172a;
-  font-size: 13px;
-  max-width: min(320px, 45%);
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  opacity: 0;
-  transform: translateY(12px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  pointer-events: none;
-  backdrop-filter: blur(10px);
-  z-index: 5;
-}
+  .toast {
+    position: absolute;
+    right: 24px;
+    bottom: 24px;
+    padding: 12px 18px;
+    background: var(--color-panel-strong);
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    font-size: 13px;
+    max-width: min(320px, 45%);
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    pointer-events: none;
+    backdrop-filter: blur(10px);
+    z-index: 5;
+  }
 .toast.visible {
   opacity: 1;
   transform: translateY(0);
@@ -718,7 +718,7 @@ body.layout-main {
 }
 </style>
  </head>
- <body class="theme-light layout-3col">
+ <body class="layout-3col">
   <!-- TODO(play): legacy header HUD scaffold (superseded by overlays).
        Commented out for now; safe to delete once parity validation is complete.
   <header class="app-header">
