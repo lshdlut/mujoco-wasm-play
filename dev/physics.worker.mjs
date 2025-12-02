@@ -1118,6 +1118,9 @@ function captureCopyState(precision) {
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const nq = readModelCount('nq');
   const nv = readModelCount('nv');
+  const nuLocal = readModelCount('nu');
+  const naLocal = readModelCount('na');
+  const nmocap = readModelCount('nmocap');
   const tSim = sim?.time?.() || 0;
   const payload = {
     kind: 'copyState',
@@ -1125,35 +1128,70 @@ function captureCopyState(precision) {
     precision,
     nq,
     nv,
+    nu: nuLocal,
+    na: naLocal,
+    nmocap,
     timestamp: now,
     tSim,
     qposPreview: [],
     qvelPreview: [],
+    ctrlPreview: [],
     complete: false,
   };
   if (nq > 0) {
     const view = sim?.qposView?.();
     if (view) {
-      const limit = precision === 'full' ? nq : Math.min(nq, 8);
-      for (let i = 0; i < limit; i++) {
+      const limitPreview = Math.min(nq, 8);
+      for (let i = 0; i < limitPreview; i++) {
         payload.qposPreview.push(Number(view[i]) || 0);
       }
-      if (precision === 'full' && nq <= 128) {
-        payload.qpos = Array.from(view);
-        payload.complete = true;
-      }
+      payload.qpos = Array.from(view);
+      payload.complete = true;
     }
   }
   if (nv > 0) {
     const view = sim?.qvelView?.();
     if (view) {
-      const limit = precision === 'full' ? nv : Math.min(nv, 8);
-      for (let i = 0; i < limit; i++) {
+      const limitPreview = Math.min(nv, 8);
+      for (let i = 0; i < limitPreview; i++) {
         payload.qvelPreview.push(Number(view[i]) || 0);
       }
-      if (precision === 'full' && nv <= 128) {
-        payload.qvel = Array.from(view);
-        payload.complete = payload.complete && nv <= 128;
+      payload.qvel = Array.from(view);
+      payload.complete = payload.complete && true;
+    }
+  }
+  if (nuLocal > 0) {
+    const ctrlView = sim?.ctrlView?.();
+    if (ctrlView && ctrlView.length) {
+      const limitPreview = Math.min(ctrlView.length, 8);
+      for (let i = 0; i < limitPreview; i++) {
+        payload.ctrlPreview.push(Number(ctrlView[i]) || 0);
+      }
+      payload.ctrl = Array.from(ctrlView);
+    }
+  }
+  if (naLocal > 0) {
+    const actPtr = readDataPtr('act');
+    if (actPtr) {
+      const actView = heapViewF64(mod, actPtr, naLocal);
+      if (actView && actView.length >= naLocal) {
+        payload.act = Array.from(actView);
+      }
+    }
+  }
+  if (nmocap > 0) {
+    const mposPtr = readDataPtr('mocap_pos');
+    const mquatPtr = readDataPtr('mocap_quat');
+    if (mposPtr) {
+      const mposView = heapViewF64(mod, mposPtr, nmocap * 3);
+      if (mposView && mposView.length >= nmocap * 3) {
+        payload.mpos = Array.from(mposView);
+      }
+    }
+    if (mquatPtr) {
+      const mquatView = heapViewF64(mod, mquatPtr, nmocap * 4);
+      if (mquatView && mquatView.length >= nmocap * 4) {
+        payload.mquat = Array.from(mquatView);
       }
     }
   }
@@ -1828,6 +1866,14 @@ setInterval(() => {
   } catch {
     currentSim = simTimeApprox || 0;
   }
+  // Detect MuJoCo-internal time resets (for example after invalid states).
+  // If time jumps backwards relative to our last sync, resynchronise instead
+  // of trying to "catch up" from the previous timeline, which can cause long
+  // stalls and large apparent jumps in the HUD time.
+  if (Number.isFinite(lastSyncSimTime) && currentSim + 1e-6 < lastSyncSimTime) {
+    resetTimingForCurrentSim();
+    return;
+  }
   const targetSim = lastSyncSimTime + wallDelta * rate;
   if (!Number.isFinite(targetSim)) return;
   let guard = 0;
@@ -2106,6 +2152,7 @@ onmessage = async (ev) => {
       const idx = Math.max(0, normaliseInt(msg.index, 0));
       if (loadKeyframe(idx)) {
         keySliderIndex = idx;
+        resetTimingForCurrentSim();
       }
     } else if (msg.cmd === 'keyframeSelect') {
       const idx = Math.max(0, normaliseInt(msg.index, 0));

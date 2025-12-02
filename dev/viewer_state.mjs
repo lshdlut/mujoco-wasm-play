@@ -1806,15 +1806,28 @@ async function loadDefaultXml() {
     const precision = data.precision === 'full' ? 'full' : 'standard';
     const nq = Number(data.nq) || 0;
     const nv = Number(data.nv) || 0;
+    const nu = Number(data.nu) || 0;
+    const na = Number(data.na) || 0;
+    const nmocap = Number(data.nmocap) || 0;
     const tSim = typeof data.tSim === 'number' ? data.tSim : 0;
     const hasFullQpos = Array.isArray(data.qpos) && data.qpos.length >= nq && nq > 0;
     const hasFullQvel = Array.isArray(data.qvel) && data.qvel.length >= nv && nv > 0;
+    const hasFullCtrl = Array.isArray(data.ctrl) && data.ctrl.length >= nu && nu > 0;
+    const hasFullAct = Array.isArray(data.act) && data.act.length >= na && na > 0;
+    const hasFullMpos = Array.isArray(data.mpos) && data.mpos.length >= nmocap * 3 && nmocap > 0;
+    const hasFullMquat = Array.isArray(data.mquat) && data.mquat.length >= nmocap * 4 && nmocap > 0;
     const qpos = hasFullQpos
       ? data.qpos
       : (Array.isArray(data.qposPreview) ? data.qposPreview : []);
     const qvel = hasFullQvel
       ? data.qvel
       : (Array.isArray(data.qvelPreview) ? data.qvelPreview : []);
+    const ctrl = hasFullCtrl
+      ? data.ctrl
+      : (Array.isArray(data.ctrlPreview) ? data.ctrlPreview : []);
+    const act = hasFullAct ? data.act : [];
+    const mpos = hasFullMpos ? data.mpos : [];
+    const mquat = hasFullMquat ? data.mquat : [];
     const format = (v) => formatCopyNumber(v, precision);
     let xml = '<key\n';
     xml += `  time=\"${format(tSim)}\"\n`;
@@ -1823,6 +1836,18 @@ async function loadDefaultXml() {
     }
     if (qvel.length) {
       xml += `  qvel=\"${qvel.map(format).join(' ')}\"\n`;
+    }
+    if (act.length) {
+      xml += `  act=\"${act.map(format).join(' ')}\"\n`;
+    }
+    if (ctrl.length) {
+      xml += `  ctrl=\"${ctrl.map(format).join(' ')}\"\n`;
+    }
+    if (mpos.length) {
+      xml += `  mpos=\"${mpos.map(format).join(' ')}\"\n`;
+    }
+    if (mquat.length) {
+      xml += `  mquat=\"${mquat.map(format).join(' ')}\"\n`;
     }
     xml += '/>';
     return xml;
@@ -2255,6 +2280,38 @@ async function loadDefaultXml() {
           lastSnapshot.options = data.options;
         }
         applyOptionSnapshot(data);
+        notifyListeners();
+        break;
+      }
+      case 'keyframes': {
+        lastSnapshot.keyframes = lastSnapshot.keyframes || createDefaultKeyframeState();
+        const meta = data;
+        if (typeof meta.capacity === 'number') {
+          lastSnapshot.keyframes.capacity = meta.capacity | 0;
+        }
+        if (typeof meta.count === 'number') {
+          lastSnapshot.keyframes.count = Math.max(0, meta.count | 0);
+        }
+        if (Array.isArray(meta.labels)) {
+          lastSnapshot.keyframes.labels = meta.labels.slice();
+        }
+        if (Array.isArray(meta.slots)) {
+          lastSnapshot.keyframes.slots = meta.slots.map((slot) => ({
+            index: Number(slot.index) || 0,
+            label: typeof slot.label === 'string' ? slot.label : `Key ${slot.index | 0}`,
+            kind: slot.kind || 'user',
+            available: !!slot.available,
+          }));
+        }
+        if (typeof meta.lastSaved === 'number') {
+          lastSnapshot.keyframes.lastSaved = meta.lastSaved | 0;
+        }
+        if (typeof meta.lastLoaded === 'number') {
+          lastSnapshot.keyframes.lastLoaded = meta.lastLoaded | 0;
+        }
+        if (typeof meta.keyIndex === 'number' && Number.isFinite(meta.keyIndex)) {
+          lastSnapshot.keyIndex = meta.keyIndex | 0;
+        }
         notifyListeners();
         break;
       }

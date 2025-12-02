@@ -4142,7 +4142,7 @@ function renderScene(snapshot, state) {
       ) {
         const radius = Math.max(bounds.radius || 0, 0.6);
         const focus = tempVecA.set(bounds.center[0], bounds.center[1], bounds.center[2]);
-        const offset = tempVecB.set(radius * 2.0, -radius * 2.0, radius * 1.4);
+        const offset = tempVecB.set(radius * 2.6, -radius * 2.6, radius * 1.7);
         context.camera.position.copy(focus.clone().add(offset));
         context.camera.lookAt(focus);
         context.cameraTarget.copy(focus);
@@ -4202,7 +4202,7 @@ function renderScene(snapshot, state) {
       );
       const target = tempVecA.set(center[0], center[1], center[2]);
       context.camera.position.copy(
-        target.clone().add(new THREE.Vector3(radius * 1.5, -radius * 1.5, radius * 1.1))
+        target.clone().add(new THREE.Vector3(radius * 0.8, -radius * 0.8, radius * 0.6))
       );
       context.camera.lookAt(target);
       context.cameraTarget.copy(target);
