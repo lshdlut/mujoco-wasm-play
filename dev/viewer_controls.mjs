@@ -45,6 +45,31 @@ export function createControlManager({
     document.body.classList.toggle('spacing-wide', isWide);
   }
 
+  function applyFontFromControl(value) {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    if (!root || typeof root.style?.setProperty !== 'function') return;
+    let scale = 1;
+    const raw = value;
+    if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))) {
+      const idx = Number(raw) | 0;
+      const lookup = [50, 75, 100, 150, 200];
+      const pct = lookup[idx] ?? 100;
+      if (pct > 0) scale = pct / 100;
+    } else if (typeof raw === 'string') {
+      const token = raw.trim().toLowerCase();
+      const match = token.match(/(\d+)\s*%/);
+      if (match) {
+        const pct = Number(match[1]);
+        if (Number.isFinite(pct) && pct > 0) {
+          scale = pct / 100;
+        }
+      }
+    }
+    if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+    root.style.setProperty('--viewer-font-scale', String(scale));
+  }
+
   function sanitiseName(name) {
     return (
       String(name ?? '')
@@ -1095,6 +1120,38 @@ function shortcutFromEvent(event) {
             applySpacingFromControl(label);
             return;
           }
+          if (control?.item_id === 'option.font') {
+            const labels = options.length > 0 ? options : ['50 %', '100 %', '150 %', '200 %', '250 %', '300 %'];
+            let label;
+            const raw = value;
+            if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))) {
+              const idx = Number(raw) | 0;
+              label = labels[idx] ?? labels[1] ?? labels[0];
+            } else if (typeof raw === 'string') {
+              const token = raw.trim().toLowerCase();
+              const direct = labels.find((opt) => String(opt).trim().toLowerCase() === token);
+              if (direct) {
+                label = direct;
+              } else {
+                const match = token.match(/(\d+)\s*%/);
+                if (match) {
+                  const pct = `${match[1]} %`;
+                  const exact = labels.find((opt) => String(opt).trim().toLowerCase() === pct.toLowerCase());
+                  label = exact || labels[0];
+                } else {
+                  label = labels[0];
+                }
+              }
+            } else {
+              label = labels[0];
+            }
+            if (!labels.includes(label)) {
+              label = labels[0];
+            }
+            select.value = label;
+            applyFontFromControl(label);
+            return;
+          }
 
           if (isCameraModeSelect) {
             const entries = syncCameraSelectOptions(select, control);
@@ -1139,6 +1196,8 @@ function shortcutFromEvent(event) {
             applyThemeFromColorControl(value);
           } else if (control?.item_id === 'option.spacing') {
             applySpacingFromControl(value);
+          } else if (control?.item_id === 'option.font') {
+            applyFontFromControl(value);
           }
           await applySpecAction(store, backend, control, value);
         }),
@@ -1148,6 +1207,8 @@ function shortcutFromEvent(event) {
         applyThemeFromColorControl(select.value);
       } else if (control?.item_id === 'option.spacing') {
         applySpacingFromControl(select.value);
+      } else if (control?.item_id === 'option.font') {
+        applyFontFromControl(select.value);
       }
     }
 

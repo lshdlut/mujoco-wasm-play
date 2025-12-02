@@ -29,6 +29,8 @@
   --color-text-subtle: #81868d;       /* tertiary text */
   --color-overlay: rgba(19, 20, 22, 0.96);
   --color-overlay-soft: rgba(19, 20, 22, 0.6);
+  /* Font scaling */
+  --viewer-font-scale: 1;
   /* UI spacing tokens (Tight preset) */
   --ui-panel-padding-y: 16px;
   --ui-panel-padding-x: 18px;
@@ -155,14 +157,14 @@ body.fullscreen {
 }
 .app-header h1 {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--viewer-font-scale));
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 #hud {
   display: flex;
   gap: 16px;
-  font-size: 12px;
+  font-size: calc(12px * var(--viewer-font-scale));
   color: var(--color-text-muted);
 }
 #hud span {
@@ -235,7 +237,7 @@ body.fullscreen {
   padding: var(--ui-overlay-card-padding-y) var(--ui-overlay-card-padding-x);
   background: var(--color-overlay);
   border-radius: 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--viewer-font-scale));
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.35);
   border: 1px solid var(--color-border);
   opacity: 0;
@@ -257,7 +259,7 @@ body.fullscreen {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: var(--ui-info-grid-gap);
-  font-size: 11px;
+  font-size: calc(11px * var(--viewer-font-scale));
   min-width: 0;
 }
 .info-label {
@@ -280,13 +282,13 @@ body.fullscreen {
   transform: translateY(0);
 }
 .overlay-card .help-title {
-  font-size: 12px;
+  font-size: calc(12px * var(--viewer-font-scale));
   font-weight: 600;
   margin-bottom: 6px;
   color: var(--color-text);
 }
 .overlay-card .help-subtitle {
-  font-size: 11px;
+  font-size: calc(11px * var(--viewer-font-scale));
   color: var(--color-text-muted);
   margin-bottom: 8px;
 }
@@ -294,7 +296,7 @@ body.fullscreen {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr);
   gap: var(--ui-help-grid-gap);
-  font-size: 11px;
+  font-size: calc(11px * var(--viewer-font-scale));
 }
 .overlay-card .help-key {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -332,7 +334,7 @@ body.fullscreen {
   color: var(--color-text);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 11px;
+  font-size: calc(11px * var(--viewer-font-scale));
   font-weight: 600;
   cursor: pointer;
   padding: 0;
@@ -346,7 +348,7 @@ body.fullscreen {
   background: none;
   border: none;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--viewer-font-scale));
   cursor: not-allowed;
   opacity: 0.35;
 }
@@ -399,7 +401,7 @@ body.fullscreen {
   gap: var(--ui-control-row-full-gap);
 }
 .control-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--viewer-font-scale));
   font-weight: 500;
   color: var(--color-text-muted);
   text-align: right;
@@ -424,7 +426,7 @@ body.fullscreen {
 .control-field .static-value {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
+  font-size: calc(13px * var(--viewer-font-scale));
   color: var(--color-text);
   text-align: right;
   min-width: 0;
@@ -452,7 +454,7 @@ body.fullscreen {
   border-radius: 999px;
   border: 1px solid var(--color-border);
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--viewer-font-scale));
   background: rgba(255, 255, 255, 0.02);
   cursor: pointer;
   transition: all 0.2s ease;
@@ -488,7 +490,7 @@ body.fullscreen {
   width: 100%;
   padding: 6px 14px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: calc(12px * var(--viewer-font-scale));
   font-weight: 500;
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -500,13 +502,14 @@ body.fullscreen {
 }
 .control-field select, .control-field input[type="number"], .control-field input[type="text"] {
   width: 100%;
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: calc(32px * var(--viewer-font-scale));
+  padding: 0 calc(12px * var(--viewer-font-scale));
   border-radius: 8px;
   border: 1px solid var(--color-border);
   background: rgba(15, 23, 42, 0.35);
   color: var(--color-text);
   text-align: right;
+  font-size: calc(12px * var(--viewer-font-scale));
 }
 .control-field input[type="number"]::-webkit-inner-spin-button {
   height: 100%;
@@ -531,7 +534,7 @@ body.fullscreen {
   max-width: 100%;
 }
 .slider-value {
-  font-size: 11px;
+  font-size: calc(11px * var(--viewer-font-scale));
   color: var(--color-text-muted);
   min-width: 44px;
   text-align: right;
@@ -569,13 +572,13 @@ body.fullscreen {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
-  padding: 0 18px;
+  min-height: calc(32px * var(--viewer-font-scale));
+  padding: 0 calc(18px * var(--viewer-font-scale));
   border-radius: 12px;
   border: 1px solid var(--color-border);
   background: rgba(148, 163, 184, 0.12);
   color: var(--color-text);
-  font-size: 12px;
+  font-size: calc(12px * var(--viewer-font-scale));
   font-weight: 400;
   text-align: center;
   cursor: pointer;
@@ -608,10 +611,10 @@ body.fullscreen {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
-  padding: 0 18px;
+  min-height: calc(32px * var(--viewer-font-scale));
+  padding: 0 calc(18px * var(--viewer-font-scale));
   border-radius: 999px;
-  font-size: 12px;
+  font-size: calc(12px * var(--viewer-font-scale));
   font-weight: 600;
   border: 1px solid transparent;
   cursor: pointer;
@@ -690,13 +693,13 @@ body.fullscreen {
   margin-top: var(--ui-equality-container-margin-top);
 }
 .control-static {
-  font-size: 12px;
+  font-size: calc(12px * var(--viewer-font-scale));
   font-weight: 500;
   color: var(--color-text-muted);
   padding: 4px 0;
 }
 .control-separator {
-  font-size: 11px;
+  font-size: calc(11px * var(--viewer-font-scale));
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--color-text-muted);
@@ -712,7 +715,7 @@ body.fullscreen {
     border-radius: 12px;
     border: 1px solid var(--color-border);
     color: var(--color-text);
-    font-size: 13px;
+    font-size: calc(13px * var(--viewer-font-scale));
     max-width: min(320px, 45%);
     word-break: break-word;
     overflow-wrap: anywhere;
