@@ -1972,8 +1972,8 @@ function shortcutFromEvent(event) {
       toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     };
 
-    const isLeftPanel = container === leftPanel;
-    const initialCollapsed = isLeftPanel && section.section_id !== 'simulation';
+      const isLeftPanel = container === leftPanel;
+      const initialCollapsed = false;
     setCollapsed(initialCollapsed);
 
       const toggleCollapsed = () => {

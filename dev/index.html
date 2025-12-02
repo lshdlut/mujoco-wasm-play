@@ -12,19 +12,23 @@
   <style>
 :root {
   color-scheme: dark;
-  --color-primary: #3b82f6;
-  --color-primary-strong: #2563eb;
+  /* Dark theme inspired by MuJoCo docs */
+  --color-primary: #50a5ff;           /* general accent / links */
+  --color-primary-strong: #3d94ff;    /* large titles / strong CTA */
+  --color-primary-soft: #458dff;      /* subtle accents / hover on smaller UI */
+  --color-primary-active: #458dff;    /* active / focus */
   --color-primary-contrast: #ffffff;
-  --color-surface: rgba(15, 23, 42, 0.85);
-  --color-panel: rgba(15, 23, 42, 0.72);
-  --color-panel-strong: rgba(15, 23, 42, 0.9);
-  --color-border: rgba(148, 163, 184, 0.35);
-  --color-border-strong: rgba(59, 130, 246, 0.45);
-  --color-text: #e2e8f0;
-  --color-text-muted: #94a3b8;
-  --color-bg: #0f172a;
-  --color-overlay: rgba(15, 23, 42, 0.92);
-  --color-overlay-soft: rgba(15, 23, 42, 0.6);
+  --color-bg: #131416;                /* main background */
+  --color-surface: rgba(26, 28, 30, 0.96); /* content surface */
+  --color-panel: rgba(26, 28, 30, 0.9);    /* side panels */
+  --color-panel-strong: rgba(26, 28, 30, 0.98);
+  --color-border: rgba(129, 134, 141, 0.55);
+  --color-border-strong: rgba(80, 165, 255, 0.65);
+  --color-text: #cfd0d0;              /* primary text */
+  --color-text-muted: #9ca0a5;        /* secondary text */
+  --color-text-subtle: #81868d;       /* tertiary text */
+  --color-overlay: rgba(19, 20, 22, 0.96);
+  --color-overlay-soft: rgba(19, 20, 22, 0.6);
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 body.theme-light {
@@ -110,15 +114,15 @@ body.fullscreen {
   white-space: nowrap;
 }
 */
-.panel {
-  grid-row: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  .panel {
+    grid-row: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
   padding: 16px 18px 72px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: var(--color-panel);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--color-bg);
   border-right: 1px solid var(--color-border);
   min-height: 0;
   min-width: 0;

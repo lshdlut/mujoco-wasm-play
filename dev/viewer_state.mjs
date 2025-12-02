@@ -1076,6 +1076,14 @@ function readBindingValue(state, binding, control) {
       return state.watch?.field ?? 'qpos';
     case 'Simulate::index':
       return Number.isFinite(state.watch?.index) ? state.watch.index | 0 : 0;
+    case 'Simulate::color': {
+      try {
+        if (typeof document !== 'undefined' && document.body) {
+          return document.body.classList.contains('theme-light') ? 1 : 0;
+        }
+      } catch {}
+      return 0;
+    }
     case 'UpdateWatch': {
       if (state.watch?.summary) return state.watch.summary;
       if (typeof state.watch?.value === 'number' && Number.isFinite(state.watch.value)) {
