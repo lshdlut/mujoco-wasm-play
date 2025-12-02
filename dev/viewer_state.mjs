@@ -1375,6 +1375,7 @@ function resolveSnapshot(state) {
     geoms: Array.isArray(state.geoms) ? state.geoms.slice() : null,
     frameId: Number.isFinite(state.frameId) ? (state.frameId | 0) : null,
     optionSupport: state.optionSupport ? { ...state.optionSupport } : null,
+    info: state.info ? { ...state.info } : null,
     visual: cloneStruct(state.visual),
     statistic: cloneStruct(state.statistic),
     visualDefaults: cloneStruct(state.visualDefaults),
@@ -1979,6 +1980,9 @@ async function loadDefaultXml() {
         if (typeof data.ngeom === 'number') lastSnapshot.ngeom = data.ngeom;
         if (typeof data.nq === 'number') lastSnapshot.nq = data.nq;
         if (typeof data.nv === 'number') lastSnapshot.nv = data.nv;
+        if (data.info && typeof data.info === 'object') {
+          lastSnapshot.info = { ...data.info };
+        }
         updateGeometryCaches(data);
         if (data.ctrl) {
           try {
@@ -2089,6 +2093,14 @@ async function loadDefaultXml() {
           notifyListeners();
         }
         if (debug) console.log('[snapshot]', source, data.frame ?? null);
+        break;
+      }
+      case 'info_debug': {
+        if (typeof window !== 'undefined') {
+          try {
+            window.__infoDebug = data.info || null;
+          } catch {}
+        }
         break;
       }
       case 'gesture':

@@ -388,9 +388,9 @@ function emitHistoryMeta() {
 }
 
 function buildInfoStats(sim, tSim, nconLocal) {
-  const mod = sim?.mod;
-  const h = sim?.h | 0;
-  if (!mod || !(h > 0)) return null;
+  const moduleRef = mod;
+  const handle = h;
+  if (!moduleRef || !(handle > 0)) return null;
   const out = {
     time: Number(tSim) || 0,
     nefc: 0,
@@ -404,13 +404,17 @@ function buildInfoStats(sim, tSim, nconLocal) {
     nisland: null,
     maxuseCon: null,
     maxuseEfc: null,
+    narena: null,
+    maxuseArena: null,
   };
 
   try {
-    if (typeof mod.data_nefc === 'function') {
-      out.nefc = (mod.data_nefc(h) | 0) || 0;
-    } else if (typeof mod.data_nefc_ptr === 'function') {
-      const ptr = mod.data_nefc_ptr(h) | 0;
+    const nefcFn = typeof moduleRef.data_nefc === 'function' ? moduleRef.data_nefc : moduleRef._mjwf_data_nefc;
+    const nefcPtrFn = typeof moduleRef.data_nefc_ptr === 'function' ? moduleRef.data_nefc_ptr : moduleRef._mjwf_data_nefc_ptr;
+    if (typeof nefcFn === 'function') {
+      out.nefc = (nefcFn.call(moduleRef, handle) | 0) || 0;
+    } else if (typeof nefcPtrFn === 'function') {
+      const ptr = nefcPtrFn.call(moduleRef, handle) | 0;
       if (ptr) {
         const view = heapViewI32(mod, ptr, 1);
         out.nefc = (view && view.length > 0 ? view[0] : 0) | 0;
@@ -419,14 +423,14 @@ function buildInfoStats(sim, tSim, nconLocal) {
   } catch {}
 
   try {
-    const durFn = mod.data_timer_duration_ptr;
-    const numFn = mod.data_timer_number_ptr;
+    const durFn = moduleRef.data_timer_duration_ptr || moduleRef._mjwf_data_timer_duration_ptr;
+    const numFn = moduleRef.data_timer_number_ptr || moduleRef._mjwf_data_timer_number_ptr;
     if (typeof durFn === 'function' && typeof numFn === 'function') {
-      const durPtr = durFn.call(mod, h) | 0;
-      const numPtr = numFn.call(mod, h) | 0;
+      const durPtr = durFn.call(moduleRef, handle) | 0;
+      const numPtr = numFn.call(moduleRef, handle) | 0;
       if (durPtr && numPtr) {
-        const durations = heapViewF64(mod, durPtr, MJ_NTIMER);
-        const numbers = heapViewI32(mod, numPtr, MJ_NTIMER);
+        const durations = heapViewF64(moduleRef, durPtr, MJ_NTIMER);
+        const numbers = heapViewI32(moduleRef, numPtr, MJ_NTIMER);
         const stepDur = Number(durations[MJ_TIMER_STEP]) || 0;
         const stepNum = Math.max(1, Number(numbers[MJ_TIMER_STEP]) || 0);
         const fwdDur = Number(durations[MJ_TIMER_FORWARD]) || 0;
@@ -439,10 +443,11 @@ function buildInfoStats(sim, tSim, nconLocal) {
 
   let nisland = 0;
   try {
-    if (typeof mod.data_nisland_ptr === 'function') {
-      const ptr = mod.data_nisland_ptr(h) | 0;
+    const nislandPtrFn = moduleRef.data_nisland_ptr || moduleRef._mjwf_data_nisland_ptr;
+    if (typeof nislandPtrFn === 'function') {
+      const ptr = nislandPtrFn.call(moduleRef, handle) | 0;
       if (ptr) {
-        const view = heapViewI32(mod, ptr, 1);
+        const view = heapViewI32(moduleRef, ptr, 1);
         nisland = (view && view.length > 0 ? view[0] : 0) | 0;
       }
     }
@@ -450,25 +455,30 @@ function buildInfoStats(sim, tSim, nconLocal) {
   out.nisland = nisland;
 
   try {
-    if (nisland > 0 && typeof mod.data_solver_niter_ptr === 'function') {
-      const niterPtr = mod.data_solver_niter_ptr(h) | 0;
+    const niterPtrFn = moduleRef.data_solver_niter_ptr || moduleRef._mjwf_data_solver_niter_ptr;
+    const imprPtrFn = moduleRef.data_solver_improvement_ptr || moduleRef._mjwf_data_solver_improvement_ptr;
+    const gradPtrFn = moduleRef.data_solver_gradient_ptr || moduleRef._mjwf_data_solver_gradient_ptr;
+    const fwdinvPtrFn = moduleRef.data_solver_fwdinv_ptr || moduleRef._mjwf_data_solver_fwdinv_ptr;
+
+    if (nisland > 0 && typeof niterPtrFn === 'function') {
+      const niterPtr = niterPtrFn.call(moduleRef, handle) | 0;
       if (niterPtr) {
-        const niterArr = heapViewI32(mod, niterPtr, nisland);
+        const niterArr = heapViewI32(moduleRef, niterPtr, nisland);
         let totalIter = 0;
         for (let i = 0; i < nisland; i += 1) {
           const it = Number(niterArr[i]) || 0;
           if (it > 0) totalIter += it;
         }
         out.solverNiter = totalIter;
-        const imprFn = mod.data_solver_improvement_ptr;
-        const gradFn = mod.data_solver_gradient_ptr;
+        const imprFn = imprPtrFn;
+        const gradFn = gradPtrFn;
         if (typeof imprFn === 'function' && typeof gradFn === 'function') {
           const baseCount = nisland * MJ_NSOLVER;
-          const imprPtr = imprFn.call(mod, h) | 0;
-          const gradPtr = gradFn.call(mod, h) | 0;
+          const imprPtr = imprFn.call(moduleRef, handle) | 0;
+          const gradPtr = gradFn.call(moduleRef, handle) | 0;
           if (imprPtr && gradPtr && baseCount > 0) {
-            const impr = heapViewF64(mod, imprPtr, baseCount);
-            const grad = heapViewF64(mod, gradPtr, baseCount);
+            const impr = heapViewF64(moduleRef, imprPtr, baseCount);
+            const grad = heapViewF64(moduleRef, gradPtr, baseCount);
             let worst = 0;
             for (let i = 0; i < nisland; i += 1) {
               const it = Math.min(MJ_NSOLVER, Math.max(0, Number(niterArr[i]) || 0));
@@ -495,10 +505,10 @@ function buildInfoStats(sim, tSim, nconLocal) {
         }
       }
     }
-    if (typeof mod.data_solver_fwdinv_ptr === 'function') {
-      const fptr = mod.data_solver_fwdinv_ptr(h) | 0;
+    if (typeof fwdinvPtrFn === 'function') {
+      const fptr = fwdinvPtrFn.call(moduleRef, handle) | 0;
       if (fptr) {
-        const fv = heapViewF64(mod, fptr, 2);
+        const fv = heapViewF64(moduleRef, fptr, 2);
         const f0 = Number(fv[0]) || 0;
         const f1 = Number(fv[1]) || 0;
         out.solverFwdinv = [
@@ -510,10 +520,11 @@ function buildInfoStats(sim, tSim, nconLocal) {
   } catch {}
 
   try {
-    if (typeof mod.data_energy_ptr === 'function') {
-      const eptr = mod.data_energy_ptr(h) | 0;
+    const energyPtrFn = moduleRef.data_energy_ptr || moduleRef._mjwf_data_energy_ptr;
+    if (typeof energyPtrFn === 'function') {
+      const eptr = energyPtrFn.call(moduleRef, handle) | 0;
       if (eptr) {
-        const ev = heapViewF64(mod, eptr, 2);
+        const ev = heapViewF64(moduleRef, eptr, 2);
         const e0 = Number(ev[0]) || 0;
         const e1 = Number(ev[1]) || 0;
         out.energy = e0 + e1;
@@ -522,18 +533,39 @@ function buildInfoStats(sim, tSim, nconLocal) {
   } catch {}
 
   try {
-    if (typeof mod.data_maxuse_con_ptr === 'function') {
-      const p = mod.data_maxuse_con_ptr(h) | 0;
+    const maxConFn = moduleRef.data_maxuse_con_ptr || moduleRef._mjwf_data_maxuse_con_ptr;
+    const maxEfcFn = moduleRef.data_maxuse_efc_ptr || moduleRef._mjwf_data_maxuse_efc_ptr;
+    if (typeof maxConFn === 'function') {
+      const p = maxConFn.call(moduleRef, handle) | 0;
       if (p) {
-        const v = heapViewI32(mod, p, 1);
+        const v = heapViewI32(moduleRef, p, 1);
         out.maxuseCon = (v && v.length > 0 ? v[0] : 0) | 0;
       }
     }
-    if (typeof mod.data_maxuse_efc_ptr === 'function') {
-      const p = mod.data_maxuse_efc_ptr(h) | 0;
+    if (typeof maxEfcFn === 'function') {
+      const p = maxEfcFn.call(moduleRef, handle) | 0;
       if (p) {
-        const v = heapViewI32(mod, p, 1);
+        const v = heapViewI32(moduleRef, p, 1);
         out.maxuseEfc = (v && v.length > 0 ? v[0] : 0) | 0;
+      }
+    }
+  } catch {}
+
+  try {
+    const narenaPtrFn = moduleRef.data_narena_ptr || moduleRef._mjwf_data_narena_ptr;
+    const maxArenaPtrFn = moduleRef.data_maxuse_arena_ptr || moduleRef._mjwf_data_maxuse_arena_ptr;
+    if (typeof narenaPtrFn === 'function') {
+      const p = narenaPtrFn.call(moduleRef, handle) | 0;
+      if (p) {
+        const v = heapViewI32(moduleRef, p, 1);
+        out.narena = (v && v.length > 0 ? v[0] : 0) | 0;
+      }
+    }
+    if (typeof maxArenaPtrFn === 'function') {
+      const p = maxArenaPtrFn.call(moduleRef, handle) | 0;
+      if (p) {
+        const v = heapViewI32(moduleRef, p, 1);
+        out.maxuseArena = (v && v.length > 0 ? v[0] : 0) | 0;
       }
     }
   } catch {}
@@ -1111,6 +1143,15 @@ async function loadModule() {
     if (!vTag) wasmUrl.searchParams.set('cb', String(Date.now()));
     mod = await load_mujoco({ locateFile: (p) => (p.endsWith('.wasm') ? wasmUrl.href : p) });
     try { installForgeAbiCompat(mod); } catch {}
+    try {
+      const enableTimers =
+        typeof mod._mjwf_enable_timers === 'function'
+          ? mod._mjwf_enable_timers
+          : (typeof mod.cwrap === 'function' ? mod.cwrap('mjwf_enable_timers', null, []) : null);
+      if (typeof enableTimers === 'function') {
+        enableTimers.call(mod);
+      }
+    } catch {}
   } catch (e) {
     throw e;
   }

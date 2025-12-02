@@ -55,6 +55,20 @@ let lastFpsFrameSample = 0;
 let lastFpsSampleTimeMs = (typeof performance !== 'undefined' && performance.now)
   ? performance.now()
   : Date.now();
+
+function formatArenaBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n <= 0) return '0B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let idx = 0;
+  let value = n;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  if (value >= 100) return `${Math.round(value)}${units[idx]}`;
+  return `${value.toFixed(1)}${units[idx]}`;
+}
 const panelStateCache = {
   left: null,
   right: null,
@@ -308,6 +322,8 @@ function updateInfoOverlayCard(state) {
   const solverIter = Number(info?.solverNiter) || 0;
   const maxCon = Number(info?.maxuseCon) || 0;
   const maxEfc = Number(info?.maxuseEfc) || 0;
+  const narena = Number(info?.narena) || 0;
+  const maxArena = Number(info?.maxuseArena) || 0;
   const energy = Number(info?.energy);
   const nisland = Number(info?.nisland) || 0;
 
@@ -342,8 +358,12 @@ function updateInfoOverlayCard(state) {
   }
   const memEl = getFieldEl('memory');
   if (memEl) {
-    if (maxCon > 0 || maxEfc > 0) {
-      memEl.textContent = `max con/efc: ${maxCon} / ${maxEfc}`;
+    if (narena > 0 && maxArena >= 0) {
+      const pct = (maxArena / narena) * 100;
+      const label = formatArenaBytes(narena);
+      memEl.textContent = `${pct.toFixed(1)}% of ${label}`;
+    } else if (maxCon > 0 || maxEfc > 0) {
+      memEl.textContent = `con/efc ${maxCon}/${maxEfc}`;
     } else {
       memEl.textContent = 'n/a';
     }
