@@ -29,6 +29,37 @@
   --color-text-subtle: #81868d;       /* tertiary text */
   --color-overlay: rgba(19, 20, 22, 0.96);
   --color-overlay-soft: rgba(19, 20, 22, 0.6);
+  /* UI spacing tokens */
+  --ui-panel-padding-y: 16px;
+  --ui-panel-padding-x: 18px;
+  --ui-panel-padding-bottom: 72px;
+  --ui-panel-gap: 12px;
+  --ui-overlay-gap: 8px;
+  --ui-overlay-padding: 12px;
+  --ui-overlay-card-padding-y: 12px;
+  --ui-overlay-card-padding-x: 14px;
+  --ui-info-grid-gap: 4px 12px;
+  --ui-help-grid-gap: 4px 10px;
+  --ui-section-header-padding-y: 10px;
+  --ui-section-header-padding-x: 14px;
+  --ui-section-header-gap: 10px;
+  --ui-section-body-gap: 12px;
+  --ui-section-body-padding: 12px;
+  --ui-control-row-gap: 6px 12px;
+  --ui-control-row-full-gap: 8px;
+  --ui-control-field-gap: 6px;
+  --ui-action-row-gap: 8px;
+  --ui-compact-pills-gap: 6px;
+  --ui-segmented-gap: 4px;
+  --ui-segmented-padding: 4px;
+  --ui-pill-row-gap: 8px;
+  --ui-equality-container-margin-top: 8px;
+  --ui-equality-container-gap: 12px;
+  --ui-run-toggle-margin-top: 4px;
+  --ui-toast-offset-x: 24px;
+  --ui-toast-offset-y: 24px;
+  --ui-toast-padding-y: 12px;
+  --ui-toast-padding-x: 18px;
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 body.theme-light {
@@ -118,10 +149,10 @@ body.fullscreen {
     grid-row: 1;
     overflow-y: auto;
     overflow-x: hidden;
-  padding: 16px 18px 72px;
+    padding: var(--ui-panel-padding-y) var(--ui-panel-padding-x) var(--ui-panel-padding-bottom);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--ui-panel-gap);
     background: var(--color-bg);
   border-right: 1px solid var(--color-border);
   min-height: 0;
@@ -171,13 +202,13 @@ body.fullscreen {
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--ui-overlay-gap);
   align-items: flex-start;
-  padding: 12px;
+  padding: var(--ui-overlay-padding);
 }
 .overlay-card {
   min-width: 240px;
-  padding: 12px 14px;
+  padding: var(--ui-overlay-card-padding-y) var(--ui-overlay-card-padding-x);
   background: var(--color-overlay);
   border-radius: 12px;
   font-size: 12px;
@@ -201,7 +232,7 @@ body.fullscreen {
 .info-grid {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 12px;
+  gap: var(--ui-info-grid-gap);
   font-size: 11px;
   min-width: 0;
 }
@@ -238,7 +269,7 @@ body.fullscreen {
 .overlay-card .help-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr);
-  gap: 4px 10px;
+  gap: var(--ui-help-grid-gap);
   font-size: 11px;
 }
 .overlay-card .help-key {
@@ -267,8 +298,8 @@ body.fullscreen {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
-  gap: 10px;
+  padding: var(--ui-section-header-padding-y) var(--ui-section-header-padding-x);
+  gap: var(--ui-section-header-gap);
   background: transparent;
 }
 .section-toggle {
@@ -314,8 +345,8 @@ body.fullscreen {
 .section-body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  padding: 12px;
+  gap: var(--ui-section-body-gap);
+  padding: var(--ui-section-body-padding);
 }
 .section-body > * {
   grid-column: span 2;
@@ -335,13 +366,13 @@ body.fullscreen {
 .control-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
+  gap: var(--ui-control-row-gap);
   align-items: center;
   width: 100%;
 }
 .control-row.full {
   grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
+  gap: var(--ui-control-row-full-gap);
 }
 .control-label {
   font-size: 12px;
@@ -361,7 +392,7 @@ body.fullscreen {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--ui-control-field-gap);
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -380,7 +411,7 @@ body.fullscreen {
 .action-row {
   display: flex;
   align-items: stretch;
-  gap: 8px;
+  gap: var(--ui-action-row-gap);
 }
 .action-row button {
   flex: 1 1 100%;
@@ -388,7 +419,7 @@ body.fullscreen {
 .compact-pills {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--ui-compact-pills-gap);
   width: 100%;
 }
 .compact-pill {
@@ -410,8 +441,8 @@ body.fullscreen {
 .segmented {
   display: flex;
   width: 100%;
-  gap: 4px;
-  padding: 4px;
+  gap: var(--ui-segmented-gap);
+  padding: var(--ui-segmented-padding);
   border-radius: 999px;
   border: 1px solid var(--color-border);
   background: rgba(255, 255, 255, 0.02);
@@ -597,7 +628,7 @@ body.fullscreen {
   transform: translateY(-0.5px);
 }
 .run-toggle-row {
-  margin-top: 4px;
+  margin-top: var(--ui-run-toggle-margin-top);
 }
 .run-toggle {
   display: inline-flex;
@@ -623,11 +654,17 @@ body.fullscreen {
 }
 .pill-row {
   display: flex;
-  gap: 8px;
+  gap: var(--ui-pill-row-gap);
 }
   .pill-row .btn-pill {
     flex: 1 1 100%;
   }
+.equality-toggle-container {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-equality-container-gap);
+  margin-top: var(--ui-equality-container-margin-top);
+}
 .control-static {
   font-size: 12px;
   font-weight: 500;

@@ -2377,16 +2377,13 @@ function shortcutFromEvent(event) {
         if (!section) return;
         const body = section.querySelector('.section-body');
         if (!body) return;
-        let container = body.querySelector('[data-dynamic="equality"]');
-        if (!container) {
-          container = document.createElement('div');
-          container.setAttribute('data-dynamic', 'equality');
-          container.style.marginTop = '8px';
-          container.style.display = 'grid';
-          container.style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))';
-          container.style.gap = '12px';
-          body.appendChild(container);
-        }
+          let container = body.querySelector('[data-dynamic="equality"]');
+          if (!container) {
+            container = document.createElement('div');
+            container.setAttribute('data-dynamic', 'equality');
+            container.className = 'equality-toggle-container';
+            body.appendChild(container);
+          }
         if (!Array.isArray(eqs) || eqs.length === 0) {
           container.innerHTML = '';
           container.setAttribute('data-count', '0');
