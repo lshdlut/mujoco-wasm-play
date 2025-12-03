@@ -918,6 +918,12 @@ function meanSizeFromState(state, context = null) {
   return 1;
 }
 
+function computeMeanScale(state, context = null) {
+  const meanSize = meanSizeFromState(state, context);
+  const scaleAll = scaleAllFactor(state);
+  return { meanSize, scaleAll };
+}
+
 function warnOnce(cache, key, message) {
   if (!warnLogEnabled()) return;
   if (!key || cache.has(key)) return;
@@ -1326,27 +1332,26 @@ function hideConstraintGroup(ctx) {
 }
 
 function updateFrameOverlays(context, snapshot, state, options = {}) {
-  const mode = Number(state.rendering?.frameMode) | 0;
-  if (mode === FRAME_MODES.NONE) {
-    hideFrameGroup(context);
-    return;
-  }
+    const mode = Number(state.rendering?.frameMode) | 0;
+    if (mode === FRAME_MODES.NONE) {
+      hideFrameGroup(context);
+      return;
+    }
   const frameGroup = ensureFrameGroup(context);
-  const pool = context.framePool;
-  const bounds = options.bounds || context.bounds || null;
-  const radius = Number.isFinite(bounds?.radius) ? bounds.radius : 1;
-  const meanSize = meanSizeFromState(state, context);
-  if (!Number.isFinite(context.frameBaseMeanSize) || context.frameBaseMeanSize <= 0) {
-    context.frameBaseMeanSize = Number.isFinite(meanSize) && meanSize > 0 ? meanSize : 1;
-  }
+    const pool = context.framePool;
+    const bounds = options.bounds || context.bounds || null;
+    const radius = Number.isFinite(bounds?.radius) ? bounds.radius : 1;
+    const { meanSize, scaleAll } = computeMeanScale(state, context);
+    if (!Number.isFinite(context.frameBaseMeanSize) || context.frameBaseMeanSize <= 0) {
+      context.frameBaseMeanSize = Number.isFinite(meanSize) && meanSize > 0 ? meanSize : 1;
+    }
   const baseMeanSize = Number.isFinite(context.frameBaseMeanSize) && context.frameBaseMeanSize > 0
     ? context.frameBaseMeanSize
     : 1;
   const meanScale = Number.isFinite(meanSize) && meanSize > 0
     ? (meanSize / baseMeanSize)
-    : 1;
-  const scaleStruct = state?.model?.vis?.scale || {};
-  const scaleAll = scaleAllFactor(state);
+      : 1;
+    const scaleStruct = state?.model?.vis?.scale || {};
   const frameLengthScale = Number.isFinite(Number(scaleStruct.framelength)) && Number(scaleStruct.framelength) > 0
     ? Number(scaleStruct.framelength)
     : 1;
@@ -1539,8 +1544,7 @@ function updateConstraintOverlays(ctx, snapshot, state) {
   const pool = ctx.constraintPool || (ctx.constraintPool = []);
   const visScale = state?.model?.vis?.scale || {};
   const visRgba = state?.model?.vis?.rgba || {};
-  const scaleAll = scaleAllFactor(state);
-  const meanSize = meanSizeFromState(state, ctx);
+  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const radiusConst = Math.max(1e-4, meanSize * 0.03 * Math.max(Number(visScale.constraint) || 1, 1e-6) * scaleAll);
   const radiusConnect = Math.max(1e-4, meanSize * 0.03 * Math.max(Number(visScale.connect) || 1, 1e-6) * scaleAll);
   const colorConnect = rgbaToHex(visRgba.connect, 0x3344dd);
@@ -1641,9 +1645,8 @@ function updateLightOverlays(ctx, snapshot, state) {
   const pool = ctx.lightPool || (ctx.lightPool = []);
   const visScale = state?.model?.vis?.scale || {};
   const visRgba = state?.model?.vis?.rgba || {};
-  const scaleAll = scaleAllFactor(state);
+  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const sizeScale = Math.max(1e-6, Number(visScale.light) || 1) * scaleAll;
-  const meanSize = meanSizeFromState(state, ctx);
   const colorHex = rgbaToHex(visRgba.light, 0x8899ff);
   const opacity = alphaFromArray(visRgba.light, 1);
   const count = Math.floor(pos.length / 3);
@@ -1709,9 +1712,8 @@ function updateComOverlays(ctx, snapshot, state) {
   const pool = ctx.comPool || (ctx.comPool = []);
   const visScale = state?.model?.vis?.scale || {};
   const visRgba = state?.model?.vis?.rgba || {};
-  const scaleAll = scaleAllFactor(state);
+  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const sizeScale = Math.max(1e-6, Number(visScale.com) || 1) * scaleAll;
-  const meanSize = meanSizeFromState(state, ctx);
   const colorHex = rgbaToHex(visRgba.com, 0xe6e6e6);
   const opacity = alphaFromArray(visRgba.com, 1);
   const count = Math.floor(xipos.length / 3);
@@ -1792,10 +1794,9 @@ function updateJointOverlays(ctx, snapshot, state) {
   const pool = ctx.jointPool || (ctx.jointPool = []);
   const visScale = state?.model?.vis?.scale || {};
   const visRgba = state?.model?.vis?.rgba || {};
-  const scaleAll = scaleAllFactor(state);
+  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const lenScale = Math.max(1e-6, Number(visScale.jointlength) || 1) * scaleAll;
   const widthScale = Math.max(1e-6, Number(visScale.jointwidth) || 1) * scaleAll;
-  const meanSize = meanSizeFromState(state, ctx);
   const colorHex = rgbaToHex(visRgba.joint, 0x3399cc);
   const opacity = alphaFromArray(visRgba.joint, 1);
   const nj = Math.floor(jpos.length / 3);
@@ -1885,10 +1886,9 @@ function updateActuatorOverlays(ctx, snapshot, state) {
   const pool = ctx.actuatorPool || (ctx.actuatorPool = []);
   const visScale = state?.model?.vis?.scale || {};
   const visRgba = state?.model?.vis?.rgba || {};
-  const scaleAll = scaleAllFactor(state);
+  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const lenScale = Math.max(1e-6, Number(visScale.actuatorlength) || 1) * scaleAll;
   const widthScale = Math.max(1e-6, Number(visScale.actuatorwidth) || 1) * scaleAll;
-  const meanSize = meanSizeFromState(state, ctx);
   const colorHex = rgbaToHex(visRgba.actuator, 0x2b90d9);
   const opacity = alphaFromArray(visRgba.actuator, 1);
   const na = Math.floor(trntype.length);
@@ -1981,9 +1981,8 @@ function updateSlidercrankOverlays(ctx, snapshot, state) {
   const pool = ctx.slidercrankPool || (ctx.slidercrankPool = []);
   const visScale = state?.model?.vis?.scale || {};
   const visRgba = state?.model?.vis?.rgba || {};
-  const scaleAll = scaleAllFactor(state);
+  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const scl = Math.max(1e-6, Number(visScale.slidercrank) || 1) * scaleAll;
-  const meanSize = meanSizeFromState(state, ctx);
   const colorHex = rgbaToHex(visRgba.slidercrank, 0x8a6aff);
   const brokenColorHex = rgbaToHex(visRgba.crankbroken, 0xff4d4d);
   const opacity = alphaFromArray(visRgba.slidercrank, 1);
@@ -3197,17 +3196,16 @@ function buildGeomDescriptors(snapshot, state, assets) {
  * @param {object} ctx
  * @returns {OverlayDescriptor[]}
  */
-function buildCameraOverlayDescriptors(snapshot, state, ctx) {
-  const camPos = snapshot?.cam_xpos;
-  const camMat = snapshot?.cam_xmat;
-  if (!camPos || !camMat || camPos.length < 3) {
-    return [];
-  }
-  const visScale = state?.model?.vis?.scale || {};
-  const visRgba = state?.model?.vis?.rgba || {};
-  const scaleAll = scaleAllFactor(state);
-  const sizeScale = Math.max(1e-6, Number(visScale.camera) || 1) * scaleAll;
-  const meanSize = meanSizeFromState(state, ctx);
+  function buildCameraOverlayDescriptors(snapshot, state, ctx) {
+    const camPos = snapshot?.cam_xpos;
+    const camMat = snapshot?.cam_xmat;
+    if (!camPos || !camMat || camPos.length < 3) {
+      return [];
+    }
+    const visScale = state?.model?.vis?.scale || {};
+    const visRgba = state?.model?.vis?.rgba || {};
+    const { meanSize, scaleAll } = computeMeanScale(state, ctx);
+    const sizeScale = Math.max(1e-6, Number(visScale.camera) || 1) * scaleAll;
   const colorHex = rgbaToHex(visRgba.camera, 0x6aa86a);
   const opacity = alphaFromArray(visRgba.camera, 1);
   const count = Math.floor(camPos.length / 3);
@@ -3899,7 +3897,7 @@ function renderScene(snapshot, state) {
     // Contact overlays: points (flags[14]) and force arrows (flags[16]).
     const contacts = snapshot.contacts || null;
     const visScale = visStruct?.scale || {};
-    const meanSize = meanSizeFromState(state, context);
+    const { meanSize, scaleAll } = computeMeanScale(state, context);
     const boundsRadius = Math.max(0.1, context.bounds?.radius || meanSize || 1);
     if (contactPointEnabled && contacts && typeof contacts.n === 'number' && !contacts.pos) {
       try { warnLog('[render] contact points enabled but no position array in snapshot; n=', contacts.n); } catch {}
@@ -3909,7 +3907,6 @@ function renderScene(snapshot, state) {
       const pool = Array.isArray(context.contactPool) ? context.contactPool : (context.contactPool = []);
       const n = Math.max(0, contacts.n | 0);
       // Contact visual size scales by vis.scale.{contactwidth,contactheight} * vis.scale.all * meansize.
-      const scaleAll = scaleAllFactor(state);
       const base = Math.max(1e-6, meanSize * scaleAll);
       const widthScale = Number(visScale?.contactwidth);
       const heightScale = Number(visScale?.contactheight);
@@ -4012,7 +4009,7 @@ function renderScene(snapshot, state) {
           if (Number.isFinite(value) && value > 1e-9) return value;
           return 1;
         })();
-        const scaleAll = scaleAllFactor(state);
+        const { meanSize, scaleAll } = computeMeanScale(state, context);
         const mapForce = (() => {
           const value = Number(visStruct?.map?.force);
           if (Number.isFinite(value) && value > 0) return value;
@@ -4547,7 +4544,7 @@ function applySelectionHighlight(ctx, mesh) {
   };
 }
 
-function updateSelectionOverlay(ctx, snapshot, state) {
+  function updateSelectionOverlay(ctx, snapshot, state) {
   const selection = state?.runtime?.selection;
   if (!selection || selection.geom < 0) {
     clearSelectionHighlight(ctx);
@@ -4579,11 +4576,11 @@ function updateSelectionOverlay(ctx, snapshot, state) {
     hideSelectionPoint(ctx);
     return;
   }
-  const overlay = ensureSelectionPointOverlay(ctx);
-  if (!overlay) return;
-  const scaleStruct = state?.model?.vis?.scale || {};
-  const rgbaStruct = state?.model?.vis?.rgba || {};
-  const scaleAll = scaleAllFactor(state);
+    const overlay = ensureSelectionPointOverlay(ctx);
+    if (!overlay) return;
+    const scaleStruct = state?.model?.vis?.scale || {};
+    const rgbaStruct = state?.model?.vis?.rgba || {};
+    const { scaleAll } = computeMeanScale(state, ctx);
   const selectScale = Number.isFinite(Number(scaleStruct.selectpoint)) && Number(scaleStruct.selectpoint) > 0
     ? Number(scaleStruct.selectpoint)
     : 0.2;
