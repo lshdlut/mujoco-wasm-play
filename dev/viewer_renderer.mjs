@@ -941,10 +941,10 @@ function meanSizeFromState(state, context = null) {
     // ID color / additive / cullFace can be extended later; keep false by default for now.
     const idColorEnabled = false;
     const additiveEnabled = false;
-    const cullFaceEnabled = true;
-    return {
-      sceneFlags,
-      voptFlags,
+      const cullFaceEnabled = true;
+      return {
+        sceneFlags,
+        voptFlags,
       segmentEnabled,
       skyboxEnabled,
       shadowEnabled,
@@ -954,9 +954,29 @@ function meanSizeFromState(state, context = null) {
       cullFaceEnabled,
       idColorEnabled,
       additiveEnabled,
-      presetMode,
-      hideAllGeometry,
-    };
+        presetMode,
+        hideAllGeometry,
+      };
+    }
+
+  function isSceneDebugEnabled() {
+    if (debugMode) return true;
+    if (typeof window !== 'undefined') {
+      try {
+        if (window.PLAY_VERBOSE_DEBUG === true) return true;
+        if (window.__PLAY_SCENE_DEBUG === true) return true;
+      } catch {}
+    }
+    return false;
+  }
+
+  function debugSceneDescriptors(ctx, payload) {
+    if (!ctx) return;
+    ctx.lastSceneDebug = payload;
+    if (typeof window === 'undefined') return;
+    try {
+      window.__sceneDescriptors = payload;
+    } catch {}
   }
 
 function warnOnce(cache, key, message) {
@@ -3788,6 +3808,7 @@ export function createRendererManager({
     window.__renderCtx = context;
   }
     const renderer = context.renderer;
+    const debugSceneEnabled = isSceneDebugEnabled();
     const policy = computeScenePolicy(snapshot, state, context);
     const {
       sceneFlags,
@@ -4238,19 +4259,20 @@ export function createRendererManager({
     updateFrameOverlays(context, snapshot, state, overlayOptions);
     updateLabelOverlays(context, snapshot, state, overlayOptions);
     const showCamera = voptEnabled(voptFlags, MJ_VIS.CAMERA);
+    let cameraDescriptors = null;
     const showLight = voptEnabled(voptFlags, MJ_VIS.LIGHT);
     const showCom = voptEnabled(voptFlags, MJ_VIS.COM);
     const showJoint = voptEnabled(voptFlags, MJ_VIS.JOINT);
-    const showActuator = voptEnabled(voptFlags, MJ_VIS.ACTUATOR);
-    const showRangefinder = voptEnabled(voptFlags, MJ_VIS.RANGEFINDER);
-    const showConstraint = voptEnabled(voptFlags, MJ_VIS.CONSTRAINT);
+      const showActuator = voptEnabled(voptFlags, MJ_VIS.ACTUATOR);
+      const showRangefinder = voptEnabled(voptFlags, MJ_VIS.RANGEFINDER);
+      const showConstraint = voptEnabled(voptFlags, MJ_VIS.CONSTRAINT);
 
     if (showCamera) {
-      const cameraDescriptors = buildCameraOverlayDescriptors(snapshot, state, context);
-      applyCameraOverlayDescriptors(context, cameraDescriptors);
-    } else {
-      hideCameraGroup(context);
-    }
+        cameraDescriptors = buildCameraOverlayDescriptors(snapshot, state, context);
+        applyCameraOverlayDescriptors(context, cameraDescriptors);
+      } else {
+        hideCameraGroup(context);
+      }
     if (showLight) updateLightOverlays(context, snapshot, state);
     else hideLightGroup(context);
     if (showCom) updateComOverlays(context, snapshot, state);
@@ -4263,12 +4285,12 @@ export function createRendererManager({
     else hideSlidercrankGroup(context);
     if (showRangefinder) updateRangefinderOverlays(context, snapshot, state);
     else hideRangefinderGroup(context);
-    if (showConstraint) updateConstraintOverlays(context, snapshot, state);
-    else hideConstraintGroup(context);
+      if (showConstraint) updateConstraintOverlays(context, snapshot, state);
+      else hideConstraintGroup(context);
     // Perturb overlay is driven by runtime.pertViz in state; do not gate on vopt flags.
-    updatePerturbOverlay(context, snapshot, state, overlayOptions);
+      updatePerturbOverlay(context, snapshot, state, overlayOptions);
 
-    const geomDescriptors = buildGeomDescriptors(snapshot, state, assets);
+      const geomDescriptors = buildGeomDescriptors(snapshot, state, assets);
     drawn = applyGeomDescriptors(context, geomDescriptors, {
       assets,
       state,
@@ -4296,14 +4318,28 @@ export function createRendererManager({
       hideSelectionPoint(context);
     }
 
-    const stats = {
-      drawn,
-      hidden: Math.max(0, ngeom - drawn),
-      contacts: snapshot.contacts?.n ?? 0,
-      t: typeof snapshot.t === 'number' ? snapshot.t : null,
-      frame: ctx._frameCounter | 0,
-    };
-    setRenderStats(stats);
+      const stats = {
+        drawn,
+        hidden: Math.max(0, ngeom - drawn),
+        contacts: snapshot.contacts?.n ?? 0,
+        t: typeof snapshot.t === 'number' ? snapshot.t : null,
+        frame: ctx._frameCounter | 0,
+      };
+      setRenderStats(stats);
+      if (debugSceneEnabled) {
+        debugSceneDescriptors(context, {
+          geomDescriptors,
+          cameraDescriptors: cameraDescriptors || [],
+          stats,
+          policy,
+        });
+      }
+      debugSceneDescriptors(context, {
+        geomDescriptors,
+        cameraDescriptors: cameraDescriptors || [],
+        stats,
+        policy,
+      });
     try {
       if (typeof window !== 'undefined') {
         window.__drawnCount = drawn;
