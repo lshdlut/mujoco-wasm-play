@@ -1216,6 +1216,48 @@ function ensureConstraintGroup(ctx) {
   return ctx.constraintGroup;
 }
 
+function ensureSelectionGroup(ctx) {
+  if (!ctx) return null;
+  if (!ctx.selectionGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:selection';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.selectionGroup = group;
+  }
+  return ctx.selectionGroup;
+}
+
+function ensureContactGroup(ctx) {
+  if (!ctx) return null;
+  if (!ctx.contactGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:contacts';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.contactGroup = group;
+    if (!Array.isArray(ctx.contactPool)) {
+      ctx.contactPool = [];
+    }
+  }
+  return ctx.contactGroup;
+}
+
+function ensureContactForceGroup(ctx) {
+  if (!ctx) return null;
+  if (!ctx.contactForceGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:contactForces';
+    const world = getWorldScene(ctx);
+    if (world) world.add(group);
+    ctx.contactForceGroup = group;
+    if (!Array.isArray(ctx.contactForcePool)) {
+      ctx.contactForcePool = [];
+    }
+  }
+  return ctx.contactForceGroup;
+}
+
 function hideFrameGroup(context) {
   if (Array.isArray(context?.framePool)) {
     for (const helper of context.framePool) {
@@ -3216,6 +3258,136 @@ function buildGeomDescriptors(snapshot, state, assets) {
 }
 
 /**
+ * @typedef {Object} OverlayDescriptor
+ * @property {'overlay'} kind
+ * @property {string} subtype
+ * @property {number} index
+ * @property {number[]} position
+ * @property {number[] | null} rotation
+ * @property {number} scale
+ * @property {number} colorHex
+ * @property {number} opacity
+ */
+
+/**
+ * Build overlay descriptors for model cameras.
+ *
+ * @param {object} snapshot
+ * @param {object} state
+ * @param {object} ctx
+ * @returns {OverlayDescriptor[]}
+ */
+function buildCameraOverlayDescriptors(snapshot, state, ctx) {
+  const camPos = snapshot?.cam_xpos;
+  const camMat = snapshot?.cam_xmat;
+  if (!camPos || !camMat || camPos.length < 3) {
+    return [];
+  }
+  const visScale = state?.model?.vis?.scale || {};
+  const visRgba = state?.model?.vis?.rgba || {};
+  const scaleAll = scaleAllFactor(state);
+  const sizeScale = Math.max(1e-6, Number(visScale.camera) || 1) * scaleAll;
+  const meanSize = meanSizeFromState(state, ctx);
+  const colorHex = rgbaToHex(visRgba.camera, 0x6aa86a);
+  const opacity = alphaFromArray(visRgba.camera, 1);
+  const count = Math.floor(camPos.length / 3);
+  const descriptors = [];
+  for (let i = 0; i < count; i += 1) {
+    const base = 3 * i;
+    const position = [
+      Number(camPos[base + 0]) || 0,
+      Number(camPos[base + 1]) || 0,
+      Number(camPos[base + 2]) || 0,
+    ];
+    const rotBase = 9 * i;
+    const rotation = [
+      camMat?.[rotBase + 0] ?? 1,
+      camMat?.[rotBase + 1] ?? 0,
+      camMat?.[rotBase + 2] ?? 0,
+      camMat?.[rotBase + 3] ?? 0,
+      camMat?.[rotBase + 4] ?? 1,
+      camMat?.[rotBase + 5] ?? 0,
+      camMat?.[rotBase + 6] ?? 0,
+      camMat?.[rotBase + 7] ?? 0,
+      camMat?.[rotBase + 8] ?? 1,
+    ];
+    const s = Math.max(1e-4, meanSize * 0.15 * sizeScale);
+    descriptors.push({
+      kind: 'overlay',
+      subtype: 'camera',
+      index: i,
+      position,
+      rotation,
+      scale: s,
+      colorHex,
+      opacity,
+    });
+  }
+  return descriptors;
+}
+
+/**
+ * Apply camera overlay descriptors to the Three.js scene, using the existing
+ * camera gizmo pool and group. Behaviour matches updateCameraOverlays.
+ *
+ * @param {object} ctx
+ * @param {OverlayDescriptor[]} descriptors
+ */
+function applyCameraOverlayDescriptors(ctx, descriptors) {
+  if (!ctx) return;
+  if (!Array.isArray(descriptors) || descriptors.length === 0) {
+    hideCameraGroup(ctx);
+    return;
+  }
+  const group = ensureCameraGroup(ctx);
+  const pool = ctx.cameraPool || (ctx.cameraPool = []);
+  let used = 0;
+  for (const desc of descriptors) {
+    if (!desc || desc.kind !== 'overlay' || desc.subtype !== 'camera') continue;
+    let mesh = pool[used];
+    if (!mesh) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: desc.colorHex,
+        transparent: desc.opacity < 0.999,
+        opacity: desc.opacity,
+        depthWrite: false,
+        toneMapped: false,
+        fog: false,
+      });
+      mesh = new THREE.Mesh(CAMERA_GIZMO_GEOMETRY, mat);
+      mesh.renderOrder = 55;
+      pool[used] = mesh;
+      group.add(mesh);
+    }
+    mesh.visible = true;
+    mesh.position.set(desc.position[0], desc.position[1], desc.position[2]);
+    const rot = desc.rotation || null;
+    if (rot && rot.length >= 9) {
+      TEMP_MAT4.set(
+        rot[0], rot[1], rot[2], 0,
+        rot[3], rot[4], rot[5], 0,
+        rot[6], rot[7], rot[8], 0,
+        0, 0, 0, 1,
+      );
+      mesh.quaternion.setFromRotationMatrix(TEMP_MAT4);
+    }
+    mesh.scale.set(desc.scale, desc.scale, desc.scale);
+    const mat = mesh.material;
+    if (mat) {
+      mat.color.setHex(desc.colorHex);
+      mat.opacity = desc.opacity;
+      mat.transparent = desc.opacity < 0.999;
+      mat.needsUpdate = true;
+    }
+    used += 1;
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  group.visible = used > 0;
+}
+
+/**
  * Apply geom descriptors to the Three.js scene: ensure meshes exist, update pose/material,
  * and apply visibility/group filters. Returns the number of geoms drawn.
  *
@@ -3813,16 +3985,8 @@ function renderScene(snapshot, state) {
       try { warnLog('[render] contact points enabled but no position array in snapshot; n=', contacts.n); } catch {}
     }
     if (contactPointEnabled && contacts && contacts.pos && typeof contacts.n === 'number') {
-      // Ensure overlay group
-    if (!context.contactGroup) {
-      context.contactGroup = new THREE.Group();
-      context.contactGroup.name = 'overlay:contacts';
-      const worldScene = getWorldScene(context);
-      if (worldScene) worldScene.add(context.contactGroup);
-        context.contactPool = [];
-      }
-      const group = context.contactGroup;
-      const pool = context.contactPool || [];
+      const group = ensureContactGroup(context);
+      const pool = Array.isArray(context.contactPool) ? context.contactPool : (context.contactPool = []);
       const n = Math.max(0, contacts.n | 0);
       // Contact visual size scales by vis.scale.{contactwidth,contactheight} * vis.scale.all * meansize.
       const scaleAll = scaleAllFactor(state);
@@ -3910,7 +4074,6 @@ function renderScene(snapshot, state) {
           mesh.visible = false;
         }
       }
-      // Update references
       context.contactPool = pool;
       group.visible = true;
     } else {
@@ -3922,15 +4085,8 @@ function renderScene(snapshot, state) {
       if (!pos) {
         if (context.contactForceGroup) context.contactForceGroup.visible = false;
       } else {
-        if (!context.contactForceGroup) {
-          context.contactForceGroup = new THREE.Group();
-          context.contactForceGroup.name = 'overlay:contactForces';
-          const worldScene = getWorldScene(context);
-          if (worldScene) worldScene.add(context.contactForceGroup);
-          context.contactForcePool = [];
-        }
-        const group = context.contactForceGroup;
-        const pool = Array.isArray(context.contactForcePool) ? context.contactForcePool : [];
+        const group = ensureContactForceGroup(context);
+        const pool = Array.isArray(context.contactForcePool) ? context.contactForcePool : (context.contactForcePool = []);
         const meanMass = (() => {
           const value = Number(statStruct?.meanmass);
           if (Number.isFinite(value) && value > 1e-9) return value;
@@ -4137,8 +4293,12 @@ function renderScene(snapshot, state) {
     const showRangefinder = voptEnabled(voptFlags, MJ_VIS.RANGEFINDER);
     const showConstraint = voptEnabled(voptFlags, MJ_VIS.CONSTRAINT);
 
-    if (showCamera) updateCameraOverlays(context, snapshot, state);
-    else hideCameraGroup(context);
+    if (showCamera) {
+      const cameraDescriptors = buildCameraOverlayDescriptors(snapshot, state, context);
+      applyCameraOverlayDescriptors(context, cameraDescriptors);
+    } else {
+      hideCameraGroup(context);
+    }
     if (showLight) updateLightOverlays(context, snapshot, state);
     else hideLightGroup(context);
     if (showCom) updateComOverlays(context, snapshot, state);
@@ -4378,6 +4538,7 @@ function hideSelectionPoint(ctx) {
 function ensureSelectionPointOverlay(ctx) {
   if (!ctx) return null;
   if (ctx.selectionPoint?.mesh) return ctx.selectionPoint;
+  const group = ensureSelectionGroup(ctx);
   const geometry = new THREE.SphereGeometry(1, 18, 12);
   const material = new THREE.MeshBasicMaterial({
     color: SELECT_POINT_FALLBACK_COLOR,
@@ -4391,8 +4552,12 @@ function ensureSelectionPointOverlay(ctx) {
   mesh.matrixAutoUpdate = true;
   mesh.renderOrder = 10;
   mesh.visible = false;
-  const worldScene = getWorldScene(ctx);
-  if (worldScene) worldScene.add(mesh);
+  if (group) {
+    group.add(mesh);
+  } else {
+    const worldScene = getWorldScene(ctx);
+    if (worldScene) worldScene.add(mesh);
+  }
   ctx.selectionPoint = { mesh, material, geometry };
   return ctx.selectionPoint;
 }
