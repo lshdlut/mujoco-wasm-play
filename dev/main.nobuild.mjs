@@ -240,18 +240,23 @@ function updateRealtimeOverlay(state) {
   const offset = Math.abs(actual - desired);
   const misaligned = run && offset > 0.1 * desired;
   const shouldShow = (desired !== 100) || misaligned;
-  const formatPercent = (val, decimals = 1) => {
+  const formatPercentSpeed = (val) => {
     const v = Number(val) || 0;
     const abs = Math.abs(v);
     if (!Number.isFinite(abs) || abs <= 0) return '0%';
-    if (Math.abs(abs - Math.round(abs)) < 0.05) return `${Math.round(abs)}%`;
-    return `${abs.toFixed(decimals)}%`;
+    return `${Math.round(abs)}%`;
+  };
+  const formatPercentPhysics = (val) => {
+    const v = Number(val) || 0;
+    const abs = Math.abs(v);
+    if (!Number.isFinite(abs) || abs <= 0) return '0.0%';
+    return `${abs.toFixed(1)}%`;
   };
   const desiredEl = overlayRealtime.querySelector('[data-testid="overlay-realtime-desired"]') || overlayRealtime;
   const actualEl = overlayRealtime.querySelector('[data-testid="overlay-realtime-actual"]');
   if (shouldShow) {
-    if (desiredEl) desiredEl.textContent = `Speed: ${formatPercent(desired, 0)}`;
-    if (actualEl) actualEl.textContent = `Physics: ${formatPercent(actual, 1)}`;
+    if (desiredEl) desiredEl.textContent = `Speed : ${formatPercentSpeed(desired)}`;
+    if (actualEl) actualEl.textContent = `Physics: ${formatPercentPhysics(actual)}`;
     overlayRealtime.classList.add('visible');
   } else {
     overlayRealtime.classList.remove('visible');
