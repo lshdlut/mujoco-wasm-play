@@ -67,6 +67,7 @@ const diagStagesLogged = new Set();
 let lastSyncWallTime = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
 let lastSyncSimTime = 0;
 let simTimeApprox = 0;
+let stepDebt = 0;
 let hasLoggedNoSim = false;
 
 const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
@@ -101,60 +102,15 @@ function emitLog(message, extra, { force = false } = {}) {
   try { postMessage({ kind: 'log', message, extra }); } catch {}
 }
 
+// Noise controls are currently disabled in the web build.
+// Keep the helpers defined as no-ops so the message wiring stays intact
+// without affecting underlying MuJoCo control values.
 function standardNormalNoise() {
-  if (ctrlNoiseSpare != null) {
-    const v = ctrlNoiseSpare;
-    ctrlNoiseSpare = null;
-    return v;
-  }
-  let u = 0;
-  let v = 0;
-  let s = 0;
-  do {
-    u = Math.random() * 2 - 1;
-    v = Math.random() * 2 - 1;
-    s = u * u + v * v;
-  } while (!s || s >= 1);
-  const mul = Math.sqrt(-2 * Math.log(s) / s);
-  ctrlNoiseSpare = v * mul;
-  return u * mul;
+  return 0;
 }
 
 function applyCtrlNoise() {
-  if (!sim || !(ctrlNoiseStd > 0)) return;
-  const ctrlView = sim.ctrlView?.();
-  if (!ctrlView || !ctrlView.length) return;
-  const rangeView = sim.actuatorCtrlRangeView?.();
-  const nuLocal = ctrlView.length | 0;
-  const dtLocal = (Number.isFinite(dt) && dt > 0) ? dt : (sim.timestep?.() || 0.002);
-  if (!(dtLocal > 0)) return;
-  const rate = Math.exp(-dtLocal / Math.max(ctrlNoiseRate || 1, 1e-6));
-  const scale = ctrlNoiseStd * Math.sqrt(Math.max(0, 1 - rate * rate));
-  if (!(scale > 0)) return;
-  for (let i = 0; i < nuLocal; i += 1) {
-    let bottom = 0;
-    let top = 0;
-    let midpoint = 0;
-    let halfrange = 1;
-    if (rangeView && (2 * i + 1) < rangeView.length) {
-      bottom = Number(rangeView[2 * i]) || 0;
-      top = Number(rangeView[2 * i + 1]) || 0;
-      midpoint = 0.5 * (top + bottom);
-      halfrange = 0.5 * (top - bottom);
-    }
-    let value = Number(ctrlView[i]) || 0;
-    value = rate * value + (1 - rate) * midpoint;
-    value += scale * halfrange * standardNormalNoise();
-    if (rangeView && (2 * i + 1) < rangeView.length) {
-      const lo = Number(rangeView[2 * i]);
-      const hi = Number(rangeView[2 * i + 1]);
-      if (Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
-        if (value < lo) value = lo;
-        else if (value > hi) value = hi;
-      }
-    }
-    ctrlView[i] = value;
-  }
+  // Intentionally left blank: ctrl noise is disabled.
 }
 
 const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
@@ -175,19 +131,7 @@ function setRunning(next, source = 'backend', notify = true) {
   const changed = running !== target;
   running = target;
   if (running && changed) {
-    const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
-    let tSim = 0;
-    try {
-      if (sim && typeof sim.time === 'function') {
-        tSim = sim.time() || 0;
-      } else {
-        tSim = simTimeApprox || 0;
-      }
-    } catch {
-      tSim = simTimeApprox || 0;
-    }
-    lastSyncWallTime = nowSec;
-    lastSyncSimTime = tSim;
+    resetTimingForCurrentSim();
   }
   if (notify && changed) {
     try {
@@ -211,6 +155,7 @@ function resetTimingForCurrentSim(initialRate = null) {
   lastSyncWallTime = nowSec;
   lastSyncSimTime = tSim;
   simTimeApprox = tSim;
+  stepDebt = 0;
   if (initialRate != null && Number.isFinite(initialRate)) {
     rate = Math.max(0.0625, Math.min(16, Number(initialRate) || 1));
   }
@@ -1856,30 +1801,29 @@ setInterval(() => {
   if (wallDelta > MAX_WALL_DELTA) {
     wallDelta = MAX_WALL_DELTA;
   }
-  let currentSim = 0;
-  try {
-    if (sim && typeof sim.time === 'function') {
-      currentSim = sim.time() || 0;
-    } else {
-      currentSim = simTimeApprox || 0;
-    }
-  } catch {
-    currentSim = simTimeApprox || 0;
+  // Accumulate desired simulation steps based on wall time and current rate.
+  const currentDt = (() => {
+    try {
+      if (sim && typeof sim.timestep === 'function') {
+        const raw = sim.timestep();
+        if (Number.isFinite(raw) && raw > 0) return raw;
+      }
+    } catch {}
+    return dt;
+  })();
+  if (Number.isFinite(currentDt) && currentDt > 0) {
+    dt = currentDt;
+    stepDebt += (wallDelta * rate) / currentDt;
   }
-  // Detect MuJoCo-internal time resets (for example after invalid states).
-  // If time jumps backwards relative to our last sync, resynchronise instead
-  // of trying to "catch up" from the previous timeline, which can cause long
-  // stalls and large apparent jumps in the HUD time.
-  if (Number.isFinite(lastSyncSimTime) && currentSim + 1e-6 < lastSyncSimTime) {
-    resetTimingForCurrentSim();
+  const maxStepsPerTick = 240;
+  let steps = stepDebt > 0 ? Math.floor(stepDebt) : 0;
+  if (steps > maxStepsPerTick) steps = maxStepsPerTick;
+  if (steps <= 0) {
+    lastSyncWallTime = nowSec;
     return;
   }
-  const targetSim = lastSyncSimTime + wallDelta * rate;
-  if (!Number.isFinite(targetSim)) return;
-  let guard = 0;
-  const maxSteps = 10000;
-  // Primary path: MjSimLite with access to sim.time()
-  while (sim && typeof sim.step === 'function' && currentSim < targetSim && guard < maxSteps) {
+  // Advance sim by a bounded number of fixed steps.
+  for (let i = 0; i < steps && sim && typeof sim.step === 'function'; i += 1) {
     try {
       captureHistorySample(true);
       applyCtrlNoise();
@@ -1887,16 +1831,17 @@ setInterval(() => {
     } catch {
       break;
     }
-    guard += 1;
-    try {
-      currentSim = sim.time() || currentSim;
-    } catch {
-      break;
-    }
   }
+  stepDebt -= steps;
+  if (stepDebt < 0) stepDebt = 0;
   lastSyncWallTime = nowSec;
-  lastSyncSimTime = currentSim;
-  simTimeApprox = currentSim;
+  try {
+    if (sim && typeof sim.time === 'function') {
+      const tSim = sim.time() || 0;
+      lastSyncSimTime = tSim;
+      simTimeApprox = tSim;
+    }
+  } catch {}
 }, 8);
 
 // Snapshot timer at ~60Hz
@@ -2172,6 +2117,17 @@ onmessage = async (ev) => {
         try {
           const ok = writeOptionField(mod, h, Array.isArray(msg.path) ? msg.path : [], msg.kind, msg.value);
           if (ok) {
+            if (Array.isArray(msg.path) && msg.path.length === 1 && msg.path[0] === 'timestep') {
+              try {
+                const rawDt = sim?.timestep?.() || dt;
+                if (Number.isFinite(rawDt) && rawDt > 0) {
+                  dt = rawDt;
+                  const targetHz = clamp(Math.round(1 / dt), 5, 240);
+                  historyConfig = { ...historyConfig, captureHz: targetHz };
+                  resetTimingForCurrentSim(rate);
+                }
+              } catch {}
+            }
             snapshot();
           } else if (snapshotDebug) {
             postMessage({ kind: 'log', message: 'worker: setField (mjOption) unsupported', extra: String(msg.path || []) });

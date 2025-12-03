@@ -295,24 +295,6 @@
           "action": "Simulate::pending_.save_key = true"
         },
         {
-          "item_id": "simulation.noise_scale",
-          "type": "slider_float",
-          "label": "Noise scale",
-          "shortcut": null,
-          "binding": "Simulate::ctrl_noise_std",
-          "default": 0.0,
-          "range": "[0,1]"
-        },
-        {
-          "item_id": "simulation.noise_rate",
-          "type": "slider_float",
-          "label": "Noise rate",
-          "shortcut": null,
-          "binding": "Simulate::ctrl_noise_rate",
-          "default": 0.0,
-          "range": "[0,4]"
-        },
-        {
           "item_id": "simulation.history_separator",
           "type": "separator",
           "label": "History"

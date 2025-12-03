@@ -114,10 +114,8 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   simulation: {
     run: true,
     scrubIndex: 0,
-    keyIndex: -1,
+    keyIndex: 0,
     realTimeIndex: 0,
-    noiseStd: 0,
-    noiseRate: 0,
   },
   runtime: {
     cameraIndex: 0,
@@ -638,7 +636,7 @@ function mergeBackendSnapshot(draft, snapshot) {
     watch.valid = !!snapshot.watch.valid;
     watch.status = snapshot.watch.status || (watch.valid ? 'ok' : 'invalid');
     if (watch.valid && typeof watch.value === 'number') {
-      watch.summary = `${watch.field}[${watch.index}] = ${watch.value.toPrecision(6)}`;
+      watch.summary = watch.value.toPrecision(6);
     } else if (typeof snapshot.watch.message === 'string') {
       watch.summary = snapshot.watch.message;
     } else {
@@ -993,17 +991,6 @@ function applyBinding(draft, binding, value, control) {
     case 'Simulate::key':
       draft.simulation.keyIndex = Math.trunc(toNumber(value));
       return true;
-    case 'Simulate::ctrl_noise_std': {
-      const std = Math.max(0, toNumber(value));
-      draft.simulation.noiseStd = std;
-      return true;
-    }
-    case 'Simulate::ctrl_noise_rate': {
-      let rateVal = toNumber(value);
-      if (!Number.isFinite(rateVal) || rateVal < 0) rateVal = 0;
-      draft.simulation.noiseRate = rateVal;
-      return true;
-    }
     case 'Simulate::field': {
       const watch = ensureWatchState(draft);
       watch.field = typeof value === 'string' ? value.trim() : String(value ?? '');
@@ -1073,6 +1060,31 @@ function applyStructBindingToModel(draft, scope, pathSegments, value) {
   return false;
 }
 
+function formatKeyframeLabelFromState(state, index) {
+  const keyframes = ensureKeyframeState(state);
+  const slots = Array.isArray(keyframes.slots) && keyframes.slots.length
+    ? keyframes.slots
+    : (Array.isArray(keyframes.labels)
+        ? keyframes.labels.map((label, slotIndex) => ({
+            index: slotIndex,
+            label,
+            available: true,
+            kind: 'user',
+          }))
+        : []);
+  let idx = Number.isFinite(index) ? (index | 0) : 0;
+  if (idx < 0) idx = 0;
+  let slot = null;
+  if (Array.isArray(slots) && slots.length) {
+    slot = slots.find((s) => Number.isFinite(s.index) && (s.index | 0) === idx) || slots[idx] || null;
+  }
+  const baseLabel = slot && typeof slot.label === 'string' ? slot.label : `Key ${idx}`;
+  if (slot && slot.available === false) {
+    return `${baseLabel} (empty)`;
+  }
+  return baseLabel;
+}
+
 function applyControl(draft, control, value) {
   if (!control) return false;
   if (control.item_id === 'simulation.reset') {
@@ -1098,16 +1110,14 @@ function applyControl(draft, control, value) {
     return true;
   }
   if (control.item_id === 'simulation.save_key') {
-    const idxRaw = draft.simulation?.keyIndex;
-    const idx = Number.isFinite(idxRaw) ? (idxRaw | 0) : -1;
-    const label = idx >= 0 ? `[${idx}]` : '[?]';
+    const idx = draft.simulation?.keyIndex;
+    const label = formatKeyframeLabelFromState(draft, idx);
     draft.toast = { message: `Saved keyframe ${label}`, ts: Date.now() };
     return true;
   }
   if (control.item_id === 'simulation.load_key') {
-    const idxRaw = draft.simulation?.keyIndex;
-    const idx = Number.isFinite(idxRaw) ? (idxRaw | 0) : -1;
-    const label = idx >= 0 ? `[${idx}]` : '[?]';
+    const idx = draft.simulation?.keyIndex;
+    const label = formatKeyframeLabelFromState(draft, idx);
     draft.toast = { message: `Loaded keyframe ${label}`, ts: Date.now() };
     return true;
   }
@@ -1189,14 +1199,6 @@ function readBindingValue(state, binding, control) {
       return state.simulation.scrubIndex | 0;
     case 'Simulate::key':
       return state.simulation.keyIndex | 0;
-    case 'Simulate::ctrl_noise_std':
-      return Number.isFinite(state.simulation?.noiseStd)
-        ? state.simulation.noiseStd
-        : 0;
-    case 'Simulate::ctrl_noise_rate':
-      return Number.isFinite(state.simulation?.noiseRate)
-        ? state.simulation.noiseRate
-        : 0;
     case 'Simulate::field':
       return state.watch?.field ?? 'qpos';
     case 'Simulate::index':
@@ -2756,31 +2758,12 @@ async function loadDefaultXml() {
         }
         break;
       }
-      case 'simulation.noise_scale': {
-        const std = Math.max(0, toNumber(value));
-        if (!lastSnapshot.ctrlNoise) lastSnapshot.ctrlNoise = { std: 0, rate: 0 };
-        lastSnapshot.ctrlNoise.std = std;
-        const rateVal = Number(lastSnapshot.ctrlNoise.rate) || 0;
-        try {
-          client.postMessage?.({ cmd: 'setCtrlNoise', std, rate: rateVal });
-        } catch (err) {
-          if (debug) console.warn('[backend ctrl noise std] post failed', err);
-        }
+      case 'simulation.noise_scale':
+      case 'simulation.noise_rate':
+        // Noise controls are disabled in this build; UI state is still
+        // tracked via Simulate::ctrl_noise_* bindings but no messages are
+        // sent to the worker.
         break;
-      }
-      case 'simulation.noise_rate': {
-        let rateVal = toNumber(value);
-        if (!Number.isFinite(rateVal) || rateVal < 0) rateVal = 0;
-        if (!lastSnapshot.ctrlNoise) lastSnapshot.ctrlNoise = { std: 0, rate: 0 };
-        lastSnapshot.ctrlNoise.rate = rateVal;
-        const std = Number(lastSnapshot.ctrlNoise.std) || 0;
-        try {
-          client.postMessage?.({ cmd: 'setCtrlNoise', std, rate: rateVal });
-        } catch (err) {
-          if (debug) console.warn('[backend ctrl noise rate] post failed', err);
-        }
-        break;
-      }
       case 'rendering.camera_mode':
       case 'option.help':
       default:

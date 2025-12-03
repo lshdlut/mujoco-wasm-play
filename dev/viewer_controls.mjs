@@ -116,9 +116,18 @@ export function createControlManager({
   }
 
   function applyOptionAvailability(control, element) {
-    // Keep option inputs always editable and avoid injecting placeholders;
-    // mirrors visualization/headlight behavior (pure state-driven value).
-    return;
+    if (!element || !isOptionBinding(control)) return;
+    const support = getOptionSupport();
+    const supported = !!support?.supported;
+    if ('disabled' in element) {
+      element.disabled = !supported;
+    }
+    if (element instanceof HTMLElement) {
+      const row = element.closest('.control-row');
+      if (row) {
+        row.classList.toggle('is-disabled', !supported);
+      }
+    }
   }
 
 function formatNumber(value) {
@@ -1037,7 +1046,7 @@ function shortcutFromEvent(event) {
     });
   }
 
-    function renderSelect(container, control) {
+  function renderSelect(container, control) {
       const { row, label, field } = createLabeledRow(control);
       const inputId = `${sanitiseName(control.item_id)}__select`;
       label.setAttribute('for', inputId);
@@ -1049,6 +1058,9 @@ function shortcutFromEvent(event) {
       const isLabelModeSelect = control.binding === 'mjvOption::label';
       const isFrameModeSelect = control.binding === 'mjvOption::frame';
       const isNumericSelect = isLabelModeSelect || isFrameModeSelect;
+      const isMjOptionEnumBinding = isOptionBinding(control);
+      const isMjOptionEnumSelect =
+        isMjOptionEnumBinding && !isNumericSelect && !isCameraModeSelect && !isTrackingGeomSelect;
       const options = isCameraModeSelect || isTrackingGeomSelect ? [] : normaliseOptions(control.options);
       if (isCameraModeSelect) {
         syncCameraSelectOptions(select, control);
@@ -1064,8 +1076,6 @@ function shortcutFromEvent(event) {
       }
       field.append(select);
       container.append(row);
-
-      applyOptionAvailability(control, select);
 
       const binding = createBinding(control, {
         getValue: () => {
@@ -1188,6 +1198,13 @@ function shortcutFromEvent(event) {
             const numericValue = Math.max(0, Math.trunc(toNumber(value)));
             const clamped = Math.min(numericValue, Math.max(0, options.length - 1));
             select.value = String(clamped);
+          } else if (isMjOptionEnumSelect && (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value)))) {
+            const idx = Number(value) | 0;
+            const clamped = Math.max(0, Math.min(idx, Math.max(0, options.length - 1)));
+            const label = options[clamped] ?? options[0] ?? '';
+            if (label) {
+              select.value = label;
+            }
           } else if (value == null) {
             select.value = options[0] ?? '';
           } else {
@@ -1200,6 +1217,13 @@ function shortcutFromEvent(event) {
           }
         },
       });
+
+      applyOptionAvailability(control, select);
+      binding.updateOptions = () => {
+        try {
+          applyOptionAvailability(control, select);
+        } catch {}
+      };
 
       select.addEventListener(
         'change',
@@ -1452,6 +1476,14 @@ function shortcutFromEvent(event) {
     if (input.disabled) {
       valueLabel.textContent = 'unsupported';
     }
+    binding.updateOptions = () => {
+      try {
+        applyOptionAvailability(control, input);
+        if (input.disabled) {
+          valueLabel.textContent = 'unsupported';
+        }
+      } catch {}
+    };
 
     input.addEventListener(
       'input',
@@ -1515,8 +1547,6 @@ function shortcutFromEvent(event) {
     field.append(input);
     container.append(row);
 
-    applyOptionAvailability(control, input);
-
     const binding = createBinding(control, {
       getValue: () => {
         if (mode === 'text') return input.value;
@@ -1544,6 +1574,13 @@ function shortcutFromEvent(event) {
         }
       },
     });
+
+    applyOptionAvailability(control, input);
+    binding.updateOptions = () => {
+      try {
+        applyOptionAvailability(control, input);
+      } catch {}
+    };
 
     // Seed with current state value if present; fallback to default only when the state is empty.
     const current = readControlValue(store.get(), control);
@@ -1598,8 +1635,6 @@ function shortcutFromEvent(event) {
     field.append(input);
     container.append(row);
 
-    applyOptionAvailability(control, input);
-
     const targetLength = Math.max(1, expectedLength | 0);
     let lastValidText = '';
 
@@ -1650,6 +1685,13 @@ function shortcutFromEvent(event) {
         setInputText(text);
       },
     });
+
+    applyOptionAvailability(control, input);
+    binding.updateOptions = () => {
+      try {
+        applyOptionAvailability(control, input);
+      } catch {}
+    };
 
     const currentVector = readControlValue(store.get(), control);
     if (currentVector !== undefined && currentVector !== null) {
@@ -1712,8 +1754,6 @@ function shortcutFromEvent(event) {
     });
     field.append(input);
     container.append(row);
-
-    applyOptionAvailability(control, input);
     const targetLength = 3;
     let lastValidText = '';
 
@@ -1768,6 +1808,13 @@ function shortcutFromEvent(event) {
         setInputText(text);
       },
     });
+
+    applyOptionAvailability(control, input);
+    binding.updateOptions = () => {
+      try {
+        applyOptionAvailability(control, input);
+      } catch {}
+    };
 
     const current = readControlValue(store.get(), control);
     if (current !== undefined && current !== null) {
@@ -1980,6 +2027,18 @@ function shortcutFromEvent(event) {
     return row;
   }
 
+  function renderSimulationNoiseNotice(container) {
+    const row = createControlRow(null, { full: true });
+    const field = document.createElement('div');
+    field.className = 'control-field';
+    const notice = document.createElement('div');
+    notice.className = 'control-static';
+    notice.textContent = 'Noise controls are disabled in this build.';
+    field.append(notice);
+    row.append(field);
+    container.append(row);
+  }
+
   function renderSeparator(container, control) {
     const row = createControlRow(control, { full: true });
     const sep = document.createElement('div');
@@ -2153,6 +2212,9 @@ function shortcutFromEvent(event) {
     } else {
       for (const item of section.items ?? []) {
         renderControl(body, item);
+        if (section.section_id === 'simulation' && item?.item_id === 'simulation.save_key') {
+          renderSimulationNoiseNotice(body);
+        }
         if (!item?.item_id) continue;
         const resetValue = resolveResetValue(item);
         if (resetValue !== undefined) {
