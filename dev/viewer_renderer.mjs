@@ -895,10 +895,10 @@ function computeBoundsFromSnapshot(snapshot, { ignoreStatic = false } = {}) {
   };
 }
 
-function overlayScale(radius, factor, min = 0.05, max = 2) {
-  const r = Number.isFinite(radius) && radius > 0 ? radius : 1;
-  return Math.min(max, Math.max(min, r * factor));
-}
+  function overlayScale(radius, factor, min = 0.05, max = 2) {
+    const r = Number.isFinite(radius) && radius > 0 ? radius : 1;
+    return Math.min(max, Math.max(min, r * factor));
+  }
 
 function scaleAllFactor(state) {
   const value = Number(state?.model?.vis?.scale?.all);
@@ -918,11 +918,46 @@ function meanSizeFromState(state, context = null) {
   return 1;
 }
 
-function computeMeanScale(state, context = null) {
-  const meanSize = meanSizeFromState(state, context);
-  const scaleAll = scaleAllFactor(state);
-  return { meanSize, scaleAll };
-}
+  function computeMeanScale(state, context = null) {
+    const meanSize = meanSizeFromState(state, context);
+    const scaleAll = scaleAllFactor(state);
+    return { meanSize, scaleAll };
+  }
+
+  function computeScenePolicy(snapshot, state, context) {
+    const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
+    const voptFlags = Array.isArray(state.rendering?.voptFlags)
+      ? state.rendering.voptFlags
+      : (Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : (getDefaultVopt(context, state) || []));
+    const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
+    const presetMode = (state?.visualSourceMode ?? 'model') === 'preset';
+    const skyboxFlag = sceneFlags[4] !== false;
+    const shadowEnabled = segmentEnabled ? false : sceneFlags[0] !== false;
+    const reflectionEnabled = segmentEnabled ? false : sceneFlags[2] !== false;
+    const skyboxEnabled = !segmentEnabled && skyboxFlag;
+    const fogEnabled = segmentEnabled ? false : !!sceneFlags[5];
+    const hazeEnabled = segmentEnabled ? false : !!sceneFlags[6];
+    const hideAllGeometry = !!state.rendering?.hideAllGeometry;
+    // ID color / additive / cullFace can be extended later; keep false by default for now.
+    const idColorEnabled = false;
+    const additiveEnabled = false;
+    const cullFaceEnabled = true;
+    return {
+      sceneFlags,
+      voptFlags,
+      segmentEnabled,
+      skyboxEnabled,
+      shadowEnabled,
+      reflectionEnabled,
+      fogEnabled,
+      hazeEnabled,
+      cullFaceEnabled,
+      idColorEnabled,
+      additiveEnabled,
+      presetMode,
+      hideAllGeometry,
+    };
+  }
 
 function warnOnce(cache, key, message) {
   if (!warnLogEnabled()) return;
@@ -3745,27 +3780,27 @@ export function createRendererManager({
 
     return ctx;
   }
-function renderScene(snapshot, state) {
-  if (!snapshot || !state) return;
-  const context = initRenderer();
-  if (!context.initialized) return;
+  function renderScene(snapshot, state) {
+    if (!snapshot || !state) return;
+    const context = initRenderer();
+    if (!context.initialized) return;
   if (typeof window !== 'undefined') {
     window.__renderCtx = context;
   }
-  const renderer = context.renderer;
-  const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
-  const voptFlags = Array.isArray(state.rendering?.voptFlags)
-    ? state.rendering.voptFlags
-    : (Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : (getDefaultVopt(context, state) || []));
-  const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
-  const presetMode = (state?.visualSourceMode ?? 'model') === 'preset';
-  const skyboxFlag = sceneFlags[4] !== false;
-  const shadowEnabled = segmentEnabled ? false : sceneFlags[0] !== false;
-  const reflectionEnabled = segmentEnabled ? false : sceneFlags[2] !== false;
-  const skyboxEnabled = !segmentEnabled && skyboxFlag;
-  const fogEnabled = segmentEnabled ? false : !!sceneFlags[5];
-  const hazeEnabled = segmentEnabled ? false : !!sceneFlags[6];
-  context.reflectionActive = reflectionEnabled;
+    const renderer = context.renderer;
+    const policy = computeScenePolicy(snapshot, state, context);
+    const {
+      sceneFlags,
+      voptFlags,
+      segmentEnabled,
+      skyboxEnabled,
+      shadowEnabled,
+      reflectionEnabled,
+      fogEnabled,
+      hazeEnabled,
+      presetMode,
+    } = policy;
+    context.reflectionActive = reflectionEnabled;
 
     const assets = state.rendering?.assets || null;
     syncRendererAssets(context, assets);
