@@ -54,6 +54,7 @@ export interface HudState {
   frames: number;
   fps: number;
   rate: number;
+  measuredSlowdown: number;
   ngeom: number;
   pausedSource: string;
   rateSource: string;
@@ -221,6 +222,7 @@ export type BackendApplyPayload = BackendUiApplyPayload | GestureApplyPayload;
 export interface BackendSnapshot {
   t: number;
   rate: number;
+  measuredSlowdown?: number;
   paused: boolean;
   ngeom: number;
   nq?: number;
@@ -275,6 +277,7 @@ export interface ViewerBackend {
   step?(direction?: number): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
   setCameraIndex?(index: number): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
   setRunState?(run: boolean, source?: string): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
+  setRate?(rate: number, source?: string): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
   setVisualState?(payload: { visual?: Record<string, unknown> | null; sceneFlags?: boolean[] | null }): Promise<BackendSnapshot | undefined> | BackendSnapshot | undefined;
   dispose?(): void;
 }

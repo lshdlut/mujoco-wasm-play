@@ -2280,9 +2280,6 @@ function shortcutFromEvent(event) {
       const control = controlById.get(id);
       if (!control) continue;
       const value = readControlValue(state, control);
-      try {
-        if (binding.getValue && binding.getValue() === value) continue;
-      } catch {}
       binding.setValue?.(value);
     }
     try {

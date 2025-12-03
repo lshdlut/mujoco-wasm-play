@@ -816,6 +816,9 @@ body.layout-main {
    <canvas data-testid="viewer-canvas">
    </canvas>
    <div class="overlay-stack">
+     <div class="overlay-card" data-testid="overlay-realtime">
+      <div data-testid="overlay-realtime-label">100%</div>
+     </div>
      <div class="overlay-card" data-testid="overlay-help">
       <div class="help-title">Help</div>
       <div class="help-subtitle">Keyboard & mouse shortcuts (Simulate parity)</div>
@@ -856,7 +859,7 @@ body.layout-main {
       <div class="help-subtitle help-subtitle-unimplemented">Unimplemented / web differences</div>
       <div class="help-grid">
        <div class="help-key">+  -</div>
-       <div class="help-desc">Real-time scale (TODO, not wired yet)</div>
+       <div class="help-desc">Real-time scale</div>
        <div class="help-key">F3</div>
        <div class="help-desc">Profiler overlay (not implemented)</div>
        <div class="help-key">F4</div>

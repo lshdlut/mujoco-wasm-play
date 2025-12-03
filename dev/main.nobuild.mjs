@@ -35,6 +35,7 @@ const SCREENSHOT_PIXEL_RATIO_CAP = 2;
 const leftPanel = document.querySelector('[data-testid="panel-left"]');
 const rightPanel = document.querySelector('[data-testid="panel-right"]');
 const canvas = document.querySelector('[data-testid="viewer-canvas"]');
+const overlayRealtime = document.querySelector('[data-testid="overlay-realtime"]');
 const overlayHelp = document.querySelector('[data-testid="overlay-help"]');
 const overlayInfo = document.querySelector('[data-testid="overlay-info"]');
 const overlayProfiler = document.querySelector('[data-testid="overlay-profiler"]');
@@ -55,6 +56,19 @@ let lastFpsFrameSample = 0;
 let lastFpsSampleTimeMs = (typeof performance !== 'undefined' && performance.now)
   ? performance.now()
   : Date.now();
+
+// Mirror MuJoCo simulate's percentRealTime ladder (see simulate.h).
+// Logarithmically spaced real-time slow-down coefficients (percent).
+const REALTIME_LEVELS = [
+  100, 80, 66, 50, 40, 33, 25, 20, 16, 13,
+  10, 8, 6.6, 5.0, 4, 3.3, 2.5, 2, 1.6, 1.3,
+  1, 0.8, 0.66, 0.5, 0.4, 0.33, 0.25, 0.2, 0.16, 0.13,
+  0.1,
+];
+const DEFAULT_REALTIME_INDEX = (() => {
+  const idx = REALTIME_LEVELS.indexOf(100);
+  return idx >= 0 ? idx : 0;
+})();
 
 function formatArenaBytes(bytes) {
   const n = Number(bytes) || 0;
@@ -204,6 +218,50 @@ try {
 function updateOverlay(card, visible) {
   if (!card) return;
   card.classList.toggle('visible', !!visible);
+}
+
+function updateRealtimeOverlay(state) {
+  if (!overlayRealtime) return;
+  if (state?.overlays?.help) {
+    overlayRealtime.classList.remove('visible');
+    return;
+  }
+  const sim = state?.simulation || {};
+  const hud = state?.hud || {};
+  const run = !!sim.run;
+  const total = REALTIME_LEVELS.length;
+  if (!total) {
+    overlayRealtime.classList.remove('visible');
+    return;
+  }
+  const idxRaw = Number.isFinite(sim.realTimeIndex) ? (sim.realTimeIndex | 0) : DEFAULT_REALTIME_INDEX;
+  const clampedIdx = Math.max(0, Math.min(total - 1, idxRaw));
+  const desired = REALTIME_LEVELS[clampedIdx] || 100;
+  const slowdown = Number(hud.measuredSlowdown);
+  const actual = (Number.isFinite(slowdown) && slowdown > 0) ? (100 / slowdown) : desired;
+  const offset = Math.abs(actual - desired);
+  const misaligned = run && offset > 0.1 * desired;
+  let label = '';
+  if (desired !== 100 || misaligned) {
+    const formatPercent = (val, decimals = 1) => {
+      const v = Number(val) || 0;
+      const abs = Math.abs(v);
+      if (!Number.isFinite(abs) || abs <= 0) return '0%';
+      if (Math.abs(abs - Math.round(abs)) < 0.05) return `${Math.round(abs)}%`;
+      return `${abs.toFixed(decimals)}%`;
+    };
+    label = formatPercent(desired, 0);
+    if (misaligned) {
+      label += ` (${formatPercent(actual, 1)})`;
+    }
+  }
+  const labelEl = overlayRealtime.querySelector('[data-testid="overlay-realtime-label"]') || overlayRealtime;
+  if (label) {
+    labelEl.textContent = label;
+    overlayRealtime.classList.add('visible');
+  } else {
+    overlayRealtime.classList.remove('visible');
+  }
 }
 
 const TOAST_HIDE_MS = 2200;
@@ -443,6 +501,7 @@ store.subscribe((state) => {
   updateOverlay(overlayInfo, state.overlays.info);
   updateOverlay(overlayProfiler, state.overlays.profiler);
   updateOverlay(overlaySensor, state.overlays.sensor);
+  updateRealtimeOverlay(state);
   // updateHud(state); // legacy header HUD (kept for reference, replaced by F2 info overlay)
   updatePanels(state);
 
@@ -769,6 +828,53 @@ if (typeof registerGlobalShortcut === 'function') {
       draft.runtime.lastAction = 'select-parent';
       draft.toast = { message: `Selected parent: ${label}`, ts };
     });
+  });
+
+  const adjustRealtime = async (delta) => {
+    const state = store.get();
+    const total = REALTIME_LEVELS.length;
+    if (!total) return;
+    const currentIdxRaw = Number.isFinite(state?.simulation?.realTimeIndex)
+      ? (state.simulation.realTimeIndex | 0)
+      : DEFAULT_REALTIME_INDEX;
+    const currentIdx = Math.max(0, Math.min(total - 1, currentIdxRaw));
+    let nextIdx = currentIdx + delta;
+    if (nextIdx < 0) nextIdx = 0;
+    if (nextIdx >= total) nextIdx = total - 1;
+    if (nextIdx === currentIdx) return;
+    const desired = REALTIME_LEVELS[nextIdx] || 100;
+    const nextRate = desired / 100;
+    store.update((draft) => {
+      if (!draft.simulation) draft.simulation = { ...DEFAULT_VIEWER_STATE.simulation };
+      draft.simulation.realTimeIndex = nextIdx;
+    });
+    try {
+      if (typeof backend.setRate === 'function') {
+        await backend.setRate(nextRate, 'ui');
+      }
+    } catch (err) {
+      console.warn('[ui] setRate failed', err);
+    }
+  };
+
+  registerGlobalShortcut(['-'], async (event) => {
+    event?.preventDefault?.();
+    await adjustRealtime(+1);
+  });
+
+  registerGlobalShortcut(['_'], async (event) => {
+    event?.preventDefault?.();
+    await adjustRealtime(+1);
+  });
+
+  registerGlobalShortcut(['='], async (event) => {
+    event?.preventDefault?.();
+    await adjustRealtime(-1);
+  });
+
+  registerGlobalShortcut(['+'], async (event) => {
+    event?.preventDefault?.();
+    await adjustRealtime(-1);
   });
 
   registerGlobalShortcut(['Ctrl', 'P'], async (event) => {

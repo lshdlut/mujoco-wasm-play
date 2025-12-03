@@ -69,6 +69,7 @@ let lastSyncSimTime = 0;
 let simTimeApprox = 0;
 let stepDebt = 0;
 let hasLoggedNoSim = false;
+let measuredSlowdown = 1;
 
 const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
 
@@ -1372,6 +1373,10 @@ async function loadXmlWithFallback(xmlText) {
     ? { dx: Number(dragState.dx) || 0, dy: Number(dragState.dy) || 0 }
     : { dx: 0, dy: 0 };
   const frameId = frameSeq++;
+  const slowdownSafe = (() => {
+    if (!Number.isFinite(measuredSlowdown) || measuredSlowdown <= 0) return 1;
+    return measuredSlowdown;
+  })();
   const msg = {
     kind: 'snapshot',
     tSim,
@@ -1400,6 +1405,7 @@ async function loadXmlWithFallback(xmlText) {
       paused: !running,
       pausedSource: historyState?.scrubActive ? 'history' : 'backend',
       rate,
+      measuredSlowdown: slowdownSafe,
       qpos,
     };
     try {
@@ -1830,6 +1836,18 @@ setInterval(() => {
       sim.step(1);
     } catch {
       break;
+    }
+  }
+  const simDelta = steps * currentDt;
+  if (simDelta > 0 && wallDelta > 0) {
+    const instSlowdown = wallDelta / simDelta;
+    if (Number.isFinite(instSlowdown) && instSlowdown > 0) {
+      if (!(measuredSlowdown > 0)) {
+        measuredSlowdown = instSlowdown;
+      } else {
+        const alpha = 0.1;
+        measuredSlowdown = measuredSlowdown * (1 - alpha) + instSlowdown * alpha;
+      }
     }
   }
   stepDebt -= steps;

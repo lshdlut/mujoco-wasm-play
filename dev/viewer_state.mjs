@@ -204,6 +204,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     frames: 0,
     fps: 0,
     rate: 1,
+    measuredSlowdown: 1,
     ngeom: 0,
     contacts: 0,
     pausedSource: 'backend',
@@ -358,6 +359,7 @@ function createInitialSnapshot() {
   return {
     t: 0,
     rate: 1,
+    measuredSlowdown: 1,
     paused: false,
     ngeom: 0,
     nq: 0,
@@ -505,6 +507,9 @@ function mergeBackendSnapshot(draft, snapshot) {
   }
   if (typeof snapshot.rate === 'number' && Number.isFinite(snapshot.rate)) {
     draft.hud.rate = snapshot.rate;
+  }
+  if (typeof snapshot.measuredSlowdown === 'number' && Number.isFinite(snapshot.measuredSlowdown)) {
+    draft.hud.measuredSlowdown = snapshot.measuredSlowdown;
   }
   if (typeof snapshot.ngeom === 'number' && Number.isFinite(snapshot.ngeom)) {
     draft.hud.ngeom = snapshot.ngeom | 0;
@@ -1454,6 +1459,7 @@ function resolveSnapshot(state) {
   return {
     t: state.t ?? 0,
     rate: state.rate ?? 1,
+    measuredSlowdown: state.measuredSlowdown ?? 1,
     paused: !!state.paused,
     ngeom: state.ngeom ?? 0,
     nq: state.nq ?? 0,
@@ -1921,6 +1927,20 @@ async function loadDefaultXml() {
       } catch (err) {
         if (debug) console.warn('[backend] setPaused post failed', err);
       }
+    }
+    return notifyListeners();
+  }
+
+  function setRate(nextRate, source = 'ui') {
+    const raw = Number(nextRate);
+    const clamped = Number.isFinite(raw) ? Math.max(0.0625, Math.min(16, raw)) : 1;
+    rate = clamped;
+    lastSnapshot.rate = rate;
+    lastSnapshot.rateSource = source;
+    try {
+      client.postMessage?.({ cmd: 'setRate', rate });
+    } catch (err) {
+      if (debug) console.warn('[backend] setRate post failed', err);
     }
     return notifyListeners();
   }
@@ -2912,6 +2932,7 @@ async function loadDefaultXml() {
     step,
     setCameraIndex,
     setRunState,
+    setRate,
     applyForce: applyForceCommand,
     applyBodyForce: applyBodyForceCommand,
     clearForces: clearForcesCommand,
