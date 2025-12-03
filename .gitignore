@@ -4,6 +4,7 @@ dist/
 build/
 local_temp/
 coverage/
+dev/model
 tmp/
 *.log
 

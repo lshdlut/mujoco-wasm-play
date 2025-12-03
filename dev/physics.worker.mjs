@@ -900,30 +900,50 @@ function cstr(modRef, ptr) {
   return readCString(modRef, ptr);
 }
 
+function readLastErrorMeta(modRef) {
+  const m = modRef || mod || null;
+  const meta = {
+    errno: 0,
+    errmsg: '',
+    helperErrno: 0,
+    helperErrmsg: '',
+  };
+  if (!m) return meta;
+  try {
+    if (typeof m._mjwf_errno_last_global === 'function') {
+      meta.errno = m._mjwf_errno_last_global() | 0;
+    }
+  } catch {}
+  try {
+    if (!meta.errno && typeof m._mjwf_helper_errno_last_global === 'function') {
+      meta.helperErrno = m._mjwf_helper_errno_last_global() | 0;
+    }
+  } catch {}
+  try {
+    if (typeof m._mjwf_errmsg_last_global === 'function') {
+      meta.errmsg = cstr(m, m._mjwf_errmsg_last_global() | 0);
+    }
+  } catch {}
+  try {
+    if (!meta.errmsg && typeof m._mjwf_helper_errmsg_last_global === 'function') {
+      meta.helperErrmsg = cstr(m, m._mjwf_helper_errmsg_last_global() | 0);
+    }
+  } catch {}
+  return meta;
+}
+
+function readErrno(modRef) {
+  const meta = readLastErrorMeta(modRef);
+  return meta.errno || meta.helperErrno || 0;
+}
+
 function logHandleFailure(stage, info) {
-  let eno = 0;
-  let emsg = '';
-  let helperErr = 0;
-  let helperMsg = '';
-  try { if (mod && typeof mod._mjwf_errno_last === 'function') eno = mod._mjwf_errno_last() | 0; } catch {}
-  try {
-    if (mod && typeof mod._mjwf_errmsg_last === 'function') {
-      emsg = cstr(mod, mod._mjwf_errmsg_last() | 0);
-    } else if (mod && typeof mod._mjwf_errmsg_last_global === 'function') {
-      emsg = cstr(mod, mod._mjwf_errmsg_last_global() | 0);
-    }
-  } catch {}
-  try { if (mod && typeof mod._mjwf_helper_errno_last_global === 'function') helperErr = mod._mjwf_helper_errno_last_global() | 0; } catch {}
-  try {
-    if (mod && typeof mod._mjwf_helper_errmsg_last_global === 'function') {
-      helperMsg = cstr(mod, mod._mjwf_helper_errmsg_last_global() | 0);
-    }
-  } catch {}
+  const meta = readLastErrorMeta(mod);
   emitLog(`worker: handle failure (${stage})`, {
-    errno: eno,
-    errmsg: emsg,
-    helperErrno: helperErr,
-    helperErrmsg: helperMsg,
+    errno: meta.errno,
+    errmsg: meta.errmsg,
+    helperErrno: meta.helperErrno,
+    helperErrmsg: meta.helperErrmsg,
     extra: info ?? null,
   }, { force: true });
 }
@@ -1176,7 +1196,23 @@ async function loadModule() {
   const wasmAbs = new URL(`mujoco.wasm`, distBase);
   // Optional cache tag from version.json (sha8) to avoid stale caching
   let vTag = '';
-  try { const vinfoUrl = new URL('version.json', distBase); vinfoUrl.searchParams.set('cb', String(Date.now())); const r = await fetch(vinfoUrl.href, { cache:'no-store' }); if (r.ok) { const j = await r.json(); const s = String(j.sha256||j.git_sha||j.mujoco_git_sha||''); vTag = s.slice(0,8); } } catch {}
+  try {
+    const vinfoUrl = new URL('version.json', distBase);
+    vinfoUrl.searchParams.set('cb', String(Date.now()));
+    const r = await fetch(vinfoUrl.href, { cache: 'no-store' });
+    if (r.ok) {
+      const j = await r.json();
+      const s = String(j.sha256 || j.git_sha || j.mujoco_git_sha || '');
+      vTag = s.slice(0, 8);
+      emitLog('worker: forge version.json', {
+        distBase: distBase.href,
+        mujocoVersion: j.mujocoVersion || null,
+        buildProfile: j.profile || null,
+        exceptions: j.exceptions || null,
+        shaTag: vTag || null,
+      }, { force: true });
+    }
+  } catch {}
   try {
     const jsHref = withCacheTag(jsAbs.href, vTag);
     const wasmHref = withCacheTag(wasmAbs.href, vTag);
@@ -1239,14 +1275,38 @@ async function loadXmlWithFallback(xmlText) {
       h = sim.h | 0;
       logSimPointers(`load:${attempt.stage}`, { force: true });
       emitLog(`worker: loaded via ${attempt.stage}`, { abi });
-      return { ok: true, abi, handle: h };
+      return {
+        ok: true,
+        abi,
+        handle: h,
+        errno: 0,
+        errmsg: '',
+        helperErrno: 0,
+        helperErrmsg: '',
+      };
     } catch (err) {
-      logHandleFailure('tryMakeHandle_fail', {
+      const meta = readLastErrorMeta(mod || {});
+      const errPayload = {
         stage: attempt.stage,
         error: String(err || ''),
-        eno: readErrno(mod || {}),
+        errno: meta.errno,
+        errmsg: meta.errmsg,
+        helperErrno: meta.helperErrno,
+        helperErrmsg: meta.helperErrmsg,
         file: attempt.stage === 'primary' ? 'primary' : 'fallback-none',
-      });
+      };
+      logHandleFailure('tryMakeHandle_fail', errPayload);
+      if (attempts.length === 1) {
+        return {
+          ok: false,
+          abi,
+          handle: 0,
+          errno: meta.errno || meta.helperErrno || 0,
+          errmsg: meta.errmsg || meta.helperErrmsg || String(err || ''),
+          helperErrno: meta.helperErrno || 0,
+          helperErrmsg: meta.helperErrmsg || '',
+        };
+      }
     }
   }
   throw new Error('Unable to create handle');
@@ -1739,6 +1799,8 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.geoms.type);
     push(assets.geoms.matid);
     push(assets.geoms.bodyid);
+    push(assets.geoms.group);
+    push(assets.geoms.rgba);
   }
   if (assets?.materials) {
     push(assets.materials.rgba);
@@ -1882,7 +1944,33 @@ onmessage = async (ev) => {
         try { mod._mjwf_helper_free(h); } catch {}
       }
       h = 0;
-      const { ok, abi, handle } = await loadXmlWithFallback(msg.xmlText || '');
+      const result = await loadXmlWithFallback(msg.xmlText || '');
+      if (!result || !result.ok || !(result.handle > 0)) {
+        const errMeta = {
+          errno: result?.errno ?? 0,
+          errmsg: result?.errmsg || '',
+          helperErrno: result?.helperErrno ?? 0,
+          helperErrmsg: result?.helperErrmsg || '',
+        };
+        const messageParts = [];
+        if (errMeta.errmsg) messageParts.push(errMeta.errmsg);
+        if (errMeta.helperErrmsg && errMeta.helperErrmsg !== errMeta.errmsg) {
+          messageParts.push(`helper: ${errMeta.helperErrmsg}`);
+        }
+        const summary = messageParts.length ? messageParts.join(' | ') : 'Unable to create handle';
+        try {
+          postMessage({
+            kind: 'error',
+            message: `XML load failed: ${summary}`,
+            errno: errMeta.errno,
+            errmsg: errMeta.errmsg,
+            helperErrno: errMeta.helperErrno,
+            helperErrmsg: errMeta.helperErrmsg,
+          });
+        } catch {}
+        return;
+      }
+      const { abi, handle } = result;
       h = handle | 0;
       frameSeq = 0;
       if (snapshotState) {

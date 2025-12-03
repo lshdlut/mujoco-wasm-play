@@ -332,6 +332,10 @@ function applyGeomMetadata(mesh, meta) {
   if (meta.bodyId != null) {
     userData.geomBodyId = meta.bodyId;
   }
+  if (meta.groupId != null) {
+    userData.geomGroupId = meta.groupId;
+    userData.geomGroup = meta.groupId;
+  }
   if (meta.matId != null) {
     userData.geomMatId = meta.matId;
     userData.matId = meta.matId;
@@ -348,6 +352,8 @@ function applyGeomMetadata(mesh, meta) {
     dataId: meta.dataId,
     size: meta.size,
     grid: meta.grid,
+    groupId: meta.groupId,
+    rgba: meta.rgba,
   };
 }
 
@@ -523,14 +529,29 @@ function resolveGeomAppearance(index, sceneGeom, snapshot, assets) {
     };
   }
   const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
-  const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
   const matIndex = matIdView && index < matIdView.length ? matIdView[index] : -1;
+  const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
+  const geomRgbaView = assets?.geoms?.rgba || null;
   if (matIndex >= 0 && matRgbaView && matRgbaView.length >= (matIndex * 4 + 4)) {
     const rgba = [
       matRgbaView[matIndex * 4 + 0],
       matRgbaView[matIndex * 4 + 1],
       matRgbaView[matIndex * 4 + 2],
       matRgbaView[matIndex * 4 + 3],
+    ];
+    return {
+      rgba,
+      color: rgbFromArray(rgba),
+      opacity: alphaFromArray(rgba),
+    };
+  }
+  if (matIndex < 0 && geomRgbaView && geomRgbaView.length >= ((index * 4) + 4)) {
+    const base = index * 4;
+    const rgba = [
+      geomRgbaView[base + 0],
+      geomRgbaView[base + 1],
+      geomRgbaView[base + 2],
+      geomRgbaView[base + 3],
     ];
     return {
       rgba,
@@ -959,8 +980,8 @@ function meanSizeFromState(state, context = null) {
       };
     }
 
-  function isSceneDebugEnabled() {
-    if (debugMode) return true;
+  function isSceneDebugEnabled(state = null) {
+    if (state?.debugMode === true || state?.rendering?.debugMode === true) return true;
     if (typeof window !== 'undefined') {
       try {
         if (window.PLAY_VERBOSE_DEBUG === true) return true;
@@ -2348,7 +2369,7 @@ function updatePerturbOverlay(ctx, snapshot, state, options = {}) {
   }
 }
 
-function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
+  function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
   const fallbackEnabled = options.fallbackEnabled !== false;
   const preset = options.preset || 'bright-outdoor';
   let geometry;
@@ -2358,27 +2379,34 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
     roughness: 0.65,
   };
   let postCreate = null;
+  const sx = Number(sizeVec?.[0]) || 0;
+  const sy = Number(sizeVec?.[1]) || 0;
+  const sz = Number(sizeVec?.[2]) || 0;
   switch (gtype) {
-    case MJ_GEOM.SPHERE:
-    case MJ_GEOM.ELLIPSOID: {
+    case MJ_GEOM.SPHERE: {
+      const r = Math.max(1e-6, sx || sy || sz || 0.1);
       geometry = new THREE.SphereGeometry(1, 24, 16);
-      if (Array.isArray(sizeVec)) {
-        const ax = Math.max(1e-6, sizeVec[0] || 0);
-        const ay = Math.max(1e-6, (sizeVec[1] ?? sizeVec[0]) || 0);
-        const az = Math.max(1e-6, (sizeVec[2] ?? sizeVec[0]) || 0);
-        geometry.scale(ax, ay, az);
-      }
+      geometry.scale(r, r, r);
+      break;
+    }
+    case MJ_GEOM.ELLIPSOID: {
+      const ax = Math.max(1e-6, sx || 0.1);
+      const ay = Math.max(1e-6, sy || ax);
+      const az = Math.max(1e-6, sz || ax);
+      geometry = new THREE.SphereGeometry(1, 24, 16);
+      geometry.scale(ax, ay, az);
       break;
     }
     case MJ_GEOM.CAPSULE: {
-      const radius = Math.max(1e-6, sizeVec?.[0] || 0.05);
-      const halfLength = Math.max(0, sizeVec?.[1] || 0);
+      const radius = Math.max(1e-6, sx || 0.05);
+      const halfLength = Math.max(0, sy || 0);
       geometry = new THREE.CapsuleGeometry(radius, Math.max(0, 2 * halfLength), 20, 12);
+      geometry.rotateX(Math.PI / 2);
       break;
     }
     case MJ_GEOM.CYLINDER: {
-      const radius = Math.max(1e-6, sizeVec?.[0] || 0.05);
-      const halfLength = Math.max(0, sizeVec?.[1] || 0.05);
+      const radius = Math.max(1e-6, sx || 0.05);
+      const halfLength = Math.max(0, sy || 0.05);
       geometry = new THREE.CylinderGeometry(
         radius,
         radius,
@@ -2386,12 +2414,13 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
         24,
         1
       );
+      geometry.rotateX(Math.PI / 2);
       break;
     }
     case MJ_GEOM.PLANE:
     case MJ_GEOM.HFIELD: {
-      const halfX = Math.max(Math.abs(sizeVec?.[0] ?? 0), PLANE_SIZE_EPS);
-      const halfY = Math.max(Math.abs(sizeVec?.[1] ?? 0), PLANE_SIZE_EPS);
+      const halfX = Math.max(Math.abs(sx), PLANE_SIZE_EPS);
+      const halfY = Math.max(Math.abs(sy || sx), PLANE_SIZE_EPS);
       const width = Math.max(PLANE_SIZE_EPS, halfX * 2);
       const height = Math.max(PLANE_SIZE_EPS, halfY * 2);
       geometry = new THREE.PlaneGeometry(width, height, 1, 1);
@@ -2430,10 +2459,10 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
       break;
     }
     default: {
-      const sx = Math.max(1e-6, sizeVec?.[0] || 0.1);
-      const sy = Math.max(1e-6, sizeVec?.[1] || sx);
-      const sz = Math.max(1e-6, sizeVec?.[2] || sx);
-      geometry = new THREE.BoxGeometry(2 * sx, 2 * sy, 2 * sz);
+      const bx = Math.max(1e-6, sx || 0.1);
+      const by = Math.max(1e-6, sy || bx);
+      const bz = Math.max(1e-6, sz || bx);
+      geometry = new THREE.BoxGeometry(2 * bx, 2 * by, 2 * bz);
       break;
     }
   }
@@ -2867,6 +2896,12 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
         };
         if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
         material = ctx.materialPool.get(poolKey);
+        if (material && material.userData?.pooled) {
+          const cloned = material.clone();
+          cloned.userData = cloned.userData || {};
+          cloned.userData.pooled = false;
+          material = cloned;
+        }
         if (!useStandard) material.envMapIntensity = 0;
       }
       material.side = THREE.FrontSide;
@@ -3189,7 +3224,9 @@ function buildGeomDescriptors(snapshot, state, assets) {
   const typeView = snapshot.gtype || assets?.geoms?.type || null;
   const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
   const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
-  const bodyIdView = state?.model?.geomBodyId || null;
+  const bodyIdView = state?.model?.geomBodyId || assets?.geoms?.bodyid || null;
+  const groupIdView = assets?.geoms?.group || null;
+  const geomRgbaView = assets?.geoms?.rgba || null;
   const geomNameLookup = createGeomNameLookup(state?.model?.geoms);
   const sceneGeoms = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms : null;
 
@@ -3199,22 +3236,45 @@ function buildGeomDescriptors(snapshot, state, assets) {
     const type = sceneGeom ? sceneTypeToEnum(sceneGeom.type) : (typeView?.[i] ?? MJ_GEOM.BOX);
     const dataId = dataIdView?.[i] ?? -1;
     const base = 3 * i;
-    const sizeVec = sceneGeom && Array.isArray(sceneGeom.size)
-      ? [
-          sceneGeom.size[0] ?? 0.1,
-          sceneGeom.size[1] ?? sceneGeom.size[0] ?? 0.1,
-          sceneGeom.size[2] ?? sceneGeom.size[0] ?? 0.1,
-        ]
-      : (sizeView
-        ? [
-            sizeView[base + 0] ?? 0,
-            sizeView[base + 1] ?? 0,
-            sizeView[base + 2] ?? 0,
-          ]
-        : null);
+    let sizeVec = null;
+    if (sizeView) {
+      sizeVec = [
+        sizeView[base + 0] ?? 0,
+        sizeView[base + 1] ?? 0,
+        sizeView[base + 2] ?? 0,
+      ];
+    } else if (sceneGeom && Array.isArray(sceneGeom.size)) {
+      sizeVec = [
+        sceneGeom.size[0] ?? 0,
+        sceneGeom.size[1] ?? 0,
+        sceneGeom.size[2] ?? 0,
+      ];
+    }
+    if (Array.isArray(sizeVec)) {
+      if (type === MJ_GEOM.SPHERE) {
+        const r = Math.max(1e-6, Number(sizeVec[0]) || 0.1);
+        sizeVec = [r, r, r];
+      } else if (type === MJ_GEOM.ELLIPSOID) {
+        const ax = Math.max(1e-6, Number(sizeVec[0]) || 0.1);
+        const ay = Math.max(1e-6, Number(sizeVec[1]) || ax);
+        const az = Math.max(1e-6, Number(sizeVec[2]) || ax);
+        sizeVec = [ax, ay, az];
+      }
+    }
     const matId = matIdView?.[i] ?? -1;
     const bodyId = bodyIdView && i < bodyIdView.length ? bodyIdView[i] : -1;
+    const groupId = groupIdView && i < groupIdView.length ? groupIdView[i] : -1;
     const name = geomNameFromLookup(geomNameLookup, i);
+    let rgba = null;
+    if (geomRgbaView && geomRgbaView.length >= ((i * 4) + 4)) {
+      const rgbaBase = i * 4;
+      rgba = [
+        geomRgbaView[rgbaBase + 0],
+        geomRgbaView[rgbaBase + 1],
+        geomRgbaView[rgbaBase + 2],
+        geomRgbaView[rgbaBase + 3],
+      ];
+    }
 
     descriptors.push({
       kind: 'geom',
@@ -3224,6 +3284,8 @@ function buildGeomDescriptors(snapshot, state, assets) {
       size: sizeVec,
       matId,
       bodyId,
+      groupId,
+      rgba,
       name,
     });
   }
@@ -3420,6 +3482,8 @@ function applyGeomDescriptors(context, descriptors, {
       name: desc.name,
       matId: desc.matId,
       bodyId: desc.bodyId,
+      groupId: desc.groupId,
+      rgba: desc.rgba,
     };
 
     const mesh = ensureGeomMesh(
@@ -3808,7 +3872,7 @@ export function createRendererManager({
     window.__renderCtx = context;
   }
     const renderer = context.renderer;
-    const debugSceneEnabled = isSceneDebugEnabled();
+    const debugSceneEnabled = isSceneDebugEnabled(state);
     const policy = computeScenePolicy(snapshot, state, context);
     const {
       sceneFlags,
@@ -4326,20 +4390,6 @@ export function createRendererManager({
         frame: ctx._frameCounter | 0,
       };
       setRenderStats(stats);
-      if (debugSceneEnabled) {
-        debugSceneDescriptors(context, {
-          geomDescriptors,
-          cameraDescriptors: cameraDescriptors || [],
-          stats,
-          policy,
-        });
-      }
-      debugSceneDescriptors(context, {
-        geomDescriptors,
-        cameraDescriptors: cameraDescriptors || [],
-        stats,
-        policy,
-      });
     try {
       if (typeof window !== 'undefined') {
         window.__drawnCount = drawn;
