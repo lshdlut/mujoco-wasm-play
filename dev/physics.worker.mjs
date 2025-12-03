@@ -1828,6 +1828,7 @@ setInterval(() => {
     lastSyncWallTime = nowSec;
     return;
   }
+  const tSimBefore = simTimeApprox;
   // Advance sim by a bounded number of fixed steps.
   for (let i = 0; i < steps && sim && typeof sim.step === 'function'; i += 1) {
     try {
@@ -1838,18 +1839,6 @@ setInterval(() => {
       break;
     }
   }
-  const simDelta = steps * currentDt;
-  if (simDelta > 0 && wallDelta > 0) {
-    const instSlowdown = wallDelta / simDelta;
-    if (Number.isFinite(instSlowdown) && instSlowdown > 0) {
-      if (!(measuredSlowdown > 0)) {
-        measuredSlowdown = instSlowdown;
-      } else {
-        const alpha = 0.1;
-        measuredSlowdown = measuredSlowdown * (1 - alpha) + instSlowdown * alpha;
-      }
-    }
-  }
   stepDebt -= steps;
   if (stepDebt < 0) stepDebt = 0;
   lastSyncWallTime = nowSec;
@@ -1858,6 +1847,19 @@ setInterval(() => {
       const tSim = sim.time() || 0;
       lastSyncSimTime = tSim;
       simTimeApprox = tSim;
+      const simDelta = Math.max(0, tSim - tSimBefore);
+      const theoretical = wallDelta * rate;
+      if (simDelta > 0 && theoretical > 0) {
+        const instSlowdown = theoretical / simDelta;
+        if (Number.isFinite(instSlowdown) && instSlowdown > 0) {
+          if (!(measuredSlowdown > 0)) {
+            measuredSlowdown = instSlowdown;
+          } else {
+            const alpha = 0.1;
+            measuredSlowdown = measuredSlowdown * (1 - alpha) + instSlowdown * alpha;
+          }
+        }
+      }
     }
   } catch {}
 }, 8);

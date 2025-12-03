@@ -249,6 +249,12 @@ body.fullscreen {
 .overlay-card[data-testid="overlay-info"] {
   background: var(--color-overlay-soft);
 }
+.overlay-card[data-testid="overlay-realtime"] {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  min-width: auto;
+}
 .overlay-card[data-testid="overlay-info"] {
   position: absolute;
   left: 12px;
@@ -817,7 +823,8 @@ body.layout-main {
    </canvas>
    <div class="overlay-stack">
      <div class="overlay-card" data-testid="overlay-realtime">
-      <div data-testid="overlay-realtime-label">100%</div>
+      <div data-testid="overlay-realtime-desired">Speed: 100%</div>
+      <div data-testid="overlay-realtime-actual">Physics: 100%</div>
      </div>
      <div class="overlay-card" data-testid="overlay-help">
       <div class="help-title">Help</div>
@@ -825,6 +832,8 @@ body.layout-main {
       <div class="help-grid">
        <div class="help-key">Space</div>
        <div class="help-desc">Play / Pause</div>
+       <div class="help-key">+  -</div>
+       <div class="help-desc">Real-time scale (discrete speed levels)</div>
        <div class="help-key">Left / Right arrow</div>
        <div class="help-desc">Step Back / Forward (history aware)</div>
        <div class="help-key">Tab / Shift-Tab</div>
@@ -855,11 +864,11 @@ body.layout-main {
        <div class="help-desc">Help overlay</div>
        <div class="help-key">F2</div>
        <div class="help-desc">Info overlay</div>
+       <div class="help-key">UI title double-click</div>
+       <div class="help-desc">Expand / collapse all sections</div>
       </div>
       <div class="help-subtitle help-subtitle-unimplemented">Unimplemented / web differences</div>
       <div class="help-grid">
-       <div class="help-key">+  -</div>
-       <div class="help-desc">Real-time scale</div>
        <div class="help-key">F3</div>
        <div class="help-desc">Profiler overlay (not implemented)</div>
        <div class="help-key">F4</div>
@@ -868,8 +877,6 @@ body.layout-main {
        <div class="help-desc">Fullscreen (use browser fullscreen instead)</div>
        <div class="help-key">UI right-button hold</div>
        <div class="help-desc">Show UI shortcuts (not implemented)</div>
-       <div class="help-key">UI title double-click</div>
-       <div class="help-desc">Expand / collapse all sections (web: global expand/collapse)</div>
       </div>
      </div>
     <div class="overlay-card" data-testid="overlay-info">

@@ -57,9 +57,11 @@ let lastFpsSampleTimeMs = (typeof performance !== 'undefined' && performance.now
   ? performance.now()
   : Date.now();
 
-// Mirror MuJoCo simulate's percentRealTime ladder (see simulate.h).
-// Logarithmically spaced real-time slow-down coefficients (percent).
+// Mirror MuJoCo simulate's percentRealTime ladder (see simulate.h) and
+// extend with a set of fast-forward levels. Values are in percent, ordered
+// from fastest (index 0) to slowest.
 const REALTIME_LEVELS = [
+  800, 400, 200, 150, 120,
   100, 80, 66, 50, 40, 33, 25, 20, 16, 13,
   10, 8, 6.6, 5.0, 4, 3.3, 2.5, 2, 1.6, 1.3,
   1, 0.8, 0.66, 0.5, 0.4, 0.33, 0.25, 0.2, 0.16, 0.13,
@@ -222,10 +224,6 @@ function updateOverlay(card, visible) {
 
 function updateRealtimeOverlay(state) {
   if (!overlayRealtime) return;
-  if (state?.overlays?.help) {
-    overlayRealtime.classList.remove('visible');
-    return;
-  }
   const sim = state?.simulation || {};
   const hud = state?.hud || {};
   const run = !!sim.run;
@@ -241,23 +239,19 @@ function updateRealtimeOverlay(state) {
   const actual = (Number.isFinite(slowdown) && slowdown > 0) ? (100 / slowdown) : desired;
   const offset = Math.abs(actual - desired);
   const misaligned = run && offset > 0.1 * desired;
-  let label = '';
-  if (desired !== 100 || misaligned) {
-    const formatPercent = (val, decimals = 1) => {
-      const v = Number(val) || 0;
-      const abs = Math.abs(v);
-      if (!Number.isFinite(abs) || abs <= 0) return '0%';
-      if (Math.abs(abs - Math.round(abs)) < 0.05) return `${Math.round(abs)}%`;
-      return `${abs.toFixed(decimals)}%`;
-    };
-    label = formatPercent(desired, 0);
-    if (misaligned) {
-      label += ` (${formatPercent(actual, 1)})`;
-    }
-  }
-  const labelEl = overlayRealtime.querySelector('[data-testid="overlay-realtime-label"]') || overlayRealtime;
-  if (label) {
-    labelEl.textContent = label;
+  const shouldShow = (desired !== 100) || misaligned;
+  const formatPercent = (val, decimals = 1) => {
+    const v = Number(val) || 0;
+    const abs = Math.abs(v);
+    if (!Number.isFinite(abs) || abs <= 0) return '0%';
+    if (Math.abs(abs - Math.round(abs)) < 0.05) return `${Math.round(abs)}%`;
+    return `${abs.toFixed(decimals)}%`;
+  };
+  const desiredEl = overlayRealtime.querySelector('[data-testid="overlay-realtime-desired"]') || overlayRealtime;
+  const actualEl = overlayRealtime.querySelector('[data-testid="overlay-realtime-actual"]');
+  if (shouldShow) {
+    if (desiredEl) desiredEl.textContent = `Speed: ${formatPercent(desired, 0)}`;
+    if (actualEl) actualEl.textContent = `Physics: ${formatPercent(actual, 1)}`;
     overlayRealtime.classList.add('visible');
   } else {
     overlayRealtime.classList.remove('visible');
@@ -356,6 +350,7 @@ function updateInfoOverlayCard(state) {
     addRow('fps', 'FPS');
     addRow('memory', 'Memory');
     addRow('energy', 'Energy');
+    addRow('fwdinv', 'FwdInv');
     addRow('islands', 'Islands');
     overlayInfo.appendChild(grid);
   }
@@ -383,6 +378,7 @@ function updateInfoOverlayCard(state) {
   const narena = Number(info?.narena) || 0;
   const maxArena = Number(info?.maxuseArena) || 0;
   const energy = Number(info?.energy);
+  const solverFwdinv = Array.isArray(info?.solverFwdinv) ? info.solverFwdinv : null;
   const nisland = Number(info?.nisland) || 0;
 
   const modelEl = getFieldEl('model');
@@ -424,6 +420,22 @@ function updateInfoOverlayCard(state) {
       memEl.textContent = `con/efc ${maxCon}/${maxEfc}`;
     } else {
       memEl.textContent = 'n/a';
+    }
+  }
+  const fwdinvEl = getFieldEl('fwdinv');
+  if (fwdinvEl) {
+    const enableFlags = state?.model?.opt?.enableflags;
+    const enabled = typeof enableFlags === 'number' && !!(enableFlags & (1 << 2));
+    if (enabled && solverFwdinv && solverFwdinv.length >= 2) {
+      const f0 = Number(solverFwdinv[0]);
+      const f1 = Number(solverFwdinv[1]);
+      if (Number.isFinite(f0) && Number.isFinite(f1)) {
+        fwdinvEl.textContent = `${f0.toFixed(1)}  ${f1.toFixed(1)}`;
+      } else {
+        fwdinvEl.textContent = 'n/a';
+      }
+    } else {
+      fwdinvEl.textContent = 'n/a';
     }
   }
   const energyEl = getFieldEl('energy');

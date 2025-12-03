@@ -100,6 +100,56 @@ const SCENE_FLAG_DEFAULTS = Object.freeze([
   true,  // cull face
 ]);
 
+const DISABLE_FLAG_LABELS = Object.freeze([
+  'Constraint',
+  'Equality',
+  'Frictionloss',
+  'Limit',
+  'Contact',
+  'Spring',
+  'Damper',
+  'Gravity',
+  'Clampctrl',
+  'Warmstart',
+  'Filterparent',
+  'Actuation',
+  'Refsafe',
+  'Sensor',
+  'Midphase',
+  'Eulerdamp',
+  'AutoReset',
+  'NativeCCD',
+  'Island',
+]);
+
+const ENABLE_FLAG_LABELS = Object.freeze([
+  'Override',
+  'Energy',
+  'Fwdinv',
+  'InvDiscrete',
+  'MultiCCD',
+]);
+
+const ACTUATOR_GROUP_LABELS = Object.freeze([
+  'Act Group 0',
+  'Act Group 1',
+  'Act Group 2',
+  'Act Group 3',
+  'Act Group 4',
+  'Act Group 5',
+]);
+
+function flagsFromMask(mask, labels, invert = false) {
+  const result = {};
+  const m = Number(mask) | 0;
+  for (let i = 0; i < labels.length; i += 1) {
+    const label = labels[i];
+    const bitOn = !!(m & (1 << i));
+    result[label] = invert ? !bitOn : bitOn;
+  }
+  return result;
+}
+
 const DEFAULT_VIEWER_STATE = Object.freeze({
   overlays: {
     help: false,
@@ -115,7 +165,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     run: true,
     scrubIndex: 0,
     keyIndex: 0,
-    realTimeIndex: 0,
+    realTimeIndex: 5,
   },
   runtime: {
     cameraIndex: 0,
@@ -706,6 +756,22 @@ function mergeBackendSnapshot(draft, snapshot) {
       ...(draft.model.opt || {}),
       ...snapshot.options,
     };
+    if (!draft.physics) {
+      draft.physics = { disableFlags: {}, enableFlags: {}, actuatorGroups: {} };
+    }
+    if (typeof snapshot.options.disableflags === 'number' && Number.isFinite(snapshot.options.disableflags)) {
+      draft.physics.disableFlags = flagsFromMask(snapshot.options.disableflags, DISABLE_FLAG_LABELS, false);
+    }
+    if (typeof snapshot.options.enableflags === 'number' && Number.isFinite(snapshot.options.enableflags)) {
+      draft.physics.enableFlags = flagsFromMask(snapshot.options.enableflags, ENABLE_FLAG_LABELS, false);
+    }
+    if (typeof snapshot.options.disableactuator === 'number' && Number.isFinite(snapshot.options.disableactuator)) {
+      draft.physics.actuatorGroups = flagsFromMask(
+        snapshot.options.disableactuator,
+        ACTUATOR_GROUP_LABELS,
+        true,
+      );
+    }
   }
   if (snapshot.visual) {
     if (!draft.model) draft.model = {};
@@ -2211,6 +2277,9 @@ async function loadDefaultXml() {
         if (typeof data.ngeom === 'number') lastSnapshot.ngeom = data.ngeom;
         if (typeof data.nq === 'number') lastSnapshot.nq = data.nq;
         if (typeof data.nv === 'number') lastSnapshot.nv = data.nv;
+        if (typeof data.measuredSlowdown === 'number' && Number.isFinite(data.measuredSlowdown)) {
+          lastSnapshot.measuredSlowdown = data.measuredSlowdown;
+        }
         if (data.info && typeof data.info === 'object') {
           lastSnapshot.info = { ...data.info };
         }
@@ -2518,6 +2587,100 @@ async function loadDefaultXml() {
     if (binding === 'Simulate::tracking_geom') {
       lastSnapshot.trackingGeom = Math.trunc(toNumber(value));
       notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (binding && binding.startsWith('Simulate::disable[')) {
+      const match = binding.match(/^Simulate::disable\[(\d+)\]$/);
+      const bitIndex = match ? normaliseInt(match[1], -1) : -1;
+      if (bitIndex >= 0 && bitIndex < 32) {
+        if (!lastSnapshot.options || typeof lastSnapshot.options !== 'object') {
+          lastSnapshot.options = {};
+        }
+        const currentMask =
+          typeof lastSnapshot.options.disableflags === 'number'
+            ? (lastSnapshot.options.disableflags | 0)
+            : 0;
+        const active = bool(value);
+        const bit = 1 << bitIndex;
+        const nextMask = active ? (currentMask | bit) : (currentMask & ~bit);
+        lastSnapshot.options.disableflags = nextMask;
+        try {
+          client.postMessage?.({
+            cmd: 'setField',
+            target: 'mjOption',
+            path: ['disableflags'],
+            kind: 'int',
+            size: 1,
+            value: [nextMask],
+          });
+        } catch (err) {
+          if (debug) console.warn('[backend disableflags] post failed', err);
+        }
+        notifyListeners();
+      }
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (binding && binding.startsWith('Simulate::enable[')) {
+      const match = binding.match(/^Simulate::enable\[(\d+)\]$/);
+      const bitIndex = match ? normaliseInt(match[1], -1) : -1;
+      if (bitIndex >= 0 && bitIndex < 32) {
+        if (!lastSnapshot.options || typeof lastSnapshot.options !== 'object') {
+          lastSnapshot.options = {};
+        }
+        const currentMask =
+          typeof lastSnapshot.options.enableflags === 'number'
+            ? (lastSnapshot.options.enableflags | 0)
+            : 0;
+        const active = bool(value);
+        const bit = 1 << bitIndex;
+        const nextMask = active ? (currentMask | bit) : (currentMask & ~bit);
+        lastSnapshot.options.enableflags = nextMask;
+        try {
+          client.postMessage?.({
+            cmd: 'setField',
+            target: 'mjOption',
+            path: ['enableflags'],
+            kind: 'int',
+            size: 1,
+            value: [nextMask],
+          });
+        } catch (err) {
+          if (debug) console.warn('[backend enableflags] post failed', err);
+        }
+        notifyListeners();
+      }
+      return resolveSnapshot(lastSnapshot);
+    }
+    if (binding && binding.startsWith('Simulate::enableactuator[')) {
+      const match = binding.match(/^Simulate::enableactuator\[(\d+)\]$/);
+      const bitIndex = match ? normaliseInt(match[1], -1) : -1;
+      if (bitIndex >= 0 && bitIndex < 32) {
+        if (!lastSnapshot.options || typeof lastSnapshot.options !== 'object') {
+          lastSnapshot.options = {};
+        }
+        const currentMask =
+          typeof lastSnapshot.options.disableactuator === 'number'
+            ? (lastSnapshot.options.disableactuator | 0)
+            : 0;
+        const enabled = bool(value);
+        const bit = 1 << bitIndex;
+        // enableactuator is the inverse of disableactuator bitmask
+        const nextMask = enabled ? (currentMask & ~bit) : (currentMask | bit);
+        lastSnapshot.options.disableactuator = nextMask;
+        try {
+          client.postMessage?.({
+            cmd: 'setField',
+            target: 'mjOption',
+            path: ['disableactuator'],
+            kind: 'int',
+            size: 1,
+            value: [nextMask],
+          });
+        } catch (err) {
+          if (debug) console.warn('[backend disableactuator] post failed', err);
+        }
+        notifyListeners();
+      }
       return resolveSnapshot(lastSnapshot);
     }
     const groupMatch = binding?.match(/^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/);
