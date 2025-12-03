@@ -113,7 +113,7 @@ const renderCtx = {
   snapshotLogState: null,
   frameId: null,
 };
-if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
   window.__renderCtx = renderCtx;
 }
 
@@ -913,7 +913,7 @@ if (typeof window !== 'undefined') {
     };
     window.__viewerRenderer = {
       getStats: () => ({ ...renderStats }),
-      getContext: () => (renderCtx.initialized ? renderCtx : null),
+      getContext: () => (rendererManager.getContext ? rendererManager.getContext() : (renderCtx.initialized ? renderCtx : null)),
       ensureLoop: () => rendererManager.ensureRenderLoop(),
       renderScene: (snapshot, state) => rendererManager.renderScene(snapshot, state),
     };
@@ -947,13 +947,14 @@ function queueResizeCanvas() {
 queueResizeCanvas();
 window.addEventListener('resize', queueResizeCanvas);
 
-function processScreenshotQueue(state) {
-  if (!pendingScreenshotSeq || screenshotInFlight) return;
-  if (!renderCtx.initialized || !renderCtx.renderer || !renderCtx.scene || !renderCtx.camera) return;
-  const seq = pendingScreenshotSeq;
-  pendingScreenshotSeq = 0;
-  screenshotInFlight = true;
-  captureScreenshot(renderCtx, state)
+  function processScreenshotQueue(state) {
+    if (!pendingScreenshotSeq || screenshotInFlight) return;
+    const ctx = rendererManager.getContext ? rendererManager.getContext() : renderCtx;
+    if (!ctx || !ctx.initialized || !ctx.renderer || !ctx.scene || !ctx.camera) return;
+    const seq = pendingScreenshotSeq;
+    pendingScreenshotSeq = 0;
+    screenshotInFlight = true;
+    captureScreenshot(ctx, state)
     .catch((err) => {
       console.warn('[screenshot] capture failed', err);
       if (store) {

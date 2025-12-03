@@ -4465,11 +4465,29 @@ export function createRendererManager({
     return ctx;
   }
 
+  function getContext() {
+    return ctx && ctx.initialized ? ctx : null;
+  }
+
+  function dispose() {
+    if (!ctx) return;
+    ctx.loopActive = false;
+    if (ctx.frameId != null && typeof window !== 'undefined' && window.cancelAnimationFrame) {
+      try { window.cancelAnimationFrame(ctx.frameId); } catch {}
+      ctx.frameId = null;
+    }
+    if (ctx.renderer && typeof ctx.renderer.dispose === 'function') {
+      try { ctx.renderer.dispose(); } catch {}
+    }
+  }
+
   return {
     setup,
     renderScene,
     ensureRenderLoop,
     updateViewport: () => updateRendererViewport(),
+    getContext,
+    dispose,
   };
 }
 
