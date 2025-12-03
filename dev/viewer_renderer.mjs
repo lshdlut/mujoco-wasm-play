@@ -3144,6 +3144,188 @@ function getDefaultVopt(ctx, state) {
   }
   return ctx.defaultVopt;
 }
+
+/**
+ * @typedef {Object} GeomDescriptor
+ * @property {'geom'} kind
+ * @property {number} index
+ * @property {number} type
+ * @property {number} dataId
+ * @property {number[] | null} size
+ * @property {number} matId
+ * @property {number} bodyId
+ * @property {string} name
+ */
+
+/**
+ * Build descriptors for base MuJoCo geoms in the current snapshot.
+ * This describes "what exists" at the geom level, independent of how it is rendered.
+ *
+ * @param {object} snapshot
+ * @param {object} state
+ * @param {object | null} assets
+ * @returns {GeomDescriptor[]}
+ */
+function buildGeomDescriptors(snapshot, state, assets) {
+  const ngeom = snapshot?.ngeom | 0;
+  if (!(ngeom > 0)) return [];
+  const sizeView = snapshot.gsize || assets?.geoms?.size || null;
+  const typeView = snapshot.gtype || assets?.geoms?.type || null;
+  const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
+  const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
+  const bodyIdView = state?.model?.geomBodyId || null;
+  const geomNameLookup = createGeomNameLookup(state?.model?.geoms);
+  const sceneGeoms = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms : null;
+
+  const descriptors = [];
+  for (let i = 0; i < ngeom; i += 1) {
+    const sceneGeom = sceneGeoms ? sceneGeoms[i] : null;
+    const type = sceneGeom ? sceneTypeToEnum(sceneGeom.type) : (typeView?.[i] ?? MJ_GEOM.BOX);
+    const dataId = dataIdView?.[i] ?? -1;
+    const base = 3 * i;
+    const sizeVec = sceneGeom && Array.isArray(sceneGeom.size)
+      ? [
+          sceneGeom.size[0] ?? 0.1,
+          sceneGeom.size[1] ?? sceneGeom.size[0] ?? 0.1,
+          sceneGeom.size[2] ?? sceneGeom.size[0] ?? 0.1,
+        ]
+      : (sizeView
+        ? [
+            sizeView[base + 0] ?? 0,
+            sizeView[base + 1] ?? 0,
+            sizeView[base + 2] ?? 0,
+          ]
+        : null);
+    const matId = matIdView?.[i] ?? -1;
+    const bodyId = bodyIdView && i < bodyIdView.length ? bodyIdView[i] : -1;
+    const name = geomNameFromLookup(geomNameLookup, i);
+
+    descriptors.push({
+      kind: 'geom',
+      index: i,
+      type,
+      dataId,
+      size: sizeVec,
+      matId,
+      bodyId,
+      name,
+    });
+  }
+
+  return descriptors;
+}
+
+/**
+ * Apply geom descriptors to the Three.js scene: ensure meshes exist, update pose/material,
+ * and apply visibility/group filters. Returns the number of geoms drawn.
+ *
+ * Behaviour is intended to match the previous inlined loop in renderScene.
+ *
+ * @param {object} context
+ * @param {GeomDescriptor[]} descriptors
+ * @param {object} params
+ * @param {object | null} params.assets
+ * @param {object} params.state
+ * @param {object} params.snapshot
+ * @param {boolean[]} params.sceneFlags
+ * @param {boolean} params.reflectionEnabled
+ * @param {boolean} params.hideAllGeometry
+ * @param {ArrayLike<number> | null} params.geomGroupIds
+ * @param {boolean[] | null} params.geomGroupMask
+ * @returns {number}
+ */
+function applyGeomDescriptors(context, descriptors, {
+  assets,
+  state,
+  snapshot,
+  sceneFlags,
+  reflectionEnabled,
+  hideAllGeometry,
+  geomGroupIds,
+  geomGroupMask,
+}) {
+  if (!Array.isArray(descriptors) || descriptors.length === 0) {
+    // Hide any leftover meshes if no descriptors exist.
+    if (Array.isArray(context.meshes)) {
+      for (let i = 0; i < context.meshes.length; i += 1) {
+        if (context.meshes[i]) {
+          context.meshes[i].visible = false;
+        }
+      }
+    }
+    return 0;
+  }
+
+  const flags = Array.isArray(sceneFlags) ? sceneFlags : [];
+  const n = descriptors.length;
+  let drawn = 0;
+
+  for (let idx = 0; idx < n; idx += 1) {
+    const desc = descriptors[idx];
+    if (!desc || desc.kind !== 'geom') continue;
+    const i = desc.index;
+    const sizeVec = desc.size;
+    const geomMeta = {
+      index: i,
+      type: desc.type,
+      dataId: desc.dataId,
+      size: sizeVec,
+      // Plane size[2] is not grid step; use a sane default (1m) for planes.
+      grid: desc.type === MJ_GEOM.PLANE ? 1 : sizeVec?.[2] ?? 0,
+      name: desc.name,
+      matId: desc.matId,
+      bodyId: desc.bodyId,
+    };
+
+    const mesh = ensureGeomMesh(
+      context,
+      i,
+      desc.type,
+      assets,
+      desc.dataId,
+      sizeVec,
+      { geomMeta },
+      state,
+    );
+    if (!mesh) continue;
+
+    const reflectanceValue = resolveMaterialReflectance(desc.matId, assets);
+    mesh.userData = mesh.userData || {};
+    mesh.userData.matId = desc.matId;
+    applyReflectanceToMaterial(mesh, context, reflectanceValue, reflectionEnabled);
+    updateMeshFromSnapshot(mesh, i, snapshot, state, assets, flags);
+
+    let visible = mesh.visible;
+    if (hideAllGeometry) {
+      visible = false;
+    }
+    if (visible && geomGroupMask && Array.isArray(geomGroupMask)) {
+      const rawGroup = geomGroupIds && i < geomGroupIds.length ? geomGroupIds[i] : 0;
+      const groupIdx = Number.isFinite(rawGroup) ? (rawGroup | 0) : 0;
+      if (groupIdx >= 0 && groupIdx < geomGroupMask.length) {
+        if (!geomGroupMask[groupIdx]) {
+          visible = false;
+        }
+      }
+    }
+
+    mesh.visible = visible;
+    if (visible) {
+      drawn += 1;
+    }
+  }
+
+  // Hide any stale meshes beyond the descriptor range.
+  if (Array.isArray(context.meshes) && context.meshes.length > n) {
+    for (let i = n; i < context.meshes.length; i += 1) {
+      if (context.meshes[i]) {
+        context.meshes[i].visible = false;
+      }
+    }
+  }
+
+  return drawn;
+}
 export function createRendererManager({
   canvas,
   renderCtx,
@@ -3938,9 +4120,7 @@ function renderScene(snapshot, state) {
     const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
     const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
     const bodyIdView = state?.model?.geomBodyId || null;
-    const geomNameLookup = createGeomNameLookup(state?.model?.geoms);
-
-  const overlayOptions = {
+    const overlayOptions = {
       geomGroupIds,
       geomGroupMask,
       hideAllGeometry,
@@ -3976,66 +4156,17 @@ function renderScene(snapshot, state) {
     // Perturb overlay is driven by runtime.pertViz in state; do not gate on vopt flags.
     updatePerturbOverlay(context, snapshot, state, overlayOptions);
 
-    for (let i = 0; i < ngeom; i += 1) {
-      const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
-      const type = sceneGeom ? sceneTypeToEnum(sceneGeom.type) : (typeView?.[i] ?? MJ_GEOM.BOX);
-      const dataId = dataIdView?.[i] ?? -1;
-      const base = 3 * i;
-      const sizeVec = sceneGeom && Array.isArray(sceneGeom.size)
-        ? [sceneGeom.size[0] ?? 0.1, sceneGeom.size[1] ?? sceneGeom.size[0] ?? 0.1, sceneGeom.size[2] ?? sceneGeom.size[0] ?? 0.1]
-        : (sizeView
-          ? [
-              sizeView[base + 0] ?? 0,
-              sizeView[base + 1] ?? 0,
-              sizeView[base + 2] ?? 0,
-            ]
-          : null);
-      const matIndex = matIdView?.[i] ?? -1;
-      const geomMeta = {
-        index: i,
-        type,
-        dataId,
-        size: sizeVec,
-        // Plane size[2] is not grid step; use a sane default (1m) for planes.
-        grid: type === MJ_GEOM.PLANE ? 1 : sizeVec?.[2] ?? 0,
-        name: geomNameFromLookup(geomNameLookup, i),
-        matId: matIndex,
-        bodyId: bodyIdView && i < bodyIdView.length ? bodyIdView[i] : -1,
-      };
-      const mesh = ensureGeomMesh(
-        context,
-        i,
-        type,
-        assets,
-        dataId,
-        sizeVec,
-        { geomMeta },
-        state,
-      );
-      if (!mesh) continue;
-      const reflectanceValue = resolveMaterialReflectance(matIndex, assets);
-      mesh.userData = mesh.userData || {};
-      mesh.userData.matId = matIndex;
-      applyReflectanceToMaterial(mesh, context, reflectanceValue, reflectionEnabled);
-      updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags);
-
-      let visible = mesh.visible;
-      if (hideAllGeometry) {
-        visible = false;
-      }
-      if (visible && geomGroupMask) {
-        const rawGroup = geomGroupIds && i < geomGroupIds.length ? geomGroupIds[i] : 0;
-        const groupIdx = Number.isFinite(rawGroup) ? (rawGroup | 0) : 0;
-        if (groupIdx >= 0 && groupIdx < geomGroupMask.length) {
-          if (!geomGroupMask[groupIdx]) {
-            visible = false;
-          }
-        }
-      }
-
-      mesh.visible = visible;
-      if (visible) drawn += 1;
-    }
+    const geomDescriptors = buildGeomDescriptors(snapshot, state, assets);
+    drawn = applyGeomDescriptors(context, geomDescriptors, {
+      assets,
+      state,
+      snapshot,
+      sceneFlags,
+      reflectionEnabled,
+      hideAllGeometry,
+      geomGroupIds,
+      geomGroupMask,
+    });
 
     context.ground = null;
     for (let i = 0; i < ngeom; i += 1) {
@@ -4043,12 +4174,6 @@ function renderScene(snapshot, state) {
       if (candidate?.userData?.infinitePlane && candidate.visible) {
         context.ground = candidate;
         break;
-      }
-    }
-
-    for (let i = ngeom; i < context.meshes.length; i += 1) {
-      if (context.meshes[i]) {
-        context.meshes[i].visible = false;
       }
     }
 
