@@ -1792,7 +1792,7 @@ function updateConstraintOverlays(ctx, snapshot, state) {
   const nsite = siteXpos ? Math.floor(siteXpos.length / 3) : 0;
   const nbody = bxpos ? Math.floor(bxpos.length / 3) : 0;
   let used = 0;
-  const addCapsule = () => {
+  const addSphere = () => {
     let mesh = pool[used];
     if (!mesh) {
       const mat = new THREE.MeshBasicMaterial({
@@ -1803,7 +1803,7 @@ function updateConstraintOverlays(ctx, snapshot, state) {
         toneMapped: false,
         fog: false,
       });
-      mesh = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, mat);
+      mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), mat);
       mesh.renderOrder = 48;
       pool[used] = mesh;
       group.add(mesh);
@@ -1846,23 +1846,27 @@ function updateConstraintOverlays(ctx, snapshot, state) {
     if (!pose1 || !pose2) continue;
     const p1 = pose1.pos.clone();
     const p2 = pose2.pos.clone();
-    const dir = p2.clone().sub(p1);
-    const dist = dir.length();
-    if (dist < 1e-6) continue;
-    const mesh = addCapsule();
-    mesh.position.copy(p1.clone().add(p2).multiplyScalar(0.5));
-    mesh.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, dir.clone().normalize());
-    const r = t === MJ_EQ.CONNECT ? radiusConnect : radiusConst;
-    mesh.scale.set(r, dist, r);
-    if (mesh.material) {
-      const mat = mesh.material;
-      const isConnect = t === MJ_EQ.CONNECT;
-      const hex = isConnect ? colorConnect : colorConstraint;
-      const op = isConnect ? opacityConnect : opacityConstraint;
-      mat.color.setHex(hex);
-      mat.opacity = op;
-      mat.transparent = op < 0.999;
-      mat.needsUpdate = true;
+    const rConnect = radiusConnect;
+    const rConstraint = radiusConst;
+    // First endpoint: "connect" color
+    const s1 = addSphere();
+    s1.position.copy(p1);
+    s1.scale.set(rConnect, rConnect, rConnect);
+    if (s1.material) {
+      s1.material.color.setHex(colorConnect);
+      s1.material.opacity = opacityConnect;
+      s1.material.transparent = opacityConnect < 0.999;
+      s1.material.needsUpdate = true;
+    }
+    // Second endpoint: "constraint" color
+    const s2 = addSphere();
+    s2.position.copy(p2);
+    s2.scale.set(rConstraint, rConstraint, rConstraint);
+    if (s2.material) {
+      s2.material.color.setHex(colorConstraint);
+      s2.material.opacity = opacityConstraint;
+      s2.material.transparent = opacityConstraint < 0.999;
+      s2.material.needsUpdate = true;
     }
   }
   for (let i = used; i < pool.length; i += 1) {
@@ -1911,21 +1915,28 @@ function updateLightOverlays(ctx, snapshot, state) {
   for (let i = 0; i < count; i += 1) {
     const mesh = addMesh();
     const base = 3 * i;
-    mesh.position.set(
-      Number(pos[base + 0]) || 0,
-      Number(pos[base + 1]) || 0,
-      Number(pos[base + 2]) || 0,
-    );
+    const px = Number(pos[base + 0]) || 0;
+    const py = Number(pos[base + 1]) || 0;
+    const pz = Number(pos[base + 2]) || 0;
     const dirBase = 3 * i;
     LIGHT_TMP_DIR.set(
       Number(dir[dirBase + 0]) || 0,
       Number(dir[dirBase + 1]) || 0,
       Number(dir[dirBase + 2]) || 1,
     ).normalize();
-    LIGHT_TMP_QUAT.setFromUnitVectors(PERTURB_RING_NORMAL, LIGHT_TMP_DIR);
+    // Orient cylinder Y-axis along light direction (match mjv_quatZ2Vec + geom frame)
+    LIGHT_TMP_QUAT.setFromUnitVectors(PERTURB_AXIS_DEFAULT, LIGHT_TMP_DIR);
     mesh.quaternion.copy(LIGHT_TMP_QUAT);
-    const s = Math.max(1e-4, meanSize * 0.12 * sizeScale);
-    mesh.scale.set(s, s, s);
+    // Offset gizmo slightly "behind" the light along -dir, similar to simulate
+    const offset = Math.max(1e-4, meanSize * sizeScale);
+    mesh.position.set(
+      px - LIGHT_TMP_DIR.x * offset,
+      py - LIGHT_TMP_DIR.y * offset,
+      pz - LIGHT_TMP_DIR.z * offset,
+    );
+    const radius = Math.max(1e-4, meanSize * sizeScale * 0.8);
+    const height = Math.max(1e-4, meanSize * sizeScale * 1.0);
+    mesh.scale.set(radius, height, radius);
     if (mesh.material) {
       mesh.material.color.setHex(colorHex);
       mesh.material.opacity = opacity;
@@ -1954,6 +1965,7 @@ function updateComOverlays(ctx, snapshot, state) {
   const colorHex = rgbaToHex(visRgba.com, 0xe6e6e6);
   const opacity = alphaFromArray(visRgba.com, 1);
   const count = Math.floor(xipos.length / 3);
+  const bodyParent = state?.model?.bodyParentId || null;
   let used = 0;
   const addMesh = () => {
     let mesh = pool[used];
@@ -1975,7 +1987,15 @@ function updateComOverlays(ctx, snapshot, state) {
     used += 1;
     return mesh;
   };
-  for (let i = 1; i < count; i += 1) { // skip world body 0
+  const maxIndex = bodyParent && typeof bodyParent.length === 'number'
+    ? Math.min(count, bodyParent.length)
+    : count;
+  for (let i = 1; i < maxIndex; i += 1) { // skip world body 0
+    if (bodyParent && typeof bodyParent.length === 'number') {
+      const parentId = Number(bodyParent[i]);
+      // Only draw COM for “root” bodies (direct children of world), approximating subtree COM.
+      if (Number.isFinite(parentId) && parentId !== 0) continue;
+    }
     const mesh = addMesh();
     const base = 3 * i;
     mesh.position.set(
@@ -1983,7 +2003,7 @@ function updateComOverlays(ctx, snapshot, state) {
       Number(xipos[base + 1]) || 0,
       Number(xipos[base + 2]) || 0,
     );
-    const r = Math.max(1e-4, meanSize * 0.05 * sizeScale);
+    const r = Math.max(1e-4, meanSize * sizeScale);
     mesh.scale.set(r, r, r);
     if (mesh.material) {
       mesh.material.color.setHex(colorHex);
@@ -2040,8 +2060,8 @@ function updateJointOverlays(ctx, snapshot, state) {
   const nbody = Math.floor(bxpos.length / 3);
   let used = 0;
   const addMesh = () => {
-    let mesh = pool[used];
-    if (!mesh) {
+    let node = pool[used];
+    if (!node) {
       const mat = new THREE.MeshBasicMaterial({
         color: colorHex,
         transparent: opacity < 0.999,
@@ -2050,14 +2070,19 @@ function updateJointOverlays(ctx, snapshot, state) {
         toneMapped: false,
         fog: false,
       });
-      mesh = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, mat);
-      mesh.renderOrder = 52;
-      pool[used] = mesh;
-      group.add(mesh);
+      const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, mat);
+      const head = new THREE.Mesh(PERTURB_HEAD_GEOMETRY, mat);
+      node = new THREE.Group();
+      node.add(shaft);
+      node.add(head);
+      node.renderOrder = 52;
+      node.userData = { shaft, head, material: mat };
+      pool[used] = node;
+      group.add(node);
     }
-    mesh.visible = true;
+    node.visible = true;
     used += 1;
-    return mesh;
+    return node;
   };
   for (let i = 0; i < nj; i += 1) {
     const bodyId = Number(jbody[i]) || 0;
@@ -2087,18 +2112,29 @@ function updateJointOverlays(ctx, snapshot, state) {
       Number(jaxis[axisBase + 2]) || 1,
     ).normalize();
     const worldAxis = localAxis.clone().applyMatrix4(bodyMat).normalize();
-    const mesh = addMesh();
-    mesh.position.copy(worldAnchor);
-    const length = Math.max(1e-4, meanSize * 0.12 * lenScale);
-    const width = Math.max(1e-4, meanSize * 0.04 * widthScale);
-    mesh.scale.set(width, length, width);
-    mesh.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, worldAxis);
-    mesh.updateMatrixWorld();
-    if (mesh.material) {
-      mesh.material.color.setHex(colorHex);
-      mesh.material.opacity = opacity;
-      mesh.material.transparent = opacity < 0.999;
-      mesh.material.needsUpdate = true;
+    const node = addMesh();
+    const shaft = node.userData?.shaft;
+    const head = node.userData?.head;
+    const length = Math.max(1e-4, meanSize * lenScale);
+    const width = Math.max(1e-4, meanSize * widthScale);
+    const headLength = Math.min(length * 0.35, Math.max(length * 0.25, width * 4));
+    const shaftLength = Math.max(1e-4, length - headLength);
+    node.position.copy(worldAnchor);
+    node.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, worldAxis);
+    if (shaft) {
+      shaft.scale.set(width, shaftLength, width);
+      shaft.position.set(0, shaftLength / 2, 0);
+    }
+    if (head) {
+      head.scale.set(width * 1.8, headLength, width * 1.8);
+      head.position.set(0, shaftLength + headLength / 2, 0);
+    }
+    if (node.userData?.material) {
+      const mat = node.userData.material;
+      mat.color.setHex(colorHex);
+      mat.opacity = opacity;
+      mat.transparent = opacity < 0.999;
+      mat.needsUpdate = true;
     }
   }
   for (let i = used; i < pool.length; i += 1) {
@@ -2133,8 +2169,8 @@ function updateActuatorOverlays(ctx, snapshot, state) {
   const nbody = Math.floor(bxpos.length / 3);
   let used = 0;
   const addMesh = () => {
-    let mesh = pool[used];
-    if (!mesh) {
+    let node = pool[used];
+    if (!node) {
       const mat = new THREE.MeshBasicMaterial({
         color: colorHex,
         transparent: opacity < 0.999,
@@ -2143,14 +2179,19 @@ function updateActuatorOverlays(ctx, snapshot, state) {
         toneMapped: false,
         fog: false,
       });
-      mesh = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, mat);
-      mesh.renderOrder = 51;
-      pool[used] = mesh;
-      group.add(mesh);
+      const shaft = new THREE.Mesh(PERTURB_SHAFT_GEOMETRY, mat);
+      const head = new THREE.Mesh(PERTURB_HEAD_GEOMETRY, mat);
+      node = new THREE.Group();
+      node.add(shaft);
+      node.add(head);
+      node.renderOrder = 51;
+      node.userData = { shaft, head, material: mat };
+      pool[used] = node;
+      group.add(node);
     }
-    mesh.visible = true;
+    node.visible = true;
     used += 1;
-    return mesh;
+    return node;
   };
   for (let i = 0; i < na; i += 1) {
     const t = Number(trntype[i]) | 0;
@@ -2183,18 +2224,29 @@ function updateActuatorOverlays(ctx, snapshot, state) {
       Number(jaxis[base + 2]) || 1,
     ).normalize();
     const worldAxis = localAxis.clone().applyMatrix4(bodyMat).normalize();
-    const mesh = addMesh();
-    mesh.position.copy(worldAnchor);
-    const length = Math.max(1e-4, meanSize * 0.14 * lenScale);
-    const width = Math.max(1e-4, meanSize * 0.045 * widthScale);
-    mesh.scale.set(width, length, width);
-    mesh.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, worldAxis);
-    mesh.updateMatrixWorld();
-    if (mesh.material) {
-      mesh.material.color.setHex(colorHex);
-      mesh.material.opacity = opacity;
-      mesh.material.transparent = opacity < 0.999;
-      mesh.material.needsUpdate = true;
+    const node = addMesh();
+    const shaft = node.userData?.shaft;
+    const head = node.userData?.head;
+    const length = Math.max(1e-4, meanSize * lenScale);
+    const width = Math.max(1e-4, meanSize * widthScale);
+    const headLength = Math.min(length * 0.35, Math.max(length * 0.25, width * 4));
+    const shaftLength = Math.max(1e-4, length - headLength);
+    node.position.copy(worldAnchor);
+    node.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, worldAxis);
+    if (shaft) {
+      shaft.scale.set(width, shaftLength, width);
+      shaft.position.set(0, shaftLength / 2, 0);
+    }
+    if (head) {
+      head.scale.set(width * 1.9, headLength, width * 1.9);
+      head.position.set(0, shaftLength + headLength / 2, 0);
+    }
+    if (node.userData?.material) {
+      const mat = node.userData.material;
+      mat.color.setHex(colorHex);
+      mat.opacity = opacity;
+      mat.transparent = opacity < 0.999;
+      mat.needsUpdate = true;
     }
   }
   for (let i = used; i < pool.length; i += 1) {
@@ -2208,9 +2260,8 @@ function updateSlidercrankOverlays(ctx, snapshot, state) {
   const trntype = snapshot?.act_trntype;
   const crankLength = snapshot?.act_cranklength;
   const siteXpos = snapshot?.site_xpos;
-  const bxpos = snapshot?.bxpos;
-  const bxmat = snapshot?.bxmat;
-  if (!trnid || !trntype || !crankLength || !siteXpos) {
+  const siteXmat = snapshot?.site_xmat;
+  if (!trnid || !trntype || !crankLength || !siteXpos || !siteXmat) {
     hideSlidercrankGroup(ctx);
     return;
   }
@@ -2262,23 +2313,58 @@ function updateSlidercrankOverlays(ctx, snapshot, state) {
       Number(siteXpos[3 * sidSlider + 1]) || 0,
       Number(siteXpos[3 * sidSlider + 2]) || 0,
     );
-    const rodLen = Math.max(1e-4, Number(crankLength[i]) || crank.distanceTo(slider));
-    const rod = crank.clone().sub(slider);
-    const dir = rod.lengthSq() > 1e-12 ? rod.clone().normalize() : new THREE.Vector3(1, 0, 0);
-    const mesh = addMesh();
-    const mid = crank.clone().add(slider).multiplyScalar(0.5);
-    mesh.position.copy(mid);
-    mesh.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, dir);
-    const width = Math.max(1e-4, meanSize * 0.025 * scl);
-    const length = Math.max(1e-4, rodLen);
-    mesh.scale.set(width, length, width);
-    const broken = rod.length() > rodLen * 1.2;
-    const mat = mesh.material;
-    if (mat) {
-      mat.color.setHex(broken ? brokenColorHex : colorHex);
-      mat.opacity = opacity;
-      mat.transparent = opacity < 0.999;
-      mat.needsUpdate = true;
+    const rod = Math.max(1e-6, Number(crankLength[i]) || 0);
+    // Slider axis is third column (z) of slider site rotation
+    const rotBase = 9 * sidSlider;
+    const axis = __TMP_VEC3_A.set(
+      Number(siteXmat[rotBase + 2]) || 0,
+      Number(siteXmat[rotBase + 5]) || 0,
+      Number(siteXmat[rotBase + 8]) || 0,
+    ).normalize();
+    const vec = __TMP_VEC3_B.copy(crank).sub(slider);
+    const lenAlongAxis = vec.dot(axis);
+    const distSq = vec.lengthSq();
+    let det = (lenAlongAxis * lenAlongAxis) + (rod * rod) - distSq;
+    let broken = false;
+    if (det < 0) {
+      det = 0;
+      broken = true;
+    }
+    const len = lenAlongAxis - Math.sqrt(det);
+    const end = __TMP_VEC3_C.copy(axis).multiplyScalar(len).add(slider);
+    const widthBase = Math.max(1e-4, meanSize * 0.025 * scl);
+    // Slider segment: slider -> end
+    const sliderDir = __TMP_VEC3_B.copy(end).sub(slider);
+    const sliderDist = sliderDir.length();
+    if (sliderDist > 1e-6) {
+      sliderDir.multiplyScalar(1 / sliderDist);
+      const meshSlider = addMesh();
+      meshSlider.position.copy(slider.clone().add(end).multiplyScalar(0.5));
+      meshSlider.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, sliderDir);
+      meshSlider.scale.set(widthBase, sliderDist, widthBase);
+      if (meshSlider.material) {
+        meshSlider.material.color.setHex(colorHex);
+        meshSlider.material.opacity = opacity;
+        meshSlider.material.transparent = opacity < 0.999;
+        meshSlider.material.needsUpdate = true;
+      }
+    }
+    // Rod segment: end -> crank
+    const rodDir = __TMP_VEC3_B.copy(crank).sub(end);
+    const rodDist = rodDir.length();
+    if (rodDist > 1e-6) {
+      rodDir.multiplyScalar(1 / rodDist);
+      const meshRod = addMesh();
+      meshRod.position.copy(crank.clone().add(end).multiplyScalar(0.5));
+      meshRod.quaternion.setFromUnitVectors(PERTURB_AXIS_DEFAULT, rodDir);
+      const rodWidth = widthBase * 0.5;
+      meshRod.scale.set(rodWidth, rodDist, rodWidth);
+      if (meshRod.material) {
+        meshRod.material.color.setHex(broken ? brokenColorHex : colorHex);
+        meshRod.material.opacity = opacity;
+        meshRod.material.transparent = opacity < 0.999;
+        meshRod.material.needsUpdate = true;
+      }
     }
   }
   for (let i = used; i < pool.length; i += 1) {
