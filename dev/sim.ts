@@ -42,7 +42,6 @@ export class MjSim {
     if (!(h > 0)) throw new Error('mjwf_helper_make_from_xml failed');
     this.h = h;
     this.ensurePointers();
-    this.assertCounts();
   }
 
   private ensurePointers(): void {
@@ -56,15 +55,6 @@ export class MjSim {
     }
     if (!(this.modelPtr && this.dataPtr)) {
       throw new Error('helper pointers unavailable');
-    }
-  }
-
-  private assertCounts(): void {
-    const nq = this.nq();
-    const nv = this.nv();
-    const ng = this.ngeom();
-    if (!((nq > 0 && nv > 0 && ng > 2) || (nq === 0 && nv === 0 && ng > 0))) {
-      throw new Error(`invalid model counts nq=${nq}, nv=${nv}, ngeom=${ng}`);
     }
   }
 

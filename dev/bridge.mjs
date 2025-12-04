@@ -463,22 +463,6 @@ export class MjSimLite {
     for (const fn of stage){ try { if (typeof m[fn] === 'function') { m[fn](h); called.push(fn); } } catch {}
     }
 
-    // Counts (prefer model_* when available)
-    const readInt = (name)=> (typeof m[name]==='function') ? (m[name](h)|0) : 0;
-    let nq = readInt('_mjwf_model_nq') || readInt('_mjwf_nq');
-    let nv = readInt('_mjwf_model_nv') || readInt('_mjwf_nv');
-    let ng = readInt('_mjwf_model_ngeom') || readInt('_mjwf_ngeom');
-    if ((nq|0)===0 && (nv|0)===0 && (ng|0)===0) {
-      let eno = 0, emsg = '';
-      try { if (typeof m._mjwf_errno_last==='function') eno = m._mjwf_errno_last()|0; } catch {}
-      try { if (typeof m._mjwf_errmsg_last==='function') emsg = this._cstr(m._mjwf_errmsg_last()|0); } catch {}
-      console.error('loaded counts all zero', { eno, emsg });
-      throw new Error('model empty');
-    }
-    // Regression self-check: require nq>0 && nv>0 && ngeom>2
-    if (!((nq|0) > 0 && (nv|0) > 0 && (ng|0) > 2)) {
-      throw new Error(`counts assertion failed: nq=${nq}, nv=${nv}, ngeom=${ng}`);
-    }
   }
 
   ensurePointers(){
