@@ -1667,6 +1667,9 @@ async function loadXmlWithFallback(xmlText) {
   }
   let contacts = null;
   try {
+    if (typeof sim.ensurePointers === 'function') {
+      sim.ensurePointers();
+    }
     const ncon = sim.ncon?.() | 0;
     if (ncon > 0) {
       contacts = { n: ncon };
@@ -1681,6 +1684,17 @@ async function loadXmlWithFallback(xmlText) {
         const frame = new Float64Array(frameView);
         contacts.frame = frame;
         transfers.push(frame.buffer);
+      }
+      if (snapshotDebug) {
+        try {
+          console.log('[worker] contact view diag', {
+            ncon,
+            hasPos: !!posView,
+            hasFrame: !!frameView,
+            posLen: posView ? posView.length : 0,
+            frameLen: frameView ? frameView.length : 0,
+          });
+        } catch {}
       }
       const geom1View = sim.contactGeom1View?.();
       if (geom1View) {

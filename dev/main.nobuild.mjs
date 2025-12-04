@@ -904,21 +904,23 @@ if (typeof registerGlobalShortcut === 'function') {
     await toggleControl('file.screenshot');
   });
 }
-if (typeof window !== 'undefined') {
-  try {
-    window.__viewerStore = store;
-    window.__viewerControls = {
-      getBinding: (id) => controlManager.getBinding(id),
-      listIds: (prefix) => controlManager.listIds(prefix),
-    };
-    window.__viewerRenderer = {
-      getStats: () => ({ ...renderStats }),
-      getContext: () => (rendererManager.getContext ? rendererManager.getContext() : (renderCtx.initialized ? renderCtx : null)),
-      ensureLoop: () => rendererManager.ensureRenderLoop(),
-      renderScene: (snapshot, state) => rendererManager.renderScene(snapshot, state),
-    };
-  } catch {}
-}
+  if (typeof window !== 'undefined') {
+    try {
+      window.__viewerStore = store;
+      window.__viewerControls = {
+        getBinding: (id) => controlManager.getBinding(id),
+        listIds: (prefix) => controlManager.listIds(prefix),
+        toggleControl: (id, value) => controlManager.toggleControl(id, value),
+        getControl: (id) => controlManager.getControl(id),
+      };
+      window.__viewerRenderer = {
+        getStats: () => ({ ...renderStats }),
+        getContext: () => (rendererManager.getContext ? rendererManager.getContext() : (renderCtx.initialized ? renderCtx : null)),
+        ensureLoop: () => rendererManager.ensureRenderLoop(),
+        renderScene: (snapshot, state) => rendererManager.renderScene(snapshot, state),
+      };
+    } catch {}
+  }
 
 // Keep canvas resized to container.
 function resizeCanvas() {

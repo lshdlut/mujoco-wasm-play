@@ -1111,45 +1111,17 @@ function updateLabelOverlays(context, snapshot, state, options = {}) {
     hideLabelGroup(context);
     return;
   }
-  if (mode !== LABEL_MODES.GEOM) {
-    hideLabelGroup(context);
-    warnOnce(LABEL_MODE_WARNINGS, mode, '[render] Label mode not yet supported in viewer (pending data)');
-    return;
-  }
-  const ngeom = snapshot.ngeom | 0;
-  const xpos = snapshot.xpos;
-  if (!(ngeom > 0) || !xpos) {
-    hideLabelGroup(context);
-    return;
-  }
-    const geomsMeta = Array.isArray(state.model?.geoms) ? state.model.geoms : [];
-    const nameByIndex = new Map();
-    for (const geom of geomsMeta) {
-      const idx = Number(geom?.index);
-      if (Number.isFinite(idx)) {
-        nameByIndex.set(idx, (geom?.name || `Geom ${idx}`).trim());
-      }
-    }
   const labelGroup = ensureLabelGroup(context);
   const pool = context.labelPool;
-  const radius = options.bounds?.radius ?? context.bounds?.radius ?? 1;
   const labelHeight = LABEL_DEFAULT_HEIGHT;
   const verticalOffset = LABEL_DEFAULT_OFFSET;
-  const typeView = options.typeView;
-  let used = 0;
-  const limit = Math.min(ngeom, LABEL_GEOM_LIMIT);
   const camera = context.camera;
-  for (let i = 0; i < limit; i += 1) {
-    if (!shouldDisplayGeom(i, options)) continue;
-    const base = 3 * i;
-    const px = Number(xpos[base + 0]);
-    const py = Number(xpos[base + 1]);
-    const pz = Number(xpos[base + 2]);
-    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
-    const geomType = Number(typeView?.[i]);
-    if (geomType === MJ_GEOM.PLANE || geomType === MJ_GEOM.HFIELD) continue;
-      const meshForGeom = Array.isArray(context.meshes) ? context.meshes[i] : null;
-      const label = meshForGeom?.userData?.geomName || nameByIndex.get(i) || `Geom ${i}`;
+  const maxLabels = LABEL_GEOM_LIMIT;
+  let used = 0;
+
+  const emitLabel = (px, py, pz, label) => {
+    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return;
+    if (!label || used >= maxLabels) return;
     let quality = LABEL_LOD_FACTORS.far;
     if (camera) {
       const dist = camera.position.distanceTo(__TMP_VEC3.set(px, py, pz));
@@ -1157,7 +1129,7 @@ function updateLabelOverlays(context, snapshot, state, options = {}) {
       else if (dist < LABEL_LOD_MID) quality = LABEL_LOD_FACTORS.mid;
     }
     const texture = getLabelTexture(label, quality);
-    if (!texture) continue;
+    if (!texture) return;
     let sprite = pool[used];
     if (!sprite) {
       sprite = createLabelSprite();
@@ -1172,7 +1144,114 @@ function updateLabelOverlays(context, snapshot, state, options = {}) {
     sprite.position.set(px, py, pz + verticalOffset);
     sprite.visible = true;
     used += 1;
+  };
+
+  if (mode === LABEL_MODES.GEOM) {
+    const ngeom = snapshot.ngeom | 0;
+    const xpos = snapshot.xpos;
+    const xmat = snapshot.xmat;
+    if (!(ngeom > 0) || !xpos || !xmat) {
+      hideLabelGroup(context);
+      return;
+    }
+    const geomsMeta = Array.isArray(state.model?.geoms) ? state.model.geoms : [];
+    const nameByIndex = new Map();
+    for (const geom of geomsMeta) {
+      const idx = Number(geom?.index);
+      if (Number.isFinite(idx)) {
+        nameByIndex.set(idx, (geom?.name || `Geom ${idx}`).trim());
+      }
+    }
+    const typeView = options.typeView;
+    const limit = Math.min(ngeom, maxLabels);
+    for (let i = 0; i < limit; i += 1) {
+      if (!shouldDisplayGeom(i, options)) continue;
+      const base = 3 * i;
+      const px = Number(xpos[base + 0]);
+      const py = Number(xpos[base + 1]);
+      const pz = Number(xpos[base + 2]);
+      const geomType = Number(typeView?.[i]);
+      if (geomType === MJ_GEOM.PLANE || geomType === MJ_GEOM.HFIELD) continue;
+      const meshForGeom = Array.isArray(context.meshes) ? context.meshes[i] : null;
+      const label = meshForGeom?.userData?.geomName || nameByIndex.get(i) || `Geom ${i}`;
+      emitLabel(px, py, pz, label);
+    }
+  } else if (mode === LABEL_MODES.BODY) {
+    const bxpos = snapshot.bxpos;
+    const nbody = bxpos ? Math.floor(bxpos.length / 3) : 0;
+    if (!bxpos || nbody <= 1) {
+      hideLabelGroup(context);
+      return;
+    }
+    // Skip world body 0
+    const limit = Math.min(nbody, maxLabels + 1);
+    for (let i = 1; i < limit; i += 1) {
+      const base = 3 * i;
+      const px = Number(bxpos[base + 0]) || 0;
+      const py = Number(bxpos[base + 1]) || 0;
+      const pz = Number(bxpos[base + 2]) || 0;
+      const label = `Body ${i}`;
+      emitLabel(px, py, pz, label);
+    }
+  } else if (mode === LABEL_MODES.SITE) {
+    const siteXpos = snapshot.site_xpos;
+    const nsite = siteXpos ? Math.floor(siteXpos.length / 3) : 0;
+    if (!siteXpos || nsite <= 0) {
+      hideLabelGroup(context);
+      return;
+    }
+    const limit = Math.min(nsite, maxLabels);
+    for (let i = 0; i < limit; i += 1) {
+      const base = 3 * i;
+      const px = Number(siteXpos[base + 0]) || 0;
+      const py = Number(siteXpos[base + 1]) || 0;
+      const pz = Number(siteXpos[base + 2]) || 0;
+      const label = `Site ${i}`;
+      emitLabel(px, py, pz, label);
+    }
+  } else if (mode === LABEL_MODES.JOINT) {
+    const jpos = snapshot.jpos;
+    const jbody = snapshot.jbody;
+    const bxpos = snapshot.bxpos;
+    const bxmat = snapshot.bxmat;
+    const jntNames = Array.isArray(snapshot.jnt_names) ? snapshot.jnt_names : null;
+    if (!jpos || !jbody || !bxpos || !bxmat) {
+      hideLabelGroup(context);
+      return;
+    }
+    const nj = Math.floor(jpos.length / 3);
+    const nbody = Math.floor(bxpos.length / 3);
+    const limit = Math.min(nj, maxLabels);
+    for (let i = 0; i < limit; i += 1) {
+      const bodyId = Number(jbody[i]) || 0;
+      if (bodyId < 0 || bodyId >= nbody) continue;
+      const base = 3 * i;
+      const bodyPos = __TMP_VEC3_A.set(
+        Number(bxpos[3 * bodyId + 0]) || 0,
+        Number(bxpos[3 * bodyId + 1]) || 0,
+        Number(bxpos[3 * bodyId + 2]) || 0,
+      );
+      const bodyMat = TEMP_MAT4.set(
+        bxmat?.[9 * bodyId + 0] ?? 1, bxmat?.[9 * bodyId + 1] ?? 0, bxmat?.[9 * bodyId + 2] ?? 0, 0,
+        bxmat?.[9 * bodyId + 3] ?? 0, bxmat?.[9 * bodyId + 4] ?? 1, bxmat?.[9 * bodyId + 5] ?? 0, 0,
+        bxmat?.[9 * bodyId + 6] ?? 0, bxmat?.[9 * bodyId + 7] ?? 0, bxmat?.[9 * bodyId + 8] ?? 1, 0,
+        0, 0, 0, 1,
+      );
+      const localAnchor = __TMP_VEC3_B.set(
+        Number(jpos[base + 0]) || 0,
+        Number(jpos[base + 1]) || 0,
+        Number(jpos[base + 2]) || 0,
+      );
+      const worldAnchor = localAnchor.clone().applyMatrix4(bodyMat).add(bodyPos);
+      const label = jntNames && jntNames[i] ? String(jntNames[i]) : `jnt ${i}`;
+      emitLabel(worldAnchor.x, worldAnchor.y, worldAnchor.z, label);
+    }
+  } else {
+    hideLabelGroup(context);
+    warnOnce(LABEL_MODE_WARNINGS, mode, '[render] Label mode not yet supported in viewer (pending data)');
+    return;
   }
+
   for (let i = used; i < pool.length; i += 1) {
     if (pool[i]) pool[i].visible = false;
   }
@@ -1478,6 +1557,88 @@ function updateFrameOverlays(context, snapshot, state, options = {}) {
         xmat?.[matBase + 6] ?? 0,
         xmat?.[matBase + 7] ?? 0,
         xmat?.[matBase + 8] ?? 1,
+      ];
+      TEMP_MAT4.set(
+        rot[0], rot[1], rot[2], 0,
+        rot[3], rot[4], rot[5], 0,
+        rot[6], rot[7], rot[8], 0,
+        0, 0, 0, 1,
+      );
+      helper.quaternion.setFromRotationMatrix(TEMP_MAT4);
+      const axisScale = overlayScale(radius, 0.12, 0.1, 3) * 0.25 * scaleAll * frameLengthScale * meanScale;
+      helper.scale.set(axisScale, axisScale, axisScale);
+      if (helper.material && 'linewidth' in helper.material) {
+        helper.material.linewidth = frameWidthScale * scaleAll * meanScale;
+      }
+    }
+  } else if (mode === FRAME_MODES.BODY) {
+    const bxpos = snapshot.bxpos;
+    const bxmat = snapshot.bxmat;
+    const nbody = bxpos ? Math.floor(bxpos.length / 3) : 0;
+    if (!bxpos || !bxmat || nbody <= 1) {
+      hideFrameGroup(context);
+      return;
+    }
+    const limit = Math.min(nbody, FRAME_GEOM_LIMIT + 1);
+    for (let i = 1; i < limit; i += 1) {
+      const base = 3 * i;
+      const px = Number(bxpos[base + 0]) || 0;
+      const py = Number(bxpos[base + 1]) || 0;
+      const pz = Number(bxpos[base + 2]) || 0;
+      const helper = addHelper();
+      helper.position.set(px, py, pz);
+      const matBase = 9 * i;
+      const rot = [
+        bxmat?.[matBase + 0] ?? 1,
+        bxmat?.[matBase + 1] ?? 0,
+        bxmat?.[matBase + 2] ?? 0,
+        bxmat?.[matBase + 3] ?? 0,
+        bxmat?.[matBase + 4] ?? 1,
+        bxmat?.[matBase + 5] ?? 0,
+        bxmat?.[matBase + 6] ?? 0,
+        bxmat?.[matBase + 7] ?? 0,
+        bxmat?.[matBase + 8] ?? 1,
+      ];
+      TEMP_MAT4.set(
+        rot[0], rot[1], rot[2], 0,
+        rot[3], rot[4], rot[5], 0,
+        rot[6], rot[7], rot[8], 0,
+        0, 0, 0, 1,
+      );
+      helper.quaternion.setFromRotationMatrix(TEMP_MAT4);
+      const axisScale = overlayScale(radius, 0.12, 0.1, 3) * 0.25 * scaleAll * frameLengthScale * meanScale;
+      helper.scale.set(axisScale, axisScale, axisScale);
+      if (helper.material && 'linewidth' in helper.material) {
+        helper.material.linewidth = frameWidthScale * scaleAll * meanScale;
+      }
+    }
+  } else if (mode === FRAME_MODES.SITE) {
+    const siteXpos = snapshot.site_xpos;
+    const siteXmat = snapshot.site_xmat;
+    const nsite = siteXpos ? Math.floor(siteXpos.length / 3) : 0;
+    if (!siteXpos || !siteXmat || nsite <= 0) {
+      hideFrameGroup(context);
+      return;
+    }
+    const limit = Math.min(nsite, FRAME_GEOM_LIMIT);
+    for (let i = 0; i < limit; i += 1) {
+      const base = 3 * i;
+      const px = Number(siteXpos[base + 0]) || 0;
+      const py = Number(siteXpos[base + 1]) || 0;
+      const pz = Number(siteXpos[base + 2]) || 0;
+      const helper = addHelper();
+      helper.position.set(px, py, pz);
+      const rotBase = 9 * i;
+      const rot = [
+        siteXmat?.[rotBase + 0] ?? 1,
+        siteXmat?.[rotBase + 1] ?? 0,
+        siteXmat?.[rotBase + 2] ?? 0,
+        siteXmat?.[rotBase + 3] ?? 0,
+        siteXmat?.[rotBase + 4] ?? 1,
+        siteXmat?.[rotBase + 5] ?? 0,
+        siteXmat?.[rotBase + 6] ?? 0,
+        siteXmat?.[rotBase + 7] ?? 0,
+        siteXmat?.[rotBase + 8] ?? 1,
       ];
       TEMP_MAT4.set(
         rot[0], rot[1], rot[2], 0,
@@ -3868,9 +4029,9 @@ export function createRendererManager({
     if (!snapshot || !state) return;
     const context = initRenderer();
     if (!context.initialized) return;
-  if (typeof window !== 'undefined') {
-    window.__renderCtx = context;
-  }
+    if (typeof window !== 'undefined') {
+      window.__renderCtx = context;
+    }
     const renderer = context.renderer;
     const debugSceneEnabled = isSceneDebugEnabled(state);
     const policy = computeScenePolicy(snapshot, state, context);
@@ -4382,14 +4543,41 @@ export function createRendererManager({
       hideSelectionPoint(context);
     }
 
-      const stats = {
-        drawn,
-        hidden: Math.max(0, ngeom - drawn),
-        contacts: snapshot.contacts?.n ?? 0,
-        t: typeof snapshot.t === 'number' ? snapshot.t : null,
-        frame: ctx._frameCounter | 0,
+    const stats = {
+      drawn,
+      hidden: Math.max(0, ngeom - drawn),
+      contacts: snapshot.contacts?.n ?? 0,
+      t: typeof snapshot.t === 'number' ? snapshot.t : null,
+      frame: ctx._frameCounter | 0,
+    };
+    setRenderStats(stats);
+    if (debugSceneEnabled) {
+      const contacts = snapshot.contacts || null;
+      const contactCount = typeof contacts?.n === 'number' ? (contacts.n | 0) : 0;
+      const contactDebug = {
+        n: contactCount,
+        hasPos: !!contacts?.pos,
+        hasFrame: !!contacts?.frame,
+        hasForce: !!contacts?.force,
       };
-      setRenderStats(stats);
+      const sceneDebugPayload = {
+        stats: {
+          ngeom,
+          drawn,
+          hidden: Math.max(0, ngeom - drawn),
+          contacts: {
+            n: contactCount,
+          },
+        },
+        geoms: Array.isArray(geomDescriptors) ? geomDescriptors : [],
+      };
+      debugSceneDescriptors(context, sceneDebugPayload);
+      try {
+        if (typeof window !== 'undefined') {
+          window.__contactDebug = contactDebug;
+        }
+      } catch {}
+    }
     try {
       if (typeof window !== 'undefined') {
         window.__drawnCount = drawn;
