@@ -848,7 +848,148 @@ export class MjSimLite {
   geomXmatView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.mode==='legacy' ? 'mjwf' : (this.pref||'mjwf'); const d=m['_' + pref + '_geom_xmat_ptr']; let p=0; if (typeof d==='function') p=d.call(m,h)|0; else { try{ p=m.ccall(pref+'_geom_xmat_ptr','number',['number'],[h])|0; }catch{ p=0; } } if(!p)return; return heapViewF64(m,p,n*9); }
   bodyXposView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const pref=this.mode==='legacy' ? 'mjwf' : (this.pref||'mjwf'); let d=m['_' + pref + '_body_xpos_ptr']; if (typeof d!=='function') { d = m['_' + pref + '_xpos_ptr'] || m['_' + pref + '_xipos_ptr'] || m['_' + pref + '_data_xpos_ptr']; } if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*3); }
   bodyXmatView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const pref=this.mode==='legacy' ? 'mjwf' : (this.pref||'mjwf'); let d=m['_' + pref + '_body_xmat_ptr']; if (typeof d!=='function') { d = m['_' + pref + '_xmat_ptr'] || m['_' + pref + '_data_xmat_ptr']; } if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*9); }
-  bodyXiposView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const pref=this.mode==='legacy' ? 'mjwf' : (this.pref||'mjwf'); const d=m['_' + pref + '_xipos_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*3); }
+  bodyXiposView(){
+    const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return;
+    const pref=this.mode==='legacy' ? 'mjwf' : (this.pref||'mjwf');
+    let d = m['_' + pref + '_body_xipos_ptr'];
+    if (typeof d!=='function') {
+      d = m['_' + pref + '_xipos_ptr'] || m['_' + pref + '_data_xipos_ptr'];
+    }
+    if (typeof d!=='function') return;
+    let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; }
+    if(!p)return;
+    return heapViewF64(m,p,n*3);
+  }
+  bodyCvelView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const d=m._mjwf_data_cvel_ptr || m._mjwf_cvel_ptr; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*6); }
+  bodyInertiaScalar(bodyIndex){
+    const body = bodyIndex|0;
+    const m = this.mod;
+    if (!m || !(body >= 0)) return null;
+    const nbody = this.nbody()|0;
+    if (!(nbody > 0 && body < nbody)) return null;
+    const fn = m._mjwf_model_body_invweight0_ptr;
+    if (typeof fn !== 'function') return null;
+    let ptr = 0;
+    try { ptr = fn.call(m, this.h | 0) | 0; } catch { ptr = 0; }
+    if (!(ptr > 0)) return null;
+    const view = heapViewF64(m, ptr, 2 * nbody);
+    if (!view || view.length < (2 * nbody)) return null;
+    const idx = 2 * body + 1;
+    const invweight = Number(view[idx]) || 0;
+    if (!Number.isFinite(invweight)) return null;
+    if (invweight === 0) return 1;
+    const MJ_MINVAL = 1e-15;
+    const denom = Math.max(invweight, MJ_MINVAL);
+    if (!(denom > 0)) return null;
+    return 1.0 / denom;
+  }
+  bodyWorldVelocity(bodyIndex, target){
+    const body = bodyIndex|0;
+    const m = this.mod;
+    if (!m || !(body >= 0)) return null;
+    const nbody = this.nbody()|0;
+    if (!(nbody > 0 && body < nbody)) return null;
+    try {
+      this.ensurePointers();
+    } catch {
+      return null;
+    }
+    const modelPtr = this.modelPtr|0;
+    const dataPtr = this.dataPtr|0;
+    if (!(modelPtr > 0 && dataPtr > 0)) return null;
+    const fn = m._mjwf_mj_objectVelocity;
+    if (typeof fn !== 'function') return null;
+    const out = target instanceof Float64Array && target.length >= 6 ? target : new Float64Array(6);
+    const bytes = 6 * Float64Array.BYTES_PER_ELEMENT;
+    this._withStack(bytes, (ptr) => {
+      if (!(ptr > 0)) return null;
+      const view = heapViewF64(m, ptr, 6);
+      if (!view || view.length < 6) return null;
+      try {
+        fn.call(m, modelPtr, dataPtr, 1, body, ptr | 0, 0);
+      } catch {
+        return null;
+      }
+      for (let i = 0; i < 6; i += 1) {
+        out[i] = Number(view[i]) || 0;
+      }
+      return null;
+    });
+    return out;
+  }
+  bodyLocalMassAtPoint(bodyIndex, worldPoint){
+    const body = bodyIndex|0;
+    if (!(body >= 0)) return null;
+    const m = this.mod;
+    if (!m) return null;
+    const nv = this.nv()|0;
+    const nbody = this.nbody()|0;
+    if (!(nv > 0 && nbody > 0 && body < nbody)) return null;
+    try {
+      this.ensurePointers();
+    } catch {
+      return null;
+    }
+    const modelPtr = this.modelPtr|0;
+    const dataPtr = this.dataPtr|0;
+    if (!(modelPtr > 0 && dataPtr > 0)) return null;
+    const qLDiagPtr = this._readDataPtr('qLDiagInv') | 0;
+    if (!(qLDiagPtr > 0)) return null;
+    const qLDiagView = heapViewF64(m, qLDiagPtr, nv);
+    if (!qLDiagView || qLDiagView.length < nv) return null;
+    const jacFn = m._mjwf_mj_jac;
+    const solveFn = m._mjwf_mj_solveM2;
+    if (typeof jacFn !== 'function' || typeof solveFn !== 'function') return null;
+    const MJ_MINVAL = 1e-15;
+    const anchor = worldPoint || [0, 0, 0];
+    const ax = +anchor[0] || 0;
+    const ay = +anchor[1] || 0;
+    const az = +anchor[2] || 0;
+    const count = (6*nv + nv + 3);
+    const bytes = count * Float64Array.BYTES_PER_ELEMENT;
+    const result = this._withStack(bytes, (ptr) => {
+      if (!(ptr > 0)) return null;
+      const base = ptr>>>0;
+      const jacPtr = base;
+      const jacM2Ptr = base + (3*nv)*Float64Array.BYTES_PER_ELEMENT;
+      const sqrtPtr = base + (6*nv)*Float64Array.BYTES_PER_ELEMENT;
+      const selPtr = base + (7*nv)*Float64Array.BYTES_PER_ELEMENT;
+      const jacView = heapViewF64(m, jacPtr, 3*nv);
+      const jacM2View = heapViewF64(m, jacM2Ptr, 3*nv);
+      const sqrtView = heapViewF64(m, sqrtPtr, nv);
+      const selView = heapViewF64(m, selPtr, 3);
+      if (!jacView || !jacM2View || !sqrtView || !selView) return null;
+      selView[0] = ax;
+      selView[1] = ay;
+      selView[2] = az;
+      for (let i=0; i<nv; i+=1) {
+        const inv = qLDiagView[i] || 0;
+        sqrtView[i] = inv > 0 ? Math.sqrt(inv) : 0;
+      }
+      try {
+        jacFn.call(m, modelPtr, dataPtr, jacPtr, 0, selPtr, body);
+        solveFn.call(m, modelPtr, dataPtr, jacM2Ptr, jacPtr, sqrtPtr, 3);
+      } catch {
+        return null;
+      }
+      let invmass = 0;
+      for (let row=0; row<3; row+=1) {
+        const rowBase = row*nv;
+        let sum = 0;
+        for (let j=0; j<nv; j+=1) {
+          const v = jacM2View[rowBase + j] || 0;
+          sum += v*v;
+        }
+        invmass += sum;
+      }
+      if (!Number.isFinite(invmass)) return null;
+      if (invmass === 0) return 1;
+      const denom = Math.max(invmass, MJ_MINVAL);
+      if (!(denom > 0)) return null;
+      return 3.0/denom;
+    });
+    return (typeof result === 'number' && result > 0 && Number.isFinite(result)) ? result : null;
+  }
   // Optional getters: never call ccall for unknown symbols — only use direct exports
   geomSizeView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_geom_size_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*3); }
   geomTypeView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_geom_type_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }

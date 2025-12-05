@@ -3071,6 +3071,25 @@ async function loadDefaultXml() {
     return resolveSnapshot(lastSnapshot);
   }
 
+  async function applyPerturbCommand(options = {}) {
+    const bodyId = Number.isFinite(options.bodyId) ? (options.bodyId | 0) : -1;
+    const geomIndex = Number.isFinite(options.geomIndex) ? (options.geomIndex | 0) : -1;
+    const mode = options.mode === 'rotate' ? 'rotate' : 'translate';
+    try {
+      client.postMessage?.({
+        cmd: 'applyPerturb',
+        bodyId,
+        geomIndex,
+        mode,
+        anchor: toVec3(options.anchor),
+        cursor: toVec3(options.cursor),
+      });
+    } catch (err) {
+      if (debug) console.warn('[backend applyPerturb] failed', err);
+    }
+    return resolveSnapshot(lastSnapshot);
+  }
+
   async function clearForcesCommand() {
     try {
       client.postMessage?.({ cmd: 'clearForces' });
@@ -3098,6 +3117,7 @@ async function loadDefaultXml() {
     setRate,
     applyForce: applyForceCommand,
     applyBodyForce: applyBodyForceCommand,
+    applyPerturb: applyPerturbCommand,
     clearForces: clearForcesCommand,
     setVisualState: applyVisualStatePayload,
     loadXmlText,

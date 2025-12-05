@@ -488,35 +488,11 @@ export function createPickingController({
     return false;
   }
 
-  function computeTorque(dx, dy) {
-    const camera = renderCtx.camera;
-    if (!camera) return null;
-    const boundsRadius = Math.max(0.25, renderCtx.bounds?.radius || 1);
-    const torqueScale = boundsRadius * 0.02;
-    const forward = tempVecA;
-    camera.getWorldDirection(forward).normalize();
-    const up = tempVecB.copy(globalUp).normalize();
-    const right = tempVecC.copy(forward).cross(up).normalize();
-    const torque = new THREE_NS.Vector3();
-    torque.addScaledVector(up, dx * torqueScale);
-    torque.addScaledVector(right, -dy * torqueScale);
-    if (dragState.shiftKey) {
-      torque.addScaledVector(forward, dy * torqueScale * 0.5);
-    }
-    return torque;
-  }
-const TRANSLATION_GAIN = 3000;
-const ROTATION_GAIN = 150;
-// 简单稳定阻尼：指数衰减 + 渐进累加
-const FORCE_DECAY = 0.50;   // 每帧衰减 50%
-const FORCE_ACCUM = 0.08;   // 新目标力的累加系数
-const TORQUE_DECAY = 0.38;
-const TORQUE_ACCUM = 0.08;
   function setPerturbState(mode, active) {
-    store.update((draft) => {
-      if (!draft.runtime) draft.runtime = {};
-      if (active) {
-        draft.runtime.perturb = { mode, active: true };
+      store.update((draft) => {
+        if (!draft.runtime) draft.runtime = {};
+        if (active) {
+          draft.runtime.perturb = { mode, active: true };
         draft.runtime.lastAction = PERTURB_LABEL[mode] || 'perturb';
       } else {
         draft.runtime.perturb = { mode: 'idle', active: false };
@@ -567,9 +543,11 @@ const TORQUE_ACCUM = 0.08;
     perturbRaf = null;
   }
 
-  function dispatchPayload(payload) {
+  function dispatchPerturbState(payload) {
     if (!payload) return;
-    if (Number.isFinite(payload.bodyId) && payload.bodyId >= 0 && typeof backend.applyBodyForce === 'function') {
+    if (typeof backend.applyPerturb === 'function') {
+      backend.applyPerturb(payload);
+    } else if (Number.isFinite(payload.bodyId) && payload.bodyId >= 0 && typeof backend.applyBodyForce === 'function') {
       backend.applyBodyForce(payload);
     } else if (Number.isFinite(payload.geomIndex) && payload.geomIndex >= 0) {
       backend.applyForce?.(payload);
@@ -582,136 +560,41 @@ const TORQUE_ACCUM = 0.08;
     const geomIndex = selection.geom | 0;
     const camera = renderCtx.camera;
     if (!camera) return false;
-    const boundsRadius = Math.max(0.1, renderCtx.bounds?.radius || 1);
-    let payload = null;
     const bodyCapable = Number.isFinite(dragState.bodyId) && dragState.bodyId >= 0 && refreshBodyPose(dragState.bodyId);
     if (bodyCapable) {
-      const bodyPos = tempVecWorld.copy(tempBodyPos);
       applyRotation(tempBodyRot, dragState.anchorLocal, dragState.anchorPoint);
       dragState.anchorPoint.add(tempBodyPos);
-      dragState.scale = computePerturbScale(dragState.anchorPoint);
-      samplePointerFromScreen();
-      const target = dragState.pointerTarget;
-      const displacement = tempVecB.copy(target).sub(dragState.anchorPoint);
-      const baseVec = displacement.clone();
-      const forward = tempVecC.copy(camera.getWorldDirection(new THREE_NS.Vector3())).normalize();
-      const up = tempVecD.copy(camera.up).normalize();
-      const right = tempVecA.copy(forward).cross(up).normalize();
-      if (dragState.mode === 'translate') {
-        const forceVec = baseVec.clone().multiplyScalar(TRANSLATION_GAIN);
-        const maxForce = TRANSLATION_GAIN * boundsRadius * 1.2;
-        if (forceVec.length() > maxForce) forceVec.setLength(maxForce);
-        dragState.lastForceVec.multiplyScalar(1 - FORCE_DECAY);
-        dragState.lastForceVec.addScaledVector(forceVec, FORCE_ACCUM);
-        forceVec.copy(dragState.lastForceVec);
-        const lever = tempVecE.copy(dragState.anchorPoint).sub(tempBodyCom);
-        const torqueFromForce = lever.clone().cross(forceVec);
-        payload = {
-          bodyId: dragState.bodyId,
-          force: [forceVec.x, forceVec.y, forceVec.z],
-          torque: [torqueFromForce.x, torqueFromForce.y, torqueFromForce.z],
-        };
-        setPerturbState('translate', true);
-      } else if (dragState.mode === 'rotate') {
-        const localX = baseVec.dot(right);
-        const localY = baseVec.dot(up);
-        const torqueVec = new THREE_NS.Vector3()
-          .addScaledVector(up, localX * ROTATION_GAIN)
-          .addScaledVector(right, -localY * ROTATION_GAIN);
-        if (dragState.shiftKey) {
-          torqueVec.addScaledVector(forward, displacement.dot(forward) * ROTATION_GAIN * 0.4);
-        }
-        const maxTorque = ROTATION_GAIN * boundsRadius * 1.5;
-        if (torqueVec.length() > maxTorque) torqueVec.setLength(maxTorque);
-        dragState.lastTorqueVec.multiplyScalar(1 - TORQUE_DECAY);
-        dragState.lastTorqueVec.addScaledVector(torqueVec, TORQUE_ACCUM);
-        torqueVec.copy(dragState.lastTorqueVec);
-        payload = {
-          bodyId: dragState.bodyId,
-          force: [0, 0, 0],
-          torque: [torqueVec.x, torqueVec.y, torqueVec.z],
-        };
-        setPerturbState('rotate', true);
-      }
-      if (payload) {
-        dragState.payload = payload;
-        dispatchPayload(payload);
-        updatePerturbViz({
-          active: true,
-          mode: dragState.mode,
-          anchor: dragState.anchorPoint,
-          cursor: dragState.pointerTarget,
-          force: payload.force ? { x: payload.force[0], y: payload.force[1], z: payload.force[2] } : null,
-          torque: payload.torque ? { x: payload.torque[0], y: payload.torque[1], z: payload.torque[2] } : null,
-        });
-        if (!fromLoop) ensurePerturbLoop();
-        return true;
-      }
+    } else if (!resolveSelectionWorldPoint(selection, dragState.anchorPoint)) {
       return false;
     }
-
-    const anchor = dragState.anchorPoint;
-    if (!resolveSelectionWorldPoint(selection, anchor)) return;
-    dragState.scale = computePerturbScale(anchor);
+    dragState.scale = computePerturbScale(dragState.anchorPoint);
     samplePointerFromScreen();
     const target = dragState.pointerTarget;
     if (!target) return false;
-    const displacement = tempVecB.copy(target).sub(anchor);
-    if (dragState.mode === 'translate') {
-      const baseVec = displacement.clone();
-      const forceVec = baseVec.multiplyScalar(TRANSLATION_GAIN);
-      const maxForce = TRANSLATION_GAIN * boundsRadius * 1.2;
-      if (forceVec.length() > maxForce) forceVec.setLength(maxForce);
-      dragState.lastForceVec.multiplyScalar(1 - FORCE_DECAY);
-      dragState.lastForceVec.addScaledVector(forceVec, FORCE_ACCUM);
-      forceVec.copy(dragState.lastForceVec);
-      payload = {
-        geomIndex,
-        force: [forceVec.x, forceVec.y, forceVec.z],
-        torque: [0, 0, 0],
-        point: [anchor.x, anchor.y, anchor.z],
-      };
-      setPerturbState('translate', true);
-    } else if (dragState.mode === 'rotate') {
-      const forward = tempVecC.copy(camera.getWorldDirection(new THREE_NS.Vector3())).normalize();
-      const up = tempVecD.copy(globalUp).normalize();
-      const right = tempVecA.copy(forward).cross(up).normalize();
-      const localX = displacement.dot(right);
-      const localY = displacement.dot(up);
-      const torqueVec = new THREE_NS.Vector3()
-        .addScaledVector(up, localX * ROTATION_GAIN)
-        .addScaledVector(right, -localY * ROTATION_GAIN);
-      if (dragState.shiftKey) {
-        torqueVec.addScaledVector(forward, displacement.dot(forward) * ROTATION_GAIN * 0.4);
-      }
-      const maxTorque = ROTATION_GAIN * boundsRadius * 1.5;
-      if (torqueVec.length() > maxTorque) torqueVec.setLength(maxTorque);
-      dragState.lastTorqueVec.multiplyScalar(1 - TORQUE_DECAY);
-      dragState.lastTorqueVec.addScaledVector(torqueVec, TORQUE_ACCUM);
-      torqueVec.copy(dragState.lastTorqueVec);
-      payload = {
-        geomIndex,
-        force: [0, 0, 0],
-        torque: [torqueVec.x, torqueVec.y, torqueVec.z],
-        point: [anchor.x, anchor.y, anchor.z],
-      };
-      setPerturbState('rotate', true);
-    }
-    if (payload) {
-      dragState.payload = payload;
-      dispatchPayload(payload);
-      updatePerturbViz({
-        active: true,
-        mode: dragState.mode,
-        anchor,
-        cursor: dragState.pointerTarget,
-        force: payload.force ? { x: payload.force[0], y: payload.force[1], z: payload.force[2] } : null,
-        torque: payload.torque ? { x: payload.torque[0], y: payload.torque[1], z: payload.torque[2] } : null,
-      });
-      if (!fromLoop) ensurePerturbLoop();
-      return true;
-    }
-    return false;
+    const mode = dragState.mode === 'rotate' ? 'rotate' : 'translate';
+    const payload = {
+      bodyId: bodyCapable ? dragState.bodyId : -1,
+      geomIndex: bodyCapable ? -1 : geomIndex,
+      mode,
+      anchor: [dragState.anchorPoint.x, dragState.anchorPoint.y, dragState.anchorPoint.z],
+      cursor: [target.x, target.y, target.z],
+    };
+    dragState.payload = payload;
+    setPerturbState(mode, true);
+    dispatchPerturbState(payload);
+    const offsetVec = tempVecWorld.copy(dragState.pointerTarget).sub(dragState.anchorPoint);
+    const vizForce = mode === 'translate' ? offsetVec : null;
+    const vizTorque = mode === 'rotate' ? offsetVec : null;
+    updatePerturbViz({
+      active: true,
+      mode,
+      anchor: dragState.anchorPoint,
+      cursor: dragState.pointerTarget,
+      force: vizForce,
+      torque: vizTorque,
+    });
+    if (!fromLoop) ensurePerturbLoop();
+    return true;
   }
 
   function beginPerturb(event, mode) {

@@ -58,6 +58,9 @@ const GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'ski
 const MJ_GROUP_COUNT = 6;
 let groupState = createGroupState();
 let lastBounds = { center: [0, 0, 0], radius: 0 };
+let perturbBodyId = -1;
+let perturbLocalmass = null;
+let perturbInertia = null;
 let alignSeq = 0;
 let copySeq = 0;
 let renderAssets = null;
@@ -126,6 +129,11 @@ let historyState = null;
 let keyframeState = null;
 let watchState = null;
 let keySliderIndex = -1;
+let lastPerturbLogTimeMs = 0;
+let loggedGsizeDiag = false;
+let loggedGtypeDiag = false;
+let loggedContactDiag = false;
+let loggedSnapshotKeys = false;
 
 function setRunning(next, source = 'backend', notify = true) {
   const target = !!next;
@@ -160,20 +168,16 @@ function resetTimingForCurrentSim(initialRate = null) {
   if (initialRate != null && Number.isFinite(initialRate)) {
     rate = Math.max(0.0625, Math.min(16, Number(initialRate) || 1));
   }
-}
+  }
 
-function readStructState(scope) {
-  if (!mod || !(h > 0)) return null;
-  try {
-    if (scope === 'mjVisual') {
-      return readVisualStruct(mod, h);
-    }
-    if (scope === 'mjStatistic') {
-      return readStatisticStruct(mod, h);
-    }
-  } catch {}
-  return null;
-}
+  function readStructState(scope) {
+    if (!mod || !(h > 0)) return null;
+    try {
+      if (scope === 'mjVisual') return readVisualStruct(mod, h);
+      if (scope === 'mjStatistic') return readStatisticStruct(mod, h);
+    } catch {}
+    return null;
+  }
 
 function createGroupState(initial = 1) {
   const state = {};
@@ -1499,13 +1503,19 @@ async function loadXmlWithFallback(xmlText) {
     msg.keyIndex = keySliderIndex | 0;
   }
   if (gsizeView) {
-    if (snapshotLogEnabled) console.log('[worker] gsize view len', gsizeView.length);
+    if (snapshotLogEnabled && !loggedGsizeDiag) {
+      loggedGsizeDiag = true;
+      console.log('[worker] gsize view len', gsizeView.length);
+    }
     const gsize = new Float64Array(gsizeView);
     msg.gsize = gsize;
     transfers.push(gsize.buffer);
   }
   if (gtypeView) {
-    if (snapshotLogEnabled) console.log('[worker] gtype view len', gtypeView.length);
+    if (snapshotLogEnabled && !loggedGtypeDiag) {
+      loggedGtypeDiag = true;
+      console.log('[worker] gtype view len', gtypeView.length);
+    }
     const gtype = new Int32Array(gtypeView);
     msg.gtype = gtype;
     transfers.push(gtype.buffer);
@@ -1685,7 +1695,8 @@ async function loadXmlWithFallback(xmlText) {
         contacts.frame = frame;
         transfers.push(frame.buffer);
       }
-      if (snapshotDebug) {
+      if (snapshotLogEnabled && !loggedContactDiag) {
+        loggedContactDiag = true;
         try {
           console.log('[worker] contact view diag', {
             ncon,
@@ -1773,7 +1784,10 @@ async function loadXmlWithFallback(xmlText) {
     msg.scene_snapshot = { source: 'sim', frame: snapshotState.frame - 1, snap: scenePayload };
   }
   try {
-    if (snapshotLogEnabled) console.log('[worker] snapshot keys', Object.keys(msg));
+    if (snapshotLogEnabled && !loggedSnapshotKeys) {
+      loggedSnapshotKeys = true;
+      console.log('[worker] snapshot keys', Object.keys(msg));
+    }
     postMessage(msg, transfers);
   } catch (err) {
     try { postMessage({ kind:'error', message: `snapshot postMessage failed: ${err}` }); } catch {}
@@ -2280,6 +2294,244 @@ onmessage = async (ev) => {
           postMessage({ kind: 'log', message: 'worker: setField (mjStatistic) failed', extra: String(err) });
         }
       }
+    } else if (msg.cmd === 'applyPerturb') {
+      try {
+        if (!sim) return;
+        const bodyId = Number(msg.bodyId) | 0;
+        const geomIndex = Number(msg.geomIndex) | 0;
+        const mode = msg.mode === 'rotate' ? 'rotate' : 'translate';
+        const ax = +msg.anchor?.[0] || 0;
+        const ay = +msg.anchor?.[1] || 0;
+        const az = +msg.anchor?.[2] || 0;
+        const cx = +msg.cursor?.[0] || 0;
+        const cy = +msg.cursor?.[1] || 0;
+        const cz = +msg.cursor?.[2] || 0;
+        const dx = cx - ax;
+        const dy = cy - ay;
+        const dz = cz - az;
+        const visual = readStructState('mjVisual') || {};
+        const statistic = readStructState('mjStatistic') || {};
+        const map = visual.map || {};
+        const meanmass = Number(statistic.meanmass) || 1;
+        const stiffness = Number.isFinite(map.stiffness) && map.stiffness > 0 ? map.stiffness : 100;
+        const stiffnessrot = Number.isFinite(map.stiffnessrot) && map.stiffnessrot > 0 ? map.stiffnessrot : 500;
+        const nbodyLocal = typeof sim.nbody === 'function' ? (sim.nbody() | 0) : 0;
+        const boundsRadius = Math.max(0.1, lastBounds?.radius || 1);
+        const xiposView = typeof sim.bodyXiposView === 'function' ? sim.bodyXiposView() : null;
+        const bodyVel = (typeof sim.bodyWorldVelocity === 'function' && bodyId >= 0 && nbodyLocal > 0 && bodyId < nbodyLocal)
+          ? sim.bodyWorldVelocity(bodyId, null)
+          : null;
+        const hasVel = !!(bodyVel && bodyVel.length >= 6);
+        if (mode === 'translate' && bodyId >= 0 && nbodyLocal > 0 && bodyId < nbodyLocal && xiposView) {
+          let localmass = meanmass;
+          const idxPos = 3 * bodyId;
+          const comx = xiposView[idxPos + 0] || 0;
+          const comy = xiposView[idxPos + 1] || 0;
+          const comz = xiposView[idxPos + 2] || 0;
+          const selx = ax;
+          const sely = ay;
+          const selz = az;
+          const refx = cx;
+          const refy = cy;
+          const refz = cz;
+          const diffx = selx - refx;
+          const diffy = sely - refy;
+          const diffz = selz - refz;
+          if (bodyId !== perturbBodyId || !(perturbLocalmass > 0) || !(perturbInertia && perturbInertia > 0)) {
+            if (typeof sim.bodyLocalMassAtPoint === 'function') {
+              try {
+                const lm = sim.bodyLocalMassAtPoint(bodyId, [selx, sely, selz]);
+                if (Number.isFinite(lm) && lm > 0) {
+                  localmass = lm;
+                }
+              } catch {}
+            }
+            let inertia = null;
+            if (typeof sim.bodyInertiaScalar === 'function') {
+              try {
+                const val = sim.bodyInertiaScalar(bodyId);
+                if (Number.isFinite(val) && val > 0) {
+                  inertia = val;
+                }
+              } catch {}
+            }
+            perturbBodyId = bodyId;
+            perturbLocalmass = localmass;
+            perturbInertia = inertia;
+          } else {
+            localmass = perturbLocalmass;
+          }
+          const bodyInertia = perturbInertia && perturbInertia > 0 ? perturbInertia : null;
+          const rvx = hasVel ? (bodyVel[0] || 0) : 0;
+          const rvy = hasVel ? (bodyVel[1] || 0) : 0;
+          const rvz = hasVel ? (bodyVel[2] || 0) : 0;
+          const lvx = hasVel ? (bodyVel[3] || 0) : 0;
+          const lvy = hasVel ? (bodyVel[4] || 0) : 0;
+          const lvz = hasVel ? (bodyVel[5] || 0) : 0;
+          const mx = selx - comx;
+          const my = sely - comy;
+          const mz = selz - comz;
+          const svelx = hasVel ? (rvy * mz - rvz * my + lvx) : 0;
+          const svely = hasVel ? (rvz * mx - rvx * mz + lvy) : 0;
+          const svelz = hasVel ? (rvx * my - rvy * mx + lvz) : 0;
+          const k = stiffness * localmass;
+          const springFx = -k * diffx;
+          const springFy = -k * diffy;
+          const springFz = -k * diffz;
+          const c0 = Math.sqrt(Math.max(stiffness, 1e-6)) * localmass;
+          const dampFx = hasVel ? -c0 * svelx : 0;
+          const dampFy = hasVel ? -c0 * svely : 0;
+          const dampFz = hasVel ? -c0 * svelz : 0;
+          let fx = springFx + dampFx;
+          let fy = springFy + dampFy;
+          let fz = springFz + dampFz;
+          const momx = mx;
+          const momy = my;
+          const momz = mz;
+          let tx = momy * fz - momz * fy;
+          let ty = momz * fx - momx * fz;
+          let tz = momx * fy - momy * fx;
+          if (hasVel && bodyInertia && bodyInertia > 0) {
+            const dirLen = Math.hypot(diffx, diffy, diffz);
+            if (dirLen > 1e-6) {
+              const nx = diffx / dirLen;
+              const ny = diffy / dirLen;
+              const nz = diffz / dirLen;
+              const proj = rvx * nx + rvy * ny + rvz * nz;
+              const cRot = Math.sqrt(Math.max(stiffnessrot, 1e-6)) * bodyInertia;
+              tx += -cRot * proj * nx;
+              ty += -cRot * proj * ny;
+              tz += -cRot * proj * nz;
+            }
+          }
+          if (verboseLogEnabled) {
+              const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+              if (!lastPerturbLogTimeMs || (now - lastPerturbLogTimeMs) > 200) {
+                lastPerturbLogTimeMs = now;
+                const fLen = Math.hypot(fx, fy, fz);
+                const tLen = Math.hypot(tx, ty, tz);
+                emitLog('worker: applyPerturb body translate', { bodyId, mode, fLen, tLen, localmass });
+              }
+            }
+            try {
+              sim.applyXfrcByBody?.(bodyId, [fx, fy, fz], [tx, ty, tz]);
+            } catch {}
+        } else if (mode === 'rotate' && bodyId >= 0 && nbodyLocal > 0 && bodyId < nbodyLocal) {
+          const inertia = bodyInertia && bodyInertia > 0 ? bodyInertia : (meanmass * boundsRadius * boundsRadius);
+          const rvx = hasVel ? (bodyVel[0] || 0) : 0;
+          const rvy = hasVel ? (bodyVel[1] || 0) : 0;
+          const rvz = hasVel ? (bodyVel[2] || 0) : 0;
+          const diffLen = Math.hypot(dx, dy, dz);
+          let tx = 0;
+          let ty = 0;
+          let tz = 0;
+          if (diffLen > 0) {
+            const nx = dx / diffLen;
+            const ny = dy / diffLen;
+            const nz = dz / diffLen;
+            const angle = diffLen / Math.max(boundsRadius, 1e-6);
+            const springMag = stiffnessrot * inertia * angle;
+            tx = springMag * nx;
+            ty = springMag * ny;
+            tz = springMag * nz;
+          }
+          if (hasVel && inertia && inertia > 0) {
+            const axisLen = Math.hypot(tx, ty, tz);
+            let ax = 0;
+            let ay = 0;
+            let az = 0;
+            if (axisLen > 1e-9) {
+              ax = tx / axisLen;
+              ay = ty / axisLen;
+              az = tz / axisLen;
+            } else if (diffLen > 1e-9) {
+              ax = dx / diffLen;
+              ay = dy / diffLen;
+              az = dz / diffLen;
+            }
+            const omegaAxial = ax * rvx + ay * rvy + az * rvz;
+            const cRot = Math.sqrt(Math.max(stiffnessrot, 1e-6)) * inertia;
+            tx += -cRot * omegaAxial * ax;
+            ty += -cRot * omegaAxial * ay;
+            tz += -cRot * omegaAxial * az;
+          }
+          if (verboseLogEnabled) {
+            const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+            if (!lastPerturbLogTimeMs || (now - lastPerturbLogTimeMs) > 200) {
+              lastPerturbLogTimeMs = now;
+              const tLen = Math.hypot(tx, ty, tz);
+              emitLog('worker: applyPerturb body rotate', { bodyId, mode, tLen });
+            }
+          }
+          try {
+            sim.applyXfrcByBody?.(bodyId, [0, 0, 0], [tx, ty, tz]);
+          } catch {}
+        } else if (mode === 'translate' && geomIndex >= 0) {
+          const k = stiffness * meanmass;
+          let fx = k * dx;
+          let fy = k * dy;
+          let fz = k * dz;
+          const fMax = stiffness * meanmass * boundsRadius;
+          const fLen = Math.hypot(fx, fy, fz);
+          if (fLen > fMax && fLen > 0) {
+            const scaleF = fMax / fLen;
+            fx *= scaleF;
+            fy *= scaleF;
+            fz *= scaleF;
+          }
+          if (verboseLogEnabled) {
+            const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+            if (!lastPerturbLogTimeMs || (now - lastPerturbLogTimeMs) > 200) {
+              lastPerturbLogTimeMs = now;
+              const fLen = Math.hypot(fx, fy, fz);
+              emitLog('worker: applyPerturb geom translate', { geomIndex, mode, fLen });
+            }
+          }
+          try {
+            sim.applyXfrcByGeom?.(geomIndex, [fx, fy, fz], [0, 0, 0], [ax, ay, az]);
+          } catch {}
+        } else if (mode === 'rotate' && geomIndex >= 0) {
+          const inertiaApprox = meanmass * boundsRadius * boundsRadius;
+          const diffLen = Math.hypot(dx, dy, dz);
+          let tx = 0;
+          let ty = 0;
+          let tz = 0;
+          if (diffLen > 0) {
+            const nx = dx / diffLen;
+            const ny = dy / diffLen;
+            const nz = dz / diffLen;
+            const angle = diffLen / Math.max(boundsRadius, 1e-6);
+            const springMag = stiffnessrot * inertiaApprox * angle;
+            tx = springMag * nx;
+            ty = springMag * ny;
+            tz = springMag * nz;
+          }
+          if (verboseLogEnabled) {
+            const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+            if (!lastPerturbLogTimeMs || (now - lastPerturbLogTimeMs) > 200) {
+              lastPerturbLogTimeMs = now;
+              const tLen = Math.hypot(tx, ty, tz);
+              emitLog('worker: applyPerturb geom rotate', { geomIndex, mode, tLen });
+            }
+          }
+          try {
+            sim.applyXfrcByGeom?.(geomIndex, [0, 0, 0], [tx, ty, tz], [ax, ay, az]);
+          } catch {}
+        } else if (verboseLogEnabled) {
+          const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+          if (!lastPerturbLogTimeMs || (now - lastPerturbLogTimeMs) > 200) {
+            lastPerturbLogTimeMs = now;
+            emitLog('worker: applyPerturb no-op', {
+              bodyId,
+              geomIndex,
+              mode,
+              hasXipos: !!xiposView,
+              hasCvel: hasVel,
+              nbodyLocal,
+            });
+          }
+        }
+      } catch {}
     } else if (msg.cmd === 'applyForce') {
       // Expected: { geomIndex, force:[fx,fy,fz], torque:[tx,ty,tz], point:[x,y,z] }
       try {
@@ -2324,6 +2576,9 @@ onmessage = async (ev) => {
       ctrlNoiseRate = +msg.rate || 0;
     } else if (msg.cmd === 'clearForces') {
       try { sim?.clearAllXfrc?.(); } catch {}
+      perturbBodyId = -1;
+      perturbLocalmass = null;
+      perturbInertia = null;
     } else if (msg.cmd === 'setCtrl') {
       // Write a single actuator control value if pointers available
       try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch {}

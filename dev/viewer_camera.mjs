@@ -270,7 +270,8 @@ export function createCameraController({
     if (cameraModeIndex() === 1) {
       syncTrackingOffsetFromCamera();
     }
-    if (debugMode) {
+    const cameraDebug = (typeof window !== 'undefined' && window.PLAY_CAMERA_DEBUG === true);
+    if (debugMode && cameraDebug) {
       try {
         console.log('[camera] gesture', {
           mode,
