@@ -119,9 +119,23 @@ export async function prepareBindingUpdate(control, rawValue) {
   if (binding === 'Simulate::run') return null;
   const meta = await ensureBindingIndex();
   const entry = meta?.[binding];
-  if (!entry || !entry.value) return null;
+  if (!entry || !entry.value) {
+    console.warn?.('[bindings] no binding metadata for', binding);
+    return null;
+  }
   const bindingParts = splitBinding(binding);
   if (!bindingParts) return null;
+  // Simulate-level bindings are handled explicitly in the backend; do not
+  // try to treat them as struct-backed fields here.
+  if (bindingParts.scope === 'Simulate') {
+    if (
+      binding.startsWith('Simulate::disable[')
+      || binding.startsWith('Simulate::enable[')
+      || binding.startsWith('Simulate::enableactuator[')
+    ) {
+      return null;
+    }
+  }
   if (bindingParts.scope === 'mjvOption' || bindingParts.scope === 'mjvScene') {
     return null;
   }
@@ -139,6 +153,10 @@ export async function prepareBindingUpdate(control, rawValue) {
     }
     return null;
   }
+  try {
+    // eslint-disable-next-line no-console
+    console.log('[prepareBindingUpdate]', { binding, scope, path, kind, size, value: normalised });
+  } catch {}
   return {
     meta: {
       scope,

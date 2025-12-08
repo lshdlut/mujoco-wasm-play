@@ -61,6 +61,7 @@ let lastBounds = { center: [0, 0, 0], radius: 0 };
 let perturbBodyId = -1;
 let perturbLocalmass = null;
 let perturbInertia = null;
+let perturbRefQuat = null;
 let alignSeq = 0;
 let copySeq = 0;
 let renderAssets = null;
@@ -419,15 +420,8 @@ function buildInfoStats(sim, tSim, nconLocal) {
 
   try {
     const nefcFn = typeof moduleRef.data_nefc === 'function' ? moduleRef.data_nefc : moduleRef._mjwf_data_nefc;
-    const nefcPtrFn = typeof moduleRef.data_nefc_ptr === 'function' ? moduleRef.data_nefc_ptr : moduleRef._mjwf_data_nefc_ptr;
     if (typeof nefcFn === 'function') {
       out.nefc = (nefcFn.call(moduleRef, handle) | 0) || 0;
-    } else if (typeof nefcPtrFn === 'function') {
-      const ptr = nefcPtrFn.call(moduleRef, handle) | 0;
-      if (ptr) {
-        const view = heapViewI32(mod, ptr, 1);
-        out.nefc = (view && view.length > 0 ? view[0] : 0) | 0;
-      }
     }
   } catch {}
 
@@ -452,13 +446,9 @@ function buildInfoStats(sim, tSim, nconLocal) {
 
   let nisland = 0;
   try {
-    const nislandPtrFn = moduleRef.data_nisland_ptr || moduleRef._mjwf_data_nisland_ptr;
-    if (typeof nislandPtrFn === 'function') {
-      const ptr = nislandPtrFn.call(moduleRef, handle) | 0;
-      if (ptr) {
-        const view = heapViewI32(moduleRef, ptr, 1);
-        nisland = (view && view.length > 0 ? view[0] : 0) | 0;
-      }
+    const nislandFn = moduleRef.data_nisland || moduleRef._mjwf_data_nisland;
+    if (typeof nislandFn === 'function') {
+      nisland = (nislandFn.call(moduleRef, handle) | 0) || 0;
     }
   } catch {}
   out.nisland = nisland;
@@ -561,14 +551,10 @@ function buildInfoStats(sim, tSim, nconLocal) {
   } catch {}
 
   try {
-    const narenaPtrFn = moduleRef.data_narena_ptr || moduleRef._mjwf_data_narena_ptr;
+    const narenaFn = moduleRef.data_narena || moduleRef._mjwf_data_narena;
     const maxArenaPtrFn = moduleRef.data_maxuse_arena_ptr || moduleRef._mjwf_data_maxuse_arena_ptr;
-    if (typeof narenaPtrFn === 'function') {
-      const p = narenaPtrFn.call(moduleRef, handle) | 0;
-      if (p) {
-        const v = heapViewI32(moduleRef, p, 1);
-        out.narena = (v && v.length > 0 ? v[0] : 0) | 0;
-      }
+    if (typeof narenaFn === 'function') {
+      out.narena = (narenaFn.call(moduleRef, handle) | 0) || 0;
     }
     if (typeof maxArenaPtrFn === 'function') {
       const p = maxArenaPtrFn.call(moduleRef, handle) | 0;
@@ -2251,9 +2237,43 @@ onmessage = async (ev) => {
       const target = msg.target;
       if (target === 'mjOption') {
         try {
-          const ok = writeOptionField(mod, h, Array.isArray(msg.path) ? msg.path : [], msg.kind, msg.value);
+          const pathArr = Array.isArray(msg.path) ? msg.path : [];
+          if (snapshotDebug) {
+            try {
+              postMessage({
+                kind: 'log',
+                message: 'worker: setField (mjOption) request',
+                extra: {
+                  path: pathArr,
+                  kind: msg.kind,
+                  size: msg.size,
+                  value: msg.value,
+                },
+              });
+            } catch {}
+          }
+          const ok = writeOptionField(mod, h, pathArr, msg.kind, msg.value);
           if (ok) {
-            if (Array.isArray(msg.path) && msg.path.length === 1 && msg.path[0] === 'timestep') {
+            if (snapshotDebug) {
+              try {
+                const opts = readOptionStruct(mod, h);
+                const field = pathArr[0];
+                const preview =
+                  opts && field && Object.prototype.hasOwnProperty.call(opts, field)
+                    ? opts[field]
+                    : undefined;
+                postMessage({
+                  kind: 'log',
+                  message: 'worker: setField (mjOption) applied',
+                  extra: {
+                    path: pathArr,
+                    value: msg.value,
+                    preview,
+                  },
+                });
+              } catch {}
+            }
+            if (Array.isArray(pathArr) && pathArr.length === 1 && pathArr[0] === 'timestep') {
               try {
                 const rawDt = sim?.timestep?.() || dt;
                 if (Number.isFinite(rawDt) && rawDt > 0) {
@@ -2309,6 +2329,14 @@ onmessage = async (ev) => {
         const dx = cx - ax;
         const dy = cy - ay;
         const dz = cz - az;
+        let refQuat = null;
+        const rotVec = Array.isArray(msg.rotVec) && msg.rotVec.length >= 3
+          ? [
+              +msg.rotVec[0] || 0,
+              +msg.rotVec[1] || 0,
+              +msg.rotVec[2] || 0,
+            ]
+          : null;
         const visual = readStructState('mjVisual') || {};
         const statistic = readStructState('mjStatistic') || {};
         const map = visual.map || {};
@@ -2318,10 +2346,13 @@ onmessage = async (ev) => {
         const nbodyLocal = typeof sim.nbody === 'function' ? (sim.nbody() | 0) : 0;
         const boundsRadius = Math.max(0.1, lastBounds?.radius || 1);
         const xiposView = typeof sim.bodyXiposView === 'function' ? sim.bodyXiposView() : null;
+        const xquatView = typeof sim.bodyXquatView === 'function' ? sim.bodyXquatView() : null;
         const bodyVel = (typeof sim.bodyWorldVelocity === 'function' && bodyId >= 0 && nbodyLocal > 0 && bodyId < nbodyLocal)
           ? sim.bodyWorldVelocity(bodyId, null)
           : null;
         const hasVel = !!(bodyVel && bodyVel.length >= 6);
+        // Note: Flex perturb (pert->flexselect branch in mjv_initPerturb / mjv_applyPerturbForce)
+        // is not implemented in this web viewer. Only rigid-body translate/rotate perturb is supported.
         if (mode === 'translate' && bodyId >= 0 && nbodyLocal > 0 && bodyId < nbodyLocal && xiposView) {
           let localmass = meanmass;
           const idxPos = 3 * bodyId;
@@ -2355,13 +2386,26 @@ onmessage = async (ev) => {
                 }
               } catch {}
             }
+            let refQuat = null;
+            if (xquatView && xquatView.length >= 4 * nbodyLocal) {
+              const qIdx = 4 * bodyId;
+              const xqw = xquatView[qIdx + 0] || 0;
+              const xqx = xquatView[qIdx + 1] || 0;
+              const xqy = xquatView[qIdx + 2] || 0;
+              const xqz = xquatView[qIdx + 3] || 0;
+              // body_iquat is already baked into xquat, so we treat xquat as refquat basis.
+              refQuat = [xqw, xqx, xqy, xqz];
+            }
             perturbBodyId = bodyId;
             perturbLocalmass = localmass;
             perturbInertia = inertia;
+            perturbRefQuat = refQuat;
           } else {
             localmass = perturbLocalmass;
           }
           const bodyInertia = perturbInertia && perturbInertia > 0 ? perturbInertia : null;
+          // MuJoCo mj_objectVelocity returns [ang x,y,z, lin x,y,z]
+          // mj_objectVelocity layout matches simulate: [ang x,y,z, lin x,y,z]
           const rvx = hasVel ? (bodyVel[0] || 0) : 0;
           const rvy = hasVel ? (bodyVel[1] || 0) : 0;
           const rvz = hasVel ? (bodyVel[2] || 0) : 0;
@@ -2416,51 +2460,210 @@ onmessage = async (ev) => {
             try {
               sim.applyXfrcByBody?.(bodyId, [fx, fy, fz], [tx, ty, tz]);
             } catch {}
-        } else if (mode === 'rotate' && bodyId >= 0 && nbodyLocal > 0 && bodyId < nbodyLocal) {
-          const inertia = bodyInertia && bodyInertia > 0 ? bodyInertia : (meanmass * boundsRadius * boundsRadius);
-          const rvx = hasVel ? (bodyVel[0] || 0) : 0;
-          const rvy = hasVel ? (bodyVel[1] || 0) : 0;
-          const rvz = hasVel ? (bodyVel[2] || 0) : 0;
-          const diffLen = Math.hypot(dx, dy, dz);
+        } else if (mode === 'rotate' && bodyId >= 0 && nbodyLocal > 0 && bodyId < nbodyLocal && xquatView && xquatView.length >= 4 * nbodyLocal) {
+          // Restore MuJoCo refquat update, but keep torque magnitude linear in angle for debugging.
+          if (bodyId !== perturbBodyId || !perturbRefQuat || perturbRefQuat.length < 4) {
+            const qIdx = 4 * bodyId;
+            const bw = xquatView[qIdx + 0] || 0;
+            const bx = xquatView[qIdx + 1] || 0;
+            const by = xquatView[qIdx + 2] || 0;
+            const bz = xquatView[qIdx + 3] || 0;
+            let xiw = bw;
+            let xix = bx;
+            let xiy = by;
+            let xiz = bz;
+            let bodyIquatView = null;
+            if (typeof sim._readModelPtr === 'function' && mod) {
+              const ptrIquat = sim._readModelPtr('body_iquat') | 0;
+              if (ptrIquat > 0) {
+                bodyIquatView = heapViewF64(mod, ptrIquat, 4 * nbodyLocal);
+              }
+            }
+            if (bodyIquatView && bodyIquatView.length >= 4 * nbodyLocal) {
+              const iqIdx = 4 * bodyId;
+              const iw = bodyIquatView[iqIdx + 0] || 0;
+              const ix = bodyIquatView[iqIdx + 1] || 0;
+              const iy = bodyIquatView[iqIdx + 2] || 0;
+              const iz = bodyIquatView[iqIdx + 3] || 0;
+              const t0 = bw * iw - bx * ix - by * iy - bz * iz;
+              const t1 = bw * ix + bx * iw + by * iz - bz * iy;
+              const t2 = bw * iy - bx * iz + by * iw + bz * ix;
+              const t3 = bw * iz + bx * iy - by * ix + bz * iw;
+              xiw = t0;
+              xix = t1;
+              xiy = t2;
+              xiz = t3;
+            }
+            perturbBodyId = bodyId;
+            perturbRefQuat = [xiw, xix, xiy, xiz];
+          }
+          if (rotVec && rotVec.length >= 3) {
+            const vx = rotVec[0];
+            const vy = rotVec[1];
+            const vz = rotVec[2];
+            const len = Math.hypot(vx, vy, vz);
+            if (len > 1e-12) {
+              const ax = vx / len;
+              const ay = vy / len;
+              const az = vz / len;
+              const angle = len * Math.PI * 2;
+              const half = 0.5 * angle;
+              const s = Math.sin(half);
+              const q1w = Math.cos(half);
+              const q1x = ax * s;
+              const q1y = ay * s;
+              const q1z = az * s;
+              const rw0 = perturbRefQuat[0] || 0;
+              const rx0 = perturbRefQuat[1] || 0;
+              const ry0 = perturbRefQuat[2] || 0;
+              const rz0 = perturbRefQuat[3] || 0;
+              let rw = q1w * rw0 - q1x * rx0 - q1y * ry0 - q1z * rz0;
+              let rx = q1w * rx0 + q1x * rw0 + q1y * rz0 - q1z * ry0;
+              let ry = q1w * ry0 - q1x * rz0 + q1y * rw0 + q1z * rx0;
+              let rz = q1w * rz0 + q1x * ry0 - q1y * rx0 + q1z * rw0;
+              const qn = Math.hypot(rw, rx, ry, rz) || 1;
+              rw /= qn;
+              rx /= qn;
+              ry /= qn;
+              rz /= qn;
+              // Clamp relative rotation to +/- 90 degrees relative to body (mjv_movePerturb)
+              const qIdx2 = 4 * bodyId;
+              const bw2 = xquatView[qIdx2 + 0] || 0;
+              const bx2 = xquatView[qIdx2 + 1] || 0;
+              const by2 = xquatView[qIdx2 + 2] || 0;
+              const bz2 = xquatView[qIdx2 + 3] || 0;
+              let xiw2 = bw2;
+              let xix2 = bx2;
+              let xiy2 = by2;
+              let xiz2 = bz2;
+              let bodyIquatView2 = null;
+              if (typeof sim._readModelPtr === 'function' && mod) {
+                const ptrIquat2 = sim._readModelPtr('body_iquat') | 0;
+                if (ptrIquat2 > 0) {
+                  bodyIquatView2 = heapViewF64(mod, ptrIquat2, 4 * nbodyLocal);
+                }
+              }
+              if (bodyIquatView2 && bodyIquatView2.length >= 4 * nbodyLocal) {
+                const iqIdx2 = 4 * bodyId;
+                const iw2 = bodyIquatView2[iqIdx2 + 0] || 0;
+                const ix2 = bodyIquatView2[iqIdx2 + 1] || 0;
+                const iy2 = bodyIquatView2[iqIdx2 + 2] || 0;
+                const iz2 = bodyIquatView2[iqIdx2 + 3] || 0;
+                const t0 = bw2 * iw2 - bx2 * ix2 - by2 * iy2 - bz2 * iz2;
+                const t1 = bw2 * ix2 + bx2 * iw2 + by2 * iz2 - bz2 * iy2;
+                const t2 = bw2 * iy2 - bx2 * iz2 + by2 * iw2 + bz2 * ix2;
+                const t3 = bw2 * iz2 + bx2 * iy2 - by2 * ix2 + bz2 * iw2;
+                xiw2 = t0;
+                xix2 = t1;
+                xiy2 = t2;
+                xiz2 = t3;
+              }
+              const nxw = -xiw2;
+              const nxx = -xix2;
+              const nxy = -xiy2;
+              const nxz = -xiz2;
+              let q2w = nxw * rw - nxx * rx - nxy * ry - nxz * rz;
+              let q2x = nxw * rx + nxx * rw + nxy * rz - nxz * ry;
+              let q2y = nxw * ry - nxx * rz + nxy * rw + nxz * rx;
+              let q2z = nxw * rz + nxx * ry - nxy * rx + nxz * rw;
+              let scl = Math.hypot(q2x, q2y, q2z);
+              if (scl > 1e-12) {
+                const limit = 0.5 * Math.PI;
+                if (scl > limit) {
+                  scl = limit;
+                  const half2 = 0.5 * scl;
+                  const s2 = Math.sin(half2);
+                  const q2nw = Math.cos(half2);
+                  const q2nx = (q2x / scl) * s2;
+                  const q2ny = (q2y / scl) * s2;
+                  const q2nz = (q2z / scl) * s2;
+                  const rw2 = xiw2 * q2nw - xix2 * q2nx - xiy2 * q2ny - xiz2 * q2nz;
+                  const rx2 = xiw2 * q2nx + xix2 * q2nw + xiy2 * q2nz - xiz2 * q2ny;
+                  const ry2 = xiw2 * q2ny - xix2 * q2nz + xiy2 * q2nw + xiz2 * q2nx;
+                  const rz2 = xiw2 * q2nz + xix2 * q2ny - xiy2 * q2nx + xiz2 * q2nw;
+                  perturbRefQuat = [rw2, rx2, ry2, rz2];
+                } else {
+                  perturbRefQuat = [rw, rx, ry, rz];
+                }
+              }
+            }
+          }
+          // Compute diffQuat = refQuat * neg(xiquat) and derive axis-angle; scale linearly
+          const qIdx3 = 4 * bodyId;
+          const bw3 = xquatView[qIdx3 + 0] || 0;
+          const bx3 = xquatView[qIdx3 + 1] || 0;
+          const by3 = xquatView[qIdx3 + 2] || 0;
+          const bz3 = xquatView[qIdx3 + 3] || 0;
+          let xiw3 = bw3;
+          let xix3 = bx3;
+          let xiy3 = by3;
+          let xiz3 = bz3;
+          let bodyIquatView3 = null;
+          if (typeof sim._readModelPtr === 'function' && mod) {
+            const ptrIquat3 = sim._readModelPtr('body_iquat') | 0;
+            if (ptrIquat3 > 0) {
+              bodyIquatView3 = heapViewF64(mod, ptrIquat3, 4 * nbodyLocal);
+            }
+          }
+          if (bodyIquatView3 && bodyIquatView3.length >= 4 * nbodyLocal) {
+            const iqIdx3 = 4 * bodyId;
+            const iw3 = bodyIquatView3[iqIdx3 + 0] || 0;
+            const ix3 = bodyIquatView3[iqIdx3 + 1] || 0;
+            const iy3 = bodyIquatView3[iqIdx3 + 2] || 0;
+            const iz3 = bodyIquatView3[iqIdx3 + 3] || 0;
+            const t0 = bw3 * iw3 - bx3 * ix3 - by3 * iy3 - bz3 * iz3;
+            const t1 = bw3 * ix3 + bx3 * iw3 + by3 * iz3 - bz3 * iy3;
+            const t2 = bw3 * iy3 - bx3 * iz3 + by3 * iw3 + bz3 * ix3;
+            const t3 = bw3 * iz3 + bx3 * iy3 - by3 * ix3 + bz3 * iw3;
+            xiw3 = t0;
+            xix3 = t1;
+            xiy3 = t2;
+            xiz3 = t3;
+          }
+          const rwf = perturbRefQuat ? (perturbRefQuat[0] || 0) : 1;
+          const rxf = perturbRefQuat ? (perturbRefQuat[1] || 0) : 0;
+          const ryf = perturbRefQuat ? (perturbRefQuat[2] || 0) : 0;
+          const rzf = perturbRefQuat ? (perturbRefQuat[3] || 0) : 0;
+          const ccw3 = -xiw3;
+          const ccx3 = -xix3;
+          const ccy3 = -xiy3;
+          const ccz3 = -xiz3;
+          let dw3 = rwf * ccw3 - rxf * ccx3 - ryf * ccy3 - rzf * ccz3;
+          let dxq3 = rwf * ccx3 + rxf * ccw3 + ryf * ccz3 - rzf * ccy3;
+          let dyq3 = rwf * ccy3 - rxf * ccz3 + ryf * ccw3 + rzf * ccx3;
+          let dzq3 = rwf * ccz3 + rxf * ccy3 - ryf * ccx3 + rzf * ccw3;
+          const qn3 = Math.hypot(dw3, dxq3, dyq3, dzq3) || 1;
+          dw3 /= qn3;
+          dxq3 /= qn3;
+          dyq3 /= qn3;
+          dzq3 /= qn3;
           let tx = 0;
           let ty = 0;
           let tz = 0;
-          if (diffLen > 0) {
-            const nx = dx / diffLen;
-            const ny = dy / diffLen;
-            const nz = dz / diffLen;
-            const angle = diffLen / Math.max(boundsRadius, 1e-6);
-            const springMag = stiffnessrot * inertia * angle;
-            tx = springMag * nx;
-            ty = springMag * ny;
-            tz = springMag * nz;
-          }
-          if (hasVel && inertia && inertia > 0) {
-            const axisLen = Math.hypot(tx, ty, tz);
-            let ax = 0;
-            let ay = 0;
-            let az = 0;
-            if (axisLen > 1e-9) {
-              ax = tx / axisLen;
-              ay = ty / axisLen;
-              az = tz / axisLen;
-            } else if (diffLen > 1e-9) {
-              ax = dx / diffLen;
-              ay = dy / diffLen;
-              az = dz / diffLen;
-            }
-            const omegaAxial = ax * rvx + ay * rvy + az * rvz;
-            const cRot = Math.sqrt(Math.max(stiffnessrot, 1e-6)) * inertia;
-            tx += -cRot * omegaAxial * ax;
-            ty += -cRot * omegaAxial * ay;
-            tz += -cRot * omegaAxial * az;
+          const vnorm3 = Math.hypot(dxq3, dyq3, dzq3);
+          if (vnorm3 > 1e-12) {
+            const axisX = dxq3 / vnorm3;
+            const axisY = dyq3 / vnorm3;
+            const axisZ = dzq3 / vnorm3;
+            const angle = 2 * Math.atan2(vnorm3, Math.max(1e-12, dw3));
+            const kDbg = 5.0;
+            const scale = angle * kDbg;
+            tx = axisX * scale;
+            ty = axisY * scale;
+            tz = axisZ * scale;
           }
           if (verboseLogEnabled) {
             const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
             if (!lastPerturbLogTimeMs || (now - lastPerturbLogTimeMs) > 200) {
               lastPerturbLogTimeMs = now;
               const tLen = Math.hypot(tx, ty, tz);
-              emitLog('worker: applyPerturb body rotate', { bodyId, mode, tLen });
+              emitLog('worker: applyPerturb body rotate', {
+                bodyId,
+                mode,
+                tLen,
+                hasRefQuat: !!perturbRefQuat,
+                hasXquat: !!xquatView,
+              });
             }
           }
           try {
@@ -2531,7 +2734,15 @@ onmessage = async (ev) => {
             });
           }
         }
-      } catch {}
+      } catch (err) {
+        emitLog('worker: applyPerturb failed', {
+          err: String(err),
+          mode: msg && msg.mode,
+          bodyId: msg && msg.bodyId,
+          geomIndex: msg && msg.geomIndex,
+        }, { force: true });
+        throw err;
+      }
     } else if (msg.cmd === 'applyForce') {
       // Expected: { geomIndex, force:[fx,fy,fz], torque:[tx,ty,tz], point:[x,y,z] }
       try {
@@ -2579,6 +2790,8 @@ onmessage = async (ev) => {
       perturbBodyId = -1;
       perturbLocalmass = null;
       perturbInertia = null;
+      perturbRefQuat = null;
+      perturbRefQuat = null;
     } else if (msg.cmd === 'setCtrl') {
       // Write a single actuator control value if pointers available
       try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch {}

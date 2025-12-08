@@ -1,3 +1,5 @@
+import { resolveHeapBuffer as resolveSharedHeapBuffer } from './bridge.mjs';
+
 const OPTION_LAYOUT = {
   timestep: { offset: 0, type: 'f64', count: 1 },
   impratio: { offset: 8, type: 'f64', count: 1 },
@@ -61,36 +63,15 @@ const FIELD_POINTERS = {
 };
 
 function resolveHeapBuffer(mod) {
-  if (!mod) return null;
-  if (mod.__heapBuffer instanceof ArrayBuffer) {
-    return mod.__heapBuffer;
-  }
-  try {
-    const mem = mod.wasmExports?.memory
-      || mod.asm?.memory
-      || mod.asm?.wasmMemory
-      || mod.wasmMemory;
-    if (mem?.buffer instanceof ArrayBuffer) {
-      mod.__heapBuffer = mem.buffer;
-      return mem.buffer;
-    }
-  } catch {}
-  if (mod.__heapBuffer instanceof ArrayBuffer) return mod.__heapBuffer;
-  const heaps = [mod.HEAPU8, mod.HEAPF64];
-  for (const view of heaps) {
-    if (view && view.buffer instanceof ArrayBuffer) {
-      mod.__heapBuffer = view.buffer;
-      return view.buffer;
-    }
-  }
-  return null;
+  return resolveSharedHeapBuffer(mod);
 }
 
 function getOptionPtr(mod, handle) {
-  if (!mod || !(handle > 0)) return 0;
-  const fn = mod._mjwf_model_opt_ptr;
-  if (typeof fn !== 'function') return 0;
-  try { return fn.call(mod, handle) | 0; } catch { return 0; }
+  // Struct-level mjOption pointer is no longer used for edits in play.
+  // Forge 3.3.7 recommends per-field pointers (mjwf_model_opt_*_ptr) instead.
+  // Keep this helper for potential diagnostics, but always return 0 so the
+  // code paths below consistently go through FIELD_POINTERS.
+  return 0;
 }
 
 function writeFloatValues(mod, ptr, info, rawValues) {
@@ -164,21 +145,49 @@ function writeArray(mod, ptr, ArrayType, count, rawValues, coerceInt) {
 }
 
 export function writeOptionField(mod, handle, path, _kind, value) {
+  if (!mod || !(handle > 0)) return false;
   if (!Array.isArray(path) || path.length === 0) return false;
   const field = path[0];
   const info = OPTION_LAYOUT[field];
   if (!info) return false;
-  const optPtr = getOptionPtr(mod, handle);
-  if (optPtr) {
+  const ptrName = FIELD_POINTERS[field];
+  const fn = ptrName ? mod[ptrName] : null;
+  if (typeof fn !== 'function') return false;
+  let ptr = 0;
+  try {
+    ptr = fn.call(mod, handle) | 0;
+  } catch {
+    ptr = 0;
+  }
+  if (!(ptr > 0)) return false;
+  const buffer = resolveHeapBuffer(mod);
+  if (!buffer) return false;
+  const count = info.count || 1;
+  const values = Array.isArray(value) ? value : [value];
+  if (values.length < count) return false;
+  try {
     if (info.type === 'f64') {
-      return writeFloatValues(mod, optPtr, info, value);
+      const view = new Float64Array(buffer, ptr, count);
+      for (let i = 0; i < count; i += 1) {
+        const num = Number(values[i]);
+        if (!Number.isFinite(num)) return false;
+        view[i] = num;
+      }
+    } else if (info.type === 'i32') {
+      const view = new Int32Array(buffer, ptr, count);
+      for (let i = 0; i < count; i += 1) {
+        let num = Number(values[i]);
+        if (!Number.isFinite(num)) return false;
+        num = num | 0;
+        view[i] = num;
+      }
+    } else {
+      return false;
     }
-    if (info.type === 'i32') {
-      return writeIntValues(mod, optPtr, info, value);
-    }
+    return true;
+  } catch {
     return false;
   }
-  return writeField(mod, handle, field, info, value);
 }
 
 function writeField(mod, handle, field, info, value) {
@@ -216,28 +225,40 @@ function readIntValues(mod, ptr, info) {
 }
 
 export function readOptionStruct(mod, handle) {
-  const optPtr = getOptionPtr(mod, handle);
+  if (!mod || !(handle > 0)) return null;
+  const buffer = resolveHeapBuffer(mod);
+  if (!buffer) return null;
   const result = {};
-  if (optPtr) {
-    for (const [key, info] of Object.entries(OPTION_LAYOUT)) {
-      let value = null;
-      if (info.type === 'f64') {
-        value = readFloatValues(mod, optPtr, info);
-      } else if (info.type === 'i32') {
-        value = readIntValues(mod, optPtr, info);
-      }
-      if (value != null) {
-        result[key] = value;
-      }
-    }
-    return result;
-  }
-  // Fallback: per-field pointers
   for (const [key, info] of Object.entries(OPTION_LAYOUT)) {
-    const ptr = getFieldPtr(mod, handle, key);
-    if (!ptr) continue;
-    const value = readDirect(mod, ptr, info);
-    if (value != null) result[key] = value;
+    const ptrName = FIELD_POINTERS[key];
+    const fn = ptrName ? mod[ptrName] : null;
+    if (typeof fn !== 'function') continue;
+    let ptr = 0;
+    try {
+      ptr = fn.call(mod, handle) | 0;
+    } catch {
+      ptr = 0;
+    }
+    if (!(ptr > 0)) continue;
+    try {
+      if (info.type === 'f64') {
+        const view = new Float64Array(buffer, ptr, info.count);
+        if (info.count === 1) {
+          result[key] = Number(view[0]);
+        } else {
+          result[key] = Array.from(view, (v) => Number(v));
+        }
+      } else if (info.type === 'i32') {
+        const view = new Int32Array(buffer, ptr, info.count);
+        if (info.count === 1) {
+          result[key] = view[0] | 0;
+        } else {
+          result[key] = Array.from(view, (v) => v | 0);
+        }
+      }
+    } catch {
+      // ignore read failure for this field
+    }
   }
   return Object.keys(result).length ? result : null;
 }

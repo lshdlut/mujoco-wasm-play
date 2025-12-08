@@ -1115,6 +1115,10 @@ function applyStructBindingToModel(draft, scope, pathSegments, value) {
   if (!draft.model) draft.model = {};
   if (scope === 'mjOption') {
     draft.model.opt = draft.model.opt || {};
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[applyStructBindingToModel]', { scope, path: pathSegments, value });
+    } catch {}
     assignStructPath(draft.model.opt, pathSegments, value);
     return true;
   }
@@ -1408,6 +1412,14 @@ export function createViewerStore(initialState) {
 export async function applySpecAction(store, backend, control, rawValue) {
   if (!control) return;
   const value = normaliseControlValue(control, rawValue);
+  try {
+    // eslint-disable-next-line no-console
+    console.log('[applySpecAction]', {
+      id: control.item_id,
+      binding: control.binding,
+      value,
+    });
+  } catch {}
   if (control.item_id === 'option.visual_source') {
     const nextMode =
       typeof value === 'string' && value.toLowerCase().startsWith('model') ? 'model' : 'preset';
@@ -1434,13 +1446,20 @@ export async function applySpecAction(store, backend, control, rawValue) {
     }
   }
 
+  // For struct-backed bindings (mjOption/mjVisual/mjStatistic), backend.apply
+  // posts an async setField message to the worker and returns the current
+  // snapshot (without the updated struct). In that case we rely on the local
+  // applyStructBindingToModel + subsequent backend snapshots instead of
+  // immediately merging the stale snapshot here.
+  const effectiveSnapshot = prepared ? null : snapshot;
+
   store.update((draft) => {
     applyControl(draft, control, value);
     if (prepared) {
       applyStructBindingToModel(draft, prepared.meta.scope, prepared.meta.path, prepared.value);
     }
-    if (snapshot) {
-      mergeBackendSnapshot(draft, snapshot);
+    if (effectiveSnapshot) {
+      mergeBackendSnapshot(draft, effectiveSnapshot);
     }
   });
 }
@@ -2574,6 +2593,12 @@ async function loadDefaultXml() {
     }
     const { id, value, control } = payload;
     const binding = typeof control?.binding === 'string' ? control.binding : null;
+    if (binding) {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[backend.apply ui]', { id, binding, value });
+      } catch {}
+    }
     if (binding === 'Simulate::camera') {
       const totalModes = Math.max(1, 2 + (lastSnapshot.cameras?.length || 0));
       const modeValue = Math.max(0, Math.min(totalModes - 1, Math.trunc(toNumber(value))));
@@ -3075,15 +3100,23 @@ async function loadDefaultXml() {
     const bodyId = Number.isFinite(options.bodyId) ? (options.bodyId | 0) : -1;
     const geomIndex = Number.isFinite(options.geomIndex) ? (options.geomIndex | 0) : -1;
     const mode = options.mode === 'rotate' ? 'rotate' : 'translate';
+    const msg = {
+      cmd: 'applyPerturb',
+      bodyId,
+      geomIndex,
+      mode,
+      anchor: toVec3(options.anchor),
+      cursor: toVec3(options.cursor),
+    };
+    if (Array.isArray(options.rotVec) && options.rotVec.length >= 3) {
+      msg.rotVec = [
+        Number(options.rotVec[0]) || 0,
+        Number(options.rotVec[1]) || 0,
+        Number(options.rotVec[2]) || 0,
+      ];
+    }
     try {
-      client.postMessage?.({
-        cmd: 'applyPerturb',
-        bodyId,
-        geomIndex,
-        mode,
-        anchor: toVec3(options.anchor),
-        cursor: toVec3(options.cursor),
-      });
+      client.postMessage?.(msg);
     } catch (err) {
       if (debug) console.warn('[backend applyPerturb] failed', err);
     }
@@ -3139,8 +3172,6 @@ const VISUAL_OVERRIDE_PRESET = [
   { path: ['headlight', 'ambient'], kind: 'float_vec', size: 3, value: [0.1, 0.1, 0.1] },
   { path: ['headlight', 'diffuse'], kind: 'float_vec', size: 3, value: [0.4, 0.4, 0.4] },
   { path: ['headlight', 'specular'], kind: 'float_vec', size: 3, value: [0.5, 0.5, 0.5] },
-  { path: ['map', 'stiffness'], kind: 'float', size: 1, value: 100 },
-  { path: ['map', 'stiffnessrot'], kind: 'float', size: 1, value: 500 },
   { path: ['map', 'force'], kind: 'float', size: 1, value: 0.005 },
   { path: ['map', 'torque'], kind: 'float', size: 1, value: 0.1 },
   { path: ['map', 'alpha'], kind: 'float', size: 1, value: 0.3 },

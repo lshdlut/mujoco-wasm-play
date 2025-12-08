@@ -885,7 +885,7 @@ function shortcutFromEvent(event) {
       return row;
     }
 
-    function renderCheckbox(container, control) {
+  function renderCheckbox(container, control) {
       const row = createControlRow(control);
       row.classList.add('bool-row');
       const label = document.createElement('label');
@@ -918,6 +918,10 @@ function shortcutFromEvent(event) {
     const commitToggle = guardBinding(binding, async (nextValue) => {
       const active = !!nextValue;
       binding.setValue(active);
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[checkbox-change]', { id: control.item_id, binding: control.binding, value: active });
+      } catch {}
       await applySpecAction(store, backend, control, active);
       // UX hint: if enabling Contact Point but there are no contacts yet, show a brief tip
       try {
@@ -1234,7 +1238,11 @@ function shortcutFromEvent(event) {
               ? Math.trunc(toNumber(select.value))
               : isNumericSelect
                 ? Math.max(0, Math.trunc(toNumber(select.value)))
-              : select.value;
+                : select.value;
+          try {
+            // eslint-disable-next-line no-console
+            console.log('[select-change]', { id: control.item_id, binding: control.binding, value });
+          } catch {}
           if (control?.item_id === 'option.color') {
             applyThemeFromColorControl(value);
           } else if (control?.item_id === 'option.spacing') {

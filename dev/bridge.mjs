@@ -85,6 +85,27 @@ function createHeapTypedArray(mod, ptr, length, Ctor) {
   return new Ctor(n);
 }
 
+function computeMeshElementCounts(vertAdr, vertNum, faceAdr, faceNum, texcoordAdr, texcoordNum) {
+  const safeMax = (adrView, numView, scale) => {
+    if (!adrView || !numView || !Number.isFinite(scale) || scale <= 0) return 0;
+    const n = Math.min(adrView.length, numView.length) | 0;
+    let max = 0;
+    for (let i = 0; i < n; i += 1) {
+      const base = adrView[i] | 0;
+      const count = numView[i] | 0;
+      if (base < 0 || count <= 0) continue;
+      const end = base + count;
+      if (end > max) max = end;
+    }
+    return max * scale;
+  };
+  return {
+    vert: safeMax(vertAdr, vertNum, 3),
+    face: safeMax(faceAdr, faceNum, 3),
+    texcoord: safeMax(texcoordAdr, texcoordNum, 2),
+  };
+}
+
 export function heapViewF64(mod, ptr, length) {
   return createHeapTypedArray(mod, ptr, length, Float64Array);
 }
@@ -203,19 +224,44 @@ export function collectRenderAssetsFromModule(mod, handle) {
     const texCoordNum = ensureFunc('_mjwf_mesh_texcoordnum_ptr')
       ? readView(mod, mod._mjwf_mesh_texcoordnum_ptr, handle, nmesh, heapViewI32)
       : null;
-    const vertCountFn = ensureFunc('_mjwf_mesh_vert_count');
-    const faceCountFn = ensureFunc('_mjwf_mesh_face_count');
-    const texcoordCountFn = ensureFunc('_mjwf_mesh_texcoord_count');
-    const vertCount = vertCountFn ? (vertCountFn.call(mod, handle) | 0) : 0;
-    const faceCount = faceCountFn ? (faceCountFn.call(mod, handle) | 0) : 0;
-    const texcoordCount = texcoordCountFn ? (texcoordCountFn.call(mod, handle) | 0) : 0;
-    const vertView = readView(mod, ensureFunc('_mjwf_mesh_vert_ptr'), handle, Math.max(0, vertCount * 3), heapViewF32);
-    const faceView = readView(mod, ensureFunc('_mjwf_mesh_face_ptr'), handle, Math.max(0, faceCount * 3), heapViewI32);
+    const vertCountFn = typeof mod._mjwf_mesh_vert_count === 'function' ? mod._mjwf_mesh_vert_count : null;
+    const faceCountFn = typeof mod._mjwf_mesh_face_count === 'function' ? mod._mjwf_mesh_face_count : null;
+    const texcoordCountFn = typeof mod._mjwf_mesh_texcoord_count === 'function' ? mod._mjwf_mesh_texcoord_count : null;
+    let vertElemCount = 0;
+    let faceElemCount = 0;
+    let texcoordElemCount = 0;
+    if (vertCountFn) {
+      const v = vertCountFn.call(mod, handle) | 0;
+      if (v > 0) vertElemCount = v * 3;
+    }
+    if (faceCountFn) {
+      const f = faceCountFn.call(mod, handle) | 0;
+      if (f > 0) faceElemCount = f * 3;
+    }
+    if (texcoordCountFn) {
+      const t = texcoordCountFn.call(mod, handle) | 0;
+      if (t > 0) texcoordElemCount = t * 2;
+    }
+    if (!(vertElemCount > 0) || !(faceElemCount > 0) || !(texcoordElemCount > 0)) {
+      const counts = computeMeshElementCounts(
+        vertAdr,
+        vertNum,
+        faceAdr,
+        faceNum,
+        texCoordAdr,
+        texCoordNum,
+      );
+      if (!(vertElemCount > 0)) vertElemCount = counts.vert | 0;
+      if (!(faceElemCount > 0)) faceElemCount = counts.face | 0;
+      if (!(texcoordElemCount > 0)) texcoordElemCount = counts.texcoord | 0;
+    }
+    const vertView = readView(mod, ensureFunc('_mjwf_mesh_vert_ptr'), handle, Math.max(0, vertElemCount), heapViewF32);
+    const faceView = readView(mod, ensureFunc('_mjwf_mesh_face_ptr'), handle, Math.max(0, faceElemCount), heapViewI32);
     const normalView = ensureFunc('_mjwf_mesh_normal_ptr')
-      ? readView(mod, mod._mjwf_mesh_normal_ptr, handle, Math.max(0, vertCount * 3), heapViewF32)
+      ? readView(mod, mod._mjwf_mesh_normal_ptr, handle, Math.max(0, vertElemCount), heapViewF32)
       : null;
     const texcoordView = ensureFunc('_mjwf_mesh_texcoord_ptr')
-      ? readView(mod, mod._mjwf_mesh_texcoord_ptr, handle, Math.max(0, texcoordCount * 2), heapViewF32)
+      ? readView(mod, mod._mjwf_mesh_texcoord_ptr, handle, Math.max(0, texcoordElemCount), heapViewF32)
       : null;
     assets.meshes = {
       count: nmesh,
@@ -861,6 +907,48 @@ export class MjSimLite {
     return heapViewF64(m,p,n*3);
   }
   bodyCvelView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const d=m._mjwf_data_cvel_ptr || m._mjwf_cvel_ptr; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*6); }
+  bodyXquatView(){
+    const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return;
+    const d = m._mjwf_data_xquat_ptr;
+    if (typeof d!=='function') return;
+    let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; }
+    if(!p)return;
+    return heapViewF64(m,p,n*4);
+  }
+  quat2Vel(quat, dt, target){
+    const m = this.mod;
+    if (!m) return null;
+    const fn = m._mjwf_mju_quat2Vel || m.mju_quat2Vel;
+    if (typeof fn !== 'function') return null;
+    const out = target instanceof Float64Array && target.length >= 3 ? target : new Float64Array(3);
+    const q = Array.isArray(quat) || ArrayBuffer.isView(quat) ? quat : null;
+    if (!q || q.length < 4) return null;
+    const dtVal = Number(dt) || 0;
+    const bytes = (3 + 4) * Float64Array.BYTES_PER_ELEMENT;
+    this._withStack(bytes, (ptr) => {
+      if (!(ptr > 0)) return null;
+      const resPtr = ptr | 0;
+      const quatPtr = (ptr + 3 * Float64Array.BYTES_PER_ELEMENT) | 0;
+      const quatView = heapViewF64(m, quatPtr, 4);
+      if (!quatView || quatView.length < 4) return null;
+      quatView[0] = Number(q[0]) || 0;
+      quatView[1] = Number(q[1]) || 0;
+      quatView[2] = Number(q[2]) || 0;
+      quatView[3] = Number(q[3]) || 0;
+      try {
+        fn.call(m, resPtr | 0, quatPtr | 0, dtVal);
+      } catch {
+        return null;
+      }
+      const resView = heapViewF64(m, resPtr, 3);
+      if (!resView || resView.length < 3) return null;
+      out[0] = Number(resView[0]) || 0;
+      out[1] = Number(resView[1]) || 0;
+      out[2] = Number(resView[2]) || 0;
+      return null;
+    });
+    return out;
+  }
   bodyInertiaScalar(bodyIndex){
     const body = bodyIndex|0;
     const m = this.mod;
@@ -1003,10 +1091,82 @@ export class MjSimLite {
   meshVertNumView(){ const m=this.mod; const h=this.h|0; const n=this.nmesh(); if(!n)return; const d=m._mjwf_mesh_vertnum_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
   meshFaceAdrView(){ const m=this.mod; const h=this.h|0; const n=this.nmesh(); if(!n)return; const d=m._mjwf_mesh_faceadr_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
   meshFaceNumView(){ const m=this.mod; const h=this.h|0; const n=this.nmesh(); if(!n)return; const d=m._mjwf_mesh_facenum_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  meshVertView(){ const m=this.mod; const h=this.h|0; if(!this.nmesh())return; const cntFn=m._mjwf_mesh_vert_count; const d=m._mjwf_mesh_vert_ptr; if (typeof d!=='function') return; const count = typeof cntFn==='function' ? (cntFn.call(m,h)|0) : 0; const ptr=d.call(m,h)|0; if(!ptr)return; const len = count>0? count*3 : 0; return len>0 ? heapViewF32(m,ptr,len) : null; }
-  meshNormalView(){ const m=this.mod; const h=this.h|0; if(!this.nmesh())return; const cntFn=m._mjwf_mesh_vert_count; const d=m._mjwf_mesh_normal_ptr; if (typeof d!=='function') return; const count = typeof cntFn==='function' ? (cntFn.call(m,h)|0) : 0; const ptr=d.call(m,h)|0; if(!ptr)return; const len = count>0? count*3 : 0; return len>0 ? heapViewF32(m,ptr,len) : null; }
-  meshFaceView(){ const m=this.mod; const h=this.h|0; if(!this.nmesh())return; const cntFn=m._mjwf_mesh_face_count; const d=m._mjwf_mesh_face_ptr; if (typeof d!=='function') return; const count = typeof cntFn==='function' ? (cntFn.call(m,h)|0) : 0; const ptr=d.call(m,h)|0; if(!ptr)return; const len = count>0? count*3 : 0; return len>0 ? heapViewI32(m,ptr,len) : null; }
-  meshTexcoordView(){ const m=this.mod; const h=this.h|0; if(!this.nmesh())return; const cntFn=m._mjwf_mesh_texcoord_count; const d=m._mjwf_mesh_texcoord_ptr; if (typeof d!=='function') return; const count = typeof cntFn==='function' ? (cntFn.call(m,h)|0) : 0; const ptr=d.call(m,h)|0; if(!ptr)return; const len = count>0? count*2 : 0; return len>0 ? heapViewF32(m,ptr,len) : null; }
+  meshVertView(){
+    const m=this.mod; const h=this.h|0; const n=this.nmesh(); if(!n)return;
+    const d=m._mjwf_mesh_vert_ptr; if (typeof d!=='function') return;
+    let elemCount = 0;
+    const cntFn=m._mjwf_mesh_vert_count;
+    if (typeof cntFn==='function') {
+      const v = cntFn.call(m,h)|0;
+      if (v>0) elemCount = v*3;
+    }
+    if (!(elemCount>0)) {
+      const adrView = this.meshVertAdrView?.();
+      const numView = this.meshVertNumView?.();
+      const counts = computeMeshElementCounts(adrView, numView, null, null, null, null);
+      elemCount = counts.vert|0;
+    }
+    if (!(elemCount>0)) return;
+    const ptr=d.call(m,h)|0; if(!ptr)return;
+    return heapViewF32(m,ptr,elemCount);
+  }
+  meshNormalView(){
+    const m=this.mod; const h=this.h|0; const n=this.nmesh(); if(!n)return;
+    const d=m._mjwf_mesh_normal_ptr; if (typeof d!=='function') return;
+    let elemCount = 0;
+    const cntFn=m._mjwf_mesh_vert_count;
+    if (typeof cntFn==='function') {
+      const v = cntFn.call(m,h)|0;
+      if (v>0) elemCount = v*3;
+    }
+    if (!(elemCount>0)) {
+      const adrView = this.meshVertAdrView?.();
+      const numView = this.meshVertNumView?.();
+      const counts = computeMeshElementCounts(adrView, numView, null, null, null, null);
+      elemCount = counts.vert|0;
+    }
+    if (!(elemCount>0)) return;
+    const ptr=d.call(m,h)|0; if(!ptr)return;
+    return heapViewF32(m,ptr,elemCount);
+  }
+  meshFaceView(){
+    const m=this.mod; const h=this.h|0; const n=this.nmesh(); if(!n)return;
+    const d=m._mjwf_mesh_face_ptr; if (typeof d!=='function') return;
+    let elemCount = 0;
+    const cntFn=m._mjwf_mesh_face_count;
+    if (typeof cntFn==='function') {
+      const f = cntFn.call(m,h)|0;
+      if (f>0) elemCount = f*3;
+    }
+    if (!(elemCount>0)) {
+      const adrView = this.meshFaceAdrView?.();
+      const numView = this.meshFaceNumView?.();
+      const counts = computeMeshElementCounts(null, null, adrView, numView, null, null);
+      elemCount = counts.face|0;
+    }
+    if (!(elemCount>0)) return;
+    const ptr=d.call(m,h)|0; if(!ptr)return;
+    return heapViewI32(m,ptr,elemCount);
+  }
+  meshTexcoordView(){
+    const m=this.mod; const h=this.h|0; const n=this.nmesh(); if(!n)return;
+    const d=m._mjwf_mesh_texcoord_ptr; if (typeof d!=='function') return;
+    let elemCount = 0;
+    const cntFn=m._mjwf_mesh_texcoord_count;
+    if (typeof cntFn==='function') {
+      const t = cntFn.call(m,h)|0;
+      if (t>0) elemCount = t*2;
+    }
+    if (!(elemCount>0)) {
+      const adrView = this.meshTexcoordAdrView?.();
+      const numView = this.meshTexcoordNumView?.();
+      const counts = computeMeshElementCounts(null, null, null, null, adrView, numView);
+      elemCount = counts.texcoord|0;
+    }
+    if (!(elemCount>0)) return;
+    const ptr=d.call(m,h)|0; if(!ptr)return;
+    return heapViewF32(m,ptr,elemCount);
+  }
   meshTexcoordAdrView(){ const m=this.mod; const h=this.h|0; const n=this.nmesh(); if(!n)return; const d=m._mjwf_mesh_texcoordadr_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
   meshTexcoordNumView(){ const m=this.mod; const h=this.h|0; const n=this.nmesh(); if(!n)return; const d=m._mjwf_mesh_texcoordnum_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
   collectRenderAssets() {
@@ -1016,12 +1176,12 @@ export class MjSimLite {
   // --- Contacts (optional) ---
   ncon(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_ncon']; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
   _resolveFn(names){ const m=this.mod; for(const name of names){ const fn=m[name]; if(typeof fn==='function') return fn; } return null; }
-  contactPosView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_pos_ptr','_mjwf_data_contact_pos_ptr','_mjw_contact_pos_ptr','_mjw_data_contact_pos_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*3); }
-  contactFrameView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_frame_ptr','_mjwf_data_contact_frame_ptr','_mjw_contact_frame_ptr','_mjw_data_contact_frame_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*9); }
-  contactGeom1View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_geom1_ptr','_mjwf_data_contact_geom1_ptr','_mjw_contact_geom1_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
-  contactGeom2View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_geom2_ptr','_mjwf_data_contact_geom2_ptr','_mjw_contact_geom2_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
-  contactDistView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_dist_ptr','_mjwf_data_contact_dist_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n); }
-  contactFrictionView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_contact_friction_ptr','_mjwf_data_contact_friction_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*5); }
+  contactPosView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_pos_ptr','_mjwf_contact_pos_ptr','_mjw_data_contact_pos_ptr','_mjw_contact_pos_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*3); }
+  contactFrameView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_frame_ptr','_mjwf_contact_frame_ptr','_mjw_data_contact_frame_ptr','_mjw_contact_frame_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*9); }
+  contactGeom1View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_geom1_ptr','_mjwf_contact_geom1_ptr','_mjw_data_contact_geom1_ptr','_mjw_contact_geom1_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
+  contactGeom2View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_geom2_ptr','_mjwf_contact_geom2_ptr','_mjw_data_contact_geom2_ptr','_mjw_contact_geom2_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
+  contactDistView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_dist_ptr','_mjwf_contact_dist_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n); }
+  contactFrictionView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_friction_ptr','_mjwf_contact_friction_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*5); }
   contactForceBuffer(target){
     const m=this.mod;
     const n=this.ncon();

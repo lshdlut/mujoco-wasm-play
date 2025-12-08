@@ -51,6 +51,8 @@ export function createPickingController({
   const pointerPlane = new THREE_NS.Plane();
   const pointerHit = new THREE_NS.Vector3();
   const normalMatrix = new THREE_NS.Matrix3();
+  const tempQuat = new THREE_NS.Quaternion();
+  const tempMat4 = new THREE_NS.Matrix4();
   const tempVecA = new THREE_NS.Vector3();
   const tempVecB = new THREE_NS.Vector3();
   const tempVecC = new THREE_NS.Vector3();
@@ -76,8 +78,9 @@ export function createPickingController({
     planePoint: new THREE_NS.Vector3(),
     lastForceVec: new THREE_NS.Vector3(),
     lastTorqueVec: new THREE_NS.Vector3(),
+    refQuat: null,
+    lastRotVec: new THREE_NS.Vector3(),
   };
-  let perturbRaf = null;
   const cleanup = [];
   const tempBodyPos = new THREE_NS.Vector3();
   const tempBodyCom = new THREE_NS.Vector3();
@@ -395,20 +398,16 @@ export function createPickingController({
     if (!renderCtx.camera) return null;
     const camera = renderCtx.camera;
     const forward = tempVecB.copy(camera.getWorldDirection(new THREE_NS.Vector3()));
-    if (forward.lengthSq() === 0) {
-      forward.set(0, 0, 1);
-    } else {
-      forward.normalize();
+    if (forward.lengthSq() === 0) forward.set(0, 0, 1);
+    forward.normalize();
+    const planar = tempVecC.set(forward.x, forward.y, 0);
+    const planarLen = planar.length();
+    if (planarLen < 1e-12) {
+      return null; // avoid arbitrary fallback that flips direction
     }
-    const forwardXY = tempVecC.set(forward.x, forward.y, 0);
-    const planarLen = forwardXY.length();
-    if (planarLen < 1e-9) {
-      forwardXY.set(0, 1, 0);
-    } else {
-      forwardXY.multiplyScalar(1 / planarLen);
-    }
-    const yAxis = tempVecE.copy(forwardXY);
-    const xAxis = tempVecD.set(yAxis.y, -yAxis.x, 0);
+    planar.multiplyScalar(1 / planarLen);
+    const yAxis = tempVecE.copy(planar); // forward-aligned y-axis
+    const xAxis = tempVecD.set(yAxis.y, -yAxis.x, 0); // perpendicular in XY
     outVec.set(0, 0, vec.z);
     outVec.addScaledVector(xAxis, vec.x);
     outVec.addScaledVector(yAxis, vec.y);
@@ -421,8 +420,9 @@ export function createPickingController({
       ? canvas.getBoundingClientRect()
       : { width: 1, height: 1 };
     const height = Math.max(1, rect.height || 1);
+    // Match simulate: positive mouse-up yields positive reldy (see mjv_movePerturb call site).
     const reldx = deltaX / height;
-    const reldy = deltaY / height;
+    const reldy = -deltaY / height;
     if (!Number.isFinite(reldx) || !Number.isFinite(reldy)) return;
     const action = resolvePerturbAction(dragState.mode, dragState.shiftKey);
     if (!action) return;
@@ -431,7 +431,21 @@ export function createPickingController({
     const worldVec = alignVectorToCamera(mouseVec, tempVecWorld);
     if (!worldVec) return;
     const scale = dragState.scale || computePerturbScale(dragState.anchorPoint);
-    dragState.pointerTarget.addScaledVector(worldVec, scale);
+    if (dragState.mode === 'rotate') {
+      // Keep the raw convert2D-aligned vector for rotation magnitude; do NOT scale by depth.
+      dragState.lastRotVec.copy(worldVec);
+      const scl = worldVec.length();
+      if (scl > 0) {
+        const axis = worldVec.clone().normalize();
+        const angle = scl * Math.PI * 2;
+        dragState.lastTorqueVec.copy(axis).multiplyScalar(angle);
+      } else {
+        dragState.lastTorqueVec.set(0, 0, 0);
+      }
+      // Rotate模式不移动锚点/指示点，保持与 simulate 一致（仅改变 refquat）。
+    } else {
+      dragState.pointerTarget.addScaledVector(worldVec, scale);
+    }
   }
 
   function applyRotation(mat, vec, out) {
@@ -469,6 +483,12 @@ export function createPickingController({
 
   function samplePointerFromScreen() {
     if (!dragState.active || typeof dragState.lastClientX !== 'number') return false;
+    // For rotate perturb, always drive the gizmo and refQuat from 2D mouse deltas
+    // via applyPointerDelta so that behavior matches simulate's mjv_movePerturb,
+    // which uses convert2D rather than ray-plane intersection.
+    if (dragState.mode === 'rotate') {
+      return false;
+    }
     const planePoint = dragState.planePoint.lengthSq() > 0
       ? dragState.planePoint
       : dragState.anchorPoint;
@@ -520,29 +540,6 @@ export function createPickingController({
     } catch {}
   }
 
-  function ensurePerturbLoop() {
-    if (perturbRaf !== null) return;
-    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-      return;
-    }
-    const step = () => {
-      if (!dragState.active) {
-        perturbRaf = null;
-        return;
-      }
-      applyPerturb(true);
-      perturbRaf = window.requestAnimationFrame(step);
-    };
-    perturbRaf = window.requestAnimationFrame(step);
-  }
-
-  function stopPerturbLoop() {
-    if (perturbRaf !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
-      window.cancelAnimationFrame(perturbRaf);
-    }
-    perturbRaf = null;
-  }
-
   function dispatchPerturbState(payload) {
     if (!payload) return;
     if (typeof backend.applyPerturb === 'function') {
@@ -577,14 +574,25 @@ export function createPickingController({
       geomIndex: bodyCapable ? -1 : geomIndex,
       mode,
       anchor: [dragState.anchorPoint.x, dragState.anchorPoint.y, dragState.anchorPoint.z],
-      cursor: [target.x, target.y, target.z],
+      cursor: mode === 'rotate'
+        ? [dragState.anchorPoint.x, dragState.anchorPoint.y, dragState.anchorPoint.z]
+        : [target.x, target.y, target.z],
     };
+    if (mode === 'rotate' && !fromLoop) {
+      payload.rotVec = [
+        dragState.lastRotVec.x,
+        dragState.lastRotVec.y,
+        dragState.lastRotVec.z,
+      ];
+    }
     dragState.payload = payload;
     setPerturbState(mode, true);
     dispatchPerturbState(payload);
     const offsetVec = tempVecWorld.copy(dragState.pointerTarget).sub(dragState.anchorPoint);
     const vizForce = mode === 'translate' ? offsetVec : null;
-    const vizTorque = mode === 'rotate' ? offsetVec : null;
+    const vizTorque = mode === 'rotate'
+      ? (dragState.lastTorqueVec.lengthSq() > 0 ? dragState.lastTorqueVec.clone() : offsetVec)
+      : null;
     updatePerturbViz({
       active: true,
       mode,
@@ -593,7 +601,6 @@ export function createPickingController({
       force: vizForce,
       torque: vizTorque,
     });
-    if (!fromLoop) ensurePerturbLoop();
     return true;
   }
 
@@ -617,6 +624,32 @@ export function createPickingController({
     if (!samplePointerFromScreen()) {
       dragState.pointerTarget.copy(dragState.anchorPoint);
     }
+    // Initialize reference orientation for rotate perturb using current body pose
+    if (mode === 'rotate') {
+      dragState.refQuat = null;
+      const sel = currentSelection();
+      const geomIndex = sel?.geom;
+      const mesh = Number.isInteger(geomIndex) && geomIndex >= 0 && Array.isArray(renderCtx.meshes)
+        ? renderCtx.meshes[geomIndex]
+        : null;
+      if (mesh && mesh.quaternion) {
+        dragState.refQuat = mesh.quaternion.clone();
+      } else if (refreshBodyPose(dragState.bodyId)) {
+        tempMat4.identity();
+        tempMat4.makeBasis(
+          new THREE_NS.Vector3(tempBodyRot[0], tempBodyRot[3], tempBodyRot[6]),
+          new THREE_NS.Vector3(tempBodyRot[1], tempBodyRot[4], tempBodyRot[7]),
+          new THREE_NS.Vector3(tempBodyRot[2], tempBodyRot[5], tempBodyRot[8]),
+        );
+        dragState.refQuat = new THREE_NS.Quaternion().setFromRotationMatrix(tempMat4);
+      }
+      dragState.lastTorqueVec.set(0, 0, 0);
+      dragState.lastRotVec.set(0, 0, 0);
+    } else {
+      dragState.refQuat = null;
+      dragState.lastTorqueVec.set(0, 0, 0);
+      dragState.lastRotVec.set(0, 0, 0);
+    }
     backend.clearForces?.();
     if (typeof dragState.pointerId === 'number' && canvas.setPointerCapture) {
       try {
@@ -633,7 +666,7 @@ export function createPickingController({
     dragState.payload = null;
     dragState.lastForceVec.set(0, 0, 0);
     dragState.lastTorqueVec.set(0, 0, 0);
-    stopPerturbLoop();
+    dragState.lastRotVec.set(0, 0, 0);
     dragState.pointerTarget.copy(dragState.anchorPoint);
     dragState.planeNormal.set(0, 0, 0);
     dragState.planePoint.set(0, 0, 0);
