@@ -219,18 +219,26 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     spacing: 0, // 0 = Tight, 1 = Wide
     font: 2,    // index into option.font options (50%, 75%, 100%, 150%, 200%)
   },
+  // visualSourceMode now has three explicit modes:
+  // - 'model'       : MuJoCo-driven skybox / lights.
+  // - 'preset-sun'  : daytime HDRI preset.
+  // - 'preset-moon' : nighttime HDRI preset.
   visualSourceMode: 'model',
   visualBackups: {
-    preset: null,
     model: null,
-    sceneFlagsPreset: null,
+    presetSun: null,
+    presetMoon: null,
     sceneFlagsModel: null,
+    sceneFlagsPresetSun: null,
+    sceneFlagsPresetMoon: null,
   },
   visualBaselines: {
     model: null,
-    preset: null,
+    presetSun: null,
+    presetMoon: null,
     sceneFlagsModel: null,
-    sceneFlagsPreset: null,
+    sceneFlagsPresetSun: null,
+    sceneFlagsPresetMoon: null,
   },
   panels: {
     left: true,
@@ -1360,7 +1368,10 @@ function readControlValue(state, control) {
   if (control.item_id === 'simulation.reset') return null;
   if (control.item_id === 'simulation.align') return null;
   if (control.item_id === 'option.visual_source') {
-    return state.visualSourceMode === 'model' ? 'Model' : 'Preset';
+    const mode = state.visualSourceMode || 'model';
+    if (mode === 'model') return 'Model';
+    if (mode === 'preset-moon') return 'PresetMoon';
+    return 'PresetSun';
   }
   if (control.item_id === 'file.screenshot') return null;
   if (control.item_id === 'file.quit') return null;
@@ -1421,8 +1432,17 @@ export async function applySpecAction(store, backend, control, rawValue) {
     });
   } catch {}
   if (control.item_id === 'option.visual_source') {
-    const nextMode =
-      typeof value === 'string' && value.toLowerCase().startsWith('model') ? 'model' : 'preset';
+    let nextMode = 'model';
+    if (typeof value === 'string') {
+      const token = value.toLowerCase();
+      if (token.startsWith('model')) {
+        nextMode = 'model';
+      } else if (token.includes('moon')) {
+        nextMode = 'preset-moon';
+      } else {
+        nextMode = 'preset-sun';
+      }
+    }
     try {
       await switchVisualSourceMode(store, backend, nextMode);
     } catch (err) {
@@ -3298,14 +3318,13 @@ function computeVisualGroupDiffs(modelVisual, presetVisual) {
 function ensureVisualBackups(target) {
   if (!target.visualBackups) {
     target.visualBackups = {
-      preset: null,
       model: null,
-      sceneFlagsPreset: null,
       sceneFlagsModel: null,
+      presetSun: null,
+      presetMoon: null,
+      sceneFlagsPresetSun: null,
+      sceneFlagsPresetMoon: null,
     };
-  }
-  if (target.visualSourceMode !== 'model' && target.visualSourceMode !== 'preset') {
-    target.visualSourceMode = 'model';
   }
   return target.visualBackups;
 }
@@ -3314,21 +3333,25 @@ function ensureVisualBaselines(target) {
   if (!target.visualBaselines) {
     target.visualBaselines = {
       model: null,
-      preset: null,
       sceneFlagsModel: null,
-      sceneFlagsPreset: null,
+      presetSun: null,
+      presetMoon: null,
+      sceneFlagsPresetSun: null,
+      sceneFlagsPresetMoon: null,
     };
   }
   return target.visualBaselines;
 }
 
 async function switchVisualSourceMode(store, backend, requestedMode) {
-  const targetMode = requestedMode === 'model' ? 'model' : 'preset';
+  const allowedModes = ['model', 'preset-sun', 'preset-moon'];
+  const targetMode = allowedModes.includes(requestedMode) ? requestedMode : 'model';
   if (!store || typeof store.get !== 'function' || !backend || typeof backend.snapshot !== 'function') {
     throw new Error('switchVisualSourceMode requires a store and backend with snapshot support');
   }
   const currentState = store.get();
-  const currentMode = currentState?.visualSourceMode === 'model' ? 'model' : 'preset';
+  const currentRaw = currentState?.visualSourceMode;
+  const currentMode = allowedModes.includes(currentRaw) ? currentRaw : 'model';
   let snapshot;
   try {
     snapshot = await backend.snapshot();
@@ -3357,16 +3380,33 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       baselines.model = cloneStruct(baselineVisual);
       baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
     }
-    if (!baselines.preset && baselines.model) {
-      baselines.preset = applyPresetOverridesToStruct(baselines.model);
-      baselines.sceneFlagsPreset = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
+    if (!baselines.presetSun && baselines.model) {
+      const presetBase = applyPresetOverridesToStruct(baselines.model);
+      baselines.presetSun = cloneStruct(presetBase);
+      baselines.sceneFlagsPresetSun = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
     }
-    if (currentMode === 'preset') {
-      backups.preset = cloneStruct(currentVisual) || cloneStruct(baselines.preset) || null;
-      backups.sceneFlagsPreset = currentSceneFlags
+    if (!baselines.presetMoon && baselines.presetSun) {
+      // Start moon from sun baseline; can diverge over time via backups.
+      baselines.presetMoon = cloneStruct(baselines.presetSun);
+      baselines.sceneFlagsPresetMoon = baselines.sceneFlagsPresetSun
+        ? [...baselines.sceneFlagsPresetSun]
+        : baselines.sceneFlagsModel
+        ? [...baselines.sceneFlagsModel]
+        : null;
+    }
+    if (currentMode === 'preset-sun') {
+      backups.presetSun = cloneStruct(currentVisual) || cloneStruct(baselines.presetSun) || null;
+      backups.sceneFlagsPresetSun = currentSceneFlags
         ? [...currentSceneFlags]
-        : baselines.sceneFlagsPreset
-        ? [...baselines.sceneFlagsPreset]
+        : baselines.sceneFlagsPresetSun
+        ? [...baselines.sceneFlagsPresetSun]
+        : null;
+    } else if (currentMode === 'preset-moon') {
+      backups.presetMoon = cloneStruct(currentVisual) || cloneStruct(baselines.presetMoon) || null;
+      backups.sceneFlagsPresetMoon = currentSceneFlags
+        ? [...currentSceneFlags]
+        : baselines.sceneFlagsPresetMoon
+        ? [...baselines.sceneFlagsPresetMoon]
         : null;
     } else {
       backups.model = cloneStruct(currentVisual) || cloneStruct(baselines.model) || null;
@@ -3380,26 +3420,47 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
   const updatedState = store.get();
   const backups = ensureVisualBackups(updatedState);
   const baselines = ensureVisualBaselines(updatedState);
-  const targetCache = targetMode === 'preset' ? backups.preset : backups.model;
-  const targetVisual =
-    cloneStruct(targetCache) ||
-    cloneStruct(targetMode === 'preset' ? baselines.preset : baselines.model) ||
-    {};
-  const targetSceneFlags =
-    targetMode === 'preset'
-      ? Array.isArray(backups.sceneFlagsPreset)
-        ? [...backups.sceneFlagsPreset]
-        : baselines.sceneFlagsPreset
-        ? [...baselines.sceneFlagsPreset]
-        : normaliseSceneFlagArray(null)
-      : Array.isArray(backups.sceneFlagsModel)
-      ? [...backups.sceneFlagsModel]
-      : baselines.sceneFlagsModel
-      ? [...baselines.sceneFlagsModel]
-      : normaliseSceneFlagArray(null);
+  let targetVisual = {};
+  let targetSceneFlags = normaliseSceneFlagArray(null);
+  if (targetMode === 'preset-sun') {
+    const cache = backups.presetSun;
+    const base = baselines.presetSun || baselines.model;
+    targetVisual = cloneStruct(cache) || cloneStruct(base) || {};
+    if (Array.isArray(backups.sceneFlagsPresetSun)) {
+      targetSceneFlags = [...backups.sceneFlagsPresetSun];
+    } else if (Array.isArray(baselines.sceneFlagsPresetSun)) {
+      targetSceneFlags = [...baselines.sceneFlagsPresetSun];
+    } else if (Array.isArray(baselines.sceneFlagsModel)) {
+      targetSceneFlags = [...baselines.sceneFlagsModel];
+    }
+  } else if (targetMode === 'preset-moon') {
+    const cache = backups.presetMoon;
+    const base = baselines.presetMoon || baselines.presetSun || baselines.model;
+    targetVisual = cloneStruct(cache) || cloneStruct(base) || {};
+    if (Array.isArray(backups.sceneFlagsPresetMoon)) {
+      targetSceneFlags = [...backups.sceneFlagsPresetMoon];
+    } else if (Array.isArray(baselines.sceneFlagsPresetMoon)) {
+      targetSceneFlags = [...baselines.sceneFlagsPresetMoon];
+    } else if (Array.isArray(baselines.sceneFlagsPresetSun)) {
+      targetSceneFlags = [...baselines.sceneFlagsPresetSun];
+    } else if (Array.isArray(baselines.sceneFlagsModel)) {
+      targetSceneFlags = [...baselines.sceneFlagsModel];
+    }
+  } else {
+    const cache = backups.model;
+    const base = baselines.model;
+    targetVisual = cloneStruct(cache) || cloneStruct(base) || {};
+    if (Array.isArray(backups.sceneFlagsModel)) {
+      targetSceneFlags = [...backups.sceneFlagsModel];
+    } else if (Array.isArray(baselines.sceneFlagsModel)) {
+      targetSceneFlags = [...baselines.sceneFlagsModel];
+    }
+  }
   const diagnostics = computeVisualGroupDiffs(
     backups.model || baselines.model || {},
-    backups.preset || baselines.preset || applyPresetOverridesToStruct(baselines.model || {}),
+    backups.presetSun ||
+      baselines.presetSun ||
+      applyPresetOverridesToStruct(baselines.model || {}),
   );
   if (typeof console !== 'undefined') {
     try {

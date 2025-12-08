@@ -1176,12 +1176,34 @@ export class MjSimLite {
   // --- Contacts (optional) ---
   ncon(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_ncon']; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
   _resolveFn(names){ const m=this.mod; for(const name of names){ const fn=m[name]; if(typeof fn==='function') return fn; } return null; }
-  contactPosView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_pos_ptr','_mjwf_contact_pos_ptr','_mjw_data_contact_pos_ptr','_mjw_contact_pos_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*3); }
-  contactFrameView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_frame_ptr','_mjwf_contact_frame_ptr','_mjw_data_contact_frame_ptr','_mjw_contact_frame_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*9); }
+  _contactFieldView(offsetBytes, countPerContact){
+    const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return;
+    const contactPtrFn = m._mjwf_data_contact_ptr;
+    if (typeof contactPtrFn !== 'function') return;
+    const base = contactPtrFn.call(m, h) | 0;
+    if (!base) return;
+    const buffer = resolveHeapBuffer(m);
+    if (!buffer) return;
+    const strideBytes = 576;
+    const strideD = strideBytes >>> 3;
+    const startD = (base + (offsetBytes|0)) >>> 3;
+    const view = new Float64Array(buffer);
+    const out = new Float64Array(n * countPerContact);
+    let outIndex = 0;
+    for (let i = 0; i < n; i += 1) {
+      const idx = startD + i * strideD;
+      for (let j = 0; j < countPerContact; j += 1) {
+        out[outIndex++] = view[idx + j];
+      }
+    }
+    return out;
+  }
+  contactPosView(){ const n=this.ncon(); if(!(n>0)) return; return this._contactFieldView(8, 3); }
+  contactFrameView(){ const n=this.ncon(); if(!(n>0)) return; return this._contactFieldView(32, 9); }
   contactGeom1View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_geom1_ptr','_mjwf_contact_geom1_ptr','_mjw_data_contact_geom1_ptr','_mjw_contact_geom1_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
   contactGeom2View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_geom2_ptr','_mjwf_contact_geom2_ptr','_mjw_data_contact_geom2_ptr','_mjw_contact_geom2_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
-  contactDistView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_dist_ptr','_mjwf_contact_dist_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n); }
-  contactFrictionView(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=this._resolveFn(['_mjwf_data_contact_friction_ptr','_mjwf_contact_friction_ptr']); if(!d) return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*5); }
+  contactDistView(){ const n=this.ncon(); if(!(n>0)) return; return this._contactFieldView(0, 1); }
+  contactFrictionView(){ const n=this.ncon(); if(!(n>0)) return; return this._contactFieldView(112, 5); }
   contactForceBuffer(target){
     const m=this.mod;
     const n=this.ncon();

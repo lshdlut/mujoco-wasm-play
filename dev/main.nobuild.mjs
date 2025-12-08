@@ -131,7 +131,6 @@ const {
   requestedMode,
   requestedModel,
   skyDebugModeParam,
-  hdriParam: hdriQueryParam,
 } = consumeViewerParams();
 
 const dumpBigParam = dumpToken === 'big' || findToken === 'big';
@@ -152,7 +151,6 @@ const { applyFallbackAppearance, ensureEnvIfNeeded } = createEnvironmentManager(
   THREE_NS: THREE,
   store,
   skyOffParam,
-  hdriQueryParam: hdriQueryParam,
   fallbackEnabledDefault,
   skyDebugModeParam,
 });

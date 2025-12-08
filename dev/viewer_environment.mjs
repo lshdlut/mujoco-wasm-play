@@ -1,28 +1,50 @@
-export const FALLBACK_PRESET_ALIASES = {
-  'bright-outdoor': 'bright-outdoor',
-  bright: 'bright-outdoor',
-  outdoor: 'bright-outdoor',
-};
-
 export const FALLBACK_PRESETS = {
-  'bright-outdoor': {
+  sun: {
+    // Bright daytime preset: strong directional light with moderate IBL so
+    // shadows remain clearly visible.
     background: 0xdde6f4,
-    exposure: 1.15,
-    ambient: { color: 0xf0f4ff, intensity: 0.4 },
-    hemi: { sky: 0xf0f4ff, ground: 0x10121a, intensity: 0.6 },
-    dir: { color: 0xffffff, intensity: 2.0, position: [6, -5, 4], target: [0, 0, 1], shadowBias: -0.0001 },
-    fill: { color: 0xb6d5ff, intensity: 0.45, position: [-4, 3, 2] },
+    exposure: 1.05,
+    ambient: { color: 0xf0f4ff, intensity: 0.25 },
+    hemi: { sky: 0xf0f4ff, ground: 0x10121a, intensity: 0.45 },
+    dir: {
+      color: 0xffffff,
+      intensity: 2.4,
+      position: [6, -5, 4],
+      target: [0, 0, 1],
+      shadowBias: -0.0001,
+    },
+    fill: { color: 0xb6d5ff, intensity: 0.25, position: [-4, 3, 2] },
     shadowBias: -0.00015,
-    envIntensity: 1.6,
+    // Kept deliberately low so HDRI does not wash out shadows.
+    envIntensity: 0.6,
     ground: { style: 'shadow', opacity: 0.35 },
+  },
+  moon: {
+    // Night preset: darker exposure and very weak IBL so forms are defined
+    // mostly by a single moon-like directional light.
+    background: 0x02030a,
+    exposure: 0.6,
+    ambient: { color: 0x10121a, intensity: 0.05 },
+    hemi: { sky: 0x22273a, ground: 0x02030a, intensity: 0.1 },
+    dir: {
+      color: 0x8899aa,
+      intensity: 0.3,
+      position: [2, -3, 1.5],
+      target: [0, 0, 1],
+      shadowBias: -0.0001,
+    },
+    fill: { color: 0x182030, intensity: 0.06, position: [-1.5, 1.5, 1] },
+    shadowBias: -0.0002,
+    envIntensity: 0.18,
+    ground: { style: 'shadow', opacity: 0.25 },
   },
 };
 
-const HDRI_FALLBACK_PATHS = [
-  'dist/assets/env/sky_clear_4k.hdr',
-  'dist/assets/env/hausdorf_clear_sky_4k.hdr',
-  'dist/assets/env/autumn_field_puresky_4k.hdr',
-];
+export const FALLBACK_PRESET_ALIASES = {
+  'bright-outdoor': 'sun',
+  bright: 'sun',
+  outdoor: 'sun',
+};
 
 const SKY_MODE_NONE = 'none';
 const SKY_MODE_PRESET = 'preset-hdri';
@@ -708,7 +730,16 @@ function buildSkyBackground(THREE_NS, palette) {
 }
 
 function isPresetMode(state) {
-  return (state?.visualSourceMode ?? 'model') === 'preset';
+  const mode = state?.visualSourceMode;
+  return mode === 'preset-sun' || mode === 'preset-moon';
+}
+
+function currentPresetKeyFromState(state) {
+  const mode = state?.visualSourceMode;
+  if (mode === 'preset-moon') return 'moon';
+  if (mode === 'preset-sun') return 'sun';
+  // Default to sun when not in an explicit preset mode.
+  return 'sun';
 }
 
 function ensureBaseLightingCache(ctx) {
@@ -767,69 +798,84 @@ export function createEnvironmentManager({
   THREE_NS,
   store,
   skyOffParam,
-  hdriQueryParam,
   fallbackEnabledDefault,
   skyDebugModeParam,
 }) {
-
-function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
-  const worldScene = getWorldScene(ctx);
-  if (!ctx || !ctx.renderer || !worldScene) return;
-  const cache = ensureSkyCache(ctx);
-  if (typeof skyOffParam !== 'undefined' && skyOffParam) {
-    return;
-  }
-  if (ctx.hdriFailed) {
-    return;
-  }
-  const hdriGen = typeof generation === 'number' ? generation : (ctx.hdriLoadGen ?? 0);
-  const hdrReady = ctx.envFromHDRI && ctx.envRT && ctx.hdriReady;
-  if (hdrReady) {
-    return;
-  }
-  if (!ctx.pmrem) {
-    ctx.pmrem = new THREE_NS.PMREMGenerator(ctx.renderer);
-  }
-  const allowHDRI = options.allowHDRI !== false;
-  const cachedPreset = cache?.preset;
-  if (allowHDRI && cachedPreset?.envRT && cachedPreset.background) {
-    ctx.envRT = cachedPreset.envRT;
-    ctx.hdriBackground = cachedPreset.background;
-    ctx.envIntensity = preset?.envIntensity ?? 1.6;
-    ctx.envFromHDRI = true;
-    ctx.hdriReady = true;
-    ctx.hdriActiveKey = cachedPreset.key || null;
-    ctx.envDirty = false;
-    worldScene.environment = cachedPreset.envRT.texture;
-    worldScene.background = cachedPreset.background;
-    if ('backgroundIntensity' in worldScene) {
-      worldScene.backgroundIntensity = 1.0;
+  function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
+    const worldScene = getWorldScene(ctx);
+    if (!ctx || !ctx.renderer || !worldScene) return;
+    const cache = ensureSkyCache(ctx);
+    if (typeof skyOffParam !== 'undefined' && skyOffParam) {
+      return;
     }
-    if ('backgroundBlurriness' in worldScene) {
-      worldScene.backgroundBlurriness = 0.0;
+    if (ctx.hdriFailed) {
+      return;
     }
-    pushSkyDebug(ctx, { mode: 'preset-cache', presetMode: true, allowHDRI: true, key: cachedPreset.key || 'cache' });
-    return;
-  }
-  if (
-    allowHDRI &&
-    !ctx.envFromHDRI &&
-    !ctx.hdriLoading &&
-    !ctx.hdriLoadPromise &&
-    !hasModelEnvironment(store.get())
-  ) {
-    const candidates = [];
-    if (hdriQueryParam) candidates.push(hdriQueryParam);
-    candidates.push(...HDRI_FALLBACK_PATHS);
-      const tryLoadHDRI = async (url, token) => {
+    const hdriGen = typeof generation === 'number' ? generation : (ctx.hdriLoadGen ?? 0);
+    if (!ctx.pmrem) {
+      ctx.pmrem = new THREE_NS.PMREMGenerator(ctx.renderer);
+    }
+    const allowHDRI = options.allowHDRI !== false;
+    // Decide which preset HDRI to use based on viewer state:
+    // - 'sun'  -> bright daytime sky (hausdorf)
+    // - 'moon' -> night sky (NightSkyHDRI008_4K)
+    const state = store && typeof store.get === 'function' ? store.get() : null;
+    const visualPresetKey = currentPresetKeyFromState(state);
+    const url = visualPresetKey === 'moon'
+      ? 'dist/assets/env/NightSkyHDRI008_4K_HDR.hdr'
+      : 'dist/assets/env/rustig_koppie_puresky_4k.hdr';
+    const hdrReady =
+      ctx.envFromHDRI &&
+      ctx.envRT &&
+      ctx.hdriReady &&
+      ctx.hdriActiveKey === url;
+    if (hdrReady) {
+      return;
+    }
+    const cachedPreset = cache?.preset;
+    if (
+      allowHDRI &&
+      cachedPreset?.envRT &&
+      cachedPreset.background &&
+      cachedPreset.key === url
+    ) {
+      ctx.envRT = cachedPreset.envRT;
+      ctx.hdriBackground = cachedPreset.background;
+      ctx.envIntensity = preset?.envIntensity ?? 1.6;
+      ctx.envFromHDRI = true;
+      ctx.hdriReady = true;
+      ctx.hdriActiveKey = cachedPreset.key || null;
+      ctx.envDirty = false;
+      worldScene.environment = cachedPreset.envRT.texture;
+      worldScene.background = cachedPreset.background;
+      if ('backgroundIntensity' in worldScene) {
+        worldScene.backgroundIntensity = 1.0;
+      }
+      if ('backgroundBlurriness' in worldScene) {
+        worldScene.backgroundBlurriness = 0.0;
+      }
+      pushSkyDebug(ctx, {
+        mode: 'preset-cache',
+        presetMode: true,
+        allowHDRI: true,
+        key: cachedPreset.key || 'cache',
+      });
+      return;
+    }
+    if (
+      allowHDRI &&
+      !ctx.hdriLoading &&
+      !ctx.hdriLoadPromise
+    ) {
+      const tryLoadHDRI = async (hdriUrl, token) => {
         try {
           const mod = await import('three/addons/loaders/RGBELoader.js');
           if (!mod || !mod.RGBELoader) return false;
           const loader = new mod.RGBELoader().setDataType(THREE_NS.FloatType);
-          if (typeof console !== 'undefined') console.log('[env] trying HDRI', url);
+          if (typeof console !== 'undefined') console.log('[env] trying HDRI', hdriUrl);
           ctx.hdriLoading = true;
           const hdr = await new Promise((resolve, reject) =>
-            loader.load(url, resolve, undefined, reject)
+            loader.load(hdriUrl, resolve, undefined, reject),
           );
           hdr.mapping = THREE_NS.EquirectangularReflectionMapping;
           const isUByte = hdr.type === THREE_NS.UnsignedByteType;
@@ -856,7 +902,7 @@ function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
           const prevEnvRT = ctx.envRT;
           const prevHdr = ctx.hdriBackground;
           const prevCache = cache?.preset;
-          if (prevCache && prevCache.key && prevCache.key !== url) {
+          if (prevCache && prevCache.key && prevCache.key !== hdriUrl) {
             try { prevCache.envRT?.dispose?.(); } catch {}
             try { prevCache.background?.dispose?.(); } catch {}
           }
@@ -875,7 +921,7 @@ function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
           }
           if (cache) {
             cache.preset = {
-              key: url,
+              key: hdriUrl,
               envRT,
               background: hdr,
             };
@@ -893,29 +939,29 @@ function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
           if (prevHdr && prevHdr !== hdr && (!cache || cache.preset?.background !== prevHdr)) {
             try { prevHdr?.dispose?.(); } catch {}
           }
-          const intensity = preset?.envIntensity ?? 1.7;
-          if (typeof console !== 'undefined') console.log('[env] HDRI loaded', { url, intensity });
+          const intensity = typeof preset?.envIntensity === 'number' ? preset.envIntensity : 1.0;
+          if (typeof console !== 'undefined') {
+            console.log('[env] HDRI loaded', { url: hdriUrl, intensity });
+          }
           ctx.envIntensity = intensity;
-          ctx.hdriActiveKey = url;
+          ctx.hdriActiveKey = hdriUrl;
           ctx.hdriLoading = false;
           return true;
         } catch (error) {
           ctx.hdriLoading = false;
           ctx.hdriReady = false;
           if (typeof console !== 'undefined') {
-            console.warn('[env] HDRI load failed', { url, error: String(error) });
+            console.warn('[env] HDRI load failed', { url: hdriUrl, error: String(error) });
           }
           return false;
         }
       };
       const token = hdriGen;
       ctx.hdriLoadPromise = (async () => {
-        for (const url of candidates) {
-          // eslint-disable-next-line no-await-in-loop
-          if (await tryLoadHDRI(url, token)) {
-            return true;
-          }
-        }
+        // 单一预设：根据当前 visualPresetKey 选择 hausdorf 或 NightSkyHDRI008_4K。
+        // eslint-disable-next-line no-await-in-loop
+        const ok = await tryLoadHDRI(url, token);
+        if (ok) return true;
         ctx.hdriLoading = false;
         if (!ctx.envFromHDRI) {
           ctx.hdriReady = false;
@@ -963,12 +1009,16 @@ function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
           background: grad,
         };
       }
-      pushSkyDebug(ctx, { mode: 'preset-gradient-fallback', allowHDRI, generation: generation || 0 });
+      pushSkyDebug(ctx, {
+        mode: 'preset-gradient-fallback',
+        allowHDRI,
+        generation: generation || 0,
+      });
     }
   }
 
   function applyFallbackAppearance(ctx, state) {
-    const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: 'bright-outdoor' };
+    const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: 'sun' };
     const renderer = ctx.renderer;
     ensureBaseLightingCache(ctx);
     const presetMode = isPresetMode(state);
@@ -977,7 +1027,10 @@ function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
       restoreBaseLighting(ctx);
       return;
     }
-    const preset = FALLBACK_PRESETS['bright-outdoor'];
+    const stateSnapshot = store && typeof store.get === 'function' ? store.get() : null;
+    const visualPresetKey = currentPresetKeyFromState(stateSnapshot);
+    const presetKey = visualPresetKey === 'moon' ? 'moon' : 'sun';
+    const preset = FALLBACK_PRESETS[presetKey] || FALLBACK_PRESETS.sun;
     if (renderer && preset.exposure != null) {
       renderer.toneMappingExposure = preset.exposure;
     }
@@ -1022,60 +1075,76 @@ function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
   }
 
 
-function ensureEnvIfNeeded(ctx, state, options = {}) {
-  const presetMode = isPresetMode(state);
-  const skyboxEnabled = options.skyboxEnabled !== false;
-  const skyDebugMode = typeof options.skyDebugMode === 'string'
-    ? options.skyDebugMode
-    : skyDebugModeParam || null;
-  ctx.skyDebugMode = skyDebugMode;
-  const skyMode = !skyboxEnabled
-    ? SKY_MODE_NONE
-    : (presetMode ? SKY_MODE_PRESET : SKY_MODE_MODEL);
-  const modeChanged = ctx._skyMode !== skyMode;
-  ctx._skyMode = skyMode;
-  ctx._lastPresetMode = presetMode;
-  if (skyMode === SKY_MODE_PRESET && modeChanged) {
-    ctx.hdriFailed = false;
-    ctx.hdriLoadGen = (ctx.hdriLoadGen || 0) + 1;
-    ctx.envDirty = true;
-  }
-  const preset = FALLBACK_PRESETS['bright-outdoor'];
-  const hasEnv = hasModelEnvironment(state);
-  const allowHDRI = skyMode === SKY_MODE_PRESET && fallbackEnabledDefault;
-  if (skyMode === SKY_MODE_NONE) {
+  function ensureEnvIfNeeded(ctx, state, options = {}) {
+    const presetMode = isPresetMode(state);
+    const skyboxEnabled = options.skyboxEnabled !== false;
+    const skyDebugMode = typeof options.skyDebugMode === 'string'
+      ? options.skyDebugMode
+      : skyDebugModeParam || null;
+    ctx.skyDebugMode = skyDebugMode;
+    const skyMode = !skyboxEnabled
+      ? SKY_MODE_NONE
+      : (presetMode ? SKY_MODE_PRESET : SKY_MODE_MODEL);
+    const modeChanged = ctx._skyMode !== skyMode;
+    ctx._skyMode = skyMode;
+    ctx._lastPresetMode = presetMode;
+    if (skyMode === SKY_MODE_PRESET && modeChanged) {
+      ctx.hdriFailed = false;
+      ctx.hdriLoadGen = (ctx.hdriLoadGen || 0) + 1;
+      ctx.envDirty = true;
+    }
+    const stateSnapshot = store && typeof store.get === 'function' ? store.get() : null;
+    const visualPresetKey = currentPresetKeyFromState(stateSnapshot);
+    const presetKey = visualPresetKey === 'moon' ? 'moon' : 'sun';
+    const preset = FALLBACK_PRESETS[presetKey] || FALLBACK_PRESETS.sun;
+    const hasEnv = hasModelEnvironment(state);
+    const allowHDRI = skyMode === SKY_MODE_PRESET && fallbackEnabledDefault;
+    if (skyMode === SKY_MODE_NONE) {
+      ctx.envFromHDRI = false;
+      ctx.hdriReady = false;
+      ctx.envDirty = false;
+      detachEnvironment(ctx);
+      pushSkyDebug(ctx, {
+        mode: 'skip',
+        reason: 'skybox-off',
+        presetMode,
+        hasEnv,
+        skyMode,
+      });
+      return;
+    }
+    if (skyMode === SKY_MODE_PRESET) {
+      ensureOutdoorSkyEnv(ctx, preset, ctx.hdriLoadGen || 0, { allowHDRI });
+      pushSkyDebug(ctx, {
+        mode: 'ensure-preset',
+        presetMode: true,
+        allowHDRI,
+        hasEnv,
+        skyMode,
+      });
+      return;
+    }
+
+    // Model mode: prefer MuJoCo-driven sky; clear any HDRI state but keep caches
     ctx.envFromHDRI = false;
     ctx.hdriReady = false;
-    ctx.envDirty = false;
-    detachEnvironment(ctx);
-    pushSkyDebug(ctx, { mode: 'skip', reason: 'skybox-off', presetMode, hasEnv, skyMode });
-    return;
+    const skyOk = ensureModelSkyFromAssets(ctx, state, THREE_NS, { skyDebugMode });
+    if (!skyOk) {
+      ensureModelGradientEnv(ctx, THREE_NS);
+    }
+    const worldScene = getWorldScene(ctx);
+    if (worldScene && !worldScene.background) {
+      worldScene.background = ctx.skyBackground || null;
+    }
+    pushSkyDebug(ctx, {
+      mode: skyOk ? 'ensure-model-sky-tex' : 'ensure-model-sky',
+      presetMode: false,
+      hasEnv,
+      skyMode,
+      skyKind: ctx.skyMode || null,
+      skyDebugMode,
+    });
   }
-  if (skyMode === SKY_MODE_PRESET) {
-    ensureOutdoorSkyEnv(ctx, preset, ctx.hdriLoadGen || 0, { allowHDRI });
-    pushSkyDebug(ctx, { mode: 'ensure-preset', presetMode: true, allowHDRI, hasEnv, skyMode });
-    return;
-  }
-  // Model mode: prefer MuJoCo-driven sky; clear any HDRI state but keep caches
-  ctx.envFromHDRI = false;
-  ctx.hdriReady = false;
-  const skyOk = ensureModelSkyFromAssets(ctx, state, THREE_NS, { skyDebugMode });
-  if (!skyOk) {
-    ensureModelGradientEnv(ctx, THREE_NS);
-  }
-  const worldScene = getWorldScene(ctx);
-  if (worldScene && !worldScene.background) {
-    worldScene.background = ctx.skyBackground || null;
-  }
-  pushSkyDebug(ctx, {
-    mode: skyOk ? 'ensure-model-sky-tex' : 'ensure-model-sky',
-    presetMode: false,
-    hasEnv,
-    skyMode,
-    skyKind: ctx.skyMode || null,
-    skyDebugMode,
-  });
-}
 
   return {
     applyFallbackAppearance,

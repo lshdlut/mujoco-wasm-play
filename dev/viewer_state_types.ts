@@ -180,7 +180,7 @@ export interface ViewerState {
   history: HistoryState;
   watch: WatchState;
   keyframes: KeyframeState;
-  visualSourceMode: 'preset' | 'model';
+  visualSourceMode: 'model' | 'preset-sun' | 'preset-moon';
   visualBackups: VisualBackupsState;
   visualBaselines: VisualBaselinesState;
   visualDiagnostics: VisualDiagnosticsState;

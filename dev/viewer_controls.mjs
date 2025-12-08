@@ -18,7 +18,6 @@ export function createControlManager({
   const CAMERA_FALLBACK_PRESETS = ['Free', 'Tracking'];
   const modelLibrary = [];
   let modelSelectEl = null;
-  let visualPresetButtonIndex = 0;
 
   function applyThemeFromColorControl(value) {
     if (typeof document === 'undefined' || !document.body) return;
@@ -1280,8 +1279,8 @@ function shortcutFromEvent(event) {
       container.append(groupRow);
 
       const config = [
-        { key: 'preset1', label: 'Preset☀️', modeValue: 'Preset' },
-        { key: 'preset2', label: 'Preset🌙️', modeValue: 'Preset' },
+        { key: 'preset-sun', label: 'Preset☀️', modeValue: 'PresetSun' },
+        { key: 'preset-moon', label: 'Preset🌙️', modeValue: 'PresetMoon' },
         { key: 'model', label: 'Model', modeValue: 'Model' },
       ];
 
@@ -1303,22 +1302,22 @@ function shortcutFromEvent(event) {
         return input;
       });
 
-      let logicalValue = 'Preset';
+      let logicalValue = 'PresetSun';
 
       const binding = createBinding(control, {
         getValue: () => logicalValue,
         applyValue: (value) => {
           const token = typeof value === 'string' ? value.toLowerCase() : '';
-          logicalValue = token.startsWith('model') ? 'Model' : 'Preset';
-          const isModel = logicalValue === 'Model';
           let targetKey;
-          if (isModel) {
+          if (token.startsWith('model')) {
+            logicalValue = 'Model';
             targetKey = 'model';
+          } else if (token.includes('moon')) {
+            logicalValue = 'PresetMoon';
+            targetKey = 'preset-moon';
           } else {
-            const idx = Number.isFinite(Number(visualPresetButtonIndex))
-              ? Number(visualPresetButtonIndex)
-              : 0;
-            targetKey = idx === 1 ? 'preset2' : 'preset1';
+            logicalValue = 'PresetSun';
+            targetKey = 'preset-sun';
           }
           radios.forEach((input) => {
             const key = input.dataset.key || '';
@@ -1334,12 +1333,7 @@ function shortcutFromEvent(event) {
           guardBinding(binding, async () => {
             if (!input.checked) return;
             const key = input.dataset.key || '';
-            if (key === 'preset1') {
-              visualPresetButtonIndex = 0;
-            } else if (key === 'preset2') {
-              visualPresetButtonIndex = 1;
-            }
-            const modeValue = input.value || (key === 'model' ? 'Model' : 'Preset');
+            const modeValue = input.value || (key === 'model' ? 'Model' : input.value);
             binding.setValue(modeValue);
             try {
               await applySpecAction(store, backend, control, modeValue);
@@ -2153,16 +2147,6 @@ function shortcutFromEvent(event) {
 
     const body = document.createElement('div');
     body.className = 'section-body';
-
-    if (section.section_id === 'physics') {
-      const support = getOptionSupport();
-      if (!support.supported) {
-        const noteRow = createControlRow({ item_id: 'physics.option_notice' }, { full: true });
-        noteRow.classList.add('control-static', 'control-warning');
-        noteRow.textContent = 'Physics options are read-only: forge build missing mjOption pointer exports.';
-        body.append(noteRow);
-      }
-    }
 
     const setCollapsed = (collapsed) => {
       sectionEl.classList.toggle('is-collapsed', collapsed);
