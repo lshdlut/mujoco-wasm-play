@@ -206,10 +206,26 @@ export function collectRenderAssetsFromModule(mod, handle) {
   if (nmat > 0) {
     const rgbaView = readView(mod, mod._mjwf_mat_rgba_ptr, handle, nmat * 4, heapViewF32);
     const reflectanceView = readView(mod, ensureFunc('_mjwf_mat_reflectance_ptr'), handle, nmat, heapViewF64);
+    const emissionView = readView(mod, ensureFunc('_mjwf_mat_emission_ptr'), handle, nmat, heapViewF64);
+    const specularView = readView(mod, ensureFunc('_mjwf_mat_specular_ptr'), handle, nmat, heapViewF64);
+    const shininessView = readView(mod, ensureFunc('_mjwf_mat_shininess_ptr'), handle, nmat, heapViewF64);
+    const metallicView = readView(mod, ensureFunc('_mjwf_mat_metallic_ptr'), handle, nmat, heapViewF64);
+    const roughnessView = readView(mod, ensureFunc('_mjwf_mat_roughness_ptr'), handle, nmat, heapViewF64);
+    const texidView = readView(mod, ensureFunc('_mjwf_mat_texid_ptr'), handle, nmat, heapViewI32);
+    const texrepeatView = readView(mod, ensureFunc('_mjwf_mat_texrepeat_ptr'), handle, nmat * 2, heapViewF64);
+    const texuniformView = readView(mod, ensureFunc('_mjwf_mat_texuniform_ptr'), handle, nmat, heapViewI32);
     assets.materials = {
       count: nmat,
       rgba: cloneTyped(rgbaView, Float32Array),
       reflectance: cloneTyped(reflectanceView, Float64Array),
+      emission: cloneTyped(emissionView, Float64Array),
+      specular: cloneTyped(specularView, Float64Array),
+      shininess: cloneTyped(shininessView, Float64Array),
+      metallic: cloneTyped(metallicView, Float64Array),
+      roughness: cloneTyped(roughnessView, Float64Array),
+      texid: cloneTyped(texidView, Int32Array),
+      texrepeat: cloneTyped(texrepeatView, Float64Array),
+      texuniform: cloneTyped(texuniformView, Int32Array),
     };
   }
   const nmesh = typeof mod._mjwf_nmesh === 'function' ? (mod._mjwf_nmesh(handle) | 0) : 0;

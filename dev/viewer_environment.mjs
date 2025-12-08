@@ -3,40 +3,40 @@ export const FALLBACK_PRESETS = {
     // Bright daytime preset: strong directional light with moderate IBL so
     // shadows remain clearly visible.
     background: 0xdde6f4,
-    exposure: 1.05,
-    ambient: { color: 0xf0f4ff, intensity: 0.25 },
-    hemi: { sky: 0xf0f4ff, ground: 0x10121a, intensity: 0.45 },
+    exposure: 1.95,
+    ambient: { color: 0xf0f4ff, intensity: 0.1 },
+    hemi: { sky: 0xf0f4ff, ground: 0x10121a, intensity: 0.18 },
     dir: {
       color: 0xffffff,
-      intensity: 2.4,
+      intensity: 10,
       position: [6, -5, 4],
       target: [0, 0, 1],
       shadowBias: -0.0001,
     },
-    fill: { color: 0xb6d5ff, intensity: 0.25, position: [-4, 3, 2] },
+    fill: { color: 0xb6d5ff, intensity: 0.18, position: [-4, 3, 2] },
     shadowBias: -0.00015,
     // Kept deliberately low so HDRI does not wash out shadows.
-    envIntensity: 0.6,
-    ground: { style: 'shadow', opacity: 0.35 },
+    envIntensity: 0.35,
+    ground: { style: 'shadow', opacity: 0.35, color: 0xffffff },
   },
   moon: {
     // Night preset: darker exposure and very weak IBL so forms are defined
     // mostly by a single moon-like directional light.
     background: 0x02030a,
-    exposure: 0.6,
-    ambient: { color: 0x10121a, intensity: 0.05 },
-    hemi: { sky: 0x22273a, ground: 0x02030a, intensity: 0.1 },
+    exposure: 0.45,
+    ambient: { color: 0x10121a, intensity: 0.02 },
+    hemi: { sky: 0x22273a, ground: 0x02030a, intensity: 0.05 },
     dir: {
       color: 0x8899aa,
-      intensity: 0.3,
+      intensity: 0.4,
       position: [2, -3, 1.5],
       target: [0, 0, 1],
       shadowBias: -0.0001,
     },
-    fill: { color: 0x182030, intensity: 0.06, position: [-1.5, 1.5, 1] },
+    fill: { color: 0x182030, intensity: 0.04, position: [-1.5, 1.5, 1] },
     shadowBias: -0.0002,
-    envIntensity: 0.18,
-    ground: { style: 'shadow', opacity: 0.25 },
+    envIntensity: 0.08,
+    ground: { style: 'shadow', opacity: 0.25, color: 0xf5f5f5 },
   },
 };
 
@@ -944,6 +944,11 @@ export function createEnvironmentManager({
             console.log('[env] HDRI loaded', { url: hdriUrl, intensity });
           }
           ctx.envIntensity = intensity;
+          ctx._envDebugPreset = {
+            key: visualPresetKey,
+            url: hdriUrl,
+            envIntensity: intensity,
+          };
           ctx.hdriActiveKey = hdriUrl;
           ctx.hdriLoading = false;
           return true;

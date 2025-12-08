@@ -3012,7 +3012,7 @@ function applyMaterialFlags(mesh, index, state, sceneFlagsOverride = null) {
   }
 }
 
-function updateMeshMaterial(mesh, matIndex, matRgbaView) {
+function updateMeshMaterial(mesh, matIndex, matRgbaView, materials = null) {
   if (!mesh || !mesh.material || !(matIndex >= 0)) return;
   const base = matIndex * 4;
   const r = matRgbaView?.[base + 0] ?? 0.6;
@@ -3026,6 +3026,41 @@ function updateMeshMaterial(mesh, matIndex, matRgbaView) {
   if ('opacity' in material) {
     material.opacity = a;
     material.transparent = a < 0.999;
+  }
+  if (materials && materials.count && matIndex < materials.count) {
+    const emissionArr = materials.emission || null;
+    const metallicArr = materials.metallic || null;
+    const roughnessArr = materials.roughness || null;
+    const specularArr = materials.specular || null;
+    const shininessArr = materials.shininess || null;
+    if (emissionArr && 'emissiveIntensity' in material) {
+      const e = emissionArr[matIndex];
+      if (Number.isFinite(e)) {
+        material.emissiveIntensity = e;
+      }
+    }
+    if (metallicArr && 'metalness' in material) {
+      const m = metallicArr[matIndex];
+      if (Number.isFinite(m)) {
+        material.metalness = Math.min(1, Math.max(0, m));
+      }
+    }
+    if (roughnessArr && 'roughness' in material) {
+      const rv = roughnessArr[matIndex];
+      if (Number.isFinite(rv)) {
+        material.roughness = Math.min(1, Math.max(0, rv));
+      }
+    } else if (shininessArr && 'roughness' in material) {
+      const sh = shininessArr[matIndex];
+      if (Number.isFinite(sh)) {
+        const t = Math.max(1, sh);
+        const rough = 1 / (1 + Math.log10(t));
+        material.roughness = Math.min(1, Math.max(0, rough));
+      }
+    }
+    if (specularArr && !('specularIntensity' in material)) {
+      // No-op for now; specular is available via materials.specular if needed.
+    }
   }
   if ('needsUpdate' in material) {
     material.needsUpdate = true;
@@ -3044,18 +3079,38 @@ function resolveMaterialReflectance(matIndex, assets) {
 function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
   if (!mesh) return;
   mesh.userData = mesh.userData || {};
-  mesh.userData.reflectance = reflectance;
+  const mode = ctx?.visualSourceMode || 'model';
   const baseIntensity = typeof ctx?.envIntensity === 'number' ? ctx.envIntensity : 0;
   const mat = mesh.material;
   if (!mat || !('envMapIntensity' in mat)) return;
   if (!('reflectanceBaseEnvIntensity' in mesh.userData) || mesh.userData.reflectanceBaseEnvIntensity == null) {
     mesh.userData.reflectanceBaseEnvIntensity = typeof mat.envMapIntensity === 'number' ? mat.envMapIntensity : 0;
   }
-  const active = reflectionEnabled && baseIntensity > 0 && reflectance > 0 ? reflectance : null;
-  mat.envMapIntensity = active != null
-    ? baseIntensity * active
-    : mesh.userData.reflectanceBaseEnvIntensity || 0;
+  const clampedReflectance = Number.isFinite(reflectance) ? Math.max(0, reflectance) : 0;
+  mesh.userData.reflectance = clampedReflectance;
+  const presetMode = mode === 'preset-sun' || mode === 'preset-moon';
+  let effectiveReflectance = clampedReflectance > 0 ? clampedReflectance : 0;
+  if (effectiveReflectance <= 0 && presetMode) {
+    const name = typeof mesh.name === 'string' ? mesh.name.toLowerCase() : '';
+    const isGround = mesh.userData?.infinitePlane || name.includes('floor') || name.includes('ground');
+    effectiveReflectance = isGround ? 0.2 : 0.5;
+  }
+  let nextEnvIntensity = mat.envMapIntensity;
+  if (!reflectionEnabled || baseIntensity <= 0 || !presetMode) {
+    nextEnvIntensity = 0;
+  } else {
+    nextEnvIntensity = baseIntensity * effectiveReflectance;
+  }
+  mat.envMapIntensity = nextEnvIntensity;
   mat.needsUpdate = true;
+  if (ctx) {
+    ctx._envDebugSample = {
+      baseIntensity,
+      reflectance: clampedReflectance,
+      reflectionEnabled: !!reflectionEnabled,
+      envMapIntensity: nextEnvIntensity,
+    };
+  }
 }
 
 function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}, state = null) {
@@ -3080,8 +3135,12 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
     }
 
     if (infinitePlane) {
+      const groundColorHex =
+        (ctx.fallback && ctx.fallback.ground && typeof ctx.fallback.ground.color === 'number')
+          ? ctx.fallback.ground.color
+          : 0xf5f5f5;
       mesh = createInfiniteGroundHelper({
-        color: 0xffffff,
+        color: groundColorHex,
         distance: GROUND_DISTANCE,
         renderOrder: RENDER_ORDER.GROUND,
       });
@@ -3236,10 +3295,11 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
   const appearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
   if (!appearance.rgba) {
     const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
-    const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
+    const materials = assets?.materials || null;
+    const matRgbaView = materials?.rgba || snapshot.matrgba || null;
     const matIndex = matIdView?.[i] ?? -1;
     if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
-      updateMeshMaterial(mesh, matIndex, matRgbaView);
+      updateMeshMaterial(mesh, matIndex, matRgbaView, materials);
       appearance.rgba = [
         matRgbaView[matIndex * 4 + 0] ?? 0.6,
         matRgbaView[matIndex * 4 + 1] ?? 0.6,
@@ -4117,6 +4177,10 @@ export function createRendererManager({
     if (!context.initialized) return;
     if (typeof window !== 'undefined') {
       window.__renderCtx = context;
+      window.__envDebug = {
+        envIntensity: typeof context.envIntensity === 'number' ? context.envIntensity : null,
+        sample: context._envDebugSample || null,
+      };
     }
     const renderer = context.renderer;
     const debugSceneEnabled = isSceneDebugEnabled(state);
