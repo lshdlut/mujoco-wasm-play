@@ -3,12 +3,12 @@ export const FALLBACK_PRESETS = {
     // Bright daytime preset: strong directional light with moderate IBL so
     // shadows remain clearly visible.
     background: 0xdde6f4,
-    exposure: 1.95,
+    exposure: 1.05,
     ambient: { color: 0xf0f4ff, intensity: 0.1 },
     hemi: { sky: 0xf0f4ff, ground: 0x10121a, intensity: 0.18 },
     dir: {
       color: 0xffffff,
-      intensity: 10,
+      intensity: 5,
       position: [6, -5, 4],
       target: [0, 0, 1],
       shadowBias: -0.0001,
@@ -17,7 +17,7 @@ export const FALLBACK_PRESETS = {
     shadowBias: -0.00015,
     // Kept deliberately low so HDRI does not wash out shadows.
     envIntensity: 0.35,
-    ground: { style: 'shadow', opacity: 0.35, color: 0xffffff },
+    ground: { style: 'shadow', opacity: 0.35, color: 0xff0000 },
   },
   moon: {
     // Night preset: darker exposure and very weak IBL so forms are defined
@@ -1040,41 +1040,40 @@ export function createEnvironmentManager({
       renderer.toneMappingExposure = preset.exposure;
     }
 
-    if (!hasModelLights(state)) {
-      if (ctx.ambient) {
-        const ambientCfg = preset.ambient || {};
-        ctx.ambient.color.setHex(ambientCfg.color ?? 0xffffff);
-        ctx.ambient.intensity = ambientCfg.intensity ?? 0.2;
+    // In preset mode, always apply preset lights, regardless of model-defined lights.
+    if (ctx.ambient) {
+      const ambientCfg = preset.ambient || {};
+      ctx.ambient.color.setHex(ambientCfg.color ?? 0xffffff);
+      ctx.ambient.intensity = ambientCfg.intensity ?? 0.2;
+    }
+    if (ctx.hemi) {
+      const hemiCfg = preset.hemi || {};
+      ctx.hemi.color.setHex(hemiCfg.sky ?? 0xffffff);
+      ctx.hemi.groundColor.setHex(hemiCfg.ground ?? 0x20242f);
+      ctx.hemi.intensity = hemiCfg.intensity ?? 0.6;
+    }
+    if (ctx.light) {
+      const dirCfg = preset.dir || {};
+      ctx.light.color.setHex(dirCfg.color ?? 0xffffff);
+      ctx.light.intensity = dirCfg.intensity ?? 1.8;
+      if (Array.isArray(dirCfg.position) && dirCfg.position.length === 3) {
+        ctx.light.position.set(dirCfg.position[0], dirCfg.position[1], dirCfg.position[2]);
       }
-      if (ctx.hemi) {
-        const hemiCfg = preset.hemi || {};
-        ctx.hemi.color.setHex(hemiCfg.sky ?? 0xffffff);
-        ctx.hemi.groundColor.setHex(hemiCfg.ground ?? 0x20242f);
-        ctx.hemi.intensity = hemiCfg.intensity ?? 0.6;
+      if (ctx.lightTarget && Array.isArray(dirCfg.target) && dirCfg.target.length === 3) {
+        ctx.lightTarget.position.set(dirCfg.target[0], dirCfg.target[1], dirCfg.target[2]);
+        ctx.light.target?.updateMatrixWorld?.();
       }
-      if (ctx.light) {
-        const dirCfg = preset.dir || {};
-        ctx.light.color.setHex(dirCfg.color ?? 0xffffff);
-        ctx.light.intensity = dirCfg.intensity ?? 1.8;
-        if (Array.isArray(dirCfg.position) && dirCfg.position.length === 3) {
-          ctx.light.position.set(dirCfg.position[0], dirCfg.position[1], dirCfg.position[2]);
-        }
-        if (ctx.lightTarget && Array.isArray(dirCfg.target) && dirCfg.target.length === 3) {
-          ctx.lightTarget.position.set(dirCfg.target[0], dirCfg.target[1], dirCfg.target[2]);
-          ctx.light.target?.updateMatrixWorld?.();
-        }
-        if (ctx.light.shadow) {
-          ctx.light.shadow.bias =
-            dirCfg.shadowBias ?? preset.shadowBias ?? ctx.light.shadow.bias;
-        }
+      if (ctx.light.shadow) {
+        ctx.light.shadow.bias =
+          dirCfg.shadowBias ?? preset.shadowBias ?? ctx.light.shadow.bias;
       }
-      if (ctx.fill) {
-        const fillCfg = preset.fill || {};
-        ctx.fill.color.setHex(fillCfg.color ?? 0xcfe3ff);
-        ctx.fill.intensity = fillCfg.intensity ?? 0.3;
-        if (Array.isArray(fillCfg.position) && fillCfg.position.length === 3) {
-          ctx.fill.position.set(fillCfg.position[0], fillCfg.position[1], fillCfg.position[2]);
-        }
+    }
+    if (ctx.fill) {
+      const fillCfg = preset.fill || {};
+      ctx.fill.color.setHex(fillCfg.color ?? 0xcfe3ff);
+      ctx.fill.intensity = fillCfg.intensity ?? 0.3;
+      if (Array.isArray(fillCfg.position) && fillCfg.position.length === 3) {
+        ctx.fill.position.set(fillCfg.position[0], fillCfg.position[1], fillCfg.position[2]);
       }
     }
   }
@@ -1102,6 +1101,9 @@ export function createEnvironmentManager({
     const visualPresetKey = currentPresetKeyFromState(stateSnapshot);
     const presetKey = visualPresetKey === 'moon' ? 'moon' : 'sun';
     const preset = FALLBACK_PRESETS[presetKey] || FALLBACK_PRESETS.sun;
+    if (ctx.fallback) {
+      ctx.fallback.ground = preset.ground || null;
+    }
     const hasEnv = hasModelEnvironment(state);
     const allowHDRI = skyMode === SKY_MODE_PRESET && fallbackEnabledDefault;
     if (skyMode === SKY_MODE_NONE) {

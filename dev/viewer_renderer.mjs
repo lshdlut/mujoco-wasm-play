@@ -951,7 +951,8 @@ function meanSizeFromState(state, context = null) {
       ? state.rendering.voptFlags
       : (Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : (getDefaultVopt(context, state) || []));
     const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
-    const presetMode = (state?.visualSourceMode ?? 'model') === 'preset';
+    const mode = state?.visualSourceMode ?? 'model';
+    const presetMode = mode === 'preset' || mode === 'preset-sun' || mode === 'preset-moon';
     const skyboxFlag = sceneFlags[4] !== false;
     const shadowEnabled = segmentEnabled ? false : sceneFlags[0] !== false;
     const reflectionEnabled = segmentEnabled ? false : sceneFlags[2] !== false;
@@ -3243,10 +3244,7 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
     return;
   }
   const flags = Array.isArray(sceneFlags) ? sceneFlags : state?.rendering?.sceneFlags || [];
-  if (mesh.userData?.infinitePlane) {
-    updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, flags);
-    return;
-  }
+  const isInfinitePlane = !!mesh.userData?.infinitePlane;
   const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
   const segmentEnabled = !!flags[SEGMENT_FLAG_INDEX];
   if (segmentEnabled) {
@@ -3259,38 +3257,42 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
   } else {
     restoreSegmentMaterial(mesh);
   }
-  if (sceneGeom) {
-    const px = Number(sceneGeom.xpos?.[0]) || 0;
-    const py = Number(sceneGeom.xpos?.[1]) || 0;
-    const pz = Number(sceneGeom.xpos?.[2]) || 0;
-    mesh.position.set(px, py, pz);
-    const m = Array.isArray(sceneGeom.xmat) && sceneGeom.xmat.length >= 9 ? sceneGeom.xmat : [1,0,0,0,1,0,0,0,1];
-    mesh.quaternion.copy(mat3ToQuat(m));
-  } else {
-    const xpos = snapshot.xpos;
-    const baseIndex = 3 * i;
-    const pos = [
-      xpos?.[baseIndex + 0] ?? 0,
-      xpos?.[baseIndex + 1] ?? 0,
-      xpos?.[baseIndex + 2] ?? 0,
-    ];
-    mesh.position.set(pos[0], pos[1], pos[2]);
-    const xmat = snapshot.xmat;
-    const matBase = 9 * i;
-    const rot = [
-      xmat?.[matBase + 0] ?? 1,
-      xmat?.[matBase + 1] ?? 0,
-      xmat?.[matBase + 2] ?? 0,
-      xmat?.[matBase + 3] ?? 0,
-      xmat?.[matBase + 4] ?? 1,
-      xmat?.[matBase + 5] ?? 0,
-      xmat?.[matBase + 6] ?? 0,
-      xmat?.[matBase + 7] ?? 0,
-      xmat?.[matBase + 8] ?? 1,
-    ];
-    mesh.quaternion.copy(mat3ToQuat(rot));
+  if (!isInfinitePlane) {
+    if (sceneGeom) {
+      const px = Number(sceneGeom.xpos?.[0]) || 0;
+      const py = Number(sceneGeom.xpos?.[1]) || 0;
+      const pz = Number(sceneGeom.xpos?.[2]) || 0;
+      mesh.position.set(px, py, pz);
+      const m = Array.isArray(sceneGeom.xmat) && sceneGeom.xmat.length >= 9
+        ? sceneGeom.xmat
+        : [1, 0, 0, 0, 1, 0, 0, 0, 1];
+      mesh.quaternion.copy(mat3ToQuat(m));
+    } else {
+      const xpos = snapshot.xpos;
+      const baseIndex = 3 * i;
+      const pos = [
+        xpos?.[baseIndex + 0] ?? 0,
+        xpos?.[baseIndex + 1] ?? 0,
+        xpos?.[baseIndex + 2] ?? 0,
+      ];
+      mesh.position.set(pos[0], pos[1], pos[2]);
+      const xmat = snapshot.xmat;
+      const matBase = 9 * i;
+      const rot = [
+        xmat?.[matBase + 0] ?? 1,
+        xmat?.[matBase + 1] ?? 0,
+        xmat?.[matBase + 2] ?? 0,
+        xmat?.[matBase + 3] ?? 0,
+        xmat?.[matBase + 4] ?? 1,
+        xmat?.[matBase + 5] ?? 0,
+        xmat?.[matBase + 6] ?? 0,
+        xmat?.[matBase + 7] ?? 0,
+        xmat?.[matBase + 8] ?? 1,
+      ];
+      mesh.quaternion.copy(mat3ToQuat(rot));
+    }
+    mesh.scale.set(1, 1, 1);
   }
-  mesh.scale.set(1, 1, 1);
 
   const appearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
   if (!appearance.rgba) {
@@ -3310,12 +3312,18 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
       appearance.opacity = alphaFromArray(appearance.rgba);
     }
   }
-  const applyAppearance = !segmentEnabled;
+  const applyAppearance = !segmentEnabled && !isInfinitePlane;
   if (applyAppearance) {
     applyAppearanceToMaterial(mesh, appearance);
+  }
+  if (!segmentEnabled) {
     applyMaterialFlags(mesh, i, state, flags);
   }
   mesh.visible = true;
+
+  if (isInfinitePlane) {
+    updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, flags);
+  }
 }
 
 function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags = null) {
@@ -4175,6 +4183,7 @@ export function createRendererManager({
     if (!snapshot || !state) return;
     const context = initRenderer();
     if (!context.initialized) return;
+    context.visualSourceMode = state.visualSourceMode || 'model';
     if (typeof window !== 'undefined') {
       window.__renderCtx = context;
       window.__envDebug = {
@@ -4307,7 +4316,11 @@ export function createRendererManager({
     };
     debugHazeState(hazeSummary);
     if (visStruct && !segmentEnabled) {
-      applyVisualLighting(context, visStruct);
+      const mode = state.visualSourceMode || 'model';
+      const presetMode = mode === 'preset' || mode === 'preset-sun' || mode === 'preset-moon';
+      if (!presetMode) {
+        applyVisualLighting(context, visStruct);
+      }
     }
 
     const defaults = getDefaultVopt(context, state);
