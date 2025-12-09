@@ -822,8 +822,8 @@ export function createEnvironmentManager({
     const state = store && typeof store.get === 'function' ? store.get() : null;
     const visualPresetKey = currentPresetKeyFromState(state);
     const url = visualPresetKey === 'moon'
-      ? 'dist/assets/env/starmap_random_2020_4k.exr'
-      : 'dist/assets/env/rustig_koppie_puresky_4k.hdr';
+      ? 'starmap_random_2020_4k_rot.exr'
+      : 'rustig_koppie_puresky_4k.hdr';
     const hdrReady =
       ctx.envFromHDRI &&
       ctx.envRT &&
