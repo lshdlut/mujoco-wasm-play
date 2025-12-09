@@ -3090,12 +3090,7 @@ function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
   const clampedReflectance = Number.isFinite(reflectance) ? Math.max(0, reflectance) : 0;
   mesh.userData.reflectance = clampedReflectance;
   const presetMode = mode === 'preset-sun' || mode === 'preset-moon';
-  let effectiveReflectance = clampedReflectance > 0 ? clampedReflectance : 0;
-  if (effectiveReflectance <= 0 && presetMode) {
-    const name = typeof mesh.name === 'string' ? mesh.name.toLowerCase() : '';
-    const isGround = mesh.userData?.infinitePlane || name.includes('floor') || name.includes('ground');
-    effectiveReflectance = isGround ? 0.2 : 0.5;
-  }
+  const effectiveReflectance = clampedReflectance > 0 ? clampedReflectance : 0;
   let nextEnvIntensity = mat.envMapIntensity;
   if (!reflectionEnabled || baseIntensity <= 0 || !presetMode) {
     nextEnvIntensity = 0;
@@ -3136,12 +3131,8 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
     }
 
     if (infinitePlane) {
-      const groundColorHex =
-        (ctx.fallback && ctx.fallback.ground && typeof ctx.fallback.ground.color === 'number')
-          ? ctx.fallback.ground.color
-          : 0xf5f5f5;
       mesh = createInfiniteGroundHelper({
-        color: groundColorHex,
+        color: 0xf5f5f5,
         distance: GROUND_DISTANCE,
         renderOrder: RENDER_ORDER.GROUND,
       });
@@ -3237,7 +3228,176 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
   }
   return mesh;
 }
-function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = null) {
+function ensureGeomState(context, index, geomMeta) {
+  context.geomState = context.geomState || [];
+  const existing = context.geomState[index];
+  if (existing && existing.mj && existing.view) {
+    // Refresh mj mirror; view layer kept as-is so overrides persist across frames.
+    existing.mj.type = geomMeta.type;
+    existing.mj.size = Array.isArray(geomMeta.size) ? geomMeta.size.slice() : null;
+    existing.mj.dataId = geomMeta.dataId;
+    existing.mj.matId = geomMeta.matId;
+    existing.mj.groupId = geomMeta.groupId;
+    existing.mj.bodyId = geomMeta.bodyId;
+    existing.mj.rgba = Array.isArray(geomMeta.rgba) ? geomMeta.rgba.slice() : null;
+    return existing;
+  }
+  const mj = {
+    type: geomMeta.type,
+    size: Array.isArray(geomMeta.size) ? geomMeta.size.slice() : null,
+    dataId: geomMeta.dataId,
+    matId: geomMeta.matId,
+    groupId: geomMeta.groupId,
+    bodyId: geomMeta.bodyId,
+    rgba: Array.isArray(geomMeta.rgba) ? geomMeta.rgba.slice() : null,
+  };
+  const view = {
+    visibleOverride: null,
+    debugHidden: false,
+    colorOverride: null,
+    roughnessOverride: null,
+    metalnessOverride: null,
+    envMapIntensityOverride: null,
+    emissiveIntensityOverride: null,
+    flags: {},
+    helpers: {},
+  };
+  const state = { mj, view };
+  context.geomState[index] = state;
+  return state;
+}
+
+/**
+ * Apply high-level visual properties into the JS-side geom view state.
+ * This helper deliberately hides whether a property is implemented via
+ * MuJoCo fields or JS-only overrides; callers should only care about
+ * the semantic keys on the props object.
+ *
+ * Supported props (extensible):
+ *   - color: number (0xRRGGBB) | [r,g,b] in 0..1
+ *   - opacity: number in 0..1
+ *   - roughness: number in 0..1
+ *   - metallic / metalness: number in 0..1
+ *   - envIntensity: number (maps to envMapIntensityOverride)
+ *   - emission: number (maps to emissiveIntensityOverride where available)
+ *   - visible: boolean
+ */
+function setGeomViewProps(context, geomIndex, props = {}) {
+  if (!context || geomIndex == null) return;
+  context.geomState = context.geomState || [];
+  let state = context.geomState[geomIndex];
+  if (!state) {
+    const fallbackMeta = {
+      type: MJ_GEOM.BOX,
+      size: null,
+      dataId: -1,
+      matId: -1,
+      groupId: 0,
+      bodyId: -1,
+      rgba: null,
+    };
+    state = ensureGeomState(context, geomIndex, fallbackMeta);
+  }
+  const view = state.view || (state.view = {});
+
+  if (Object.prototype.hasOwnProperty.call(props, 'visible')) {
+    const v = props.visible;
+    if (v === true || v === false) {
+      view.visibleOverride = v;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(props, 'color') || Object.prototype.hasOwnProperty.call(props, 'opacity')) {
+    let r = 1;
+    let g = 1;
+    let b = 1;
+    let a = 1;
+    const color = props.color;
+    if (typeof color === 'number' && Number.isFinite(color)) {
+      const hex = color >>> 0;
+      r = ((hex >> 16) & 0xff) / 255;
+      g = ((hex >> 8) & 0xff) / 255;
+      b = (hex & 0xff) / 255;
+    } else if (Array.isArray(color) && color.length >= 3) {
+      r = Number(color[0]) || 0;
+      g = Number(color[1]) || 0;
+      b = Number(color[2]) || 0;
+    }
+    if (Object.prototype.hasOwnProperty.call(props, 'opacity') && Number.isFinite(props.opacity)) {
+      a = Math.max(0, Math.min(1, props.opacity));
+    }
+    view.colorOverride = [r, g, b, a];
+  }
+
+  if (Object.prototype.hasOwnProperty.call(props, 'roughness') && props.roughness != null) {
+    view.roughnessOverride = props.roughness;
+  }
+  if (Object.prototype.hasOwnProperty.call(props, 'metallic') && props.metallic != null) {
+    view.metalnessOverride = props.metallic;
+  }
+  if (Object.prototype.hasOwnProperty.call(props, 'metalness') && props.metalness != null) {
+    view.metalnessOverride = props.metalness;
+  }
+  if (Object.prototype.hasOwnProperty.call(props, 'envIntensity') && props.envIntensity != null) {
+    view.envMapIntensityOverride = props.envIntensity;
+  }
+  if (Object.prototype.hasOwnProperty.call(props, 'emission') && props.emission != null) {
+    view.emissiveIntensityOverride = props.emission;
+  }
+
+  view.__dirty = true;
+}
+
+function composeGeomAppearance(geomState, baseAppearance, defaultVisible) {
+  if (!geomState || !geomState.view) {
+    return {
+      appearance: baseAppearance,
+      visible: defaultVisible,
+      overrides: null,
+    };
+  }
+  const { view } = geomState;
+  let visible = defaultVisible;
+  if (view.debugHidden) visible = false;
+  if (view.visibleOverride === true) visible = true;
+  else if (view.visibleOverride === false) visible = false;
+
+  const appearance = { ...baseAppearance };
+  if (view.colorOverride && Array.isArray(view.colorOverride)) {
+    const [r, g, b, a] = view.colorOverride;
+    appearance.rgba = [r, g, b, a];
+    appearance.color = [r, g, b];
+    appearance.opacity = a;
+  }
+  const overrides = {};
+  if (view.roughnessOverride != null) overrides.roughness = view.roughnessOverride;
+  if (view.metalnessOverride != null) overrides.metalness = view.metalnessOverride;
+  if (view.envMapIntensityOverride != null) overrides.envMapIntensity = view.envMapIntensityOverride;
+  if (view.emissiveIntensityOverride != null) overrides.emissiveIntensity = view.emissiveIntensityOverride;
+
+  return { appearance, visible, overrides };
+}
+
+function applyMaterialOverrides(material, overrides) {
+  if (!material || !overrides) return;
+  if ('roughness' in overrides && 'roughness' in material) {
+    material.roughness = overrides.roughness;
+  }
+  if ('metalness' in overrides && 'metalness' in material) {
+    material.metalness = overrides.metalness;
+  }
+  if ('envMapIntensity' in overrides && 'envMapIntensity' in material) {
+    material.envMapIntensity = overrides.envMapIntensity;
+  }
+  if ('emissiveIntensity' in overrides && 'emissiveIntensity' in material) {
+    material.emissiveIntensity = overrides.emissiveIntensity;
+  }
+  if ('needsUpdate' in material) {
+    material.needsUpdate = true;
+  }
+}
+
+function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = null, geomState = null) {
   const n = snapshot.ngeom | 0;
   if (i >= n) {
     mesh.visible = false;
@@ -3294,32 +3454,34 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
     mesh.scale.set(1, 1, 1);
   }
 
-  const appearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
-  if (!appearance.rgba) {
+  const baseAppearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
+  if (!baseAppearance.rgba) {
     const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
     const materials = assets?.materials || null;
     const matRgbaView = materials?.rgba || snapshot.matrgba || null;
     const matIndex = matIdView?.[i] ?? -1;
     if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
       updateMeshMaterial(mesh, matIndex, matRgbaView, materials);
-      appearance.rgba = [
+      baseAppearance.rgba = [
         matRgbaView[matIndex * 4 + 0] ?? 0.6,
         matRgbaView[matIndex * 4 + 1] ?? 0.6,
         matRgbaView[matIndex * 4 + 2] ?? 0.9,
         matRgbaView[matIndex * 4 + 3] ?? 1,
       ];
-      appearance.color = rgbFromArray(appearance.rgba);
-      appearance.opacity = alphaFromArray(appearance.rgba);
+      baseAppearance.color = rgbFromArray(baseAppearance.rgba);
+      baseAppearance.opacity = alphaFromArray(baseAppearance.rgba);
     }
   }
-  const applyAppearance = !segmentEnabled && !isInfinitePlane;
+  const composed = composeGeomAppearance(geomState, baseAppearance, true);
+  const applyAppearance = !segmentEnabled;
   if (applyAppearance) {
-    applyAppearanceToMaterial(mesh, appearance);
+    applyAppearanceToMaterial(mesh, composed.appearance);
+    applyMaterialOverrides(mesh.material, composed.overrides);
   }
   if (!segmentEnabled) {
     applyMaterialFlags(mesh, i, state, flags);
   }
-  mesh.visible = true;
+  mesh.visible = composed.visible;
 
   if (isInfinitePlane) {
     updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, flags);
@@ -3473,26 +3635,6 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
     const fade = uniforms.uFadeEnd?.value || groundData.baseFadeEnd || 0;
     const dist = uniforms.uDistance?.value || groundData.baseDistance || 0;
     uniforms.uQuadDistance.value = Math.max(fade * 1.2, dist);
-  }
-  if (!segmentEnabled) {
-    const appearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
-    if (!appearance.rgba) {
-      const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
-      const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
-      const matIndex = matIdView?.[i] ?? -1;
-      if (Array.isArray(matRgbaView) || ArrayBuffer.isView(matRgbaView)) {
-        updateMeshMaterial(mesh, matIndex, matRgbaView);
-        appearance.rgba = [
-          matRgbaView[matIndex * 4 + 0] ?? 0.6,
-          matRgbaView[matIndex * 4 + 1] ?? 0.6,
-          matRgbaView[matIndex * 4 + 2] ?? 0.9,
-          matRgbaView[matIndex * 4 + 3] ?? 1,
-        ];
-        appearance.color = rgbFromArray(appearance.rgba);
-        appearance.opacity = alphaFromArray(appearance.rgba);
-      }
-    }
-    applyAppearanceToMaterial(mesh, appearance);
   }
   // Ensure infinite ground remains blended by alpha
   if (mesh.material) {
@@ -3780,6 +3922,7 @@ function applyGeomDescriptors(context, descriptors, {
 
   const flags = Array.isArray(sceneFlags) ? sceneFlags : [];
   const n = descriptors.length;
+  context.geomState = context.geomState || [];
   let drawn = 0;
 
   for (let idx = 0; idx < n; idx += 1) {
@@ -3801,6 +3944,9 @@ function applyGeomDescriptors(context, descriptors, {
       rgba: desc.rgba,
     };
 
+    // Ensure state buffer for this geom index
+    const geomState = ensureGeomState(context, i, geomMeta);
+
     const mesh = ensureGeomMesh(
       context,
       i,
@@ -3817,7 +3963,7 @@ function applyGeomDescriptors(context, descriptors, {
     mesh.userData = mesh.userData || {};
     mesh.userData.matId = desc.matId;
     applyReflectanceToMaterial(mesh, context, reflectanceValue, reflectionEnabled);
-    updateMeshFromSnapshot(mesh, i, snapshot, state, assets, flags);
+    updateMeshFromSnapshot(mesh, i, snapshot, state, assets, flags, geomState);
 
     let visible = mesh.visible;
     if (hideAllGeometry) {
@@ -3878,6 +4024,11 @@ export function createRendererManager({
   const tempVecB = new THREE.Vector3();
   const tempVecC = new THREE.Vector3();
   const tempVecD = new THREE.Vector3();
+
+  // Expose a small helper so other modules (e.g. environment manager)
+  // can tweak JS-side geom view state without needing to know where
+  // those fields live.
+  ctx.setGeomViewProps = (geomIndex, props) => setGeomViewProps(ctx, geomIndex, props || {});
 
   function debugHazeState(summary) {
     const globalDebug = typeof window !== 'undefined' ? window.__PLAY_HAZE_DEBUG : undefined;
@@ -4696,6 +4847,32 @@ export function createRendererManager({
       if (candidate?.userData?.infinitePlane && candidate.visible) {
         context.ground = candidate;
         break;
+      }
+    }
+    if (context.ground && Array.isArray(context.geomState)) {
+      const groundIndex = context.ground.userData?.geomIndex;
+      if (Number.isFinite(groundIndex)) {
+        const presetMode = context._lastPresetMode === true;
+        const groundPreset = presetMode ? context.fallback?.ground || null : null;
+        if (groundPreset && typeof groundPreset === 'object') {
+          setGeomViewProps(context, groundIndex, {
+            color: groundPreset.color,
+            opacity: groundPreset.opacity,
+            roughness: groundPreset.roughness,
+            metallic: groundPreset.metallic,
+            envIntensity: groundPreset.envIntensity,
+            emission: groundPreset.emission,
+          });
+        } else {
+          const gs = context.geomState[groundIndex];
+          if (gs && gs.view) {
+            gs.view.colorOverride = null;
+            gs.view.roughnessOverride = null;
+            gs.view.metalnessOverride = null;
+            gs.view.envMapIntensityOverride = null;
+            gs.view.emissiveIntensityOverride = null;
+          }
+        }
       }
     }
 

@@ -3,12 +3,12 @@ export const FALLBACK_PRESETS = {
     // Bright daytime preset: strong directional light with moderate IBL so
     // shadows remain clearly visible.
     background: 0xdde6f4,
-    exposure: 1.05,
+    exposure: 0.5,
     ambient: { color: 0xf0f4ff, intensity: 0.1 },
     hemi: { sky: 0xf0f4ff, ground: 0x10121a, intensity: 0.18 },
     dir: {
       color: 0xffffff,
-      intensity: 5,
+      intensity: 4,
       position: [6, -5, 4],
       target: [0, 0, 1],
       shadowBias: -0.0001,
@@ -17,26 +17,26 @@ export const FALLBACK_PRESETS = {
     shadowBias: -0.00015,
     // Kept deliberately low so HDRI does not wash out shadows.
     envIntensity: 0.35,
-    ground: { style: 'shadow', opacity: 0.35, color: 0xff0000 },
+    ground: { style: 'shadow', opacity: 0.95, color: 0xffffff,metallic:0, },
   },
   moon: {
     // Night preset: darker exposure and very weak IBL so forms are defined
     // mostly by a single moon-like directional light.
     background: 0x02030a,
-    exposure: 0.45,
-    ambient: { color: 0x10121a, intensity: 0.02 },
+    exposure: 0.5,
+    ambient: { color: 0xf0f4ff, intensity: 0.2 },
     hemi: { sky: 0x22273a, ground: 0x02030a, intensity: 0.05 },
     dir: {
-      color: 0x8899aa,
-      intensity: 0.4,
-      position: [2, -3, 1.5],
-      target: [0, 0, 1],
+      color: 0xffffff,
+      intensity: 2,
+      position: [-2, 3, -1.5],
+      target: [0, 1, 1],
       shadowBias: -0.0001,
     },
-    fill: { color: 0x182030, intensity: 0.04, position: [-1.5, 1.5, 1] },
+    fill: { color: 0x182030, intensity: 0.14, position: [-1.5, 1.5, 1] },
     shadowBias: -0.0002,
     envIntensity: 0.08,
-    ground: { style: 'shadow', opacity: 0.25, color: 0xf5f5f5 },
+    ground: { style: 'shadow', opacity: 0.25, color: 0xffffff },
   },
 };
 
@@ -822,7 +822,7 @@ export function createEnvironmentManager({
     const state = store && typeof store.get === 'function' ? store.get() : null;
     const visualPresetKey = currentPresetKeyFromState(state);
     const url = visualPresetKey === 'moon'
-      ? 'dist/assets/env/NightSkyHDRI008_4K_HDR.hdr'
+      ? 'dist/assets/env/starmap_random_2020_4k.exr'
       : 'dist/assets/env/rustig_koppie_puresky_4k.hdr';
     const hdrReady =
       ctx.envFromHDRI &&
@@ -869,9 +869,20 @@ export function createEnvironmentManager({
     ) {
       const tryLoadHDRI = async (hdriUrl, token) => {
         try {
-          const mod = await import('three/addons/loaders/RGBELoader.js');
-          if (!mod || !mod.RGBELoader) return false;
-          const loader = new mod.RGBELoader().setDataType(THREE_NS.FloatType);
+          const urlStr = String(hdriUrl || '');
+          const lowered = urlStr.toLowerCase();
+          const isEXR = lowered.endsWith('.exr');
+          const isHDR = lowered.endsWith('.hdr');
+          let loader = null;
+          if (isEXR) {
+            const mod = await import('three/addons/loaders/EXRLoader.js');
+            if (!mod || !mod.EXRLoader) return false;
+            loader = new mod.EXRLoader().setDataType(THREE_NS.FloatType);
+          } else {
+            const mod = await import('three/addons/loaders/RGBELoader.js');
+            if (!mod || !mod.RGBELoader) return false;
+            loader = new mod.RGBELoader().setDataType(THREE_NS.FloatType);
+          }
           if (typeof console !== 'undefined') console.log('[env] trying HDRI', hdriUrl);
           ctx.hdriLoading = true;
           const hdr = await new Promise((resolve, reject) =>
@@ -879,7 +890,7 @@ export function createEnvironmentManager({
           );
           hdr.mapping = THREE_NS.EquirectangularReflectionMapping;
           const isUByte = hdr.type === THREE_NS.UnsignedByteType;
-          if (THREE_NS.SRGBColorSpace && isUByte) {
+          if (!isEXR && THREE_NS.SRGBColorSpace && isUByte) {
             hdr.colorSpace = THREE_NS.SRGBColorSpace;
           } else if (THREE_NS.LinearSRGBColorSpace) {
             hdr.colorSpace = THREE_NS.LinearSRGBColorSpace;
