@@ -3379,24 +3379,6 @@ function composeGeomAppearance(geomState, baseAppearance, defaultVisible) {
   return { appearance, visible, overrides };
 }
 
-function signatureForAppearance(composed) {
-  if (!composed || !composed.appearance) return 'none';
-  const { appearance, overrides, visible } = composed;
-  const color = Array.isArray(appearance.color) ? appearance.color : [NaN, NaN, NaN];
-  const opacity = Number.isFinite(appearance.opacity) ? appearance.opacity : NaN;
-  return [
-    visible ? 1 : 0,
-    Number(color[0]) ?? NaN,
-    Number(color[1]) ?? NaN,
-    Number(color[2]) ?? NaN,
-    opacity,
-    overrides?.roughness ?? NaN,
-    overrides?.metalness ?? NaN,
-    overrides?.envMapIntensity ?? NaN,
-    overrides?.emissiveIntensity ?? NaN,
-  ].join(',');
-}
-
 function applyMaterialOverrides(material, overrides) {
   if (!material || !overrides) return;
   if ('roughness' in overrides && 'roughness' in material) {
@@ -3491,25 +3473,22 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
       baseAppearance.opacity = alphaFromArray(baseAppearance.rgba);
     }
   }
-  const composed = composeGeomAppearance(geomState, baseAppearance, true);
   const viewDirty = !!geomState?.view?.__dirty;
   mesh.userData = mesh.userData || {};
-  const composedSignature = signatureForAppearance(composed);
-  const lastSignature = mesh.userData.appearanceSignature;
   const segmentStateChanged = mesh.userData.segmentState !== segmentEnabled;
   mesh.userData.segmentState = segmentEnabled;
-  const applyAppearance = !segmentEnabled && (viewDirty || composedSignature !== lastSignature || segmentStateChanged);
-  if (applyAppearance) {
+  const shouldApplyAppearance = !segmentEnabled && (viewDirty || segmentStateChanged);
+  if (shouldApplyAppearance) {
+    const composed = composeGeomAppearance(geomState, baseAppearance, true);
     applyAppearanceToMaterial(mesh, composed.appearance);
     applyMaterialOverrides(mesh.material, composed.overrides);
-    mesh.userData.appearanceSignature = composedSignature;
+    mesh.visible = composed.visible;
     if (geomState?.view) geomState.view.__dirty = false;
   }
+
   if (!segmentEnabled) {
     applyMaterialFlags(mesh, i, state, flags);
   }
-  mesh.visible = composed.visible;
-
   if (isInfinitePlane) {
     updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, flags);
   }
