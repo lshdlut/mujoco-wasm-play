@@ -3261,6 +3261,7 @@ function ensureGeomState(context, index, geomMeta) {
     emissiveIntensityOverride: null,
     flags: {},
     helpers: {},
+    __dirty: true,
   };
   const state = { mj, view };
   context.geomState[index] = state;
@@ -3378,6 +3379,24 @@ function composeGeomAppearance(geomState, baseAppearance, defaultVisible) {
   return { appearance, visible, overrides };
 }
 
+function signatureForAppearance(composed) {
+  if (!composed || !composed.appearance) return 'none';
+  const { appearance, overrides, visible } = composed;
+  const color = Array.isArray(appearance.color) ? appearance.color : [NaN, NaN, NaN];
+  const opacity = Number.isFinite(appearance.opacity) ? appearance.opacity : NaN;
+  return [
+    visible ? 1 : 0,
+    Number(color[0]) ?? NaN,
+    Number(color[1]) ?? NaN,
+    Number(color[2]) ?? NaN,
+    opacity,
+    overrides?.roughness ?? NaN,
+    overrides?.metalness ?? NaN,
+    overrides?.envMapIntensity ?? NaN,
+    overrides?.emissiveIntensity ?? NaN,
+  ].join(',');
+}
+
 function applyMaterialOverrides(material, overrides) {
   if (!material || !overrides) return;
   if ('roughness' in overrides && 'roughness' in material) {
@@ -3473,10 +3492,18 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
     }
   }
   const composed = composeGeomAppearance(geomState, baseAppearance, true);
-  const applyAppearance = !segmentEnabled;
+  const viewDirty = !!geomState?.view?.__dirty;
+  mesh.userData = mesh.userData || {};
+  const composedSignature = signatureForAppearance(composed);
+  const lastSignature = mesh.userData.appearanceSignature;
+  const segmentStateChanged = mesh.userData.segmentState !== segmentEnabled;
+  mesh.userData.segmentState = segmentEnabled;
+  const applyAppearance = !segmentEnabled && (viewDirty || composedSignature !== lastSignature || segmentStateChanged);
   if (applyAppearance) {
     applyAppearanceToMaterial(mesh, composed.appearance);
     applyMaterialOverrides(mesh.material, composed.overrides);
+    mesh.userData.appearanceSignature = composedSignature;
+    if (geomState?.view) geomState.view.__dirty = false;
   }
   if (!segmentEnabled) {
     applyMaterialFlags(mesh, i, state, flags);
@@ -3639,7 +3666,6 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
   // Ensure infinite ground remains blended by alpha
   if (mesh.material) {
     mesh.material.transparent = true;
-    mesh.material.opacity = 1;
     if ('depthWrite' in mesh.material) mesh.material.depthWrite = true;
     if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
   }
@@ -4854,27 +4880,28 @@ export function createRendererManager({
       if (Number.isFinite(groundIndex)) {
         const presetMode = context._lastPresetMode === true;
         const groundPreset = presetMode ? context.fallback?.ground || null : null;
-        if (groundPreset && typeof groundPreset === 'object') {
-          setGeomViewProps(context, groundIndex, {
-            color: groundPreset.color,
-            opacity: groundPreset.opacity,
-            roughness: groundPreset.roughness,
-            metallic: groundPreset.metallic,
-            envIntensity: groundPreset.envIntensity,
-            emission: groundPreset.emission,
-          });
-        } else {
-          const gs = context.geomState[groundIndex];
-          if (gs && gs.view) {
-            gs.view.colorOverride = null;
-            gs.view.roughnessOverride = null;
-            gs.view.metalnessOverride = null;
-            gs.view.envMapIntensityOverride = null;
-            gs.view.emissiveIntensityOverride = null;
-          }
+      if (groundPreset && typeof groundPreset === 'object') {
+        setGeomViewProps(context, groundIndex, {
+          color: groundPreset.color,
+          opacity: groundPreset.opacity,
+          roughness: groundPreset.roughness,
+          metallic: groundPreset.metallic,
+          envIntensity: groundPreset.envIntensity,
+          emission: groundPreset.emission,
+        });
+      } else {
+        const gs = context.geomState[groundIndex];
+        if (gs && gs.view) {
+          gs.view.colorOverride = null;
+          gs.view.roughnessOverride = null;
+          gs.view.metalnessOverride = null;
+          gs.view.envMapIntensityOverride = null;
+          gs.view.emissiveIntensityOverride = null;
+          gs.view.__dirty = true;
         }
       }
     }
+  }
 
     if (voptEnabled(voptFlags, MJ_VIS.SELECT)) {
       updateSelectionOverlay(context, snapshot, state);
