@@ -653,7 +653,7 @@ function ensureFreeCameraPose(ctx) {
       position: new THREE.Vector3(),
       target: new THREE.Vector3(),
       up: new THREE.Vector3(0, 0, 1),
-      fov: 45,
+      fov: 75,
       valid: false,
       autoAligned: false,
     };
@@ -731,7 +731,7 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
   const fallbackRadius = Number(sourceBounds?.radius) || ctx.trackingRadius || 0.6;
   const radius = Math.max(baseRadius != null ? baseRadius : fallbackRadius, 0.6);
   if (!ctx.trackingOffset) {
-    ctx.trackingOffset = new THREE.Vector3(radius * 2.6, -radius * 2.6, radius * 1.7);
+    ctx.trackingOffset = new THREE.Vector3(radius * 2.6, -radius * 2.6, radius * 1.2);
     ctx.trackingRadius = ctx.trackingOffset.length();
   }
   ctx.camera.position.copy(center.clone().add(ctx.trackingOffset));
@@ -4266,7 +4266,7 @@ export function createRendererManager({
     fill.position.set(-6, 6, 3);
     sceneWorld.add(fill);
 
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.01, GROUND_DISTANCE * 20);
+    const camera = new THREE.PerspectiveCamera(75, 1, 0.01, GROUND_DISTANCE * 20);
     camera.up.set(0, 0, 1);
     camera.position.set(3, -4, 2);
     camera.lookAt(new THREE.Vector3(0, 0, 0));
