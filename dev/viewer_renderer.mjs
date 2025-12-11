@@ -184,14 +184,27 @@ function cloneHighlightMaterial(source) {
     return source;
   }
   const cloned = source.clone();
+  // Allow preset overlays to tweak highlight colours.
+  let highlightColor = SELECTION_HIGHLIGHT_COLOR;
+  let emissiveColor = SELECTION_EMISSIVE_COLOR;
+  try {
+    const ctx = typeof renderCtx !== 'undefined' ? renderCtx : null;
+    const overlayCfg = ctx?.fallback?.overlays || null;
+    if (overlayCfg && Number.isFinite(overlayCfg.selectionHighlight)) {
+      highlightColor = new THREE.Color(overlayCfg.selectionHighlight);
+    }
+    if (overlayCfg && Number.isFinite(overlayCfg.selectionEmissive)) {
+      emissiveColor = new THREE.Color(overlayCfg.selectionEmissive);
+    }
+  } catch {}
   if ('emissive' in cloned && cloned.emissive?.set) {
     cloned.emissive = cloned.emissive.clone();
-    cloned.emissive.copy(SELECTION_EMISSIVE_COLOR);
+    cloned.emissive.copy(emissiveColor);
     cloned.emissiveIntensity = Math.max(1.4, cloned.emissiveIntensity ?? 1);
   }
   if ('color' in cloned && cloned.color?.lerp) {
     cloned.color = cloned.color.clone();
-    cloned.color.lerp(SELECTION_HIGHLIGHT_COLOR, 0.65);
+    cloned.color.lerp(highlightColor, 0.65);
   }
   if ('metalness' in cloned) cloned.metalness = Math.max(0, Math.min(1, (cloned.metalness ?? 0) * 0.5));
   if ('roughness' in cloned) cloned.roughness = Math.max(0, Math.min(1, (cloned.roughness ?? 0) * 0.7));
@@ -362,11 +375,12 @@ function applySkyboxVisibility(ctx, enabled, options = {}) {
   const worldScene = getWorldScene(ctx);
   if (!worldScene) return;
   const useBlackBackground = options.useBlackOnDisable !== false;
+  const baseClear = typeof ctx.baseClearHex === 'number' ? ctx.baseClearHex : DEFAULT_CLEAR_HEX;
   const skyEnabled = enabled !== false;
   if (!skyEnabled) {
     if (ctx.skyShader) ctx.skyShader.visible = false;
     worldScene.environment = null;
-    worldScene.background = new THREE.Color(useBlackBackground ? 0x000000 : DEFAULT_CLEAR_HEX);
+    worldScene.background = new THREE.Color(useBlackBackground ? 0x000000 : baseClear);
     pushSkyDebug(ctx, { mode: 'disable', useBlack: useBlackBackground });
     return;
   }
@@ -393,7 +407,7 @@ function applySkyboxVisibility(ctx, enabled, options = {}) {
     return;
   }
   // If no sky resources exist, fall back to a solid clear colour
-  worldScene.background = new THREE.Color(DEFAULT_CLEAR_HEX);
+  worldScene.background = new THREE.Color(baseClear);
   pushSkyDebug(ctx, { mode: 'fallback' });
 }
 
@@ -607,8 +621,14 @@ function resolveFogConfig(vis, statStruct, bounds, enabled) {
   const extent = computeSceneExtent(bounds, statStruct);
   const fogStart = Math.max(0, start) * extent;
   const fogEnd = Math.max(fogStart + 0.1, end * extent);
-  const colorArr = rgbFromArray(vis?.rgba?.fog, [0.7, 0.75, 0.85]);
-  const fogColor = new THREE.Color().setRGB(colorArr[0], colorArr[1], colorArr[2]);
+  // Fog colour:
+  // - primary source: model vis.rgba.fog (if present)
+  // - otherwise: viewer/preset fallback decides, see render loop.
+  let fogColor = null;
+  if (vis?.rgba?.fog != null) {
+    const colorArr = rgbFromArray(vis.rgba.fog);
+    fogColor = new THREE.Color().setRGB(colorArr[0], colorArr[1], colorArr[2]);
+  }
   return {
     enabled: true,
     start: fogStart,
@@ -1713,7 +1733,12 @@ function updateRangefinderOverlays(ctx, snapshot, state) {
   const group = ensureRangefinderGroup(ctx);
   const pool = ctx.rangefinderPool || (ctx.rangefinderPool = []);
   const visRgba = state?.model?.vis?.rgba || {};
-  const colorHex = rgbaToHex(visRgba.rangefinder, 0xffff66);
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const rangefinderFallback =
+    overlayCfg && Number.isFinite(overlayCfg.rangefinder)
+      ? overlayCfg.rangefinder
+      : 0xffff66;
+  const colorHex = rgbaToHex(visRgba.rangefinder, rangefinderFallback);
   const opacity = alphaFromArray(visRgba.rangefinder, 1);
   let used = 0;
   const addLine = () => {
@@ -1809,8 +1834,17 @@ function updateConstraintOverlays(ctx, snapshot, state) {
   const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const radiusConst = Math.max(1e-4, meanSize * 0.03 * Math.max(Number(visScale.constraint) || 1, 1e-6) * scaleAll);
   const radiusConnect = Math.max(1e-4, meanSize * 0.03 * Math.max(Number(visScale.connect) || 1, 1e-6) * scaleAll);
-  const colorConnect = rgbaToHex(visRgba.connect, 0x3344dd);
-  const colorConstraint = rgbaToHex(visRgba.constraint, 0xdd3333);
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const connectFallback =
+    overlayCfg && Number.isFinite(overlayCfg.connect)
+      ? overlayCfg.connect
+      : 0x3344dd;
+  const constraintFallback =
+    overlayCfg && Number.isFinite(overlayCfg.constraint)
+      ? overlayCfg.constraint
+      : 0xdd3333;
+  const colorConnect = rgbaToHex(visRgba.connect, connectFallback);
+  const colorConstraint = rgbaToHex(visRgba.constraint, constraintFallback);
   const opacityConnect = alphaFromArray(visRgba.connect, 1);
   const opacityConstraint = alphaFromArray(visRgba.constraint, 1);
   const neq = Math.min(eqType.length, eqObj1.length, eqObj2.length, eqObjType.length);
@@ -1913,7 +1947,12 @@ function updateLightOverlays(ctx, snapshot, state) {
   const visRgba = state?.model?.vis?.rgba || {};
   const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const sizeScale = Math.max(1e-6, Number(visScale.light) || 1) * scaleAll;
-  const colorHex = rgbaToHex(visRgba.light, 0x8899ff);
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const lightFallback =
+    overlayCfg && Number.isFinite(overlayCfg.light)
+      ? overlayCfg.light
+      : 0x8899ff;
+  const colorHex = rgbaToHex(visRgba.light, lightFallback);
   const opacity = alphaFromArray(visRgba.light, 1);
   const count = Math.floor(pos.length / 3);
   let used = 0;
@@ -1987,7 +2026,12 @@ function updateComOverlays(ctx, snapshot, state) {
   const visRgba = state?.model?.vis?.rgba || {};
   const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const sizeScale = Math.max(1e-6, Number(visScale.com) || 1) * scaleAll;
-  const colorHex = rgbaToHex(visRgba.com, 0xe6e6e6);
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const comFallback =
+    overlayCfg && Number.isFinite(overlayCfg.com)
+      ? overlayCfg.com
+      : 0xe6e6e6;
+  const colorHex = rgbaToHex(visRgba.com, comFallback);
   const opacity = alphaFromArray(visRgba.com, 1);
   const count = Math.floor(xipos.length / 3);
   const bodyParent = state?.model?.bodyParentId || null;
@@ -2079,7 +2123,12 @@ function updateJointOverlays(ctx, snapshot, state) {
   const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const lenScale = Math.max(1e-6, Number(visScale.jointlength) || 1) * scaleAll;
   const widthScale = Math.max(1e-6, Number(visScale.jointwidth) || 1) * scaleAll;
-  const colorHex = rgbaToHex(visRgba.joint, 0x3399cc);
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const jointFallback =
+    overlayCfg && Number.isFinite(overlayCfg.joint)
+      ? overlayCfg.joint
+      : 0x3399cc;
+  const colorHex = rgbaToHex(visRgba.joint, jointFallback);
   const opacity = alphaFromArray(visRgba.joint, 1);
   const nj = Math.floor(jpos.length / 3);
   const nbody = Math.floor(bxpos.length / 3);
@@ -2187,7 +2236,12 @@ function updateActuatorOverlays(ctx, snapshot, state) {
   const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const lenScale = Math.max(1e-6, Number(visScale.actuatorlength) || 1) * scaleAll;
   const widthScale = Math.max(1e-6, Number(visScale.actuatorwidth) || 1) * scaleAll;
-  const colorHex = rgbaToHex(visRgba.actuator, 0x2b90d9);
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const actuatorFallback =
+    overlayCfg && Number.isFinite(overlayCfg.actuator)
+      ? overlayCfg.actuator
+      : 0x2b90d9;
+  const colorHex = rgbaToHex(visRgba.actuator, actuatorFallback);
   const opacity = alphaFromArray(visRgba.actuator, 1);
   const na = Math.floor(trntype.length);
   const nj = Math.floor(jpos.length / 3);
@@ -2296,8 +2350,17 @@ function updateSlidercrankOverlays(ctx, snapshot, state) {
   const visRgba = state?.model?.vis?.rgba || {};
   const { meanSize, scaleAll } = computeMeanScale(state, ctx);
   const scl = Math.max(1e-6, Number(visScale.slidercrank) || 1) * scaleAll;
-  const colorHex = rgbaToHex(visRgba.slidercrank, 0x8a6aff);
-  const brokenColorHex = rgbaToHex(visRgba.crankbroken, 0xff4d4d);
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const sliderFallback =
+    overlayCfg && Number.isFinite(overlayCfg.slidercrank)
+      ? overlayCfg.slidercrank
+      : 0x8a6aff;
+  const brokenFallback =
+    overlayCfg && Number.isFinite(overlayCfg.crankbroken)
+      ? overlayCfg.crankbroken
+      : 0xff4d4d;
+  const colorHex = rgbaToHex(visRgba.slidercrank, sliderFallback);
+  const brokenColorHex = rgbaToHex(visRgba.crankbroken, brokenFallback);
   const opacity = alphaFromArray(visRgba.slidercrank, 1);
   const ns = Math.floor(siteXpos.length / 3);
   const na = Math.floor(trntype.length);
@@ -3734,11 +3797,16 @@ function buildGeomDescriptors(snapshot, state, assets) {
     if (!camPos || !camMat || camPos.length < 3) {
       return [];
     }
-    const visScale = state?.model?.vis?.scale || {};
-    const visRgba = state?.model?.vis?.rgba || {};
-    const { meanSize, scaleAll } = computeMeanScale(state, ctx);
-    const sizeScale = Math.max(1e-6, Number(visScale.camera) || 1) * scaleAll;
-  const colorHex = rgbaToHex(visRgba.camera, 0x6aa86a);
+  const visScale = state?.model?.vis?.scale || {};
+  const visRgba = state?.model?.vis?.rgba || {};
+  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
+  const sizeScale = Math.max(1e-6, Number(visScale.camera) || 1) * scaleAll;
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const cameraFallback =
+    overlayCfg && Number.isFinite(overlayCfg.camera)
+      ? overlayCfg.camera
+      : 0x6aa86a;
+  const colorHex = rgbaToHex(visRgba.camera, cameraFallback);
   const opacity = alphaFromArray(visRgba.camera, 1);
   const count = Math.floor(camPos.length / 3);
   const descriptors = [];
@@ -4424,6 +4492,14 @@ export function createRendererManager({
       }
     }
     const fogConfig = resolveFogConfig(visStruct, statStruct, context.bounds, fogEnabled);
+    if (fogConfig.enabled && !fogConfig.color) {
+      const presetFog = context.fallback && Number.isFinite(context.fallback.fogColor)
+        ? context.fallback.fogColor
+        : null;
+      if (presetFog != null) {
+        fogConfig.color = new THREE.Color(presetFog);
+      }
+    }
     const worldSceneForFog = getWorldScene(context);
     applySceneFog(worldSceneForFog, fogConfig);
     const hazeSummary = {
@@ -4500,9 +4576,14 @@ export function createRendererManager({
         }
       }
       const rgbaContact = visStruct?.rgba?.contact;
+      const overlayCfg = context.fallback?.overlays || null;
+      const contactFallback =
+        overlayCfg && Number.isFinite(overlayCfg.contactPoint)
+          ? overlayCfg.contactPoint
+          : CONTACT_POINT_FALLBACK_COLOR;
       const contactColorHex = segmentEnabled
         ? segmentColorForIndex(contacts?.n ? contacts.n + 1 : 0)
-        : rgbaToHex(rgbaContact, CONTACT_POINT_FALLBACK_COLOR);
+        : rgbaToHex(rgbaContact, contactFallback);
       const contactOpacity = segmentEnabled ? 1 : alphaFromArray(rgbaContact, 0.85);
       if (!group.userData.material) {
       group.userData.material = new THREE.MeshBasicMaterial({
@@ -4596,9 +4677,14 @@ export function createRendererManager({
         const frame = ArrayBuffer.isView(contacts.frame) ? contacts.frame : null;
         const force = ArrayBuffer.isView(contacts.force) ? contacts.force : null;
       const rgbaContactForce = visStruct?.rgba?.contactforce;
+      const overlayCfg = context.fallback?.overlays || null;
+      const forceFallback =
+        overlayCfg && Number.isFinite(overlayCfg.contactForce)
+          ? overlayCfg.contactForce
+          : CONTACT_FORCE_FALLBACK_COLOR;
       const colorHex = segmentEnabled
         ? segmentColorForIndex(contacts.n + 2)
-        : rgbaToHex(rgbaContactForce, CONTACT_FORCE_FALLBACK_COLOR);
+        : rgbaToHex(rgbaContactForce, forceFallback);
       const colorOpacity = segmentEnabled ? 1 : alphaFromArray(rgbaContactForce, 0.8);
         if (!context.contactForceMaterial) {
           context.contactForceMaterial = new THREE.MeshBasicMaterial({
@@ -5128,8 +5214,13 @@ function ensureSelectionPointOverlay(ctx) {
   if (ctx.selectionPoint?.mesh) return ctx.selectionPoint;
   const group = ensureSelectionGroup(ctx);
   const geometry = new THREE.SphereGeometry(1, 18, 12);
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const fallbackColor =
+    overlayCfg && Number.isFinite(overlayCfg.selectPoint)
+      ? overlayCfg.selectPoint
+      : SELECT_POINT_FALLBACK_COLOR;
   const material = new THREE.MeshBasicMaterial({
-    color: SELECT_POINT_FALLBACK_COLOR,
+    color: fallbackColor,
     transparent: false,
     depthWrite: true,
     toneMapped: false,
@@ -5190,8 +5281,13 @@ function applySelectionHighlight(ctx, mesh) {
   const highlightMaterial = Array.isArray(originalMaterial)
     ? originalMaterial.map((mat) => cloneHighlightMaterial(mat))
     : cloneHighlightMaterial(originalMaterial);
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const overlayFallback =
+    overlayCfg && Number.isFinite(overlayCfg.selectionOverlay)
+      ? overlayCfg.selectionOverlay
+      : null;
   const overlayMaterial = new THREE.MeshBasicMaterial({
-    color: SELECTION_OVERLAY_COLOR,
+    color: overlayFallback != null ? overlayFallback : SELECTION_OVERLAY_COLOR,
     transparent: true,
     opacity: 0.5,
     depthWrite: false,
@@ -5257,7 +5353,12 @@ function applySelectionHighlight(ctx, mesh) {
     : 0.2;
   const boundsRadius = Math.max(0.05, ctx?.bounds?.radius || 1);
   const radius = Math.max(0.003, boundsRadius * 0.0125 * scaleAll * selectScale);
-  const colorHex = rgbaToHex(rgbaStruct.selectpoint, SELECT_POINT_FALLBACK_COLOR);
+  const overlayCfg = ctx.fallback?.overlays || null;
+  const selectFallback =
+    overlayCfg && Number.isFinite(overlayCfg.selectPoint)
+      ? overlayCfg.selectPoint
+      : SELECT_POINT_FALLBACK_COLOR;
+  const colorHex = rgbaToHex(rgbaStruct.selectpoint, selectFallback);
   const opacity = alphaFromArray(rgbaStruct.selectpoint, 1);
   const normal = Array.isArray(selection.normal) && selection.normal.length >= 3
     ? __TMP_VEC3_B.set(
