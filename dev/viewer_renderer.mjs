@@ -205,7 +205,7 @@ const LABEL_GEOM_LIMIT = 120;
 const FRAME_GEOM_LIMIT = 80;
 const TEMP_MAT4 = new THREE.Matrix4();
 const DEFAULT_CLEAR_HEX = 0xd6dce4;
-const GROUND_DISTANCE = 200;
+const GROUND_DISTANCE = 2000;
 const PLANE_SIZE_EPS = 1e-9;
 const RENDER_ORDER = Object.freeze({
   GROUND: -50,
@@ -615,6 +615,30 @@ function resolveFogConfig(vis, statStruct, bounds, enabled) {
     end: fogEnd,
     color: fogColor,
     bgStrength: 0.65,
+  };
+}
+
+function resolveHazeConfig(vis, statStruct, bounds, enabled) {
+  if (!enabled || !vis) {
+    return { enabled: false };
+  }
+  const map = vis.map || {};
+  const hazeAmount = Number(map.haze);
+  if (!Number.isFinite(hazeAmount) || hazeAmount <= 0) {
+    return { enabled: false };
+  }
+  // Interpret map.haze as a generic intensity scalar; radius/region
+  // are left to individual consumers (e.g. infinite ground) so they
+  // can tie fade to their own geometry.
+  const extent = computeSceneExtent(bounds, statStruct);
+  const baseScale = Math.max(1e-3, extent);
+  const intensity = Math.max(0.0, hazeAmount);
+  const pow = 2.5;
+  return {
+    enabled: true,
+    intensity,
+    baseScale,
+    pow,
   };
 }
 
@@ -3499,83 +3523,7 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
   if (!groundData) return;
   const uniforms = groundData.uniforms || {};
   const segmentEnabled = Array.isArray(sceneFlags) ? !!sceneFlags[SEGMENT_FLAG_INDEX] : false;
-  const baseColor = mesh.material?.color;
-  if (segmentEnabled) {
-    const userData = mesh.userData || (mesh.userData = {});
-    if (baseColor && !userData.segmentOriginalColor) {
-      userData.segmentOriginalColor = baseColor.clone();
-    }
-    if (mesh.material?.emissive && !userData.segmentOriginalEmissive) {
-      userData.segmentOriginalEmissive = mesh.material.emissive.clone();
-    }
-    if ('emissiveIntensity' in mesh.material && userData.segmentOriginalEmissiveIntensity == null) {
-      userData.segmentOriginalEmissiveIntensity = mesh.material.emissiveIntensity;
-    }
-    if ('toneMapped' in mesh.material && userData.segmentOriginalToneMapped == null) {
-      userData.segmentOriginalToneMapped = mesh.material.toneMapped;
-    }
-    if ('transparent' in mesh.material && userData.segmentOriginalTransparent == null) {
-      userData.segmentOriginalTransparent = mesh.material.transparent;
-    }
-    if ('opacity' in mesh.material && userData.segmentOriginalOpacity == null) {
-      userData.segmentOriginalOpacity = mesh.material.opacity;
-    }
-    if ('metalness' in mesh.material && userData.segmentOriginalMetalness == null) {
-      userData.segmentOriginalMetalness = mesh.material.metalness;
-    }
-    if ('roughness' in mesh.material && userData.segmentOriginalRoughness == null) {
-      userData.segmentOriginalRoughness = mesh.material.roughness;
-    }
-    if ('envMapIntensity' in mesh.material && userData.segmentOriginalEnvMapIntensity == null) {
-      userData.segmentOriginalEnvMapIntensity = mesh.material.envMapIntensity;
-    }
-    const segColor = segmentColorForIndex(mesh.userData?.geomIndex ?? i);
-    if (baseColor) baseColor.setHex(segColor);
-    if (mesh.material?.emissive) {
-      mesh.material.emissive.setHex(segColor);
-    }
-    if ('emissiveIntensity' in mesh.material) {
-      mesh.material.emissiveIntensity = 1;
-    }
-    if ('metalness' in mesh.material) mesh.material.metalness = 0;
-    if ('roughness' in mesh.material) mesh.material.roughness = 1;
-    if ('toneMapped' in mesh.material) mesh.material.toneMapped = false;
-    if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
-  } else {
-    restoreSegmentMaterial(mesh);
-    if (baseColor && mesh.userData.segmentOriginalColor) {
-      baseColor.copy(mesh.userData.segmentOriginalColor);
-      if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
-      mesh.material.transparent = true;
-    }
-    if (mesh.material?.emissive && mesh.userData.segmentOriginalEmissive) {
-      mesh.material.emissive.copy(mesh.userData.segmentOriginalEmissive);
-    }
-    if ('emissiveIntensity' in mesh.material && mesh.userData.segmentOriginalEmissiveIntensity != null) {
-      mesh.material.emissiveIntensity = mesh.userData.segmentOriginalEmissiveIntensity;
-    }
-    if ('toneMapped' in mesh.material && mesh.userData.segmentOriginalToneMapped != null) {
-      mesh.material.toneMapped = mesh.userData.segmentOriginalToneMapped;
-    }
-    if ('transparent' in mesh.material && mesh.userData.segmentOriginalTransparent != null) {
-      mesh.material.transparent = mesh.userData.segmentOriginalTransparent;
-    }
-    if ('opacity' in mesh.material && mesh.userData.segmentOriginalOpacity != null) {
-      mesh.material.opacity = mesh.userData.segmentOriginalOpacity;
-    }
-    if ('metalness' in mesh.material && mesh.userData.segmentOriginalMetalness != null) {
-      mesh.material.metalness = mesh.userData.segmentOriginalMetalness;
-    }
-    if ('roughness' in mesh.material && mesh.userData.segmentOriginalRoughness != null) {
-      mesh.material.roughness = mesh.userData.segmentOriginalRoughness;
-    }
-    if ('envMapIntensity' in mesh.material && mesh.userData.segmentOriginalEnvMapIntensity != null) {
-      mesh.material.envMapIntensity = mesh.userData.segmentOriginalEnvMapIntensity;
-    }
-    if ('transparent' in mesh.material) {
-      mesh.material.transparent = true;
-    }
-  }
+  const userData = mesh.userData || (mesh.userData = {});
   const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
   let px = 0;
   let py = 0;
@@ -3621,26 +3569,31 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
   if (uniforms.uPlaneNormal?.value) {
     uniforms.uPlaneNormal.value.copy(__TMP_VEC3_C.set(0, 0, 1).applyQuaternion(quat).normalize());
   }
-  const gridStep = Math.abs(mesh.userData?.geomGrid ?? 0);
-  if (uniforms.uGridStep) {
-    const defaultStep = groundData.defaultGridStep || 1;
-    uniforms.uGridStep.value = segmentEnabled ? 0 : (gridStep > 0 ? gridStep : defaultStep);
-  }
-  if (uniforms.uDistance && groundData.baseDistance) {
-    uniforms.uDistance.value = groundData.baseDistance;
-  }
-  if (uniforms.uFadeStart) {
-    const val = groundData.baseFadeStart || (groundData.baseDistance ? groundData.baseDistance * 0.5 : 0);
-    uniforms.uFadeStart.value = val;
-  }
-  if (uniforms.uFadeEnd) {
-    const val = groundData.baseFadeEnd || groundData.baseDistance || 0;
-    uniforms.uFadeEnd.value = val;
-  }
-  if (uniforms.uQuadDistance) {
-    const fade = uniforms.uFadeEnd?.value || groundData.baseFadeEnd || 0;
-    const dist = uniforms.uDistance?.value || groundData.baseDistance || 0;
-    uniforms.uQuadDistance.value = Math.max(fade * 1.2, dist);
+
+  // Segment view: temporarily hide the ground grid by zeroing intensity,
+  // but restore original values when segment is disabled.
+  if (segmentEnabled) {
+    if (!userData.segmentGroundGrid) {
+      userData.segmentGroundGrid = {
+        step: uniforms.uGridStep ? uniforms.uGridStep.value : null,
+        intensity: uniforms.uGridIntensity ? uniforms.uGridIntensity.value : null,
+      };
+    }
+    if (uniforms.uGridStep) {
+      uniforms.uGridStep.value = 0;
+    }
+    if (uniforms.uGridIntensity) {
+      uniforms.uGridIntensity.value = 0;
+    }
+  } else if (userData.segmentGroundGrid) {
+    const backup = userData.segmentGroundGrid;
+    if (uniforms.uGridStep && backup.step != null) {
+      uniforms.uGridStep.value = backup.step;
+    }
+    if (uniforms.uGridIntensity && backup.intensity != null) {
+      uniforms.uGridIntensity.value = backup.intensity;
+    }
+    userData.segmentGroundGrid = null;
   }
   // Ensure infinite ground remains blended by alpha
   if (mesh.material) {
@@ -3935,13 +3888,11 @@ function applyGeomDescriptors(context, descriptors, {
     if (!desc || desc.kind !== 'geom') continue;
     const i = desc.index;
     const sizeVec = desc.size;
-    const geomMeta = {
+  const geomMeta = {
       index: i,
       type: desc.type,
       dataId: desc.dataId,
       size: sizeVec,
-      // Plane size[2] is not grid step; use a sane default (1m) for planes.
-      grid: desc.type === MJ_GEOM.PLANE ? 1 : sizeVec?.[2] ?? 0,
       name: desc.name,
       matId: desc.matId,
       bodyId: desc.bodyId,
@@ -4433,42 +4384,59 @@ export function createRendererManager({
       ground?.material?.userData?.infiniteUniforms
       || ground?.material?.uniforms
       || null;
-    const groundDistance =
-      Number(groundData?.baseDistance) || GROUND_DISTANCE;
-    if (groundUniforms?.uDistance) {
+    const baseDistance = Number(groundData?.baseDistance);
+    const groundDistance = Number.isFinite(baseDistance) && baseDistance > 0 ? baseDistance : null;
+    if (groundUniforms?.uDistance && groundDistance != null) {
       groundUniforms.uDistance.value = groundDistance;
     }
+    // Haze-driven fade parameters for the infinite ground. The base cutoff
+    // disc is controlled by uQuadDistance and stays active even when haze is
+    // disabled; here we only configure the optional fade inside that disc.
+    const visStruct = state.model?.vis || null;
+    const statStruct = state.model?.stat || null;
+    const hazeConfig = resolveHazeConfig(visStruct, statStruct, context.bounds, hazeEnabled);
+    const baseRadius =
+      (groundUniforms?.uQuadDistance && Number(groundUniforms.uQuadDistance.value))
+        || Number(groundData?.baseQuadDistance)
+        || groundDistance
+        || null;
     if (groundUniforms?.uFadePow) {
       const baseFade = Number(groundData?.baseFadePow);
       const defaultFade = Number.isFinite(baseFade) ? baseFade : 2.5;
-      groundUniforms.uFadePow.value = hazeEnabled ? defaultFade : 1e-6;
+      const powValue = hazeConfig.enabled && Number.isFinite(hazeConfig.pow)
+        ? hazeConfig.pow
+        : (hazeEnabled ? defaultFade : 0.0);
+      groundUniforms.uFadePow.value = powValue;
     }
-    // Avoid visible radial "mask" from the infinite ground quad:
-    // push fade-out far beyond typical scene extents so the plane
-    // behaves visually infinite in normal views.
-    const fadeRadius = groundDistance * 1000;
-    if (groundUniforms?.uFadeStart) {
-      groundUniforms.uFadeStart.value = 0;
+    if (groundUniforms) {
+      if (hazeConfig.enabled && baseRadius != null && baseRadius > 0) {
+        // Default ground haze: fade region is the outer 30% of the
+        // visible disc. The cutoff radius is still controlled by
+        // uQuadDistance; haze only shapes transparency inside it.
+        const fadeEnd = baseRadius;
+        const fadeStart = baseRadius * 0.7;
+        if (groundUniforms.uFadeStart) groundUniforms.uFadeStart.value = fadeStart;
+        if (groundUniforms.uFadeEnd) groundUniforms.uFadeEnd.value = fadeEnd;
+      } else {
+        // Disable haze fade while keeping the base cutoff disc active.
+        if (groundUniforms.uFadeStart) groundUniforms.uFadeStart.value = 0;
+        if (groundUniforms.uFadeEnd) groundUniforms.uFadeEnd.value = 0;
+      }
     }
-    if (groundUniforms?.uFadeEnd) {
-      groundUniforms.uFadeEnd.value = fadeRadius;
-    }
-    if (groundUniforms?.uQuadDistance) {
-      groundUniforms.uQuadDistance.value = fadeRadius;
-    }
-    const visStruct = state.model?.vis || null;
-    const statStruct = state.model?.stat || null;
     const fogConfig = resolveFogConfig(visStruct, statStruct, context.bounds, fogEnabled);
     const worldSceneForFog = getWorldScene(context);
     applySceneFog(worldSceneForFog, fogConfig);
-  const hazeSummary = {
-    mode: 'ground-fade',
-    enabled: hazeEnabled && skyboxEnabled,
+    const hazeSummary = {
+      mode: 'ground-fade',
+      enabled: hazeEnabled && skyboxEnabled,
       reason: hazeEnabled
         ? (skyboxEnabled ? 'enabled' : 'skybox-disabled')
         : 'flag-off',
       fadePow: groundUniforms?.uFadePow?.value ?? null,
       distance: groundDistance,
+      fadeStart: groundUniforms?.uFadeStart?.value ?? null,
+      fadeEnd: groundUniforms?.uFadeEnd?.value ?? null,
+      baseRadius: groundUniforms?.uQuadDistance?.value ?? null,
     };
     debugHazeState(hazeSummary);
     if (visStruct && !segmentEnabled) {
@@ -4859,28 +4827,58 @@ export function createRendererManager({
       if (Number.isFinite(groundIndex)) {
         const presetMode = context._lastPresetMode === true;
         const groundPreset = presetMode ? context.fallback?.ground || null : null;
-      if (groundPreset && typeof groundPreset === 'object') {
-        setGeomViewProps(context, groundIndex, {
-          color: groundPreset.color,
-          opacity: groundPreset.opacity,
-          roughness: groundPreset.roughness,
-          metallic: groundPreset.metallic,
-          envIntensity: groundPreset.envIntensity,
-          emission: groundPreset.emission,
-        });
-      } else {
-        const gs = context.geomState[groundIndex];
-        if (gs && gs.view) {
-          gs.view.colorOverride = null;
-          gs.view.roughnessOverride = null;
-          gs.view.metalnessOverride = null;
-          gs.view.envMapIntensityOverride = null;
-          gs.view.emissiveIntensityOverride = null;
-          gs.view.__dirty = true;
+        if (groundPreset && typeof groundPreset === 'object') {
+          setGeomViewProps(context, groundIndex, {
+            color: groundPreset.color,
+            opacity: groundPreset.opacity,
+            roughness: groundPreset.roughness,
+            metallic: groundPreset.metallic,
+            envIntensity: groundPreset.envIntensity,
+            emission: groundPreset.emission,
+          });
+          // Apply infinite-ground specific tuning when available.
+          const infiniteCfg = groundPreset.infinite || null;
+          const groundMesh = context.ground;
+          const infiniteData = groundMesh?.userData?.infiniteGround || null;
+          const uniforms = infiniteData?.uniforms || null;
+          if (infiniteCfg && uniforms) {
+            const dist = Number(infiniteCfg.distance);
+            if (Number.isFinite(dist) && dist > 0) {
+              if (uniforms.uDistance) uniforms.uDistance.value = dist;
+              if (uniforms.uQuadDistance) uniforms.uQuadDistance.value = dist;
+              if (uniforms.uFadeStart && typeof infiniteCfg.fadeStartFactor === 'number') {
+                uniforms.uFadeStart.value = dist * infiniteCfg.fadeStartFactor;
+              }
+              if (uniforms.uFadeEnd) {
+                uniforms.uFadeEnd.value = dist;
+              }
+            }
+            if (uniforms.uFadePow && Number.isFinite(infiniteCfg.fadePow)) {
+              uniforms.uFadePow.value = infiniteCfg.fadePow;
+            }
+            if (uniforms.uGridStep && Number.isFinite(infiniteCfg.gridStep)) {
+              uniforms.uGridStep.value = infiniteCfg.gridStep;
+            }
+            if (uniforms.uGridIntensity && Number.isFinite(infiniteCfg.gridIntensity)) {
+              uniforms.uGridIntensity.value = Math.max(0, infiniteCfg.gridIntensity);
+            }
+            if (uniforms.uGridColor && uniforms.uGridColor.value?.set && infiniteCfg.gridColor != null) {
+              uniforms.uGridColor.value.set(infiniteCfg.gridColor);
+            }
+          }
+        } else {
+          const gs = context.geomState[groundIndex];
+          if (gs && gs.view) {
+            gs.view.colorOverride = null;
+            gs.view.roughnessOverride = null;
+            gs.view.metalnessOverride = null;
+            gs.view.envMapIntensityOverride = null;
+            gs.view.emissiveIntensityOverride = null;
+            gs.view.__dirty = true;
+          }
         }
       }
     }
-  }
 
     if (voptEnabled(voptFlags, MJ_VIS.SELECT)) {
       updateSelectionOverlay(context, snapshot, state);

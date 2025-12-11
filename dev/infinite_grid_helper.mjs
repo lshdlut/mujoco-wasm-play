@@ -81,7 +81,7 @@ export function createInfiniteGridHelper({
  */
 export function createInfiniteGroundHelper({
   color = 0xffffff,
-  distance = 400.0,
+  distance = 2000.0,
   renderOrder = -10,
 } = {}) {
   const colorObj = color instanceof THREE.Color ? color.clone() : new THREE.Color(color);
@@ -96,15 +96,19 @@ export function createInfiniteGroundHelper({
   });
   const uniforms = {
     uDistance: { value: distance },
-    uFadeStart: { value: distance * 0.5 },
+    uFadeStart: { value: distance * 0.9 },
     uFadeEnd: { value: distance },
+    // Quad half-size in plane space; also used as the base cutoff radius
+    // so the visible ground disc is always inscribed in the quad.
     uQuadDistance: { value: distance },
     uFadePow: { value: 2.5 },
     uPlaneOrigin: { value: new THREE.Vector3(0, 0, 0) },
     uPlaneAxisU: { value: new THREE.Vector3(1, 0, 0) },
     uPlaneAxisV: { value: new THREE.Vector3(0, 1, 0) },
     uPlaneNormal: { value: new THREE.Vector3(0, 0, 1) },
-    uGridStep: { value: 1.0 },
+    uGridStep: { value: 2.0 },
+    uGridColor: { value: colorObj.clone() },
+    uGridIntensity: { value: 0.2 },
   };
   material.extensions = material.extensions || {};
   material.extensions.derivatives = true;
@@ -120,6 +124,8 @@ export function createInfiniteGroundHelper({
     shader.uniforms.uPlaneAxisV = uniforms.uPlaneAxisV;
     shader.uniforms.uPlaneNormal = uniforms.uPlaneNormal;
     shader.uniforms.uGridStep = uniforms.uGridStep;
+    shader.uniforms.uGridColor = uniforms.uGridColor;
+    shader.uniforms.uGridIntensity = uniforms.uGridIntensity;
     shader.vertexShader = `
 varying vec3 vInfiniteWorldPosition;
 varying vec2 vPlaneCoord;
@@ -162,36 +168,55 @@ uniform vec3 uPlaneAxisU;
 uniform vec3 uPlaneAxisV;
 uniform vec3 uPlaneNormal;
 uniform float uGridStep;
+uniform vec3 uGridColor;
+uniform float uGridIntensity;
 ${shader.fragmentShader.replace(
       '#include <dithering_fragment>',
       `
-      // Radial fade around the camera projection on the plane
+      // Radial masking around the camera projection on the plane.
+      // 1) Base cutoff disc: always active, used to hide the quad boundary.
+      // 2) Optional haze-driven fade inside the disc when enabled.
       vec3 camVec = cameraPosition - uPlaneOrigin;
       vec2 camCoord = vec2(dot(camVec, uPlaneAxisU), dot(camVec, uPlaneAxisV));
       float planarDist = length(camCoord - vPlaneCoord);
+
+      // Base cutoff radius: tied to quad half-size so the disc fits in the quad.
+      float baseRadius = max(1e-4, uQuadDistance);
+      if (planarDist >= baseRadius) discard;
+
+      float alpha = 1.0;
+
+      // Optional haze fade inside the base disc. Disabled when fadeEnd <= fadeStart
+      // or uFadePow is non-positive.
       float fadeStart = max(0.0, uFadeStart);
-      float fadeEnd = max(fadeStart + 1e-4, uFadeEnd);
-      if (planarDist >= fadeEnd) discard;
-      float t = clamp((planarDist - fadeStart) / max(fadeEnd - fadeStart, 1e-6), 0.0, 1.0);
-      float alpha = pow(1.0 - t, uFadePow);
-      // Optional soft edge to avoid hard quad boundary
-      float edge = smoothstep(fadeEnd * 0.9, fadeEnd, planarDist);
+      float fadeEnd = max(fadeStart, uFadeEnd);
+      if (fadeEnd > fadeStart + 1e-4 && uFadePow > 1e-5) {
+        float t = clamp((planarDist - fadeStart) / max(fadeEnd - fadeStart, 1e-6), 0.0, 1.0);
+        float hazeAlpha = pow(1.0 - t, uFadePow);
+        alpha *= hazeAlpha;
+      }
+
+      // Soft edge near the base radius to avoid a harsh disc boundary.
+      float edge = smoothstep(baseRadius * 0.9, baseRadius, planarDist);
       alpha *= (1.0 - edge);
+
       // Attenuate underside
       if (vCameraSide < -0.01) {
         alpha *= 0.25;
       }
       if (alpha <= 0.0) discard;
-      // Grid strength only influences color, not alpha
-      float gridMod = 1.0;
-      if (uGridStep > 1e-6) {
+      // Grid overlay: tint towards uGridColor where grid lines fall.
+      vec3 baseColor = gl_FragColor.rgb;
+      if (uGridStep > 1e-6 && uGridIntensity > 1e-6) {
         vec2 r = vPlaneCoord / max(uGridStep, 1e-6);
         vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
         float line = min(grid.x, grid.y);
         float gridStrength = 1.0 - min(line, 1.0);
-        gridMod = mix(0.9, 1.0, gridStrength);
+        float mixAmt = clamp(gridStrength * uGridIntensity, 0.0, 1.0);
+        gl_FragColor.rgb = mix(baseColor, uGridColor, mixAmt);
+      } else {
+        gl_FragColor.rgb = baseColor;
       }
-      gl_FragColor.rgb *= gridMod;
       gl_FragColor.a = alpha;
       #include <dithering_fragment>`
     )}`;
@@ -204,13 +229,8 @@ ${shader.fragmentShader.replace(
   mesh.matrixAutoUpdate = false;
   mesh.matrix.identity();
   mesh.updateMatrix();
-  mesh.userData.infiniteGround = {
-    uniforms,
-    baseDistance: distance,
-    baseFadeStart: distance * 1.0,
-    baseFadeEnd: distance * 4.0,
-    baseFadePow: uniforms.uFadePow.value,
-    defaultGridStep: 1.0,
-  };
+  // Attach a lightweight handle so renderer-side code can access uniforms
+  // without enforcing additional default behaviour from this helper.
+  mesh.userData.infiniteGround = { uniforms };
   return mesh;
 }

@@ -17,7 +17,20 @@ export const FALLBACK_PRESETS = {
     shadowBias: -0.00015,
     // Kept deliberately low so HDRI does not wash out shadows.
     envIntensity: 0.35,
-    ground: { style: 'shadow', opacity: 0.95, color: 0xffffff,metallic:0, },
+    ground: {
+      style: 'shadow',
+      opacity: 0.95,
+      color: 0xffffff,
+      metallic: 0,
+      infinite: {
+        distance: 2000,
+        fadePow: 2.5,
+        fadeStartFactor: 0.7,
+        gridStep: 2.0,
+        gridIntensity: 0.3,
+        gridColor: 0x3a4250,
+      },
+    },
   },
   moon: {
     // Night preset: darker exposure and very weak IBL so forms are defined
@@ -36,7 +49,19 @@ export const FALLBACK_PRESETS = {
     fill: { color: 0x182030, intensity: 0.14, position: [-1.5, 1.5, 1] },
     shadowBias: -0.0002,
     envIntensity: 0.08,
-    ground: { style: 'shadow', opacity: 0.25, color: 0xffffff },
+    ground: {
+      style: 'shadow',
+      opacity: 0.25,
+      color: 0xffffff,
+      infinite: {
+        distance: 2000,
+        fadePow: 2.5,
+        fadeStartFactor: 0.7,
+        gridStep: 2.0,
+        gridIntensity: 0.18,
+        gridColor: 0x2a2f3c,
+      },
+    },
   },
 };
 
