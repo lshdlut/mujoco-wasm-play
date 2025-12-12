@@ -32,7 +32,7 @@ export const FALLBACK_PRESETS = {
         fadePow: 2.5,
         fadeStartFactor: 0.7,
         gridStep: 2.0,
-        gridIntensity: 0.3,
+        gridIntensity: 0.2,
         gridColor: 0x3a4250,
       },
     },
