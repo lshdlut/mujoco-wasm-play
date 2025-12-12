@@ -173,11 +173,9 @@ const SELECTION_HIGHLIGHT_COLOR = new THREE.Color(0x40ff99);
 const SELECTION_EMISSIVE_COLOR = new THREE.Color(0x3aff3a);
 const SELECTION_OVERLAY_COLOR = new THREE.Color(0x66ffcc);
 const SELECT_POINT_FALLBACK_COLOR = 0xff8a2b;
-const SITE_OVERLAY_GEOMETRY = new THREE.SphereGeometry(1, 12, 8);
 const OVERLAY_SUBTYPE = {
   SELECTION_POINT: 'selection_point',
   SELECTION_HIGHLIGHT: 'selection_highlight',
-  SITE: 'site',
   LIGHT: 'light',
   COM: 'com',
   JOINT: 'joint',
@@ -614,6 +612,41 @@ function applyAppearanceToMaterial(mesh, appearance) {
     userData.geomRgba = appearance.rgba.slice();
     userData.geomOpacity = opacity;
   }
+}
+
+function resolveSiteAppearance(index, assets) {
+  const matIdView = assets?.sites?.matid || null;
+  const matIndex = matIdView && index < matIdView.length ? matIdView[index] : -1;
+  const matRgbaView = assets?.materials?.rgba || null;
+  const siteRgbaView = assets?.sites?.rgba || null;
+  if (matIndex >= 0 && matRgbaView && matRgbaView.length >= (matIndex * 4 + 4)) {
+    const rgba = [
+      matRgbaView[matIndex * 4 + 0],
+      matRgbaView[matIndex * 4 + 1],
+      matRgbaView[matIndex * 4 + 2],
+      matRgbaView[matIndex * 4 + 3],
+    ];
+    return {
+      rgba,
+      color: rgbFromArray(rgba),
+      opacity: alphaFromArray(rgba),
+    };
+  }
+  if (matIndex < 0 && siteRgbaView && siteRgbaView.length >= (index * 4 + 4)) {
+    const base = index * 4;
+    const rgba = [
+      siteRgbaView[base + 0],
+      siteRgbaView[base + 1],
+      siteRgbaView[base + 2],
+      siteRgbaView[base + 3],
+    ];
+    return {
+      rgba,
+      color: rgbFromArray(rgba),
+      opacity: alphaFromArray(rgba),
+    };
+  }
+  return { rgba: null, color: null, opacity: null };
 }
 
 function averageRGB(arr) {
@@ -1454,19 +1487,6 @@ function ensureSelectionGroup(ctx) {
   return ctx.selectionGroup;
 }
 
-function ensureSiteGroup(ctx) {
-  if (!ctx) return null;
-  if (!ctx.siteGroup) {
-    const group = new THREE.Group();
-    group.name = 'overlay:sites';
-    const world = getWorldScene(ctx);
-    if (world) world.add(group);
-    ctx.siteGroup = group;
-    ctx.sitePool = [];
-  }
-  return ctx.siteGroup;
-}
-
 function ensureContactGroup(ctx) {
   if (!ctx) return null;
   if (!ctx.contactGroup) {
@@ -1495,16 +1515,6 @@ function ensureContactForceGroup(ctx) {
     }
   }
   return ctx.contactForceGroup;
-}
-
-function hideSiteGroup(ctx) {
-  if (!ctx?.siteGroup) return;
-  ctx.siteGroup.visible = false;
-  if (Array.isArray(ctx.sitePool)) {
-    for (const mesh of ctx.sitePool) {
-      if (mesh) mesh.visible = false;
-    }
-  }
 }
 
 function hideFrameGroup(context) {
@@ -3554,6 +3564,93 @@ function buildGeomDescriptors(snapshot, state, assets) {
 }
 
 /**
+ * @typedef {Object} SiteDescriptor
+ * @property {'site'} kind
+ * @property {number} index
+ * @property {number} type
+ * @property {number[] | null} size
+ * @property {number} matId
+ * @property {number} bodyId
+ * @property {number} groupId
+ * @property {number[] | null} rgba
+ * @property {string} name
+ */
+
+/**
+ * Build descriptors for base MuJoCo sites.
+ *
+ * Sites are base-layer objects in simulate (addSiteGeoms) and should be rendered
+ * independently of frame/label overlays.
+ *
+ * @param {object} snapshot
+ * @param {object} state
+ * @param {object | null} assets
+ * @returns {SiteDescriptor[]}
+ */
+function buildSiteDescriptors(snapshot, state, assets) {
+  const sitePos = snapshot?.site_xpos;
+  const siteMat = snapshot?.site_xmat;
+  const nsite = assets?.sites?.count ?? (sitePos ? Math.floor(sitePos.length / 3) : 0);
+  if (!(nsite > 0) || !sitePos || !siteMat) return [];
+  const sizeView = assets?.sites?.size || null;
+  const typeView = assets?.sites?.type || null;
+  const matIdView = assets?.sites?.matid || null;
+  const bodyIdView = assets?.sites?.bodyid || null;
+  const groupIdView = assets?.sites?.group || null;
+  const rgbaView = assets?.sites?.rgba || null;
+
+  const descriptors = [];
+  for (let i = 0; i < nsite; i += 1) {
+    const type = typeView?.[i] ?? MJ_GEOM.SPHERE;
+    const base = 3 * i;
+    let sizeVec = null;
+    if (sizeView && sizeView.length >= base + 3) {
+      sizeVec = [
+        sizeView[base + 0] ?? 0,
+        sizeView[base + 1] ?? 0,
+        sizeView[base + 2] ?? 0,
+      ];
+    }
+    if (Array.isArray(sizeVec)) {
+      if (type === MJ_GEOM.SPHERE) {
+        const r = Math.max(1e-6, Number(sizeVec[0]) || 0.01);
+        sizeVec = [r, r, r];
+      } else if (type === MJ_GEOM.ELLIPSOID) {
+        const ax = Math.max(1e-6, Number(sizeVec[0]) || 0.01);
+        const ay = Math.max(1e-6, Number(sizeVec[1]) || ax);
+        const az = Math.max(1e-6, Number(sizeVec[2]) || ax);
+        sizeVec = [ax, ay, az];
+      }
+    }
+    const matId = matIdView?.[i] ?? -1;
+    const bodyId = bodyIdView?.[i] ?? -1;
+    const groupId = groupIdView?.[i] ?? -1;
+    let rgba = null;
+    if (rgbaView && rgbaView.length >= (i * 4 + 4)) {
+      const rgbaBase = i * 4;
+      rgba = [
+        rgbaView[rgbaBase + 0],
+        rgbaView[rgbaBase + 1],
+        rgbaView[rgbaBase + 2],
+        rgbaView[rgbaBase + 3],
+      ];
+    }
+    descriptors.push({
+      kind: 'site',
+      index: i,
+      type,
+      size: sizeVec,
+      matId,
+      bodyId,
+      groupId,
+      rgba,
+      name: `Site ${i}`,
+    });
+  }
+  return descriptors;
+}
+
+/**
  * @typedef {Object} OverlayDescriptor
  * @property {'overlay'} kind
  * @property {string} subtype
@@ -3685,6 +3782,150 @@ function applyCameraOverlayDescriptors(ctx, descriptors) {
     if (pool[i]) pool[i].visible = false;
   }
   group.visible = used > 0;
+}
+
+function ensureSiteMesh(ctx, index, stype, sizeVec, state = null) {
+  if (!ctx.siteMeshes) ctx.siteMeshes = [];
+  let mesh = ctx.siteMeshes[index];
+  const sizeKey = Array.isArray(sizeVec)
+    ? sizeVec.map((v) => (Number.isFinite(v) ? v.toFixed(6) : '0')).join(',')
+    : 'null';
+  const needsRebuild =
+    !mesh ||
+    mesh.userData?.siteType !== stype ||
+    mesh.userData?.siteSizeKey !== sizeKey;
+
+  if (needsRebuild) {
+    if (mesh) disposeMeshObject(mesh);
+    const fb = ctx.fallback || {};
+    const geometryInfo = createPrimitiveGeometry(stype, sizeVec, {
+      fallbackEnabled: fb.enabled !== false,
+      preset: fb.preset || 'bright-outdoor',
+    });
+    const useStandard = stype === MJ_GEOM.PLANE || stype === MJ_GEOM.HFIELD;
+    const sceneFlags = state?.rendering?.sceneFlags || [];
+    const wire = !!sceneFlags[1];
+    const baseOpts = geometryInfo.materialOpts || {};
+    const poolKey = {
+      kind: useStandard ? 'standard' : 'physical',
+      color: baseOpts.color ?? 0xffffff,
+      roughness: baseOpts.roughness ?? 0.55,
+      metalness: baseOpts.metalness ?? 0.0,
+      wireframe: wire,
+    };
+    if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
+    let material = ctx.materialPool.get(poolKey);
+    if (material && material.userData?.pooled) {
+      const cloned = material.clone();
+      cloned.userData = cloned.userData || {};
+      cloned.userData.pooled = false;
+      material = cloned;
+    }
+    if (!useStandard && material) material.envMapIntensity = 0;
+    if (material) material.side = THREE.FrontSide;
+    mesh = new THREE.Mesh(geometryInfo.geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    if (typeof geometryInfo.postCreate === 'function') {
+      try {
+        geometryInfo.postCreate(mesh);
+      } catch (err) {
+        warnLog('[render] site postCreate failed', err);
+        throw err;
+      }
+    }
+    mesh.userData = mesh.userData || {};
+    mesh.userData.siteIndex = index;
+    mesh.userData.siteType = stype;
+    mesh.userData.siteSizeKey = sizeKey;
+    mesh.userData.ownGeometry = true;
+    if (ctx.root) ctx.root.add(mesh);
+    ctx.siteMeshes[index] = mesh;
+  }
+
+  return mesh;
+}
+
+function applySiteDescriptors(context, descriptors, {
+  assets,
+  state,
+  snapshot,
+  hideAllGeometry,
+  siteGroupIds,
+  siteGroupMask,
+}) {
+  if (!Array.isArray(descriptors) || descriptors.length === 0) {
+    if (Array.isArray(context.siteMeshes)) {
+      for (const mesh of context.siteMeshes) {
+        if (mesh) mesh.visible = false;
+      }
+    }
+    return 0;
+  }
+
+  const sitePos = snapshot?.site_xpos;
+  const siteMat = snapshot?.site_xmat;
+  const n = descriptors.length;
+  let drawn = 0;
+  for (let idx = 0; idx < n; idx += 1) {
+    const desc = descriptors[idx];
+    if (!desc || desc.kind !== 'site') continue;
+    const i = desc.index;
+    const mesh = ensureSiteMesh(context, i, desc.type, desc.size, state);
+    if (!mesh) continue;
+
+    if (sitePos && sitePos.length >= (i * 3 + 3)) {
+      const base = i * 3;
+      mesh.position.set(
+        Number(sitePos[base + 0]) || 0,
+        Number(sitePos[base + 1]) || 0,
+        Number(sitePos[base + 2]) || 0,
+      );
+    }
+    if (siteMat && siteMat.length >= (i * 9 + 9)) {
+      const rotBase = i * 9;
+      TEMP_MAT4.set(
+        siteMat[rotBase + 0] ?? 1, siteMat[rotBase + 1] ?? 0, siteMat[rotBase + 2] ?? 0, 0,
+        siteMat[rotBase + 3] ?? 0, siteMat[rotBase + 4] ?? 1, siteMat[rotBase + 5] ?? 0, 0,
+        siteMat[rotBase + 6] ?? 0, siteMat[rotBase + 7] ?? 0, siteMat[rotBase + 8] ?? 1, 0,
+        0, 0, 0, 1,
+      );
+      mesh.quaternion.setFromRotationMatrix(TEMP_MAT4);
+    }
+
+    const appearance = resolveSiteAppearance(i, assets || null);
+    applyAppearanceToMaterial(mesh, appearance);
+    mesh.userData = mesh.userData || {};
+    mesh.userData.matId = desc.matId;
+    mesh.userData.siteBodyId = desc.bodyId;
+    mesh.userData.siteGroupId = desc.groupId;
+
+    let visible = true;
+    if (hideAllGeometry) {
+      visible = false;
+    }
+    if (visible && siteGroupMask && Array.isArray(siteGroupMask)) {
+      const rawGroup = siteGroupIds && i < siteGroupIds.length ? siteGroupIds[i] : 0;
+      const groupIdx = Number.isFinite(rawGroup) ? (rawGroup | 0) : 0;
+      if (groupIdx >= 0 && groupIdx < siteGroupMask.length) {
+        if (!siteGroupMask[groupIdx]) {
+          visible = false;
+        }
+      }
+    }
+    mesh.visible = visible;
+    if (visible) drawn += 1;
+  }
+
+  if (Array.isArray(context.siteMeshes) && context.siteMeshes.length > n) {
+    for (let i = n; i < context.siteMeshes.length; i += 1) {
+      if (context.siteMeshes[i]) {
+        context.siteMeshes[i].visible = false;
+      }
+    }
+  }
+
+  return drawn;
 }
 
 /**
@@ -4168,6 +4409,8 @@ export function createRendererManager({
     syncRendererAssets(context, assets);
     const geomGroupIds = assets?.geoms?.group || null;
     const geomGroupMask = Array.isArray(state.rendering?.groups?.geom) ? state.rendering.groups.geom : null;
+    const siteGroupIds = assets?.sites?.group || null;
+    const siteGroupMask = Array.isArray(state.rendering?.groups?.site) ? state.rendering.groups.site : null;
 
     if (typeof ensureEnvIfNeeded === 'function') {
       ensureEnvIfNeeded(context, state, { skyboxEnabled, presetMode });
@@ -4401,21 +4644,12 @@ export function createRendererManager({
     const showActuator = voptEnabled(voptFlags, MJ_VIS.ACTUATOR);
     const showRangefinder = voptEnabled(voptFlags, MJ_VIS.RANGEFINDER);
     const showConstraint = voptEnabled(voptFlags, MJ_VIS.CONSTRAINT);
-    const showSiteOverlay =
-      state?.rendering?.labelMode === LABEL_MODES.SITE
-      || state?.rendering?.frameMode === FRAME_MODES.SITE;
 
     if (showCamera) {
       cameraDescriptors = buildCameraOverlayDescriptors(snapshot, state, context);
       applyCameraOverlayDescriptors(context, cameraDescriptors);
     } else {
       hideCameraGroup(context);
-    }
-    if (showSiteOverlay) {
-      const siteDescriptors = buildSiteOverlayDescriptors(snapshot, state, context);
-      applySiteOverlayDescriptors(context, siteDescriptors);
-    } else {
-      hideSiteGroup(context);
     }
     if (showLight) {
       const lightDescriptors = buildLightOverlayDescriptors(snapshot, state, context);
@@ -4463,7 +4697,7 @@ export function createRendererManager({
     const perturbDescriptors = buildPerturbOverlayDescriptors(snapshot, state, context, overlayOptions);
     applyPerturbOverlayDescriptors(context, perturbDescriptors);
 
-      const geomDescriptors = buildGeomDescriptors(snapshot, state, assets);
+    const geomDescriptors = buildGeomDescriptors(snapshot, state, assets);
     drawn = applyGeomDescriptors(context, geomDescriptors, {
       assets,
       state,
@@ -4473,6 +4707,15 @@ export function createRendererManager({
       hideAllGeometry,
       geomGroupIds,
       geomGroupMask,
+    });
+    const siteDescriptors = buildSiteDescriptors(snapshot, state, assets);
+    applySiteDescriptors(context, siteDescriptors, {
+      assets,
+      state,
+      snapshot,
+      hideAllGeometry,
+      siteGroupIds,
+      siteGroupMask,
     });
 
     context.ground = null;
@@ -5317,91 +5560,6 @@ function applySelectionHighlight(ctx, mesh) {
     overlay,
     overlayMaterial,
   };
-}
-
-function buildSiteOverlayDescriptors(snapshot, state, ctx) {
-  const siteXpos = snapshot?.site_xpos;
-  const siteXmat = snapshot?.site_xmat;
-  if (!siteXpos || !siteXmat) return [];
-  const count = Math.floor(siteXpos.length / 3);
-  if (count <= 0) return [];
-  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
-  const scale = Math.max(1e-4, meanSize * 0.05 * scaleAll);
-  const overlayCfg = ctx?.fallback?.overlays || null;
-  const fallbackColor =
-    overlayCfg && Number.isFinite(overlayCfg.site)
-      ? overlayCfg.site
-      : 0x66ccff;
-  const colorHex = rgbaToHex(state?.model?.vis?.rgba?.site, fallbackColor);
-  const opacity = alphaFromArray(state?.model?.vis?.rgba?.site, 0.9);
-  const descriptors = [];
-  for (let i = 0; i < count; i += 1) {
-    const base = 3 * i;
-    const position = [
-      Number(siteXpos[base + 0]) || 0,
-      Number(siteXpos[base + 1]) || 0,
-      Number(siteXpos[base + 2]) || 0,
-    ];
-    descriptors.push({
-      kind: 'overlay',
-      subtype: OVERLAY_SUBTYPE.SITE,
-      index: i,
-      position,
-      rotation: null,
-      scale,
-      colorHex,
-      opacity,
-    });
-  }
-  return descriptors;
-}
-
-function applySiteOverlayDescriptors(ctx, descriptors) {
-  if (!ctx) return;
-  const group = ensureSiteGroup(ctx);
-  if (!Array.isArray(descriptors) || descriptors.length === 0) {
-    hideSiteGroup(ctx);
-    return;
-  }
-  const pool = Array.isArray(ctx.sitePool) ? ctx.sitePool : (ctx.sitePool = []);
-  let used = 0;
-  for (const desc of descriptors) {
-    if (!desc || desc.subtype !== OVERLAY_SUBTYPE.SITE) continue;
-    let mesh = pool[used];
-    if (!mesh) {
-      const material = new THREE.MeshBasicMaterial({
-        color: desc.colorHex,
-        transparent: desc.opacity < 0.999,
-        opacity: desc.opacity,
-        depthWrite: false,
-        toneMapped: false,
-        fog: false,
-      });
-      mesh = new THREE.Mesh(SITE_OVERLAY_GEOMETRY, material);
-      mesh.userData.overlayKind = 'overlay';
-      mesh.userData.overlaySubtype = OVERLAY_SUBTYPE.SITE;
-      mesh.frustumCulled = false;
-      mesh.renderOrder = 40;
-      pool[used] = mesh;
-      group.add(mesh);
-    }
-    mesh.visible = true;
-    mesh.position.set(desc.position[0], desc.position[1], desc.position[2]);
-    mesh.scale.set(desc.scale, desc.scale, desc.scale);
-    const mat = mesh.material;
-    if (mat) {
-      mat.color.setHex(desc.colorHex);
-      mat.opacity = desc.opacity;
-      mat.transparent = desc.opacity < 0.999;
-      mat.needsUpdate = true;
-    }
-    used += 1;
-  }
-  for (let i = used; i < pool.length; i += 1) {
-    if (pool[i]) pool[i].visible = false;
-  }
-  group.visible = used > 0;
-  ctx.sitePool = pool;
 }
 
 function buildLightOverlayDescriptors(snapshot, state, ctx) {

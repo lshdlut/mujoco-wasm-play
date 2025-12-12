@@ -163,6 +163,7 @@ export function collectRenderAssetsFromModule(mod, handle) {
   const assets = {
     version: 1,
     geoms: null,
+    sites: null,
     materials: null,
     meshes: null,
     textures: null,
@@ -198,6 +199,32 @@ export function collectRenderAssetsFromModule(mod, handle) {
       matid: cloneTyped(matidView, Int32Array),
       bodyid: cloneTyped(bodyIdView, Int32Array),
       dataid: cloneTyped(dataIdView, Int32Array),
+      group: cloneTyped(groupView, Int32Array),
+      rgba: cloneTyped(rgbaView, Float32Array),
+    };
+  }
+  const nsite = typeof mod._mjwf_nsite === 'function'
+    ? (mod._mjwf_nsite(handle) | 0)
+    : (typeof mod._mjwf_model_nsite === 'function' ? (mod._mjwf_model_nsite(handle) | 0) : 0);
+  if (nsite > 0) {
+    const sizeFn = ensureFunc('_mjwf_site_size_ptr') || ensureFunc('_mjwf_model_site_size_ptr');
+    const typeFn = ensureFunc('_mjwf_site_type_ptr') || ensureFunc('_mjwf_model_site_type_ptr');
+    const matidFn = ensureFunc('_mjwf_site_matid_ptr') || ensureFunc('_mjwf_model_site_matid_ptr');
+    const bodyIdFn = ensureFunc('_mjwf_site_bodyid_ptr') || ensureFunc('_mjwf_model_site_bodyid_ptr');
+    const groupFn = ensureFunc('_mjwf_site_group_ptr') || ensureFunc('_mjwf_model_site_group_ptr');
+    const rgbaFn = ensureFunc('_mjwf_site_rgba_ptr') || ensureFunc('_mjwf_model_site_rgba_ptr');
+    const sizeView = readView(mod, sizeFn, handle, nsite * 3, heapViewF64);
+    const typeView = readView(mod, typeFn, handle, nsite, heapViewI32);
+    const matidView = readView(mod, matidFn, handle, nsite, heapViewI32);
+    const bodyIdView = readView(mod, bodyIdFn, handle, nsite, heapViewI32);
+    const groupView = readView(mod, groupFn, handle, nsite, heapViewI32);
+    const rgbaView = readView(mod, rgbaFn, handle, nsite * 4, heapViewF32);
+    assets.sites = {
+      count: nsite,
+      size: cloneTyped(sizeView, Float64Array),
+      type: cloneTyped(typeView, Int32Array),
+      matid: cloneTyped(matidView, Int32Array),
+      bodyid: cloneTyped(bodyIdView, Int32Array),
       group: cloneTyped(groupView, Int32Array),
       rgba: cloneTyped(rgbaView, Float32Array),
     };

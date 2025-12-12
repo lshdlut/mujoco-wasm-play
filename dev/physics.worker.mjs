@@ -1816,6 +1816,14 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.geoms.group);
     push(assets.geoms.rgba);
   }
+  if (assets?.sites) {
+    push(assets.sites.size);
+    push(assets.sites.type);
+    push(assets.sites.matid);
+    push(assets.sites.bodyid);
+    push(assets.sites.group);
+    push(assets.sites.rgba);
+  }
   if (assets?.materials) {
     push(assets.materials.rgba);
     push(assets.materials.reflectance);
