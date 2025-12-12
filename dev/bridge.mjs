@@ -164,6 +164,7 @@ export function collectRenderAssetsFromModule(mod, handle) {
     version: 1,
     geoms: null,
     sites: null,
+    tendons: null,
     materials: null,
     meshes: null,
     textures: null,
@@ -225,6 +226,26 @@ export function collectRenderAssetsFromModule(mod, handle) {
       type: cloneTyped(typeView, Int32Array),
       matid: cloneTyped(matidView, Int32Array),
       bodyid: cloneTyped(bodyIdView, Int32Array),
+      group: cloneTyped(groupView, Int32Array),
+      rgba: cloneTyped(rgbaView, Float32Array),
+    };
+  }
+  const ntendon = typeof mod._mjwf_model_ntendon === 'function'
+    ? (mod._mjwf_model_ntendon(handle) | 0)
+    : (typeof mod._mjwf_ntendon === 'function' ? (mod._mjwf_ntendon(handle) | 0) : 0);
+  if (ntendon > 0) {
+    const widthFn = ensureFunc('_mjwf_tendon_width_ptr') || ensureFunc('_mjwf_model_tendon_width_ptr');
+    const matidFn = ensureFunc('_mjwf_tendon_matid_ptr') || ensureFunc('_mjwf_model_tendon_matid_ptr');
+    const groupFn = ensureFunc('_mjwf_tendon_group_ptr') || ensureFunc('_mjwf_model_tendon_group_ptr');
+    const rgbaFn = ensureFunc('_mjwf_tendon_rgba_ptr') || ensureFunc('_mjwf_model_tendon_rgba_ptr');
+    const widthView = readView(mod, widthFn, handle, ntendon, heapViewF64);
+    const matidView = readView(mod, matidFn, handle, ntendon, heapViewI32);
+    const groupView = readView(mod, groupFn, handle, ntendon, heapViewI32);
+    const rgbaView = readView(mod, rgbaFn, handle, ntendon * 4, heapViewF32);
+    assets.tendons = {
+      count: ntendon,
+      width: cloneTyped(widthView, Float64Array),
+      matid: cloneTyped(matidView, Int32Array),
       group: cloneTyped(groupView, Int32Array),
       rgba: cloneTyped(rgbaView, Float32Array),
     };
@@ -587,6 +608,8 @@ export class MjSimLite {
   ncam(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_ncam']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
   nlight(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_nlight']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
   nsite(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_nsite']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
+  ntendon(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_ntendon']||m['_mjwf_ntendon']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
+  nwrap(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nwrap']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
   nsensor(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_nsensor']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
   neq(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_neq']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
 
@@ -607,6 +630,10 @@ export class MjSimLite {
   actuatorCranklengthView(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_actuator_cranklength_ptr']; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n); }
   siteXposView(){ const m=this.mod; const h=this.h|0; const n=this.nsite()|0; if(!n)return; const d=m['_mjwf_data_site_xpos_ptr']||m['_mjwf_site_xpos_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*3); }
   siteXmatView(){ const m=this.mod; const h=this.h|0; const n=this.nsite()|0; if(!n)return; const d=m['_mjwf_data_site_xmat_ptr']||m['_mjwf_site_xmat_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*9); }
+  tenWrapAdrView(){ const m=this.mod; const h=this.h|0; const n=this.ntendon()|0; if(!(n>0)) return null; const d=m['_mjwf_data_ten_wrapadr_ptr']; if (typeof d!=='function') return null; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return null; return heapViewI32(m,p,n); }
+  tenWrapNumView(){ const m=this.mod; const h=this.h|0; const n=this.ntendon()|0; if(!(n>0)) return null; const d=m['_mjwf_data_ten_wrapnum_ptr']; if (typeof d!=='function') return null; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return null; return heapViewI32(m,p,n); }
+  wrapObjView(){ const m=this.mod; const h=this.h|0; const n=this.nwrap()|0; if(!(n>0)) return null; const d=m['_mjwf_data_wrap_obj_ptr']; if (typeof d!=='function') return null; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return null; return heapViewI32(m,p,n); }
+  wrapXposView(){ const m=this.mod; const h=this.h|0; const n=this.nwrap()|0; if(!(n>0)) return null; const d=m['_mjwf_data_wrap_xpos_ptr']; if (typeof d!=='function') return null; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return null; return heapViewF64(m,p,n*3); }
   sensorTypeView(){ const m=this.mod; const h=this.h|0; const n=this.nsensor()|0; if(!n)return; const d=m['_mjwf_sensor_type_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewI32(m,p,n); }
   sensorObjIdView(){ const m=this.mod; const h=this.h|0; const n=this.nsensor()|0; if(!n)return; const d=m['_mjwf_sensor_objid_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewI32(m,p,n); }
   eqTypeView(){ const m=this.mod; const h=this.h|0; const n=this.neq()|0; if(!n)return; const d=m['_mjwf_eq_type_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewI32(m,p,n); }

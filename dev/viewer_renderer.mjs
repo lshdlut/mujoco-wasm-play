@@ -140,6 +140,7 @@ const __TMP_VEC3 = new THREE.Vector3();
 const __TMP_VEC3_A = new THREE.Vector3();
 const __TMP_VEC3_B = new THREE.Vector3();
 const __TMP_VEC3_C = new THREE.Vector3();
+const __TMP_VEC3_D = new THREE.Vector3();
 const __TMP_COLOR = new THREE.Color();
 const CONTACT_UP = new THREE.Vector3(0, 0, 1);
 const CONTACT_TMP_NORMAL = new THREE.Vector3();
@@ -639,6 +640,41 @@ function resolveSiteAppearance(index, assets) {
       siteRgbaView[base + 1],
       siteRgbaView[base + 2],
       siteRgbaView[base + 3],
+    ];
+    return {
+      rgba,
+      color: rgbFromArray(rgba),
+      opacity: alphaFromArray(rgba),
+    };
+  }
+  return { rgba: null, color: null, opacity: null };
+}
+
+function resolveTendonAppearance(index, assets) {
+  const matIdView = assets?.tendons?.matid || null;
+  const matIndex = matIdView && index < matIdView.length ? matIdView[index] : -1;
+  const matRgbaView = assets?.materials?.rgba || null;
+  const tendonRgbaView = assets?.tendons?.rgba || null;
+  if (matIndex >= 0 && matRgbaView && matRgbaView.length >= (matIndex * 4 + 4)) {
+    const rgba = [
+      matRgbaView[matIndex * 4 + 0],
+      matRgbaView[matIndex * 4 + 1],
+      matRgbaView[matIndex * 4 + 2],
+      matRgbaView[matIndex * 4 + 3],
+    ];
+    return {
+      rgba,
+      color: rgbFromArray(rgba),
+      opacity: alphaFromArray(rgba),
+    };
+  }
+  if (matIndex < 0 && tendonRgbaView && tendonRgbaView.length >= (index * 4 + 4)) {
+    const base = index * 4;
+    const rgba = [
+      tendonRgbaView[base + 0],
+      tendonRgbaView[base + 1],
+      tendonRgbaView[base + 2],
+      tendonRgbaView[base + 3],
     ];
     return {
       rgba,
@@ -3651,6 +3687,76 @@ function buildSiteDescriptors(snapshot, state, assets) {
 }
 
 /**
+ * @typedef {Object} TendonSegmentDescriptor
+ * @property {'tendon_segment'} kind
+ * @property {number} tendon
+ * @property {number[]} start
+ * @property {number[]} end
+ * @property {number} width
+ */
+
+/**
+ * Build tendon segment descriptors from wrap state.
+ *
+ * This matches simulate's addSpatialTendonGeoms straight-segment path.
+ *
+ * @param {object} snapshot
+ * @param {object} state
+ * @param {object | null} assets
+ * @returns {TendonSegmentDescriptor[]}
+ */
+function buildTendonSegmentDescriptors(snapshot, state, assets) {
+  const tenWrapAdr = snapshot?.ten_wrapadr;
+  const tenWrapNum = snapshot?.ten_wrapnum;
+  const wrapObj = snapshot?.wrap_obj;
+  const wrapXpos = snapshot?.wrap_xpos;
+  const ntendon = assets?.tendons?.count ?? (tenWrapAdr ? (tenWrapAdr.length | 0) : 0);
+  if (!(ntendon > 0) || !tenWrapAdr || !tenWrapNum || !wrapObj || !wrapXpos) {
+    return [];
+  }
+  const widthView = assets?.tendons?.width || null;
+  const descriptors = [];
+  for (let i = 0; i < ntendon; i += 1) {
+    const adr = tenWrapAdr[i] | 0;
+    const num = tenWrapNum[i] | 0;
+    if (!(num >= 2) || adr < 0) continue;
+    const baseWidth = widthView && i < widthView.length ? Number(widthView[i]) || 0 : 0;
+    const defaultWidth = baseWidth > 0 ? baseWidth : 0.005;
+    const end = adr + num - 1;
+    for (let j = adr; j < end; j += 1) {
+      const o0 = wrapObj[j] ?? -2;
+      const o1 = wrapObj[j + 1] ?? -2;
+      if ((o0 | 0) === -2 || (o1 | 0) === -2) continue;
+      const p0 = j * 3;
+      const p1 = (j + 1) * 3;
+      if (p1 + 2 >= wrapXpos.length) continue;
+      const start = [
+        Number(wrapXpos[p0 + 0]) || 0,
+        Number(wrapXpos[p0 + 1]) || 0,
+        Number(wrapXpos[p0 + 2]) || 0,
+      ];
+      const endPos = [
+        Number(wrapXpos[p1 + 0]) || 0,
+        Number(wrapXpos[p1 + 1]) || 0,
+        Number(wrapXpos[p1 + 2]) || 0,
+      ];
+      let width = defaultWidth;
+      if ((o0 | 0) >= 0 && (o1 | 0) >= 0) {
+        width *= 0.5;
+      }
+      descriptors.push({
+        kind: 'tendon_segment',
+        tendon: i,
+        start,
+        end: endPos,
+        width,
+      });
+    }
+  }
+  return descriptors;
+}
+
+/**
  * @typedef {Object} OverlayDescriptor
  * @property {'overlay'} kind
  * @property {string} subtype
@@ -3926,6 +4032,126 @@ function applySiteDescriptors(context, descriptors, {
   }
 
   return drawn;
+}
+
+function ensureTendonGroup(ctx) {
+  if (!ctx) return null;
+  if (!ctx.tendonGroup) {
+    const group = new THREE.Group();
+    group.name = 'base:tendons';
+    if (ctx.root) ctx.root.add(group);
+    ctx.tendonGroup = group;
+    ctx.tendonPool = [];
+    ctx._tendonUnitGeometry = new THREE.CylinderGeometry(1, 1, 1, 12, 1, false);
+  }
+  return ctx.tendonGroup;
+}
+
+function ensureTendonMesh(ctx, poolIndex, state) {
+  const group = ensureTendonGroup(ctx);
+  if (!group) return null;
+  const pool = Array.isArray(ctx.tendonPool) ? ctx.tendonPool : (ctx.tendonPool = []);
+  let mesh = pool[poolIndex];
+  if (!mesh) {
+    const geom = ctx._tendonUnitGeometry || (ctx._tendonUnitGeometry = new THREE.CylinderGeometry(1, 1, 1, 12, 1, false));
+    const sceneFlags = state?.rendering?.sceneFlags || [];
+    const wire = !!sceneFlags[1];
+    const poolKey = {
+      kind: 'physical',
+      color: 0xffffff,
+      roughness: 0.8,
+      metalness: 0.0,
+      wireframe: wire,
+    };
+    if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
+    let material = ctx.materialPool.get(poolKey);
+    if (!material) {
+      material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0.0, wireframe: wire });
+    } else if (material.userData?.pooled) {
+      const cloned = material.clone();
+      cloned.userData = cloned.userData || {};
+      cloned.userData.pooled = false;
+      material = cloned;
+    }
+    if (material) material.side = THREE.FrontSide;
+    mesh = new THREE.Mesh(geom, material);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = false;
+    mesh.userData = mesh.userData || {};
+    mesh.userData.tendonSegment = true;
+    group.add(mesh);
+    pool[poolIndex] = mesh;
+  }
+  return mesh;
+}
+
+function applyTendonSegmentDescriptors(ctx, descriptors, {
+  assets,
+  state,
+  hideAllGeometry,
+  tendonGroupIds,
+  tendonGroupMask,
+}) {
+  if (!ctx) return 0;
+  const group = ensureTendonGroup(ctx);
+  if (!Array.isArray(descriptors) || descriptors.length === 0) {
+    if (group) group.visible = false;
+    if (Array.isArray(ctx.tendonPool)) {
+      for (const mesh of ctx.tendonPool) {
+        if (mesh) mesh.visible = false;
+      }
+    }
+    return 0;
+  }
+
+  const pool = Array.isArray(ctx.tendonPool) ? ctx.tendonPool : (ctx.tendonPool = []);
+  let used = 0;
+  for (const desc of descriptors) {
+    if (!desc || desc.kind !== 'tendon_segment') continue;
+    const tendonIndex = desc.tendon | 0;
+    let visible = true;
+    if (hideAllGeometry) visible = false;
+    if (visible && tendonGroupMask && Array.isArray(tendonGroupMask)) {
+      const rawGroup = tendonGroupIds && tendonIndex < tendonGroupIds.length ? tendonGroupIds[tendonIndex] : 0;
+      const groupIdx = Number.isFinite(rawGroup) ? (rawGroup | 0) : 0;
+      if (groupIdx >= 0 && groupIdx < tendonGroupMask.length) {
+        if (!tendonGroupMask[groupIdx]) {
+          visible = false;
+        }
+      }
+    }
+    if (!visible) continue;
+
+    const mesh = ensureTendonMesh(ctx, used, state);
+    if (!mesh) continue;
+    const start = desc.start || [];
+    const end = desc.end || [];
+    __TMP_VEC3_A.set(Number(start[0]) || 0, Number(start[1]) || 0, Number(start[2]) || 0);
+    __TMP_VEC3_B.set(Number(end[0]) || 0, Number(end[1]) || 0, Number(end[2]) || 0);
+    const dir = __TMP_VEC3_C.copy(__TMP_VEC3_B).sub(__TMP_VEC3_A);
+    const length = dir.length();
+    if (!(length > 1e-9)) continue;
+    const center = __TMP_VEC3_D.copy(__TMP_VEC3_A).add(__TMP_VEC3_B).multiplyScalar(0.5);
+    dir.normalize();
+    LIGHT_TMP_QUAT.setFromUnitVectors(PERTURB_AXIS_DEFAULT, dir);
+    mesh.position.copy(center);
+    mesh.quaternion.copy(LIGHT_TMP_QUAT);
+    const radius = Math.max(1e-6, Number(desc.width) || 0.001);
+    mesh.scale.set(radius, length, radius);
+
+    const appearance = resolveTendonAppearance(tendonIndex, assets || null);
+    applyAppearanceToMaterial(mesh, appearance);
+    mesh.visible = true;
+    used += 1;
+  }
+
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  if (group) group.visible = used > 0;
+  ctx.tendonPool = pool;
+  return used;
 }
 
 /**
@@ -4411,6 +4637,8 @@ export function createRendererManager({
     const geomGroupMask = Array.isArray(state.rendering?.groups?.geom) ? state.rendering.groups.geom : null;
     const siteGroupIds = assets?.sites?.group || null;
     const siteGroupMask = Array.isArray(state.rendering?.groups?.site) ? state.rendering.groups.site : null;
+    const tendonGroupIds = assets?.tendons?.group || null;
+    const tendonGroupMask = Array.isArray(state.rendering?.groups?.tendon) ? state.rendering.groups.tendon : null;
 
     if (typeof ensureEnvIfNeeded === 'function') {
       ensureEnvIfNeeded(context, state, { skyboxEnabled, presetMode });
@@ -4717,6 +4945,25 @@ export function createRendererManager({
       siteGroupIds,
       siteGroupMask,
     });
+    const showTendon = voptEnabled(voptFlags, MJ_VIS.TENDON);
+    if (showTendon) {
+      const tendonSegments = buildTendonSegmentDescriptors(snapshot, state, assets);
+      applyTendonSegmentDescriptors(context, tendonSegments, {
+        assets,
+        state,
+        hideAllGeometry,
+        tendonGroupIds,
+        tendonGroupMask,
+      });
+    } else {
+      applyTendonSegmentDescriptors(context, [], {
+        assets,
+        state,
+        hideAllGeometry: true,
+        tendonGroupIds,
+        tendonGroupMask,
+      });
+    }
 
     context.ground = null;
     for (let i = 0; i < ngeom; i += 1) {

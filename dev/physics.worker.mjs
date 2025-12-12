@@ -1341,6 +1341,10 @@ async function loadXmlWithFallback(xmlText) {
   const actCrankView = sim.actuatorCranklengthView?.();
   const siteXposView = sim.siteXposView?.();
   const siteXmatView = sim.siteXmatView?.();
+  const tenWrapAdrView = sim.tenWrapAdrView?.();
+  const tenWrapNumView = sim.tenWrapNumView?.();
+  const wrapObjView = sim.wrapObjView?.();
+  const wrapXposView = sim.wrapXposView?.();
   const sensorTypeView = sim.sensorTypeView?.();
   const sensorObjIdView = sim.sensorObjIdView?.();
   const eqTypeView = sim.eqTypeView?.();
@@ -1561,6 +1565,26 @@ async function loadXmlWithFallback(xmlText) {
     const sMat = new Float64Array(siteXmatView);
     msg.site_xmat = sMat;
     transfers.push(sMat.buffer);
+  }
+  if (tenWrapAdrView) {
+    const tAdr = new Int32Array(tenWrapAdrView);
+    msg.ten_wrapadr = tAdr;
+    transfers.push(tAdr.buffer);
+  }
+  if (tenWrapNumView) {
+    const tNum = new Int32Array(tenWrapNumView);
+    msg.ten_wrapnum = tNum;
+    transfers.push(tNum.buffer);
+  }
+  if (wrapObjView) {
+    const wObj = new Int32Array(wrapObjView);
+    msg.wrap_obj = wObj;
+    transfers.push(wObj.buffer);
+  }
+  if (wrapXposView) {
+    const wPos = new Float64Array(wrapXposView);
+    msg.wrap_xpos = wPos;
+    transfers.push(wPos.buffer);
   }
   if (sensorTypeView) {
     const stype = new Int32Array(sensorTypeView);
@@ -1823,6 +1847,12 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.sites.bodyid);
     push(assets.sites.group);
     push(assets.sites.rgba);
+  }
+  if (assets?.tendons) {
+    push(assets.tendons.width);
+    push(assets.tendons.matid);
+    push(assets.tendons.group);
+    push(assets.tendons.rgba);
   }
   if (assets?.materials) {
     push(assets.materials.rgba);

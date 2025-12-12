@@ -100,6 +100,14 @@ const SCENE_FLAG_DEFAULTS = Object.freeze([
   true,  // cull face
 ]);
 
+// Default mjvOption.flags state. Keep most overlays off by default, but enable
+// tendon visibility (mjVIS_TENDON = 7) to match simulate's base-layer scene.
+const DEFAULT_VOPT_FLAGS = Object.freeze((() => {
+  const flags = Array.from({ length: 32 }, () => false);
+  flags[7] = true;
+  return flags;
+})());
+
 const DISABLE_FLAG_LABELS = Object.freeze([
   'Constraint',
   'Equality',
@@ -250,7 +258,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     actuatorGroups: {},
   },
   rendering: {
-    voptFlags: Array.from({ length: 32 }, () => false),
+    voptFlags: DEFAULT_VOPT_FLAGS.slice(),
     sceneFlags: SCENE_FLAG_DEFAULTS.slice(),
     labelMode: 0,
     frameMode: 0,
@@ -866,7 +874,7 @@ function mergeBackendSnapshot(draft, snapshot) {
 function ensureRenderingState(target) {
   if (!target.rendering) {
     target.rendering = {
-      voptFlags: Array.from({ length: 32 }, () => false),
+      voptFlags: DEFAULT_VOPT_FLAGS.slice(),
       sceneFlags: SCENE_FLAG_DEFAULTS.slice(),
       labelMode: 0,
       frameMode: 0,
@@ -874,7 +882,7 @@ function ensureRenderingState(target) {
     };
   } else {
     if (!Array.isArray(target.rendering.voptFlags)) {
-      target.rendering.voptFlags = Array.from({ length: 32 }, () => false);
+      target.rendering.voptFlags = DEFAULT_VOPT_FLAGS.slice();
     }
     if (!Array.isArray(target.rendering.sceneFlags)) {
       target.rendering.sceneFlags = SCENE_FLAG_DEFAULTS.slice();
@@ -2119,6 +2127,10 @@ async function loadDefaultXml() {
     if (data.act_cranklength) lastSnapshot.act_cranklength = makeView(data.act_cranklength, null, Float64Array);
     if (data.site_xpos) lastSnapshot.site_xpos = makeView(data.site_xpos, null, Float64Array);
     if (data.site_xmat) lastSnapshot.site_xmat = makeView(data.site_xmat, null, Float64Array);
+    if (data.ten_wrapadr) lastSnapshot.ten_wrapadr = makeView(data.ten_wrapadr, null, Int32Array);
+    if (data.ten_wrapnum) lastSnapshot.ten_wrapnum = makeView(data.ten_wrapnum, null, Int32Array);
+    if (data.wrap_obj) lastSnapshot.wrap_obj = makeView(data.wrap_obj, null, Int32Array);
+    if (data.wrap_xpos) lastSnapshot.wrap_xpos = makeView(data.wrap_xpos, null, Float64Array);
     if (data.sensor_type) lastSnapshot.sensor_type = makeView(data.sensor_type, null, Int32Array);
     if (data.sensor_objid) lastSnapshot.sensor_objid = makeView(data.sensor_objid, null, Int32Array);
     if (data.eq_type) lastSnapshot.eq_type = makeView(data.eq_type, null, Int32Array);
