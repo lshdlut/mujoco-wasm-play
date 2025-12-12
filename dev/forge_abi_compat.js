@@ -288,7 +288,11 @@ function installErrnoAliases(mod) {
 function installLifecycleWrappers(mod) {
   if (typeof mod._mjwf_make_from_xml !== 'function' && typeof mod._mjwf_helper_make_from_xml === 'function') {
     mod._mjwf_make_from_xml = function makeLegacy(path) {
-      return mod._mjwf_helper_make_from_xml(String(path || '')) | 0;
+      const p = String(path || '');
+      if (typeof mod.ccall === 'function') {
+        try { return mod.ccall('mjwf_helper_make_from_xml', 'number', ['string'], [p]) | 0; } catch { return 0; }
+      }
+      try { return mod._mjwf_helper_make_from_xml(p) | 0; } catch { return 0; }
     };
   }
   if (typeof mod._mjwf_free !== 'function' && typeof mod._mjwf_helper_free === 'function') {

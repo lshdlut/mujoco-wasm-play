@@ -3724,6 +3724,9 @@ function buildTendonSegmentDescriptors(snapshot, state, assets) {
     const defaultWidth = baseWidth > 0 ? baseWidth : 0.005;
     const end = adr + num - 1;
     for (let j = adr; j < end; j += 1) {
+      // MuJoCo stores wrap arrays as (nwrap x 2) ints and (nwrap x 6) reals, but
+      // the visualize path indexes them as 2*nwrap sequential points: wrap_obj[j]
+      // and wrap_xpos[3*j : 3*j+3].
       const o0 = wrapObj[j] ?? -2;
       const o1 = wrapObj[j + 1] ?? -2;
       if ((o0 | 0) === -2 || (o1 | 0) === -2) continue;

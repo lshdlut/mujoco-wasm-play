@@ -48,7 +48,14 @@ let ctrlNoiseRate = 0;
 let ctrlNoiseSpare = null;
 let gestureState = { mode: 'idle', phase: 'idle', pointer: null };
 let dragState = { dx: 0, dy: 0 };
-let voptFlags = Array.from({ length: 32 }, () => 0);
+// Default mjvOption.flags (numeric) for backend snapshots.
+// Keep overlays off by default but enable tendon visibility (mjVIS_TENDON = 7).
+const DEFAULT_VOPT_FLAGS = (() => {
+  const flags = Array.from({ length: 32 }, () => 0);
+  flags[7] = 1;
+  return flags;
+})();
+let voptFlags = DEFAULT_VOPT_FLAGS.slice();
 const SCENE_FLAG_DEFAULTS = [1, 0, 1, 0, 1, 0, 1, 0, 0, 1];
 let sceneFlags = SCENE_FLAG_DEFAULTS.slice();
 let labelMode = 0;
@@ -1341,10 +1348,72 @@ async function loadXmlWithFallback(xmlText) {
   const actCrankView = sim.actuatorCranklengthView?.();
   const siteXposView = sim.siteXposView?.();
   const siteXmatView = sim.siteXmatView?.();
-  const tenWrapAdrView = sim.tenWrapAdrView?.();
-  const tenWrapNumView = sim.tenWrapNumView?.();
-  const wrapObjView = sim.wrapObjView?.();
-  const wrapXposView = sim.wrapXposView?.();
+  const ntendonLocal = sim.ntendon?.() | 0;
+  const nwrapLocal = sim.nwrap?.() | 0;
+  let tenWrapAdrView = sim.tenWrapAdrView?.() || null;
+  let tenWrapNumView = sim.tenWrapNumView?.() || null;
+  let wrapObjView = sim.wrapObjView?.() || null;
+  let wrapXposView = sim.wrapXposView?.() || null;
+  // Fallback: some forge builds expose wrap arrays only via raw ptr exports.
+  if (!tenWrapAdrView && ntendonLocal > 0 && typeof mod?._mjwf_data_ten_wrapadr_ptr === 'function') {
+    const ptr = mod._mjwf_data_ten_wrapadr_ptr(h | 0) | 0;
+    if (ptr) tenWrapAdrView = heapViewI32(mod, ptr, ntendonLocal);
+  }
+  if (!tenWrapNumView && ntendonLocal > 0 && typeof mod?._mjwf_data_ten_wrapnum_ptr === 'function') {
+    const ptr = mod._mjwf_data_ten_wrapnum_ptr(h | 0) | 0;
+    if (ptr) tenWrapNumView = heapViewI32(mod, ptr, ntendonLocal);
+  }
+  if (!wrapObjView && nwrapLocal > 0 && typeof mod?._mjwf_data_wrap_obj_ptr === 'function') {
+    const ptr = mod._mjwf_data_wrap_obj_ptr(h | 0) | 0;
+    if (ptr) wrapObjView = heapViewI32(mod, ptr, nwrapLocal * 2);
+  }
+  if (!wrapXposView && nwrapLocal > 0 && typeof mod?._mjwf_data_wrap_xpos_ptr === 'function') {
+    const ptr = mod._mjwf_data_wrap_xpos_ptr(h | 0) | 0;
+    if (ptr) wrapXposView = heapViewF64(mod, ptr, nwrapLocal * 6);
+  }
+  // One-off tendon wrap pointer diagnostics (helps debug missing wrap arrays).
+  if ((snapshotDebug || verboseWorkerLogs) && !diagStagesLogged.has('tendon_wrap_diag')) {
+    try {
+      const ptrDiag = (field) => {
+        const fn = mod && mod[`_mjwf_data_${field}_ptr`];
+        const out = { handle: 0, data: 0, errorHandle: null, errorData: null };
+        if (typeof fn !== 'function') {
+          out.errorHandle = 'missing';
+          out.errorData = 'missing';
+          return out;
+        }
+        try { out.handle = fn.call(mod, h | 0) | 0; } catch (err) { out.errorHandle = String(err || ''); }
+        try {
+          const dataPtrLocal = sim?.dataPtr ? (sim.dataPtr | 0) : 0;
+          if (dataPtrLocal) out.data = fn.call(mod, dataPtrLocal) | 0;
+        } catch (err) { out.errorData = String(err || ''); }
+        return out;
+      };
+      const viewLen = (v) => (v && typeof v.length === 'number' ? (v.length | 0) : null);
+      const diag = {
+        ntendon: sim?.ntendon?.() | 0,
+        nwrap: sim?.nwrap?.() | 0,
+        modelPtr: sim?.modelPtr | 0,
+        dataPtr: sim?.dataPtr | 0,
+        views: {
+          ten_wrapadr: viewLen(tenWrapAdrView),
+          ten_wrapnum: viewLen(tenWrapNumView),
+          wrap_obj: viewLen(wrapObjView),
+          wrap_xpos: viewLen(wrapXposView),
+        },
+        ptrs: {
+          ten_wrapadr: ptrDiag('ten_wrapadr'),
+          ten_wrapnum: ptrDiag('ten_wrapnum'),
+          wrap_obj: ptrDiag('wrap_obj'),
+          wrap_xpos: ptrDiag('wrap_xpos'),
+        },
+      };
+      diagStagesLogged.add('tendon_wrap_diag');
+      emitLog('worker: tendon wrap diag', diag, { force: true });
+    } catch (err) {
+      emitLog('worker: tendon wrap diag failed', { err: String(err || '') }, { force: true });
+    }
+  }
   const sensorTypeView = sim.sensorTypeView?.();
   const sensorObjIdView = sim.sensorObjIdView?.();
   const eqTypeView = sim.eqTypeView?.();
@@ -2052,7 +2121,7 @@ onmessage = async (ev) => {
       setRunning(true, 'load');
       gestureState = { mode: 'idle', phase: 'idle', pointer: null };
       dragState = { dx: 0, dy: 0 };
-      voptFlags = Array.from({ length: 32 }, () => 0);
+      voptFlags = DEFAULT_VOPT_FLAGS.slice();
       sceneFlags = SCENE_FLAG_DEFAULTS.slice();
       labelMode = 0;
       frameMode = 0;
@@ -2200,7 +2269,7 @@ onmessage = async (ev) => {
     } else if (msg.cmd === 'setVoptFlag') {
       const idx = Number(msg.index) | 0;
       const enabled = !!msg.enabled;
-      if (!Array.isArray(voptFlags)) voptFlags = Array.from({ length: 32 }, () => 0);
+      if (!Array.isArray(voptFlags)) voptFlags = DEFAULT_VOPT_FLAGS.slice();
       if (idx >= 0 && idx < voptFlags.length) {
         voptFlags[idx] = enabled ? 1 : 0;
         emitOptionState();
