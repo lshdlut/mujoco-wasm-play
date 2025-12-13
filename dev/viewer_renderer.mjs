@@ -56,6 +56,8 @@ const MJ_TRN = {
 };
 const MJ_SENSOR = {
   RANGEFINDER: 7,
+  GEOMFROMTO: 41,
+  TACTILE: 46,
 };
 const MJ_VIS = {
   CONVEXHULL: 0,
@@ -755,9 +757,285 @@ function resolveSkinAppearance(index, assets) {
   return { rgba: null, color: null, opacity: null };
 }
 
+function resolveMaterialTextureDescriptor(matId, assets) {
+  const materials = assets?.materials || null;
+  const texIdView = materials?.texid || null;
+  if (!texIdView || !(matId >= 0) || matId >= texIdView.length) return null;
+  const matCount = materials?.count | 0;
+  const stride =
+    matCount > 0 && texIdView.length >= matCount && texIdView.length % matCount === 0
+      ? texIdView.length / matCount
+      : 1;
+  // Simulate uses mjTEXROLE_RGB (1) as the regular albedo texture source.
+  const rolePreferred = stride > 1 ? 1 : 0;
+  const idxPreferred = matId * stride + rolePreferred;
+  const idxFallback = matId * stride;
+  let texid = idxPreferred >= 0 && idxPreferred < texIdView.length ? (texIdView[idxPreferred] | 0) : -1;
+  if (texid < 0 && idxFallback >= 0 && idxFallback < texIdView.length) {
+    texid = texIdView[idxFallback] | 0;
+  }
+  if (!(texid >= 0)) return null;
+  const repeatView = materials?.texrepeat || null;
+  let repeatX = 1;
+  let repeatY = 1;
+  if (repeatView && repeatView.length >= (matId * 2 + 2)) {
+    repeatX = Number(repeatView[matId * 2 + 0]) || 1;
+    repeatY = Number(repeatView[matId * 2 + 1]) || 1;
+  }
+  const uniformView = materials?.texuniform || null;
+  const uniform = !!(uniformView && matId < uniformView.length && uniformView[matId]);
+  return { texid, repeatX, repeatY, uniform };
+}
+
+function getMuJoCoTextureCache(ctx) {
+  if (!ctx) return null;
+  ctx.assetCache = ctx.assetCache || {};
+  ctx.assetCache.mjTextures = ctx.assetCache.mjTextures || new Map();
+  return ctx.assetCache.mjTextures;
+}
+
+function createMuJoCoDataTexture(THREE, pixels, width, height, nchannel, colorspace = 0) {
+  if (!pixels || !(width > 0) || !(height > 0) || !(nchannel > 0)) return null;
+  const format = (() => {
+    if (nchannel === 4) return THREE.RGBAFormat;
+    if (nchannel === 3) return THREE.RGBFormat;
+    if (nchannel === 2) return THREE.RGFormat || THREE.RGBAFormat;
+    if (nchannel === 1) return THREE.RedFormat || THREE.LuminanceFormat || THREE.RGBAFormat;
+    return THREE.RGBAFormat;
+  })();
+  const tex = new THREE.DataTexture(pixels, width, height, format);
+  tex.generateMipmaps = false;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.flipY = true;
+  tex.unpackAlignment = 1;
+  // Follow MuJoCo's resolved m->tex_colorspace: only promote to sRGB when the
+  // model requests it (mjCOLORSPACE_SRGB = 2). AUTO/LINEAR stay linear.
+  const isSrgb = (colorspace | 0) === 2;
+  if (isSrgb) {
+    if ('colorSpace' in tex && typeof THREE.SRGBColorSpace === 'string') {
+      tex.colorSpace = THREE.SRGBColorSpace;
+    } else if ('encoding' in tex && typeof THREE.sRGBEncoding === 'number') {
+      tex.encoding = THREE.sRGBEncoding;
+    }
+  }
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function getOrCreateMuJoCoTexture(ctx, assets, descriptor) {
+  if (!ctx || !assets || !descriptor) return null;
+  const cache = getMuJoCoTextureCache(ctx);
+  if (!cache) return null;
+  const texid = descriptor.texid | 0;
+  const repeatX = Number.isFinite(descriptor.repeatX) ? descriptor.repeatX : 1;
+  const repeatY = Number.isFinite(descriptor.repeatY) ? descriptor.repeatY : 1;
+  const key = `${texid}:${repeatX.toFixed(6)}:${repeatY.toFixed(6)}`;
+  if (cache.has(key)) return cache.get(key) || null;
+
+  const texAssets = assets?.textures || null;
+  const typeView = texAssets?.type || null;
+  const widthView = texAssets?.width || null;
+  const heightView = texAssets?.height || null;
+  const nchannelView = texAssets?.nchannel || null;
+  const adrView = texAssets?.adr || null;
+  const colorspaceView = texAssets?.colorspace || null;
+  const data = texAssets?.data || null;
+  if (!widthView || !heightView || !nchannelView || !adrView || !data) return null;
+  if (texid < 0 || texid >= widthView.length || texid >= heightView.length || texid >= nchannelView.length || texid >= adrView.length) {
+    return null;
+  }
+  const texType = typeView && texid < typeView.length ? (typeView[texid] | 0) : 0;
+  const baseWidth = widthView[texid] | 0;
+  const baseHeight = heightView[texid] | 0;
+  const width = baseWidth;
+  // MuJoCo stores cube textures either as a single square face (height==width)
+  // or as 6 faces packed back-to-back (often height==6*width). For now we take
+  // the first face so textured materials at least render deterministically.
+  const height = texType === 0 ? baseHeight : baseWidth;
+  const nchannel = nchannelView[texid] | 0;
+  const adr = adrView[texid] | 0;
+  if (!(width > 0) || !(height > 0) || !(nchannel > 0) || !(adr >= 0)) return null;
+  const byteLen = width * height * nchannel;
+  const end = adr + byteLen;
+  if (end > data.length) return null;
+
+  const pixels = data.subarray(adr, end);
+  const colorspace = colorspaceView && texid < colorspaceView.length ? (colorspaceView[texid] | 0) : 0;
+  const texture = createMuJoCoDataTexture(THREE, pixels, width, height, nchannel, colorspace);
+  if (!texture) return null;
+  texture.repeat.set(repeatX, repeatY);
+  cache.set(key, texture);
+  return texture;
+}
+
+function applyMuJoCoTextureToMesh(mesh, matId, ctx, assets, textureEnabled) {
+  if (!mesh || !mesh.material || !ctx) return;
+  const material = mesh.material;
+  if (!('map' in material)) return;
+  if (!textureEnabled || !(matId >= 0)) {
+    if (material.map) {
+      material.map = null;
+      material.needsUpdate = true;
+    }
+    return;
+  }
+  if (!assets) {
+    if (material.map) {
+      material.map = null;
+      material.needsUpdate = true;
+    }
+    return;
+  }
+  const desc = resolveMaterialTextureDescriptor(matId, assets);
+  const texture = desc ? getOrCreateMuJoCoTexture(ctx, assets, desc) : null;
+  const nextMap = texture || null;
+  if (material.map !== nextMap) {
+    material.map = nextMap;
+    material.needsUpdate = true;
+  }
+}
+
 function averageRGB(arr) {
   if (!Array.isArray(arr) || arr.length === 0) return 0;
   return arr.reduce((acc, v) => acc + (Number(v) || 0), 0) / arr.length;
+}
+
+function isDisabledFlag(mask, bitIndex) {
+  const m = Number(mask) || 0;
+  const bit = bitIndex | 0;
+  if (bit < 0 || bit >= 31) return false;
+  return (m & (1 << bit)) !== 0;
+}
+
+function vec3Norm(x, y, z) {
+  return Math.sqrt(x * x + y * y + z * z);
+}
+
+function vec3NormalizeInPlace(v) {
+  const x = v[0] || 0;
+  const y = v[1] || 0;
+  const z = v[2] || 0;
+  const n = vec3Norm(x, y, z);
+  if (!(n > 1e-12)) {
+    v[0] = 0; v[1] = 0; v[2] = 0;
+    return 0;
+  }
+  const inv = 1 / n;
+  v[0] = x * inv;
+  v[1] = y * inv;
+  v[2] = z * inv;
+  return n;
+}
+
+function vec3Dot(ax, ay, az, bx, by, bz) {
+  return ax * bx + ay * by + az * bz;
+}
+
+function coshSinh(x) {
+  const expx = Math.exp(x);
+  const inv = 1 / expx;
+  return {
+    cosh: 0.5 * (expx + inv),
+    sinh: 0.5 * (expx - inv),
+  };
+}
+
+function catenaryIntercept(v, h, length) {
+  const term = Math.sqrt(Math.max(0, length * length - v * v)) / Math.max(1e-12, h) - 1;
+  if (!(term > 0)) return 0;
+  return 1 / Math.sqrt(Math.sqrt(term));
+}
+
+function catenaryResidual(b, intercept) {
+  const a = 0.5 / b;
+  const { cosh, sinh } = coshSinh(a);
+  const denom = 2 * b * sinh - 1;
+  if (!(denom > 0)) {
+    return { res: Number.POSITIVE_INFINITY, grad: 0 };
+  }
+  const invSqrt = 1 / Math.sqrt(denom);
+  const res = invSqrt - intercept;
+  const grad = (a * cosh - sinh) * Math.pow(denom, -1.5);
+  return { res, grad };
+}
+
+function solveCatenary(v, h, length) {
+  const intercept = catenaryIntercept(v, h, length);
+  let b = intercept / Math.sqrt(24);
+  const tol = 1e-9;
+  for (let i = 0; i < 50; i += 1) {
+    const { res, grad } = catenaryResidual(b, intercept);
+    if (Math.abs(res) < tol) break;
+    let step = -res / (grad || 1e-12);
+    for (let j = 0; j < 10; j += 1) {
+      const next = catenaryResidual(b + step, intercept).res;
+      if (Math.abs(next) < Math.abs(res)) break;
+      step *= 0.5;
+    }
+    b += step;
+  }
+  return b;
+}
+
+function computeCatenaryPoints(x0, x1, gravity, length, ncatenary) {
+  const dx = (x1[0] || 0) - (x0[0] || 0);
+  const dy = (x1[1] || 0) - (x0[1] || 0);
+  const dz = (x1[2] || 0) - (x0[2] || 0);
+  const dist = vec3Norm(dx, dy, dz);
+  if (!(dist > 0) || dist > length) {
+    return { points: [x0.slice(), x1.slice()], npoints: 2 };
+  }
+
+  const up = [-(gravity?.[0] || 0), -(gravity?.[1] || 0), -(gravity?.[2] || 0)];
+  vec3NormalizeInPlace(up);
+
+  const across = [dx, dy, dz];
+  const proj = vec3Dot(up[0], up[1], up[2], across[0], across[1], across[2]);
+  across[0] -= up[0] * proj;
+  across[1] -= up[1] * proj;
+  across[2] -= up[2] * proj;
+  const acrossNorm = vec3NormalizeInPlace(across);
+  if (acrossNorm < 1e-12) {
+    across[0] = 0; across[1] = 0; across[2] = 0;
+  }
+
+  const h = vec3Dot(dx, dy, dz, across[0], across[1], across[2]);
+  const v = vec3Dot(dx, dy, dz, up[0], up[1], up[2]);
+
+  if (length > 100 * h) {
+    const dUp = -0.5 * (Math.sqrt(Math.max(0, length * length - h * h)) - v);
+    const denom = 2 * dUp - v;
+    const dAcross = Math.abs(denom) > 1e-12 ? (h * dUp) / denom : 0;
+    const mid = [
+      (x0[0] || 0) + up[0] * dUp + across[0] * dAcross,
+      (x0[1] || 0) + up[1] * dUp + across[1] * dAcross,
+      (x0[2] || 0) + up[2] * dUp + across[2] * dAcross,
+    ];
+    return { points: [x0.slice(), mid, x1.slice()], npoints: 3 };
+  }
+
+  const n = Math.max(2, Math.min(100, ncatenary | 0));
+  const bh = solveCatenary(v, h, length) * h;
+  const ratio = (length + v) / Math.max(1e-12, (length - v));
+  const hOffset = -0.5 * (Math.log(Math.max(1e-12, ratio)) * bh - h);
+  const vOffset = -coshSinh(hOffset / bh).cosh * bh;
+  const points = [];
+  points.push(x0.slice());
+  for (let i = 1; i < n - 1; i += 1) {
+    const horizontal = (i * h) / n;
+    const t = (horizontal - hOffset) / bh;
+    const vertical = bh * coshSinh(t).cosh + vOffset;
+    points.push([
+      (x0[0] || 0) + across[0] * horizontal + up[0] * vertical,
+      (x0[1] || 0) + across[1] * horizontal + up[1] * vertical,
+      (x0[2] || 0) + across[2] * horizontal + up[2] * vertical,
+    ]);
+  }
+  points.push(x1.slice());
+  return { points, npoints: points.length };
 }
 
 function computeSceneExtent(bounds, statStruct) {
@@ -1449,6 +1727,36 @@ function updateLabelOverlays(context, snapshot, state, options = {}) {
       const worldAnchor = localAnchor.clone().applyMatrix4(bodyMat).add(bodyPos);
       const label = jntNames && jntNames[i] ? String(jntNames[i]) : `jnt ${i}`;
       emitLabel(worldAnchor.x, worldAnchor.y, worldAnchor.z, label);
+    }
+  } else if (mode === LABEL_MODES.ISLAND) {
+    const nisland = snapshot?.nisland | 0;
+    const dofIsland = snapshot?.dof_island || null;
+    const xipos = snapshot?.xipos || null;
+    const bodies = state?.rendering?.assets?.bodies || snapshot?.renderAssets?.bodies || null;
+    const weldid = bodies?.weldid || null;
+    const dofadr = bodies?.dofadr || null;
+    const dofnum = bodies?.dofnum || null;
+    if (!(nisland > 0) || !dofIsland || !xipos || !weldid || !dofadr || !dofnum) {
+      hideLabelGroup(context);
+      return;
+    }
+    const nbody = Math.min(Math.floor(xipos.length / 3), weldid.length, dofadr.length, dofnum.length);
+    const limit = Math.min(nbody, maxLabels + 1);
+    for (let i = 1; i < limit; i += 1) {
+      const weld = weldid[i] | 0;
+      if (weld < 0 || weld >= nbody) continue;
+      if ((dofnum[weld] | 0) <= 0) continue;
+      const adr = dofadr[weld] | 0;
+      if (adr < 0 || adr >= dofIsland.length) continue;
+      const islandId = dofIsland[adr] | 0;
+      if (islandId <= -1) continue;
+      const base = 3 * i;
+      emitLabel(
+        Number(xipos[base + 0]) || 0,
+        Number(xipos[base + 1]) || 0,
+        Number(xipos[base + 2]) || 0,
+        String(islandId),
+      );
     }
   } else {
     hideLabelGroup(context);
@@ -2353,9 +2661,10 @@ function applyActuatorOverlayDescriptors(ctx, descriptors) {
 }
 
 function buildSlidercrankOverlayDescriptors(snapshot, state, ctx) {
-  const trnid = snapshot?.act_trnid;
-  const trntype = snapshot?.act_trntype;
-  const crankLength = snapshot?.act_cranklength;
+  const actuatorAssets = state?.rendering?.assets?.actuators || snapshot?.renderAssets?.actuators || null;
+  const trnid = actuatorAssets?.trnid || snapshot?.act_trnid;
+  const trntype = actuatorAssets?.trntype || snapshot?.act_trntype;
+  const crankLength = actuatorAssets?.cranklength || snapshot?.act_cranklength;
   const siteXpos = snapshot?.site_xpos;
   const siteXmat = snapshot?.site_xmat;
   if (!trnid || !trntype || !crankLength || !siteXpos || !siteXmat) {
@@ -3468,6 +3777,13 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
     applyAppearanceToMaterial(mesh, composed.appearance);
     applyMaterialOverrides(mesh.material, composed.overrides);
     mesh.visible = composed.visible;
+    mesh.userData = mesh.userData || {};
+    const alpha = composed?.appearance?.opacity;
+    if (typeof alpha === 'number' && Number.isFinite(alpha)) {
+      mesh.userData.baseAlpha = alpha;
+    } else if (mesh.material && typeof mesh.material.opacity === 'number') {
+      mesh.userData.baseAlpha = mesh.material.opacity;
+    }
     if (geomState?.view) geomState.view.__dirty = false;
   }
 
@@ -3785,6 +4101,41 @@ function buildTendonSegmentDescriptors(snapshot, state, assets) {
     return [];
   }
   const widthView = assets?.tendons?.width || null;
+  const numView = assets?.tendons?.num || null;
+  const limitedView = assets?.tendons?.limited || null;
+  const stiffnessView = assets?.tendons?.stiffness || null;
+  const dampingView = assets?.tendons?.damping || null;
+  const frictionlossView = assets?.tendons?.frictionloss || null;
+  const rangeView = assets?.tendons?.range || null;
+  const lengthspringView = assets?.tendons?.lengthspring || null;
+  const actTrnType = assets?.actuators?.trntype || null;
+  const actTrnId = assets?.actuators?.trnid || null;
+
+  const gravity = state?.model?.opt?.gravity || null;
+  const disableMask = state?.model?.opt?.disableflags || 0;
+  const gravityEnabled = !isDisabledFlag(disableMask, 7) && Array.isArray(gravity) && vec3Norm(gravity[0] || 0, gravity[1] || 0, gravity[2] || 0) > 1e-12;
+  const numslices = Math.max(0, (state?.model?.vis?.quality?.numslices ?? 0) | 0);
+  const ncatenary = Math.min(100, numslices + 1);
+  const hasCatenaryModelFields =
+    !!numView &&
+    !!limitedView &&
+    !!stiffnessView &&
+    !!dampingView &&
+    !!frictionlossView &&
+    !!rangeView &&
+    !!lengthspringView;
+  const hasActuators = !!actTrnType && !!actTrnId;
+  const hasTendonActuator = (tendonIndex) => {
+    if (!hasActuators) return false;
+    const n = actTrnType.length | 0;
+    for (let j = 0; j < n; j += 1) {
+      if ((actTrnType[j] | 0) !== MJ_TRN.TENDON) continue;
+      const base = 2 * j;
+      const tid = actTrnId[base] | 0;
+      if (tid === (tendonIndex | 0)) return true;
+    }
+    return false;
+  };
   const descriptors = [];
   for (let i = 0; i < ntendon; i += 1) {
     const adr = tenWrapAdr[i] | 0;
@@ -3792,6 +4143,58 @@ function buildTendonSegmentDescriptors(snapshot, state, assets) {
     if (!(num >= 2) || adr < 0) continue;
     const baseWidth = widthView && i < widthView.length ? Number(widthView[i]) || 0 : 0;
     const defaultWidth = baseWidth > 0 ? baseWidth : 0.005;
+
+    // Simulate special-case: string-like tendons under gravity (mjv_catenary).
+    if (
+      gravityEnabled &&
+      hasCatenaryModelFields &&
+      !hasTendonActuator(i) &&
+      (numView[i] | 0) === 2 &&
+      num === 2
+    ) {
+      const stiffness = Number(stiffnessView[i]) || 0;
+      const damping = Number(dampingView[i]) || 0;
+      const frictionloss = Number(frictionlossView[i]) || 0;
+      const limited = limitedView[i] | 0;
+      const ls0 = Number(lengthspringView[2 * i]) || 0;
+      const ls1 = Number(lengthspringView[2 * i + 1]) || 0;
+      const r0 = Number(rangeView[2 * i]) || 0;
+      const r1 = Number(rangeView[2 * i + 1]) || 0;
+      const limitedspring = stiffness > 0 && ls0 === 0 && ls1 > 0;
+      const limitedconstraint = stiffness === 0 && limited === 1 && r0 === 0 && r1 > 0;
+      const drawCatenary = (limitedspring !== limitedconstraint) && damping === 0 && frictionloss === 0;
+      if (drawCatenary) {
+        const p0 = adr * 3;
+        const p1 = (adr + 1) * 3;
+        if (p1 + 2 < wrapXpos.length) {
+          const x0 = [
+            Number(wrapXpos[p0 + 0]) || 0,
+            Number(wrapXpos[p0 + 1]) || 0,
+            Number(wrapXpos[p0 + 2]) || 0,
+          ];
+          const x1 = [
+            Number(wrapXpos[p1 + 0]) || 0,
+            Number(wrapXpos[p1 + 1]) || 0,
+            Number(wrapXpos[p1 + 2]) || 0,
+          ];
+          const length = limitedconstraint ? r1 : ls1;
+          const { points, npoints } = computeCatenaryPoints(x0, x1, gravity, Math.max(0, length), ncatenary);
+          if (npoints >= 2) {
+            for (let j = 0; j < npoints - 1; j += 1) {
+              descriptors.push({
+                kind: 'tendon_segment',
+                tendon: i,
+                start: points[j],
+                end: points[j + 1],
+                width: defaultWidth,
+              });
+            }
+            continue;
+          }
+        }
+      }
+    }
+
     const end = adr + num - 1;
     for (let j = adr; j < end; j += 1) {
       // MuJoCo stores wrap arrays as (nwrap x 2) ints and (nwrap x 6) reals, but
@@ -4030,6 +4433,7 @@ function applySiteDescriptors(context, descriptors, {
   state,
   snapshot,
   hideAllGeometry,
+  voptFlags,
   siteGroupIds,
   siteGroupMask,
 }) {
@@ -4041,6 +4445,34 @@ function applySiteDescriptors(context, descriptors, {
     }
     return 0;
   }
+
+  const vopt = Array.isArray(voptFlags) ? voptFlags : state?.rendering?.voptFlags || [];
+  const showStatic = voptEnabled(vopt, MJ_VIS.STATIC);
+  const transparentDynamic = voptEnabled(vopt, MJ_VIS.TRANSPARENT);
+  const textureEnabled = voptEnabled(vopt, MJ_VIS.TEXTURE);
+  const alphaScale = transparentDynamic ? clampUnit(Number(state?.model?.vis?.map?.alpha)) : 1;
+  const weldIdView =
+    assets?.bodies?.weldid ||
+    snapshot?.renderAssets?.bodies?.weldid ||
+    state?.rendering?.assets?.bodies?.weldid ||
+    null;
+  const mocapIdView =
+    assets?.bodies?.mocapid ||
+    snapshot?.renderAssets?.bodies?.mocapid ||
+    state?.rendering?.assets?.bodies?.mocapid ||
+    null;
+  const hasBodyCategory =
+    !!weldIdView &&
+    !!mocapIdView &&
+    (ArrayBuffer.isView(weldIdView) || Array.isArray(weldIdView)) &&
+    (ArrayBuffer.isView(mocapIdView) || Array.isArray(mocapIdView));
+  const isBodyStatic = (bodyId) => {
+    if (!hasBodyCategory) return false;
+    const bid = bodyId | 0;
+    if (bid < 0) return false;
+    if (bid >= weldIdView.length || bid >= mocapIdView.length) return false;
+    return (weldIdView[bid] | 0) === 0 && (mocapIdView[bid] | 0) === -1;
+  };
 
   const sitePos = snapshot?.site_xpos;
   const siteMat = snapshot?.site_xmat;
@@ -4078,6 +4510,23 @@ function applySiteDescriptors(context, descriptors, {
     mesh.userData.matId = desc.matId;
     mesh.userData.siteBodyId = desc.bodyId;
     mesh.userData.siteGroupId = desc.groupId;
+    const baseAlpha =
+      typeof appearance?.opacity === 'number' && Number.isFinite(appearance.opacity)
+        ? appearance.opacity
+        : (mesh.material && typeof mesh.material.opacity === 'number' ? mesh.material.opacity : 1);
+    mesh.userData.baseAlpha = baseAlpha;
+    if (mesh.material && typeof mesh.material.opacity === 'number') {
+      const shouldFade = transparentDynamic && !isBodyStatic(desc.bodyId);
+      const desiredAlpha = shouldFade ? baseAlpha * alphaScale : baseAlpha;
+      const nextAlpha = Number.isFinite(desiredAlpha) ? desiredAlpha : baseAlpha;
+      const nextTransparent = nextAlpha < 0.999;
+      if (Math.abs(mesh.material.opacity - nextAlpha) > 1e-6 || mesh.material.transparent !== nextTransparent) {
+        mesh.material.opacity = nextAlpha;
+        mesh.material.transparent = nextTransparent;
+        mesh.material.needsUpdate = true;
+      }
+    }
+    applyMuJoCoTextureToMesh(mesh, desc.matId, context, assets, textureEnabled);
 
     let visible = true;
     if (hideAllGeometry) {
@@ -4091,6 +4540,9 @@ function applySiteDescriptors(context, descriptors, {
           visible = false;
         }
       }
+    }
+    if (visible && !showStatic && isBodyStatic(desc.bodyId)) {
+      visible = false;
     }
     mesh.visible = visible;
     if (visible) drawn += 1;
@@ -4198,6 +4650,8 @@ function applyTendonSegmentDescriptors(ctx, descriptors, {
 
     const mesh = ensureTendonMesh(ctx, used, state);
     if (!mesh) continue;
+    mesh.userData = mesh.userData || {};
+    mesh.userData.tendonIndex = tendonIndex;
     const start = desc.start || [];
     const end = desc.end || [];
     __TMP_VEC3_A.set(Number(start[0]) || 0, Number(start[1]) || 0, Number(start[2]) || 0);
@@ -4353,12 +4807,19 @@ function ensureFlexEntry(ctx, index, assets, state) {
   return entry;
 }
 
-function applyFlexAppearance(entry, flexIndex, assets) {
+function applyFlexAppearance(entry, flexIndex, assets, ctx, textureEnabled) {
   if (!entry) return;
   const appearance = resolveFlexAppearance(flexIndex, assets || null);
   if (entry.points) applyAppearanceToMaterial(entry.points, appearance);
   if (entry.edges) applyAppearanceToMaterial(entry.edges, appearance);
   if (entry.faces) applyAppearanceToMaterial(entry.faces, appearance);
+  if (entry.faces) {
+    const matIdView = assets?.flexes?.matid || null;
+    const matId = matIdView && flexIndex < matIdView.length ? (matIdView[flexIndex] | 0) : -1;
+    entry.faces.userData = entry.faces.userData || {};
+    entry.faces.userData.matId = matId;
+    applyMuJoCoTextureToMesh(entry.faces, matId, ctx, assets, textureEnabled);
+  }
 }
 
 function normalize3Inv(x, y, z) {
@@ -4815,6 +5276,7 @@ function applyFlexRendering(ctx, snapshot, state, assets, {
   const showEdge = voptEnabled(voptFlags, MJ_VIS.FLEXEDGE);
   const showFace = voptEnabled(voptFlags, MJ_VIS.FLEXFACE);
   const showSkin = voptEnabled(voptFlags, MJ_VIS.FLEXSKIN);
+  const textureEnabled = voptEnabled(voptFlags, MJ_VIS.TEXTURE);
   const showAny = showVert || showEdge || showFace || showSkin;
   if (!showAny || hideAllGeometry) {
     hideFlexGroup(ctx);
@@ -4840,7 +5302,7 @@ function applyFlexRendering(ctx, snapshot, state, assets, {
     entry.group.visible = visible;
     if (!visible) continue;
 
-    applyFlexAppearance(entry, i, assets);
+    applyFlexAppearance(entry, i, assets, ctx, textureEnabled);
 
     const vertadr = flexAssets?.vertadr && i < flexAssets.vertadr.length ? (flexAssets.vertadr[i] | 0) : 0;
     const vertnum = entry.vertnum | 0;
@@ -4996,10 +5458,15 @@ function ensureSkinEntry(ctx, index, assets, state) {
   return entry;
 }
 
-function applySkinAppearance(entry, skinIndex, assets) {
+function applySkinAppearance(entry, skinIndex, assets, ctx, textureEnabled) {
   if (!entry?.mesh) return;
   const appearance = resolveSkinAppearance(skinIndex, assets || null);
   applyAppearanceToMaterial(entry.mesh, appearance);
+  const matIdView = assets?.skins?.matid || null;
+  const matId = matIdView && skinIndex < matIdView.length ? (matIdView[skinIndex] | 0) : -1;
+  entry.mesh.userData = entry.mesh.userData || {};
+  entry.mesh.userData.matId = matId;
+  applyMuJoCoTextureToMesh(entry.mesh, matId, ctx, assets, textureEnabled);
 }
 
 function quatToMat3(w, x, y, z, out) {
@@ -5186,6 +5653,7 @@ function applySkinRendering(ctx, snapshot, state, assets, {
     hideSkinGroup(ctx);
     return 0;
   }
+  const textureEnabled = voptEnabled(state?.rendering?.voptFlags, MJ_VIS.TEXTURE);
   let used = 0;
   for (let i = 0; i < count; i += 1) {
     const entry = ensureSkinEntry(ctx, i, assets, state);
@@ -5204,7 +5672,7 @@ function applySkinRendering(ctx, snapshot, state, assets, {
       continue;
     }
 
-    applySkinAppearance(entry, i, assets);
+    applySkinAppearance(entry, i, assets, ctx, textureEnabled);
     const ok = updateSkinMesh(entry, i, snapshot, assets);
     entry.mesh.visible = ok;
     if (ok) used += 1;
@@ -5240,6 +5708,7 @@ function applyGeomDescriptors(context, descriptors, {
   sceneFlags,
   reflectionEnabled,
   hideAllGeometry,
+  voptFlags,
   geomGroupIds,
   geomGroupMask,
 }) {
@@ -5256,6 +5725,33 @@ function applyGeomDescriptors(context, descriptors, {
   }
 
   const flags = Array.isArray(sceneFlags) ? sceneFlags : [];
+  const vopt = Array.isArray(voptFlags) ? voptFlags : state?.rendering?.voptFlags || [];
+  const showStatic = voptEnabled(vopt, MJ_VIS.STATIC);
+  const transparentDynamic = voptEnabled(vopt, MJ_VIS.TRANSPARENT);
+  const textureEnabled = voptEnabled(vopt, MJ_VIS.TEXTURE);
+  const alphaScale = transparentDynamic ? clampUnit(Number(state?.model?.vis?.map?.alpha)) : 1;
+  const weldIdView =
+    assets?.bodies?.weldid ||
+    snapshot?.renderAssets?.bodies?.weldid ||
+    state?.rendering?.assets?.bodies?.weldid ||
+    null;
+  const mocapIdView =
+    assets?.bodies?.mocapid ||
+    snapshot?.renderAssets?.bodies?.mocapid ||
+    state?.rendering?.assets?.bodies?.mocapid ||
+    null;
+  const hasBodyCategory =
+    !!weldIdView &&
+    !!mocapIdView &&
+    (ArrayBuffer.isView(weldIdView) || Array.isArray(weldIdView)) &&
+    (ArrayBuffer.isView(mocapIdView) || Array.isArray(mocapIdView));
+  const isBodyStatic = (bodyId) => {
+    if (!hasBodyCategory) return false;
+    const bid = bodyId | 0;
+    if (bid < 0) return false;
+    if (bid >= weldIdView.length || bid >= mocapIdView.length) return false;
+    return (weldIdView[bid] | 0) === 0 && (mocapIdView[bid] | 0) === -1;
+  };
   const n = descriptors.length;
   context.geomState = context.geomState || [];
   let drawn = 0;
@@ -5311,6 +5807,27 @@ function applyGeomDescriptors(context, descriptors, {
         }
       }
     }
+    if (visible && !showStatic && isBodyStatic(desc.bodyId)) {
+      visible = false;
+    }
+
+    if (mesh.material && typeof mesh.material.opacity === 'number') {
+      const userData = mesh.userData || (mesh.userData = {});
+      if (!(typeof userData.baseAlpha === 'number' && Number.isFinite(userData.baseAlpha))) {
+        userData.baseAlpha = mesh.material.opacity;
+      }
+      const baseAlpha = userData.baseAlpha;
+      const shouldFade = transparentDynamic && !isBodyStatic(desc.bodyId);
+      const desiredAlpha = shouldFade ? baseAlpha * alphaScale : baseAlpha;
+      const nextAlpha = Number.isFinite(desiredAlpha) ? desiredAlpha : baseAlpha;
+      const nextTransparent = nextAlpha < 0.999;
+      if (Math.abs(mesh.material.opacity - nextAlpha) > 1e-6 || mesh.material.transparent !== nextTransparent) {
+        mesh.material.opacity = nextAlpha;
+        mesh.material.transparent = nextTransparent;
+        mesh.material.needsUpdate = true;
+      }
+    }
+    applyMuJoCoTextureToMesh(mesh, desc.matId, context, assets, textureEnabled);
 
     mesh.visible = visible;
     if (visible) {
@@ -5840,7 +6357,6 @@ export function createRendererManager({
       }
     }
 
-    const defaults = getDefaultVopt(context, state);
     if (context.renderer) {
       context.renderer.shadowMap.enabled = shadowEnabled;
       if (context.renderer.shadowMap) {
@@ -5856,8 +6372,10 @@ export function createRendererManager({
     if (showContactPoint) {
       const pointPayload = buildContactPointOverlayDescriptors(snapshot, state, context, { segmentEnabled });
       applyContactPointOverlayDescriptors(context, pointPayload);
+      updateTactileOverlays(context, snapshot, state, assets, { voptFlags });
     } else {
       if (context.contactGroup) context.contactGroup.visible = false;
+      hideTactileGroup(context);
     }
     if (showContactForce) {
       const forcePayload = buildContactForceOverlayDescriptors(snapshot, state, context, { segmentEnabled });
@@ -5866,17 +6384,7 @@ export function createRendererManager({
       if (context.contactForceGroup) context.contactForceGroup.visible = false;
     }
 
-    let hideAllGeometry = !!hideAllGeometryDefault;
-    if (defaults) {
-      for (let idx = 0; idx < Math.min(defaults.length, voptFlags.length); idx += 1) {
-        const def = defaults[idx];
-        const val = voptFlags[idx];
-        if (def && !val) {
-          hideAllGeometry = true;
-          break;
-        }
-      }
-    }
+    const hideAllGeometry = !!hideAllGeometryDefault;
 
     const ngeom = snapshot.ngeom | 0;
     const nextBounds = ngeom > 0 ? computeBoundsFromSnapshot(snapshot) : null;
@@ -5936,6 +6444,11 @@ export function createRendererManager({
     const showActuator = voptEnabled(voptFlags, MJ_VIS.ACTUATOR);
     const showRangefinder = voptEnabled(voptFlags, MJ_VIS.RANGEFINDER);
     const showConstraint = voptEnabled(voptFlags, MJ_VIS.CONSTRAINT);
+    const showBodyBvh = voptEnabled(voptFlags, MJ_VIS.BODYBVH);
+    const showMeshBvh = voptEnabled(voptFlags, MJ_VIS.MESHBVH);
+    const showInertia = voptEnabled(voptFlags, MJ_VIS.INERTIA);
+    const showAutoConnect = voptEnabled(voptFlags, MJ_VIS.AUTOCONNECT);
+    const showPertForce = voptEnabled(voptFlags, MJ_VIS.PERTFORCE);
 
     if (showCamera) {
       cameraDescriptors = buildCameraOverlayDescriptors(snapshot, state, context);
@@ -5967,11 +6480,13 @@ export function createRendererManager({
     } else {
       hideActuatorGroup(context);
     }
-    if (showActuator) {
+    // Simulate renders slider-crank geoms whenever mjTRN_SLIDERCRANK actuators exist,
+    // independent of mjVIS_ACTUATOR; keep parity by not gating this overlay on showActuator.
+    if (hideAllGeometry) {
+      hideSlidercrankGroup(context);
+    } else {
       const sliderDescriptors = buildSlidercrankOverlayDescriptors(snapshot, state, context);
       applySlidercrankOverlayDescriptors(context, sliderDescriptors);
-    } else {
-      hideSlidercrankGroup(context);
     }
     if (showRangefinder) {
       const rangeDescriptors = buildRangefinderOverlayDescriptors(snapshot, state, context);
@@ -5989,6 +6504,32 @@ export function createRendererManager({
     const perturbDescriptors = buildPerturbOverlayDescriptors(snapshot, state, context, overlayOptions);
     applyPerturbOverlayDescriptors(context, perturbDescriptors);
 
+    if (showBodyBvh || showMeshBvh) {
+      updateBvhOverlays(context, snapshot, state, assets, {
+        voptFlags,
+        hideAllGeometry,
+        flexGroupIds,
+        flexGroupMask,
+      });
+    } else {
+      hideBvhGroup(context);
+    }
+    if (showInertia) {
+      updateInertiaOverlays(context, snapshot, state, assets, { voptFlags, hideAllGeometry });
+    } else {
+      hideInertiaGroup(context);
+    }
+    if (showAutoConnect) {
+      updateAutoConnectOverlays(context, snapshot, state, assets, { voptFlags, hideAllGeometry });
+    } else {
+      hideAutoConnectGroup(context);
+    }
+    if (showPertForce) {
+      updateExternalPerturbOverlays(context, snapshot, state, { voptFlags });
+    } else {
+      hideExternalPerturbGroup(context);
+    }
+
     const geomDescriptors = buildGeomDescriptors(snapshot, state, assets);
     drawn = applyGeomDescriptors(context, geomDescriptors, {
       assets,
@@ -5997,6 +6538,7 @@ export function createRendererManager({
       sceneFlags,
       reflectionEnabled,
       hideAllGeometry,
+      voptFlags,
       geomGroupIds,
       geomGroupMask,
     });
@@ -6006,6 +6548,7 @@ export function createRendererManager({
       state,
       snapshot,
       hideAllGeometry,
+      voptFlags,
       siteGroupIds,
       siteGroupMask,
     });
@@ -7092,8 +7635,13 @@ function applyComOverlayDescriptors(ctx, descriptors) {
 }
 
 function buildRangefinderOverlayDescriptors(snapshot, state, ctx) {
-  const sensorType = snapshot?.sensor_type;
-  const sensorObj = snapshot?.sensor_objid;
+  const sensorAssets =
+    state?.rendering?.assets?.sensors ||
+    snapshot?.renderAssets?.sensors ||
+    null;
+  const sensorType = sensorAssets?.type || snapshot?.sensor_type;
+  const sensorObj = sensorAssets?.objid || snapshot?.sensor_objid;
+  const sensorAdr = sensorAssets?.adr || null;
   const sensordata = snapshot?.sensordata;
   const siteXpos = snapshot?.site_xpos;
   const siteXmat = snapshot?.site_xmat;
@@ -7108,47 +7656,59 @@ function buildRangefinderOverlayDescriptors(snapshot, state, ctx) {
       : 0xffff66;
   const colorHex = rgbaToHex(visRgba.rangefinder, rangefinderFallback);
   const opacity = alphaFromArray(visRgba.rangefinder, 1);
-  const maxIndex = Math.min(sensorType.length, sensorObj.length, sensordata.length);
+  const maxIndex = Math.min(sensorType.length, sensorObj.length);
   const descriptors = [];
   let descriptorIndex = 0;
   const ns = Math.floor(siteXpos.length / 3);
   for (let i = 0; i < maxIndex; i += 1) {
     const stype = Number(sensorType[i]) | 0;
-    if (stype !== MJ_SENSOR.RANGEFINDER) continue;
-    const sid = Number(sensorObj[i]) | 0;
-    if (sid < 0 || sid >= ns) continue;
-    const dist = Number(sensordata[i]) || 0;
-    if (!(dist > 0)) continue;
-    const base = 3 * sid;
-    const pos = PERTURB_TEMP_ANCHOR.set(
-      Number(siteXpos[base + 0]) || 0,
-      Number(siteXpos[base + 1]) || 0,
-      Number(siteXpos[base + 2]) || 0,
-    );
-    const rotBase = 9 * sid;
-    const rot = [
-      siteXmat?.[rotBase + 0] ?? 1, siteXmat?.[rotBase + 1] ?? 0, siteXmat?.[rotBase + 2] ?? 0,
-      siteXmat?.[rotBase + 3] ?? 0, siteXmat?.[rotBase + 4] ?? 1, siteXmat?.[rotBase + 5] ?? 0,
-      siteXmat?.[rotBase + 6] ?? 0, siteXmat?.[rotBase + 7] ?? 0, siteXmat?.[rotBase + 8] ?? 1,
-    ];
-    TEMP_MAT4.set(
-      rot[0], rot[1], rot[2], 0,
-      rot[3], rot[4], rot[5], 0,
-      rot[6], rot[7], rot[8], 0,
-      0, 0, 0, 1,
-    );
-    const forward = PERTURB_TEMP_VEC.set(0, 0, 1).applyMatrix4(TEMP_MAT4).normalize();
-    const target = PERTURB_TEMP_VEC2.copy(forward).multiplyScalar(dist).add(pos);
-    descriptors.push({
-      kind: 'overlay',
-      subtype: OVERLAY_SUBTYPE.RANGEFINDER,
-      index: descriptorIndex,
-      position: [pos.x, pos.y, pos.z],
-      target: [target.x, target.y, target.z],
-      colorHex,
-      opacity,
-    });
-    descriptorIndex += 1;
+    const adr = sensorAdr && i < sensorAdr.length ? (sensorAdr[i] | 0) : (i | 0);
+    if (stype === MJ_SENSOR.RANGEFINDER) {
+      const sid = Number(sensorObj[i]) | 0;
+      if (sid < 0 || sid >= ns) continue;
+      if (adr < 0 || adr >= sensordata.length) continue;
+      const dist = Number(sensordata[adr]) || 0;
+      if (dist < 0) continue;
+      const base = 3 * sid;
+      const px = Number(siteXpos[base + 0]) || 0;
+      const py = Number(siteXpos[base + 1]) || 0;
+      const pz = Number(siteXpos[base + 2]) || 0;
+      const rotBase = 9 * sid;
+      const dx = Number(siteXmat[rotBase + 2]) || 0;
+      const dy = Number(siteXmat[rotBase + 5]) || 0;
+      const dz = Number(siteXmat[rotBase + 8]) || 0;
+      descriptors.push({
+        kind: 'overlay',
+        subtype: OVERLAY_SUBTYPE.RANGEFINDER,
+        index: descriptorIndex,
+        position: [px, py, pz],
+        target: [px + dx * dist, py + dy * dist, pz + dz * dist],
+        colorHex,
+        opacity,
+      });
+      descriptorIndex += 1;
+      continue;
+    }
+    if (stype === MJ_SENSOR.GEOMFROMTO) {
+      if (adr < 0 || (adr + 5) >= sensordata.length) continue;
+      const fx = Number(sensordata[adr + 0]) || 0;
+      const fy = Number(sensordata[adr + 1]) || 0;
+      const fz = Number(sensordata[adr + 2]) || 0;
+      const tx = Number(sensordata[adr + 3]) || 0;
+      const ty = Number(sensordata[adr + 4]) || 0;
+      const tz = Number(sensordata[adr + 5]) || 0;
+      if (!(fx || fy || fz || tx || ty || tz)) continue;
+      descriptors.push({
+        kind: 'overlay',
+        subtype: OVERLAY_SUBTYPE.RANGEFINDER,
+        index: descriptorIndex,
+        position: [fx, fy, fz],
+        target: [tx, ty, tz],
+        colorHex,
+        opacity,
+      });
+      descriptorIndex += 1;
+    }
   }
   return descriptors;
 }
@@ -7205,6 +7765,1018 @@ function applyRangefinderOverlayDescriptors(ctx, descriptors) {
     if (pool[i]) pool[i].visible = false;
   }
   group.visible = used > 0;
+}
+
+function ensureBvhGroup(ctx) {
+  if (!ctx) return null;
+  if (!ctx.bvhGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:bvh';
+    if (ctx.root) ctx.root.add(group);
+    ctx.bvhGroup = group;
+    ctx.bvhPool = [];
+    ctx._bvhUnitGeometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(2, 2, 2));
+  }
+  return ctx.bvhGroup;
+}
+
+function hideBvhGroup(ctx) {
+  if (!ctx) return;
+  const group = ctx.bvhGroup || null;
+  if (group) group.visible = false;
+  if (Array.isArray(ctx.bvhPool)) {
+    for (const mesh of ctx.bvhPool) {
+      if (mesh) mesh.visible = false;
+    }
+  }
+}
+
+function ensureBvhBox(ctx, poolIndex) {
+  const group = ensureBvhGroup(ctx);
+  if (!group) return null;
+  const pool = Array.isArray(ctx.bvhPool) ? ctx.bvhPool : (ctx.bvhPool = []);
+  let box = pool[poolIndex];
+  if (!box) {
+    const geom = ctx._bvhUnitGeometry || (ctx._bvhUnitGeometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(2, 2, 2)));
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xffffff,
+      transparent: false,
+      opacity: 1,
+      depthWrite: false,
+      toneMapped: false,
+      fog: false,
+    });
+    box = new THREE.LineSegments(geom, mat);
+    box.frustumCulled = false;
+    box.renderOrder = 42;
+    pool[poolIndex] = box;
+    group.add(box);
+  }
+  return box;
+}
+
+function updateBvhOverlays(ctx, snapshot, state, assets, options = {}) {
+  if (!ctx) return 0;
+  const vopt = Array.isArray(options.voptFlags) ? options.voptFlags : (state?.rendering?.voptFlags || []);
+  const showBodyBvh = voptEnabled(vopt, MJ_VIS.BODYBVH);
+  const showMeshBvh = voptEnabled(vopt, MJ_VIS.MESHBVH);
+  if (!showBodyBvh && !showMeshBvh) {
+    hideBvhGroup(ctx);
+    return 0;
+  }
+  if (options.hideAllGeometry) {
+    hideBvhGroup(ctx);
+    return 0;
+  }
+  const bvh = assets?.bvh || null;
+  if (!bvh) {
+    hideBvhGroup(ctx);
+    return 0;
+  }
+  const group = ensureBvhGroup(ctx);
+  const pool = Array.isArray(ctx.bvhPool) ? ctx.bvhPool : (ctx.bvhPool = []);
+  const bvhDepth = Number.isFinite(state?.rendering?.bvhDepth) ? (state.rendering.bvhDepth | 0) : 0;
+  const vis = state?.model?.vis || {};
+  const rgba = vis.rgba || {};
+  const global = vis.global || {};
+  const overlayCfg = ctx?.fallback?.overlays || null;
+  const bvFallback = overlayCfg && Number.isFinite(overlayCfg.bvh) ? overlayCfg.bvh : 0x66ccff;
+  const bvActiveFallback = overlayCfg && Number.isFinite(overlayCfg.bvhActive) ? overlayCfg.bvhActive : 0xffcc66;
+  const baseColorHex = rgbaToHex(rgba.bv, bvFallback);
+  const activeColorHex = rgbaToHex(rgba.bvactive, bvActiveFallback);
+  const baseOpacity = alphaFromArray(rgba.bv, 1);
+  const activeEnabled = (global.bvactive | 0) === 1;
+
+  const bvhChild = bvh.child;
+  const bvhDepthArr = bvh.depth;
+  const bvhNodeId = bvh.nodeid;
+  const bvhAabb = bvh.aabb;
+  const geomAabb = bvh.geom_aabb;
+  const bvhActive = snapshot?.bvh_active || null;
+  const bvhAabbDyn = snapshot?.bvh_aabb_dyn || null;
+  const nbvh = bvh.count | 0;
+  const nbvhstatic = bvh.nbvhstatic | 0;
+  const nbvhdynamic = bvh.nbvhdynamic | 0;
+
+  const isLeaf = (nodeIndex) => {
+    if (!bvhChild || (2 * nodeIndex + 1) >= bvhChild.length) return false;
+    const left = bvhChild[2 * nodeIndex] | 0;
+    const right = bvhChild[2 * nodeIndex + 1] | 0;
+    return left === -1 && right === -1;
+  };
+  const shouldRenderNode = (nodeIndex) => {
+    if (!(nodeIndex >= 0) || nodeIndex >= nbvh) return false;
+    if (!bvhDepthArr || nodeIndex >= bvhDepthArr.length) return true;
+    const depthVal = bvhDepthArr[nodeIndex] | 0;
+    if (depthVal === bvhDepth) return true;
+    const leaf = isLeaf(nodeIndex);
+    if (!leaf || depthVal > bvhDepth) return false;
+    return true;
+  };
+  const pickColor = (nodeIndex, meshSkipInactive = false) => {
+    if (!activeEnabled || !bvhActive || nodeIndex < 0 || nodeIndex >= bvhActive.length) {
+      return { colorHex: baseColorHex, opacity: baseOpacity, skip: false };
+    }
+    const active = (bvhActive[nodeIndex] | 0) !== 0;
+    if (meshSkipInactive && !active) return { colorHex: baseColorHex, opacity: baseOpacity, skip: true };
+    return { colorHex: active ? activeColorHex : baseColorHex, opacity: baseOpacity, skip: false };
+  };
+  const setBoxPose = (box, px, py, pz, rotArr, sx, sy, sz, colorHex, opacity) => {
+    box.visible = true;
+    box.position.set(px, py, pz);
+    if (rotArr && rotArr.length >= 9) {
+      TEMP_MAT4.set(
+        rotArr[0], rotArr[1], rotArr[2], 0,
+        rotArr[3], rotArr[4], rotArr[5], 0,
+        rotArr[6], rotArr[7], rotArr[8], 0,
+        0, 0, 0, 1,
+      );
+      box.quaternion.setFromRotationMatrix(TEMP_MAT4);
+    } else {
+      box.quaternion.set(0, 0, 0, 1);
+    }
+    box.scale.set(Math.max(0, sx) * 2, Math.max(0, sy) * 2, Math.max(0, sz) * 2);
+    const mat = box.material;
+    if (mat) {
+      mat.color.setHex(colorHex);
+      mat.opacity = opacity;
+      mat.transparent = opacity < 0.999;
+      mat.needsUpdate = true;
+    }
+  };
+
+  let used = 0;
+
+  // Body BVH (static).
+  if (showBodyBvh) {
+    const bodyBvhAdr = bvh.body_bvhadr;
+    const bodyBvhNum = bvh.body_bvhnum;
+    const xipos = snapshot?.xipos || null;
+    const ximat = snapshot?.ximat || null;
+    const xpos = snapshot?.xpos || null;
+    const xmat = snapshot?.xmat || null;
+    const ngeom = snapshot?.ngeom | 0;
+    const nbody = assets?.bodies?.count | 0;
+    if (bodyBvhAdr && bodyBvhNum && xipos && ximat && xpos && xmat && geomAabb && bvhAabb) {
+      let bodyId = 0;
+      for (let i = 0; i < Math.min(nbvhstatic, nbvh); i += 1) {
+        if (!shouldRenderNode(i)) continue;
+        while (bodyId < nbody && (i >= ((bodyBvhAdr[bodyId] | 0) + (bodyBvhNum[bodyId] | 0)))) {
+          bodyId += 1;
+        }
+        if (bodyId >= nbody) break;
+        const { colorHex, opacity } = pickColor(i, false);
+        if (isLeaf(i)) {
+          const geomId = bvhNodeId && i < bvhNodeId.length ? (bvhNodeId[i] | 0) : -1;
+          if (geomId < 0 || geomId >= ngeom) continue;
+          const aabbBase = 6 * geomId;
+          if ((aabbBase + 5) >= geomAabb.length) continue;
+          const cx = Number(geomAabb[aabbBase + 0]) || 0;
+          const cy = Number(geomAabb[aabbBase + 1]) || 0;
+          const cz = Number(geomAabb[aabbBase + 2]) || 0;
+          const sx = Number(geomAabb[aabbBase + 3]) || 0;
+          const sy = Number(geomAabb[aabbBase + 4]) || 0;
+          const sz = Number(geomAabb[aabbBase + 5]) || 0;
+          const posBase = 3 * geomId;
+          const rotBase = 9 * geomId;
+          if ((posBase + 2) >= xpos.length || (rotBase + 8) >= xmat.length) continue;
+          const ox = Number(xpos[posBase + 0]) || 0;
+          const oy = Number(xpos[posBase + 1]) || 0;
+          const oz = Number(xpos[posBase + 2]) || 0;
+          const rot = [
+            xmat[rotBase + 0], xmat[rotBase + 1], xmat[rotBase + 2],
+            xmat[rotBase + 3], xmat[rotBase + 4], xmat[rotBase + 5],
+            xmat[rotBase + 6], xmat[rotBase + 7], xmat[rotBase + 8],
+          ];
+          const rx = (Number(rot[0]) || 0) * cx + (Number(rot[1]) || 0) * cy + (Number(rot[2]) || 0) * cz;
+          const ry = (Number(rot[3]) || 0) * cx + (Number(rot[4]) || 0) * cy + (Number(rot[5]) || 0) * cz;
+          const rz = (Number(rot[6]) || 0) * cx + (Number(rot[7]) || 0) * cy + (Number(rot[8]) || 0) * cz;
+          const box = ensureBvhBox(ctx, used);
+          if (!box) continue;
+          setBoxPose(box, ox + rx, oy + ry, oz + rz, rot, sx, sy, sz, colorHex, opacity);
+          used += 1;
+        } else {
+          const aabbBase = 6 * i;
+          if ((aabbBase + 5) >= bvhAabb.length) continue;
+          const cx = Number(bvhAabb[aabbBase + 0]) || 0;
+          const cy = Number(bvhAabb[aabbBase + 1]) || 0;
+          const cz = Number(bvhAabb[aabbBase + 2]) || 0;
+          const sx = Number(bvhAabb[aabbBase + 3]) || 0;
+          const sy = Number(bvhAabb[aabbBase + 4]) || 0;
+          const sz = Number(bvhAabb[aabbBase + 5]) || 0;
+          const posBase = 3 * bodyId;
+          const rotBase = 9 * bodyId;
+          if ((posBase + 2) >= xipos.length || (rotBase + 8) >= ximat.length) continue;
+          const ox = Number(xipos[posBase + 0]) || 0;
+          const oy = Number(xipos[posBase + 1]) || 0;
+          const oz = Number(xipos[posBase + 2]) || 0;
+          const rot = [
+            ximat[rotBase + 0], ximat[rotBase + 1], ximat[rotBase + 2],
+            ximat[rotBase + 3], ximat[rotBase + 4], ximat[rotBase + 5],
+            ximat[rotBase + 6], ximat[rotBase + 7], ximat[rotBase + 8],
+          ];
+          const rx = (Number(rot[0]) || 0) * cx + (Number(rot[1]) || 0) * cy + (Number(rot[2]) || 0) * cz;
+          const ry = (Number(rot[3]) || 0) * cx + (Number(rot[4]) || 0) * cy + (Number(rot[5]) || 0) * cz;
+          const rz = (Number(rot[6]) || 0) * cx + (Number(rot[7]) || 0) * cy + (Number(rot[8]) || 0) * cz;
+          const box = ensureBvhBox(ctx, used);
+          if (!box) continue;
+          setBoxPose(box, ox + rx, oy + ry, oz + rz, rot, sx, sy, sz, colorHex, opacity);
+          used += 1;
+        }
+      }
+    }
+  }
+
+  // Mesh BVH (static nodes only).
+  if (showMeshBvh) {
+    const geoms = assets?.geoms || null;
+    const meshBvhAdr = bvh.mesh_bvhadr;
+    const meshBvhNum = bvh.mesh_bvhnum;
+    const meshOctAdr = bvh.mesh_octadr;
+    const xpos = snapshot?.xpos || null;
+    const xmat = snapshot?.xmat || null;
+    const ngeom = snapshot?.ngeom | 0;
+    if (geoms && meshBvhAdr && meshBvhNum && xpos && xmat && bvhAabb) {
+      for (let geomId = 0; geomId < ngeom; geomId += 1) {
+        const meshId = geoms.dataid && geomId < geoms.dataid.length ? (geoms.dataid[geomId] | 0) : -1;
+        if (meshId < 0) continue;
+        const octAdr = meshOctAdr && meshId < meshOctAdr.length ? (meshOctAdr[meshId] | 0) : -1;
+        if (octAdr >= 0) continue;
+        const bvhAdr = meshBvhAdr && meshId < meshBvhAdr.length ? (meshBvhAdr[meshId] | 0) : -1;
+        const bvhNum = meshBvhNum && meshId < meshBvhNum.length ? (meshBvhNum[meshId] | 0) : 0;
+        if (!(bvhNum > 0) || bvhAdr < 0) continue;
+        const posBase = 3 * geomId;
+        const rotBase = 9 * geomId;
+        if ((posBase + 2) >= xpos.length || (rotBase + 8) >= xmat.length) continue;
+        const ox = Number(xpos[posBase + 0]) || 0;
+        const oy = Number(xpos[posBase + 1]) || 0;
+        const oz = Number(xpos[posBase + 2]) || 0;
+        const rot = [
+          xmat[rotBase + 0], xmat[rotBase + 1], xmat[rotBase + 2],
+          xmat[rotBase + 3], xmat[rotBase + 4], xmat[rotBase + 5],
+          xmat[rotBase + 6], xmat[rotBase + 7], xmat[rotBase + 8],
+        ];
+        for (let b = 0; b < bvhNum; b += 1) {
+          const nodeIndex = (bvhAdr + b) | 0;
+          if (nodeIndex < 0 || nodeIndex >= nbvhstatic) continue;
+          if (!shouldRenderNode(nodeIndex)) continue;
+          const { colorHex, opacity, skip } = pickColor(nodeIndex, true);
+          if (skip) continue;
+          const aabbBase = 6 * nodeIndex;
+          if ((aabbBase + 5) >= bvhAabb.length) continue;
+          const cx = Number(bvhAabb[aabbBase + 0]) || 0;
+          const cy = Number(bvhAabb[aabbBase + 1]) || 0;
+          const cz = Number(bvhAabb[aabbBase + 2]) || 0;
+          const sx = Number(bvhAabb[aabbBase + 3]) || 0;
+          const sy = Number(bvhAabb[aabbBase + 4]) || 0;
+          const sz = Number(bvhAabb[aabbBase + 5]) || 0;
+          const rx = (Number(rot[0]) || 0) * cx + (Number(rot[1]) || 0) * cy + (Number(rot[2]) || 0) * cz;
+          const ry = (Number(rot[3]) || 0) * cx + (Number(rot[4]) || 0) * cy + (Number(rot[5]) || 0) * cz;
+          const rz = (Number(rot[6]) || 0) * cx + (Number(rot[7]) || 0) * cy + (Number(rot[8]) || 0) * cz;
+          const box = ensureBvhBox(ctx, used);
+          if (!box) continue;
+          setBoxPose(box, ox + rx, oy + ry, oz + rz, rot, sx, sy, sz, colorHex, opacity);
+          used += 1;
+        }
+      }
+    }
+
+    // Mesh octrees (simulate: addMeshOctreeGeoms, gated on mjVIS_MESHBVH).
+    const meshOctNum = bvh.mesh_octnum;
+    const octDepth = bvh.oct_depth;
+    const octAabb = bvh.oct_aabb;
+    if (geoms && meshOctAdr && meshOctNum && octDepth && octAabb && xpos && xmat) {
+      for (let geomId = 0; geomId < ngeom; geomId += 1) {
+        const meshId = geoms.dataid && geomId < geoms.dataid.length ? (geoms.dataid[geomId] | 0) : -1;
+        if (meshId < 0) continue;
+        const gType = geoms.type && geomId < geoms.type.length ? (geoms.type[geomId] | 0) : -1;
+        if (gType === MJ_GEOM.HFIELD) continue;
+        const octAdr = meshOctAdr && meshId < meshOctAdr.length ? (meshOctAdr[meshId] | 0) : -1;
+        const octNum = meshOctNum && meshId < meshOctNum.length ? (meshOctNum[meshId] | 0) : 0;
+        if (!(octNum > 0) || octAdr < 0) continue;
+        const posBase = 3 * geomId;
+        const rotBase = 9 * geomId;
+        if ((posBase + 2) >= xpos.length || (rotBase + 8) >= xmat.length) continue;
+        const ox = Number(xpos[posBase + 0]) || 0;
+        const oy = Number(xpos[posBase + 1]) || 0;
+        const oz = Number(xpos[posBase + 2]) || 0;
+        const rot = [
+          xmat[rotBase + 0], xmat[rotBase + 1], xmat[rotBase + 2],
+          xmat[rotBase + 3], xmat[rotBase + 4], xmat[rotBase + 5],
+          xmat[rotBase + 6], xmat[rotBase + 7], xmat[rotBase + 8],
+        ];
+        for (let b = 0; b < octNum; b += 1) {
+          const nodeIndex = (octAdr + b) | 0;
+          if (nodeIndex < 0 || nodeIndex >= octDepth.length) continue;
+          if ((octDepth[nodeIndex] | 0) !== bvhDepth) continue;
+          const aabbBase = 6 * nodeIndex;
+          if ((aabbBase + 5) >= octAabb.length) continue;
+          const cx = Number(octAabb[aabbBase + 0]) || 0;
+          const cy = Number(octAabb[aabbBase + 1]) || 0;
+          const cz = Number(octAabb[aabbBase + 2]) || 0;
+          const sx = Number(octAabb[aabbBase + 3]) || 0;
+          const sy = Number(octAabb[aabbBase + 4]) || 0;
+          const sz = Number(octAabb[aabbBase + 5]) || 0;
+          const rx = (Number(rot[0]) || 0) * cx + (Number(rot[1]) || 0) * cy + (Number(rot[2]) || 0) * cz;
+          const ry = (Number(rot[3]) || 0) * cx + (Number(rot[4]) || 0) * cy + (Number(rot[5]) || 0) * cz;
+          const rz = (Number(rot[6]) || 0) * cx + (Number(rot[7]) || 0) * cy + (Number(rot[8]) || 0) * cz;
+          const box = ensureBvhBox(ctx, used);
+          if (!box) continue;
+          setBoxPose(box, ox + rx, oy + ry, oz + rz, rot, sx, sy, sz, baseColorHex, baseOpacity);
+          used += 1;
+        }
+      }
+    }
+
+    // Flex BVH (simulate: addFlexBvhGeoms AABBs).
+    const flexAssets = assets?.flexes || null;
+    const flexBvhAdr = bvh.flex_bvhadr;
+    const flexBvhNum = bvh.flex_bvhnum;
+    const flexGroupIds = options.flexGroupIds || flexAssets?.group || null;
+    const flexGroupMask = options.flexGroupMask || null;
+    if (flexAssets && flexBvhAdr && flexBvhNum && bvhAabbDyn && (nbvhdynamic > 0) && (nbvhstatic >= 0)) {
+      const nflex = flexAssets.count | 0;
+      for (let f = 0; f < nflex; f += 1) {
+        const groupId = flexGroupIds && f < flexGroupIds.length ? (flexGroupIds[f] | 0) : 0;
+        if (flexGroupMask && Array.isArray(flexGroupMask)) {
+          if (groupId >= 0 && groupId < flexGroupMask.length && !flexGroupMask[groupId]) continue;
+        }
+        const adr = flexBvhAdr && f < flexBvhAdr.length ? (flexBvhAdr[f] | 0) : -1;
+        const num = flexBvhNum && f < flexBvhNum.length ? (flexBvhNum[f] | 0) : 0;
+        if (!(num > 0) || adr < 0) continue;
+        for (let b = 0; b < num; b += 1) {
+          const nodeIndex = (adr + b) | 0;
+          if (nodeIndex < nbvhstatic) continue;
+          if (!shouldRenderNode(nodeIndex)) continue;
+          const dynIndex = (nodeIndex - nbvhstatic) | 0;
+          if (dynIndex < 0 || dynIndex >= nbvhdynamic) continue;
+          const aabbBase = 6 * dynIndex;
+          if ((aabbBase + 5) >= bvhAabbDyn.length) continue;
+          const cx = Number(bvhAabbDyn[aabbBase + 0]) || 0;
+          const cy = Number(bvhAabbDyn[aabbBase + 1]) || 0;
+          const cz = Number(bvhAabbDyn[aabbBase + 2]) || 0;
+          const sx = Number(bvhAabbDyn[aabbBase + 3]) || 0;
+          const sy = Number(bvhAabbDyn[aabbBase + 4]) || 0;
+          const sz = Number(bvhAabbDyn[aabbBase + 5]) || 0;
+          const { colorHex, opacity } = pickColor(nodeIndex, false);
+          const box = ensureBvhBox(ctx, used);
+          if (!box) continue;
+          setBoxPose(box, cx, cy, cz, null, sx, sy, sz, colorHex, opacity);
+          used += 1;
+        }
+      }
+    }
+  }
+
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  if (group) group.visible = used > 0;
+  ctx.bvhPool = pool;
+  return used;
+}
+
+function ensureInertiaGroup(ctx) {
+  if (!ctx) return null;
+  if (!ctx.inertiaGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:inertia';
+    if (ctx.root) ctx.root.add(group);
+    ctx.inertiaGroup = group;
+    ctx.inertiaPool = [];
+    ctx._inertiaBoxGeometry = new THREE.BoxGeometry(2, 2, 2);
+    ctx._inertiaEllipsoidGeometry = new THREE.SphereGeometry(1, 16, 12);
+  }
+  return ctx.inertiaGroup;
+}
+
+function hideInertiaGroup(ctx) {
+  if (!ctx) return;
+  const group = ctx.inertiaGroup || null;
+  if (group) group.visible = false;
+  if (Array.isArray(ctx.inertiaPool)) {
+    for (const mesh of ctx.inertiaPool) {
+      if (mesh) mesh.visible = false;
+    }
+  }
+}
+
+function ensureInertiaMesh(ctx, poolIndex, ellipsoid) {
+  const group = ensureInertiaGroup(ctx);
+  if (!group) return null;
+  const pool = Array.isArray(ctx.inertiaPool) ? ctx.inertiaPool : (ctx.inertiaPool = []);
+  let mesh = pool[poolIndex];
+  const want = ellipsoid ? 1 : 0;
+  if (!mesh || (mesh.userData?.ellipsoid | 0) !== want) {
+    const geom = ellipsoid
+      ? (ctx._inertiaEllipsoidGeometry || (ctx._inertiaEllipsoidGeometry = new THREE.SphereGeometry(1, 16, 12)))
+      : (ctx._inertiaBoxGeometry || (ctx._inertiaBoxGeometry = new THREE.BoxGeometry(2, 2, 2)));
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: false,
+      opacity: 1,
+      depthWrite: false,
+      toneMapped: false,
+      fog: false,
+    });
+    const next = new THREE.Mesh(geom, mat);
+    next.frustumCulled = false;
+    next.renderOrder = 41;
+    next.userData = next.userData || {};
+    next.userData.ellipsoid = want;
+    if (mesh) {
+      group.remove(mesh);
+    }
+    group.add(next);
+    pool[poolIndex] = next;
+    mesh = next;
+  }
+  return mesh;
+}
+
+function updateInertiaOverlays(ctx, snapshot, state, assets, options = {}) {
+  if (!ctx) return 0;
+  const vopt = Array.isArray(options.voptFlags) ? options.voptFlags : (state?.rendering?.voptFlags || []);
+  if (!voptEnabled(vopt, MJ_VIS.INERTIA) || options.hideAllGeometry) {
+    hideInertiaGroup(ctx);
+    return 0;
+  }
+  const bodies = assets?.bodies || null;
+  const xipos = snapshot?.xipos || null;
+  const ximat = snapshot?.ximat || null;
+  if (!bodies || !xipos || !ximat) {
+    hideInertiaGroup(ctx);
+    return 0;
+  }
+  const massArr = bodies.mass || null;
+  const inertiaArr = bodies.inertia || null;
+  if (!massArr || !inertiaArr) {
+    hideInertiaGroup(ctx);
+    return 0;
+  }
+  const showStatic = voptEnabled(vopt, MJ_VIS.STATIC);
+  const weldIdView = bodies.weldid || null;
+  const mocapIdView = bodies.mocapid || null;
+  const canStaticCheck = !!weldIdView && !!mocapIdView;
+  const isBodyStatic = (bodyId) => {
+    if (!canStaticCheck) return false;
+    const bid = bodyId | 0;
+    if (bid < 0 || bid >= weldIdView.length || bid >= mocapIdView.length) return false;
+    return (weldIdView[bid] | 0) === 0 && (mocapIdView[bid] | 0) === -1;
+  };
+  const ellipsoid = ((state?.model?.vis?.global?.ellipsoidinertia | 0) === 1);
+  const scaleInertia = ellipsoid ? Math.sqrt(5) : Math.sqrt(3);
+  const scaledDensity = voptEnabled(vopt, MJ_VIS.SCLINERTIA);
+  const visRgba = state?.model?.vis?.rgba || {};
+  const overlayCfg = ctx?.fallback?.overlays || null;
+  const inertiaFallback = overlayCfg && Number.isFinite(overlayCfg.inertia) ? overlayCfg.inertia : 0xff6666;
+  const colorHex = rgbaToHex(visRgba.inertia, inertiaFallback);
+  const opacity = alphaFromArray(visRgba.inertia, 0.35);
+  const group = ensureInertiaGroup(ctx);
+  const pool = Array.isArray(ctx.inertiaPool) ? ctx.inertiaPool : (ctx.inertiaPool = []);
+  const nbody = bodies.count | 0;
+  let used = 0;
+  for (let i = 1; i < nbody; i += 1) {
+    if (!showStatic && isBodyStatic(i)) continue;
+    const mass = Number(massArr[i]) || 0;
+    if (!(mass > 1e-12)) continue;
+    const Ixx = Number(inertiaArr[3 * i + 0]) || 0;
+    const Iyy = Number(inertiaArr[3 * i + 1]) || 0;
+    const Izz = Number(inertiaArr[3 * i + 2]) || 0;
+    let sx = Math.sqrt(Math.max(0, (Iyy + Izz - Ixx) / (2 * mass))) * scaleInertia;
+    let sy = Math.sqrt(Math.max(0, (Ixx + Izz - Iyy) / (2 * mass))) * scaleInertia;
+    let sz = Math.sqrt(Math.max(0, (Ixx + Iyy - Izz) / (2 * mass))) * scaleInertia;
+    if (scaledDensity) {
+      const volumeScale = ellipsoid ? (4.0 / 3.0) * Math.PI : 8.0;
+      const volume = volumeScale * sx * sy * sz;
+      const density = mass / Math.max(1e-12, volume);
+      const scale = Math.pow(density * 0.001, 1 / 3);
+      sx *= scale;
+      sy *= scale;
+      sz *= scale;
+    }
+    const posBase = 3 * i;
+    const rotBase = 9 * i;
+    if ((posBase + 2) >= xipos.length || (rotBase + 8) >= ximat.length) continue;
+    const mesh = ensureInertiaMesh(ctx, used, ellipsoid);
+    if (!mesh) continue;
+    mesh.visible = true;
+    mesh.position.set(
+      Number(xipos[posBase + 0]) || 0,
+      Number(xipos[posBase + 1]) || 0,
+      Number(xipos[posBase + 2]) || 0,
+    );
+    TEMP_MAT4.set(
+      ximat[rotBase + 0] ?? 1, ximat[rotBase + 1] ?? 0, ximat[rotBase + 2] ?? 0, 0,
+      ximat[rotBase + 3] ?? 0, ximat[rotBase + 4] ?? 1, ximat[rotBase + 5] ?? 0, 0,
+      ximat[rotBase + 6] ?? 0, ximat[rotBase + 7] ?? 0, ximat[rotBase + 8] ?? 1, 0,
+      0, 0, 0, 1,
+    );
+    mesh.quaternion.setFromRotationMatrix(TEMP_MAT4);
+    mesh.scale.set(Math.max(0, sx), Math.max(0, sy), Math.max(0, sz));
+    const mat = mesh.material;
+    if (mat) {
+      mat.color.setHex(colorHex);
+      mat.opacity = opacity;
+      mat.transparent = opacity < 0.999;
+      mat.needsUpdate = true;
+    }
+    used += 1;
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  if (group) group.visible = used > 0;
+  ctx.inertiaPool = pool;
+  return used;
+}
+
+function ensureAutoConnectGroup(ctx) {
+  if (!ctx) return null;
+  if (!ctx.autoconnectGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:autoconnect';
+    if (ctx.root) ctx.root.add(group);
+    ctx.autoconnectGroup = group;
+    ctx.autoconnectPool = [];
+    ctx._autoconnectUnitGeometry = new THREE.CylinderGeometry(1, 1, 1, 10, 1, false);
+  }
+  return ctx.autoconnectGroup;
+}
+
+function hideAutoConnectGroup(ctx) {
+  if (!ctx) return;
+  const group = ctx.autoconnectGroup || null;
+  if (group) group.visible = false;
+  if (Array.isArray(ctx.autoconnectPool)) {
+    for (const mesh of ctx.autoconnectPool) {
+      if (mesh) mesh.visible = false;
+    }
+  }
+}
+
+function ensureAutoConnectMesh(ctx, poolIndex) {
+  const group = ensureAutoConnectGroup(ctx);
+  if (!group) return null;
+  const pool = Array.isArray(ctx.autoconnectPool) ? ctx.autoconnectPool : (ctx.autoconnectPool = []);
+  let mesh = pool[poolIndex];
+  if (!mesh) {
+    const geom = ctx._autoconnectUnitGeometry || (ctx._autoconnectUnitGeometry = new THREE.CylinderGeometry(1, 1, 1, 10, 1, false));
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: false,
+      opacity: 1,
+      depthWrite: false,
+      toneMapped: false,
+      fog: false,
+    });
+    mesh = new THREE.Mesh(geom, mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 40;
+    pool[poolIndex] = mesh;
+    group.add(mesh);
+  }
+  return mesh;
+}
+
+function updateAutoConnectOverlays(ctx, snapshot, state, assets, options = {}) {
+  if (!ctx) return 0;
+  const vopt = Array.isArray(options.voptFlags) ? options.voptFlags : (state?.rendering?.voptFlags || []);
+  if (!voptEnabled(vopt, MJ_VIS.AUTOCONNECT) || options.hideAllGeometry) {
+    hideAutoConnectGroup(ctx);
+    return 0;
+  }
+  const bodies = assets?.bodies || null;
+  const xipos = snapshot?.xipos || null;
+  const xanchor = snapshot?.xanchor || null;
+  if (!bodies || !xipos || !xanchor) {
+    hideAutoConnectGroup(ctx);
+    return 0;
+  }
+  const parentid = bodies.parentid || null;
+  const jntadr = bodies.jntadr || null;
+  const jntnum = bodies.jntnum || null;
+  if (!parentid || !jntadr || !jntnum) {
+    hideAutoConnectGroup(ctx);
+    return 0;
+  }
+  const visScale = state?.model?.vis?.scale || {};
+  const visRgba = state?.model?.vis?.rgba || {};
+  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
+  const radius = Math.max(1e-4, meanSize * 0.03 * Math.max(Number(visScale.connect) || 1, 1e-6) * scaleAll);
+  const overlayCfg = ctx?.fallback?.overlays || null;
+  const connectFallback = overlayCfg && Number.isFinite(overlayCfg.connect) ? overlayCfg.connect : 0x3344dd;
+  const colorHex = rgbaToHex(visRgba.connect, connectFallback);
+  const opacity = alphaFromArray(visRgba.connect, 1);
+  const group = ensureAutoConnectGroup(ctx);
+  const pool = Array.isArray(ctx.autoconnectPool) ? ctx.autoconnectPool : (ctx.autoconnectPool = []);
+  const nbody = bodies.count | 0;
+  let used = 0;
+  for (let i = 1; i < nbody; i += 1) {
+    const parent = parentid[i] | 0;
+    if (parent === 0) continue;
+    const posBase = 3 * i;
+    if ((posBase + 2) >= xipos.length) continue;
+    __TMP_VEC3_A.set(
+      Number(xipos[posBase + 0]) || 0,
+      Number(xipos[posBase + 1]) || 0,
+      Number(xipos[posBase + 2]) || 0,
+    );
+    const adr = jntadr[i] | 0;
+    const num = jntnum[i] | 0;
+    if (num > 0) {
+      for (let j = adr + num - 1; j >= adr; j -= 1) {
+        const aBase = 3 * j;
+        if ((aBase + 2) >= xanchor.length) continue;
+        __TMP_VEC3_B.set(
+          Number(xanchor[aBase + 0]) || 0,
+          Number(xanchor[aBase + 1]) || 0,
+          Number(xanchor[aBase + 2]) || 0,
+        );
+        const dir = __TMP_VEC3_C.copy(__TMP_VEC3_B).sub(__TMP_VEC3_A);
+        const length = dir.length();
+        if (!(length > 1e-9)) {
+          __TMP_VEC3_A.copy(__TMP_VEC3_B);
+          continue;
+        }
+        dir.normalize();
+        const center = __TMP_VEC3_D.copy(__TMP_VEC3_A).add(__TMP_VEC3_B).multiplyScalar(0.5);
+        const mesh = ensureAutoConnectMesh(ctx, used);
+        if (!mesh) continue;
+        mesh.visible = true;
+        mesh.position.copy(center);
+        LIGHT_TMP_QUAT.setFromUnitVectors(PERTURB_AXIS_DEFAULT, dir);
+        mesh.quaternion.copy(LIGHT_TMP_QUAT);
+        mesh.scale.set(radius, length, radius);
+        const mat = mesh.material;
+        if (mat) {
+          mat.color.setHex(colorHex);
+          mat.opacity = opacity;
+          mat.transparent = opacity < 0.999;
+          mat.needsUpdate = true;
+        }
+        used += 1;
+        __TMP_VEC3_A.copy(__TMP_VEC3_B);
+      }
+    }
+    const parentBase = 3 * parent;
+    if ((parentBase + 2) >= xipos.length) continue;
+    __TMP_VEC3_B.set(
+      Number(xipos[parentBase + 0]) || 0,
+      Number(xipos[parentBase + 1]) || 0,
+      Number(xipos[parentBase + 2]) || 0,
+    );
+    const dir = __TMP_VEC3_C.copy(__TMP_VEC3_B).sub(__TMP_VEC3_A);
+    const length = dir.length();
+    if (!(length > 1e-9)) continue;
+    dir.normalize();
+    const center = __TMP_VEC3_D.copy(__TMP_VEC3_A).add(__TMP_VEC3_B).multiplyScalar(0.5);
+    const mesh = ensureAutoConnectMesh(ctx, used);
+    if (!mesh) continue;
+    mesh.visible = true;
+    mesh.position.copy(center);
+    LIGHT_TMP_QUAT.setFromUnitVectors(PERTURB_AXIS_DEFAULT, dir);
+    mesh.quaternion.copy(LIGHT_TMP_QUAT);
+    mesh.scale.set(radius, length, radius);
+    const mat = mesh.material;
+    if (mat) {
+      mat.color.setHex(colorHex);
+      mat.opacity = opacity;
+      mat.transparent = opacity < 0.999;
+      mat.needsUpdate = true;
+    }
+    used += 1;
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  if (group) group.visible = used > 0;
+  ctx.autoconnectPool = pool;
+  return used;
+}
+
+function ensureExternalPerturbGroup(ctx) {
+  if (!ctx) return null;
+  if (!ctx.externalPerturbGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:external-perturb';
+    if (ctx.root) ctx.root.add(group);
+    ctx.externalPerturbGroup = group;
+    ctx.externalPerturbPool = [];
+  }
+  return ctx.externalPerturbGroup;
+}
+
+function hideExternalPerturbGroup(ctx) {
+  if (!ctx) return;
+  const group = ctx.externalPerturbGroup || null;
+  if (group) group.visible = false;
+  if (Array.isArray(ctx.externalPerturbPool)) {
+    for (const entry of ctx.externalPerturbPool) {
+      if (entry?.node) entry.node.visible = false;
+    }
+  }
+}
+
+function updateExternalPerturbOverlays(ctx, snapshot, state, options = {}) {
+  if (!ctx) return 0;
+  const vopt = Array.isArray(options.voptFlags) ? options.voptFlags : (state?.rendering?.voptFlags || []);
+  if (!voptEnabled(vopt, MJ_VIS.PERTFORCE)) {
+    hideExternalPerturbGroup(ctx);
+    return 0;
+  }
+  const xfrc = snapshot?.xfrc_applied || null;
+  const xipos = snapshot?.xipos || null;
+  if (!xfrc || !xipos) {
+    hideExternalPerturbGroup(ctx);
+    return 0;
+  }
+  const vis = state?.model?.vis || {};
+  const stat = state?.model?.stat || {};
+  const meanMass = Number(stat.meanmass) > 1e-12 ? Number(stat.meanmass) : 1;
+  const mapForce = Number(vis.map?.force);
+  const forceScale = (Number.isFinite(mapForce) ? mapForce : 0.005) / meanMass;
+  const visRgba = vis.rgba || {};
+  const overlayCfg = ctx?.fallback?.overlays || null;
+  const forceFallback = overlayCfg && Number.isFinite(overlayCfg.force) ? overlayCfg.force : 0xff6666;
+  const colorHex = rgbaToHex(visRgba.force, forceFallback);
+  const opacity = alphaFromArray(visRgba.force, 1);
+  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
+  const shaftRadius = Math.max(1e-5, meanSize * Math.max(Number(vis.scale?.forcewidth) || 0.1, 1e-6) * scaleAll);
+  const minLength = Math.max(shaftRadius * 2.0, meanSize * 0.01);
+  const maxLength = Math.max(meanSize * 5, (ctx.bounds?.radius || meanSize) * 8);
+
+  const group = ensureExternalPerturbGroup(ctx);
+  const pool = Array.isArray(ctx.externalPerturbPool) ? ctx.externalPerturbPool : (ctx.externalPerturbPool = []);
+  if (!ctx.externalPerturbMaterial) {
+    ctx.externalPerturbMaterial = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: opacity < 0.999,
+      opacity,
+      depthWrite: true,
+      toneMapped: false,
+      fog: false,
+    });
+  } else {
+    ctx.externalPerturbMaterial.color.setHex(colorHex);
+    ctx.externalPerturbMaterial.opacity = opacity;
+    ctx.externalPerturbMaterial.transparent = opacity < 0.999;
+    ctx.externalPerturbMaterial.depthWrite = true;
+  }
+  const material = ctx.externalPerturbMaterial;
+  const nbody = Math.min(Math.floor(xipos.length / 3), Math.floor(xfrc.length / 6));
+  let used = 0;
+  for (let i = 1; i < nbody; i += 1) {
+    const forceBase = 6 * i;
+    if ((forceBase + 2) >= xfrc.length) continue;
+    const fx = Number(xfrc[forceBase + 0]) || 0;
+    const fy = Number(xfrc[forceBase + 1]) || 0;
+    const fz = Number(xfrc[forceBase + 2]) || 0;
+    const mag = Math.hypot(fx, fy, fz);
+    if (!(mag > 1e-12)) continue;
+    const posBase = 3 * i;
+    if ((posBase + 2) >= xipos.length) continue;
+    const fromX = Number(xipos[posBase + 0]) || 0;
+    const fromY = Number(xipos[posBase + 1]) || 0;
+    const fromZ = Number(xipos[posBase + 2]) || 0;
+    const vecX = fx * forceScale * scaleAll;
+    const vecY = fy * forceScale * scaleAll;
+    const vecZ = fz * forceScale * scaleAll;
+    const dirLen = Math.hypot(vecX, vecY, vecZ);
+    if (!(dirLen > 1e-12)) continue;
+    const dx = vecX / dirLen;
+    const dy = vecY / dirLen;
+    const dz = vecZ / dirLen;
+    const length = Math.min(maxLength, Math.max(minLength, dirLen));
+    let headLength = Math.max(length * 0.3, shaftRadius * 3);
+    headLength = Math.min(headLength, length * 0.6);
+    const headRadius = Math.max(shaftRadius * 1.6, headLength * 0.4);
+    let rawShaft = Math.max(length - headLength, shaftRadius * 1.5);
+    const totalRaw = rawShaft + headLength;
+    const scaleFactor = totalRaw > 1e-12 ? (length / totalRaw) : 1;
+    rawShaft *= scaleFactor;
+    const finalHeadLength = headLength * scaleFactor;
+
+    if (used >= pool.length) {
+      const shaft = new THREE.Mesh(CONTACT_FORCE_SHAFT_GEOMETRY, material);
+      shaft.matrixAutoUpdate = true;
+      shaft.frustumCulled = false;
+      const head = new THREE.Mesh(CONTACT_FORCE_HEAD_GEOMETRY, material);
+      head.matrixAutoUpdate = true;
+      head.frustumCulled = false;
+      const node = new THREE.Group();
+      node.matrixAutoUpdate = true;
+      node.frustumCulled = false;
+      node.add(shaft);
+      node.add(head);
+      pool.push({ node, shaft, head });
+      group.add(node);
+    }
+    const arrow = pool[used];
+    arrow.node.visible = true;
+    arrow.node.position.set(fromX, fromY, fromZ);
+    CONTACT_FORCE_DIR.set(dx, dy, dz);
+    CONTACT_FORCE_TMP_QUAT.setFromUnitVectors(CONTACT_FORCE_AXIS, CONTACT_FORCE_DIR);
+    arrow.node.quaternion.copy(CONTACT_FORCE_TMP_QUAT);
+    arrow.shaft.scale.set(shaftRadius, rawShaft, shaftRadius);
+    arrow.shaft.position.set(0, rawShaft / 2, 0);
+    arrow.head.scale.set(headRadius, finalHeadLength, headRadius);
+    arrow.head.position.set(0, rawShaft + finalHeadLength / 2, 0);
+    used += 1;
+  }
+  for (let i = used; i < pool.length; i += 1) {
+    const arrow = pool[i];
+    if (arrow?.node) arrow.node.visible = false;
+  }
+  if (group) group.visible = used > 0;
+  ctx.externalPerturbPool = pool;
+  return used;
+}
+
+function ensureTactileGroup(ctx) {
+  if (!ctx) return null;
+  if (!ctx.tactileGroup) {
+    const group = new THREE.Group();
+    group.name = 'overlay:tactile';
+    if (ctx.root) ctx.root.add(group);
+    ctx.tactileGroup = group;
+    ctx.tactilePool = new Map();
+  }
+  return ctx.tactileGroup;
+}
+
+function hideTactileGroup(ctx) {
+  if (!ctx) return;
+  const group = ctx.tactileGroup || null;
+  if (group) group.visible = false;
+  const pool = ctx.tactilePool instanceof Map ? ctx.tactilePool : null;
+  if (!pool) return;
+  for (const entry of pool.values()) {
+    if (entry?.mesh) entry.mesh.visible = false;
+  }
+}
+
+function ensureTactileEntry(ctx, sensorId) {
+  const group = ensureTactileGroup(ctx);
+  if (!group) return null;
+  if (!(ctx.tactilePool instanceof Map)) ctx.tactilePool = new Map();
+  const key = sensorId | 0;
+  let entry = ctx.tactilePool.get(key);
+  if (!entry) {
+    const geom = new THREE.BufferGeometry();
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+      fog: false,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 39;
+    mesh.userData = mesh.userData || {};
+    mesh.userData.sensorId = key;
+    group.add(mesh);
+    entry = { mesh, geom };
+    ctx.tactilePool.set(key, entry);
+  }
+  return entry;
+}
+
+function updateTactileOverlays(ctx, snapshot, state, assets, options = {}) {
+  if (!ctx) return 0;
+  const vopt = Array.isArray(options.voptFlags) ? options.voptFlags : (state?.rendering?.voptFlags || []);
+  if (!voptEnabled(vopt, MJ_VIS.CONTACTPOINT)) {
+    hideTactileGroup(ctx);
+    return 0;
+  }
+  const sensordata = snapshot?.sensordata || null;
+  const xpos = snapshot?.xpos || null;
+  const xmat = snapshot?.xmat || null;
+  const sensors = assets?.sensors || null;
+  const meshes = assets?.meshes || null;
+  if (!sensordata || !xpos || !xmat || !sensors || !meshes) {
+    hideTactileGroup(ctx);
+    return 0;
+  }
+  const typeArr = sensors.type || null;
+  const objArr = sensors.objid || null;
+  const refArr = sensors.refid || null;
+  const dimArr = sensors.dim || null;
+  const adrArr = sensors.adr || null;
+  if (!typeArr || !objArr || !refArr || !dimArr || !adrArr) {
+    hideTactileGroup(ctx);
+    return 0;
+  }
+  if (!meshes.vertnum || !meshes.vertadr || !meshes.facenum || !meshes.faceadr || !meshes.vert || !meshes.face) {
+    hideTactileGroup(ctx);
+    return 0;
+  }
+  ensureTactileGroup(ctx);
+  const used = new Set();
+  const nsensor = sensors.count | 0;
+  for (let sid = 0; sid < nsensor; sid += 1) {
+    if ((typeArr[sid] | 0) !== MJ_SENSOR.TACTILE) continue;
+    const meshId = objArr[sid] | 0;
+    const geomId = refArr[sid] | 0;
+    const adr = adrArr[sid] | 0;
+    if (meshId < 0 || geomId < 0 || adr < 0) continue;
+    if (meshId >= meshes.vertnum.length || meshId >= meshes.vertadr.length) continue;
+    if (meshId >= meshes.facenum.length || meshId >= meshes.faceadr.length) continue;
+    const vertnum = meshes.vertnum[meshId] | 0;
+    const vertadr = meshes.vertadr[meshId] | 0;
+    const facenum = meshes.facenum[meshId] | 0;
+    const faceadr = meshes.faceadr[meshId] | 0;
+    if (!(vertnum > 0) || !(facenum > 0)) continue;
+    const dim = dimArr[sid] | 0;
+    const nchannel = Math.floor(dim / vertnum);
+    if (!(nchannel > 0)) continue;
+    if (adr + vertnum > sensordata.length) continue;
+    let maxval = 0;
+    for (let j = 0; j < vertnum; j += 1) {
+      const v = Math.abs(Number(sensordata[adr + j]) || 0);
+      if (v > maxval) maxval = v;
+    }
+    if (!(maxval > 0)) continue;
+    const entry = ensureTactileEntry(ctx, sid);
+    if (!entry || !entry.mesh || !entry.geom) continue;
+    used.add(sid);
+
+    const posBase = 3 * geomId;
+    const rotBase = 9 * geomId;
+    if ((posBase + 2) >= xpos.length || (rotBase + 8) >= xmat.length) continue;
+    entry.mesh.visible = true;
+    entry.mesh.position.set(
+      Number(xpos[posBase + 0]) || 0,
+      Number(xpos[posBase + 1]) || 0,
+      Number(xpos[posBase + 2]) || 0,
+    );
+    TEMP_MAT4.set(
+      xmat[rotBase + 0] ?? 1, xmat[rotBase + 1] ?? 0, xmat[rotBase + 2] ?? 0, 0,
+      xmat[rotBase + 3] ?? 0, xmat[rotBase + 4] ?? 1, xmat[rotBase + 5] ?? 0, 0,
+      xmat[rotBase + 6] ?? 0, xmat[rotBase + 7] ?? 0, xmat[rotBase + 8] ?? 1, 0,
+      0, 0, 0, 1,
+    );
+    entry.mesh.quaternion.setFromRotationMatrix(TEMP_MAT4);
+
+    const faceStart = 3 * faceadr;
+    const faceEnd = faceStart + 3 * facenum;
+    const vertStart = 3 * vertadr;
+    const vertEnd = vertStart + 3 * vertnum;
+    if (faceStart < 0 || faceEnd > meshes.face.length) continue;
+    if (vertStart < 0 || vertEnd > meshes.vert.length) continue;
+    const positions = new Float32Array(facenum * 9);
+    const colors = new Float32Array(facenum * 9);
+    const channelLimit = Math.min(nchannel, 3);
+    for (let f = 0; f < facenum; f += 1) {
+      const fi = faceStart + 3 * f;
+      const a = meshes.face[fi + 0] | 0;
+      const b = meshes.face[fi + 1] | 0;
+      const c = meshes.face[fi + 2] | 0;
+      if (a < 0 || a >= vertnum || b < 0 || b >= vertnum || c < 0 || c >= vertnum) continue;
+      const outBase = 9 * f;
+      positions[outBase + 0] = meshes.vert[vertStart + 3 * a + 0] || 0;
+      positions[outBase + 1] = meshes.vert[vertStart + 3 * a + 1] || 0;
+      positions[outBase + 2] = meshes.vert[vertStart + 3 * a + 2] || 0;
+      positions[outBase + 3] = meshes.vert[vertStart + 3 * b + 0] || 0;
+      positions[outBase + 4] = meshes.vert[vertStart + 3 * b + 1] || 0;
+      positions[outBase + 5] = meshes.vert[vertStart + 3 * b + 2] || 0;
+      positions[outBase + 6] = meshes.vert[vertStart + 3 * c + 0] || 0;
+      positions[outBase + 7] = meshes.vert[vertStart + 3 * c + 1] || 0;
+      positions[outBase + 8] = meshes.vert[vertStart + 3 * c + 2] || 0;
+      let r0 = 0;
+      let r1 = 0;
+      let r2 = 0;
+      for (let r = 0; r < channelLimit; r += 1) {
+        const chBase = adr + r * vertnum;
+        const va = Math.abs(Number(sensordata[chBase + a]) || 0);
+        const vb = Math.abs(Number(sensordata[chBase + b]) || 0);
+        const vc = Math.abs(Number(sensordata[chBase + c]) || 0);
+        const value = (va + vb + vc) / (3 * maxval);
+        if (r === 0) r0 = value;
+        else if (r === 1) r1 = value;
+        else if (r === 2) r2 = value;
+      }
+      for (let k = 0; k < 3; k += 1) {
+        colors[outBase + 3 * k + 0] = Math.max(0, Math.min(1, r0));
+        colors[outBase + 3 * k + 1] = Math.max(0, Math.min(1, r1));
+        colors[outBase + 3 * k + 2] = Math.max(0, Math.min(1, r2));
+      }
+    }
+    entry.geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    entry.geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    entry.geom.computeVertexNormals();
+    entry.geom.computeBoundingSphere();
+  }
+  if (ctx.tactilePool instanceof Map) {
+    for (const [sid, entry] of ctx.tactilePool.entries()) {
+      if (!used.has(sid) && entry?.mesh) entry.mesh.visible = false;
+    }
+  }
+  if (ctx.tactileGroup) ctx.tactileGroup.visible = used.size > 0;
+  return used.size;
 }
 
 function buildConstraintOverlayDescriptors(snapshot, state, ctx) {

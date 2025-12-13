@@ -100,11 +100,14 @@ const SCENE_FLAG_DEFAULTS = Object.freeze([
   true,  // cull face
 ]);
 
-// Default mjvOption.flags state. Keep most overlays off by default, but enable
-// tendon visibility (mjVIS_TENDON = 7) to match simulate's base-layer scene.
+// Default mjvOption.flags state. Mirror simulate's mjVISSTRING defaults, which
+// turn on texture, tendon, range finder, perturb object, static body, skin,
+// flex edge, and flex skin when mjv_defaultOption populates mjvOption.flags.
 const DEFAULT_VOPT_FLAGS = Object.freeze((() => {
   const flags = Array.from({ length: 32 }, () => false);
-  flags[7] = true;
+  for (const idx of [1, 7, 8, 13, 22, 23, 25, 27]) {
+    flags[idx] = true;
+  }
   return flags;
 })());
 
@@ -1671,6 +1674,12 @@ function resolveSnapshot(state) {
       bxpos: viewOrNull(state.bxpos, Float64Array),
       bxmat: viewOrNull(state.bxmat, Float64Array),
       xipos: viewOrNull(state.xipos, Float64Array),
+      ximat: viewOrNull(state.ximat, Float64Array),
+      xanchor: viewOrNull(state.xanchor, Float64Array),
+      dof_island: viewOrNull(state.dof_island, Int32Array),
+      nisland: typeof state.nisland === 'number' ? (state.nisland | 0) : 0,
+      bvh_active: viewOrNull(state.bvh_active, Uint8Array),
+      bvh_aabb_dyn: viewOrNull(state.bvh_aabb_dyn, Float64Array),
       cam_xpos: viewOrNull(state.cam_xpos, Float64Array),
       cam_xmat: viewOrNull(state.cam_xmat, Float64Array),
     light_xpos: viewOrNull(state.light_xpos, Float64Array),
@@ -2146,6 +2155,12 @@ async function loadDefaultXml() {
     if (data.bxpos) lastSnapshot.bxpos = makeView(data.bxpos, null, Float64Array);
     if (data.bxmat) lastSnapshot.bxmat = makeView(data.bxmat, null, Float64Array);
     if (data.xipos) lastSnapshot.xipos = makeView(data.xipos, null, Float64Array);
+    if (data.ximat) lastSnapshot.ximat = makeView(data.ximat, null, Float64Array);
+    if (data.xanchor) lastSnapshot.xanchor = makeView(data.xanchor, null, Float64Array);
+    if (data.dof_island) lastSnapshot.dof_island = makeView(data.dof_island, null, Int32Array);
+    if (typeof data.nisland === 'number' && Number.isFinite(data.nisland)) lastSnapshot.nisland = data.nisland | 0;
+    if (data.bvh_active) lastSnapshot.bvh_active = makeView(data.bvh_active, null, Uint8Array);
+    if (data.bvh_aabb_dyn) lastSnapshot.bvh_aabb_dyn = makeView(data.bvh_aabb_dyn, null, Float64Array);
     if (data.jtype) lastSnapshot.jtype = makeView(data.jtype, null, Int32Array);
     if (data.jpos) lastSnapshot.jpos = makeView(data.jpos, null, Float64Array);
     if (data.jaxis) lastSnapshot.jaxis = makeView(data.jaxis, null, Float64Array);

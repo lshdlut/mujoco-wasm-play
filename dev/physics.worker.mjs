@@ -52,7 +52,9 @@ let dragState = { dx: 0, dy: 0 };
 // Keep overlays off by default but enable tendon visibility (mjVIS_TENDON = 7).
 const DEFAULT_VOPT_FLAGS = (() => {
   const flags = Array.from({ length: 32 }, () => 0);
-  flags[7] = 1;
+  for (const idx of [1, 7, 8, 13, 22, 23, 25, 27]) {
+    flags[idx] = 1;
+  }
   return flags;
 })();
 let voptFlags = DEFAULT_VOPT_FLAGS.slice();
@@ -1434,6 +1436,12 @@ async function loadXmlWithFallback(xmlText) {
   const bodyXposView = sim.bodyXposView?.();
   const bodyXmatView = sim.bodyXmatView?.();
   const bodyXiposView = sim.bodyXiposView?.();
+  const bodyXimatView = sim.bodyXimatView?.();
+  const xanchorView = sim.xanchorView?.();
+  const dofIslandView = sim.dofIslandView?.();
+  const bvhActiveView = sim.bvhActiveView?.();
+  const bvhAabbDynView = sim.bvhAabbDynView?.();
+  const nislandVal = typeof sim.nisland === 'function' ? (sim.nisland() | 0) : 0;
   const camXposView = sim.camXposView?.();
   const camXmatView = sim.camXmatView?.();
   const lightXposView = sim.lightXposView?.();
@@ -1520,6 +1528,12 @@ async function loadXmlWithFallback(xmlText) {
     bxpos: bodyXposView ? new Float64Array(bodyXposView) : null,
     bxmat: bodyXmatView ? new Float64Array(bodyXmatView) : null,
     xipos: bodyXiposView ? new Float64Array(bodyXiposView) : null,
+    ximat: bodyXimatView ? new Float64Array(bodyXimatView) : null,
+    xanchor: xanchorView ? new Float64Array(xanchorView) : null,
+    dof_island: dofIslandView ? new Int32Array(dofIslandView) : null,
+    nisland: nislandVal | 0,
+    bvh_active: bvhActiveView ? new Uint8Array(bvhActiveView) : null,
+    bvh_aabb_dyn: bvhAabbDynView ? new Float64Array(bvhAabbDynView) : null,
     cam_xpos: camXposView ? new Float64Array(camXposView) : null,
     cam_xmat: camXmatView ? new Float64Array(camXmatView) : null,
     light_xpos: lightXposView ? new Float64Array(lightXposView) : null,
@@ -1550,6 +1564,11 @@ async function loadXmlWithFallback(xmlText) {
     if (msg.bxpos) transfers.push(msg.bxpos.buffer);
     if (msg.bxmat) transfers.push(msg.bxmat.buffer);
     if (msg.xipos) transfers.push(msg.xipos.buffer);
+    if (msg.ximat) transfers.push(msg.ximat.buffer);
+    if (msg.xanchor) transfers.push(msg.xanchor.buffer);
+    if (msg.dof_island) transfers.push(msg.dof_island.buffer);
+    if (msg.bvh_active) transfers.push(msg.bvh_active.buffer);
+    if (msg.bvh_aabb_dyn) transfers.push(msg.bvh_aabb_dyn.buffer);
     if (msg.cam_xpos) transfers.push(msg.cam_xpos.buffer);
     if (msg.cam_xmat) transfers.push(msg.cam_xmat.buffer);
     if (msg.light_xpos) transfers.push(msg.light_xpos.buffer);
@@ -1940,6 +1959,36 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.tendons.matid);
     push(assets.tendons.group);
     push(assets.tendons.rgba);
+    push(assets.tendons.num);
+    push(assets.tendons.limited);
+    push(assets.tendons.stiffness);
+    push(assets.tendons.damping);
+    push(assets.tendons.frictionloss);
+    push(assets.tendons.range);
+    push(assets.tendons.lengthspring);
+  }
+  if (assets?.actuators) {
+    push(assets.actuators.trnid);
+    push(assets.actuators.trntype);
+    push(assets.actuators.cranklength);
+  }
+  if (assets?.bodies) {
+    push(assets.bodies.weldid);
+    push(assets.bodies.mocapid);
+    push(assets.bodies.parentid);
+    push(assets.bodies.jntadr);
+    push(assets.bodies.jntnum);
+    push(assets.bodies.dofadr);
+    push(assets.bodies.dofnum);
+    push(assets.bodies.mass);
+    push(assets.bodies.inertia);
+  }
+  if (assets?.sensors) {
+    push(assets.sensors.type);
+    push(assets.sensors.objid);
+    push(assets.sensors.refid);
+    push(assets.sensors.dim);
+    push(assets.sensors.adr);
   }
   if (assets?.flexes) {
     push(assets.flexes.dim);
@@ -1991,6 +2040,14 @@ function collectAssetBuffersForTransfer(assets) {
   if (assets?.materials) {
     push(assets.materials.rgba);
     push(assets.materials.reflectance);
+    push(assets.materials.emission);
+    push(assets.materials.specular);
+    push(assets.materials.shininess);
+    push(assets.materials.metallic);
+    push(assets.materials.roughness);
+    push(assets.materials.texid);
+    push(assets.materials.texrepeat);
+    push(assets.materials.texuniform);
   }
   if (assets?.meshes) {
     push(assets.meshes.vertadr);
@@ -2012,6 +2069,23 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.textures.adr);
     push(assets.textures.colorspace);
     push(assets.textures.data);
+  }
+  if (assets?.bvh) {
+    push(assets.bvh.aabb);
+    push(assets.bvh.child);
+    push(assets.bvh.depth);
+    push(assets.bvh.nodeid);
+    push(assets.bvh.geom_aabb);
+    push(assets.bvh.body_bvhadr);
+    push(assets.bvh.body_bvhnum);
+    push(assets.bvh.flex_bvhadr);
+    push(assets.bvh.flex_bvhnum);
+    push(assets.bvh.mesh_bvhadr);
+    push(assets.bvh.mesh_bvhnum);
+    push(assets.bvh.mesh_octadr);
+    push(assets.bvh.mesh_octnum);
+    push(assets.bvh.oct_depth);
+    push(assets.bvh.oct_aabb);
   }
   return buffers;
 }

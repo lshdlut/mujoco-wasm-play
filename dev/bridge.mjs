@@ -163,13 +163,17 @@ export function collectRenderAssetsFromModule(mod, handle) {
   const assets = {
     version: 1,
     geoms: null,
+    bodies: null,
+    sensors: null,
     sites: null,
     tendons: null,
+    actuators: null,
     flexes: null,
     skins: null,
     materials: null,
     meshes: null,
     textures: null,
+    bvh: null,
     extras: {},
   };
   const diagnostics = {
@@ -247,6 +251,13 @@ export function collectRenderAssetsFromModule(mod, handle) {
     const matidView = readView(mod, matidFn, handle, ntendon, heapViewI32);
     const groupView = readView(mod, groupFn, handle, ntendon, heapViewI32);
     const rgbaView = readView(mod, rgbaFn, handle, ntendon * 4, heapViewF32);
+    const numView = readView(mod, ensureFunc('_mjwf_model_tendon_num_ptr'), handle, ntendon, heapViewI32);
+    const limitedView = readView(mod, ensureFunc('_mjwf_model_tendon_limited_ptr'), handle, ntendon, heapViewU8);
+    const stiffnessView = readView(mod, ensureFunc('_mjwf_model_tendon_stiffness_ptr'), handle, ntendon, heapViewF64);
+    const dampingView = readView(mod, ensureFunc('_mjwf_model_tendon_damping_ptr'), handle, ntendon, heapViewF64);
+    const frictionlossView = readView(mod, ensureFunc('_mjwf_model_tendon_frictionloss_ptr'), handle, ntendon, heapViewF64);
+    const rangeView = readView(mod, ensureFunc('_mjwf_model_tendon_range_ptr'), handle, ntendon * 2, heapViewF64);
+    const lengthspringView = readView(mod, ensureFunc('_mjwf_model_tendon_lengthspring_ptr'), handle, ntendon * 2, heapViewF64);
     assets.tendons = {
       count: ntendon,
       nwrap,
@@ -254,6 +265,69 @@ export function collectRenderAssetsFromModule(mod, handle) {
       matid: cloneTyped(matidView, Int32Array),
       group: cloneTyped(groupView, Int32Array),
       rgba: cloneTyped(rgbaView, Float32Array),
+      num: cloneTyped(numView, Int32Array),
+      limited: cloneTyped(limitedView, Uint8Array),
+      stiffness: cloneTyped(stiffnessView, Float64Array),
+      damping: cloneTyped(dampingView, Float64Array),
+      frictionloss: cloneTyped(frictionlossView, Float64Array),
+      range: cloneTyped(rangeView, Float64Array),
+      lengthspring: cloneTyped(lengthspringView, Float64Array),
+    };
+  }
+  const nbody = typeof mod._mjwf_model_nbody === 'function'
+    ? (mod._mjwf_model_nbody(handle) | 0)
+    : (typeof mod._mjwf_nbody === 'function' ? (mod._mjwf_nbody(handle) | 0) : 0);
+  if (nbody > 0) {
+    const weldidView = readView(mod, ensureFunc('_mjwf_model_body_weldid_ptr'), handle, nbody, heapViewI32);
+    const mocapidView = readView(mod, ensureFunc('_mjwf_model_body_mocapid_ptr'), handle, nbody, heapViewI32);
+    const parentidView = readView(mod, ensureFunc('_mjwf_model_body_parentid_ptr'), handle, nbody, heapViewI32);
+    const jntadrView = readView(mod, ensureFunc('_mjwf_model_body_jntadr_ptr'), handle, nbody, heapViewI32);
+    const jntnumView = readView(mod, ensureFunc('_mjwf_model_body_jntnum_ptr'), handle, nbody, heapViewI32);
+    const dofadrView = readView(mod, ensureFunc('_mjwf_model_body_dofadr_ptr'), handle, nbody, heapViewI32);
+    const dofnumView = readView(mod, ensureFunc('_mjwf_model_body_dofnum_ptr'), handle, nbody, heapViewI32);
+    const massView = readView(mod, ensureFunc('_mjwf_model_body_mass_ptr'), handle, nbody, heapViewF64);
+    const inertiaView = readView(mod, ensureFunc('_mjwf_model_body_inertia_ptr'), handle, nbody * 3, heapViewF64);
+    assets.bodies = {
+      count: nbody,
+      weldid: cloneTyped(weldidView, Int32Array),
+      mocapid: cloneTyped(mocapidView, Int32Array),
+      parentid: cloneTyped(parentidView, Int32Array),
+      jntadr: cloneTyped(jntadrView, Int32Array),
+      jntnum: cloneTyped(jntnumView, Int32Array),
+      dofadr: cloneTyped(dofadrView, Int32Array),
+      dofnum: cloneTyped(dofnumView, Int32Array),
+      mass: cloneTyped(massView, Float64Array),
+      inertia: cloneTyped(inertiaView, Float64Array),
+    };
+  }
+  const nsensor = typeof mod._mjwf_model_nsensor === 'function'
+    ? (mod._mjwf_model_nsensor(handle) | 0)
+    : (typeof mod._mjwf_nsensor === 'function' ? (mod._mjwf_nsensor(handle) | 0) : 0);
+  if (nsensor > 0) {
+    const typeView = readView(mod, ensureFunc('_mjwf_model_sensor_type_ptr'), handle, nsensor, heapViewI32);
+    const objidView = readView(mod, ensureFunc('_mjwf_model_sensor_objid_ptr'), handle, nsensor, heapViewI32);
+    const refidView = readView(mod, ensureFunc('_mjwf_model_sensor_refid_ptr'), handle, nsensor, heapViewI32);
+    const dimView = readView(mod, ensureFunc('_mjwf_model_sensor_dim_ptr'), handle, nsensor, heapViewI32);
+    const adrView = readView(mod, ensureFunc('_mjwf_model_sensor_adr_ptr'), handle, nsensor, heapViewI32);
+    assets.sensors = {
+      count: nsensor,
+      type: cloneTyped(typeView, Int32Array),
+      objid: cloneTyped(objidView, Int32Array),
+      refid: cloneTyped(refidView, Int32Array),
+      dim: cloneTyped(dimView, Int32Array),
+      adr: cloneTyped(adrView, Int32Array),
+    };
+  }
+  const nu = typeof mod._mjwf_model_nu === 'function' ? (mod._mjwf_model_nu(handle) | 0) : 0;
+  if (nu > 0) {
+    const trnidView = readView(mod, ensureFunc('_mjwf_model_actuator_trnid_ptr'), handle, nu * 2, heapViewI32);
+    const trntypeView = readView(mod, ensureFunc('_mjwf_model_actuator_trntype_ptr'), handle, nu, heapViewI32);
+    const cranklengthView = readView(mod, ensureFunc('_mjwf_model_actuator_cranklength_ptr'), handle, nu, heapViewF64);
+    assets.actuators = {
+      count: nu,
+      trnid: cloneTyped(trnidView, Int32Array),
+      trntype: cloneTyped(trntypeView, Int32Array),
+      cranklength: cloneTyped(cranklengthView, Float64Array),
     };
   }
   const nflex = typeof mod._mjwf_model_nflex === 'function' ? (mod._mjwf_model_nflex(handle) | 0) : 0;
@@ -434,7 +508,9 @@ export function collectRenderAssetsFromModule(mod, handle) {
     const shininessView = readView(mod, ensureFunc('_mjwf_mat_shininess_ptr'), handle, nmat, heapViewF64);
     const metallicView = readView(mod, ensureFunc('_mjwf_mat_metallic_ptr'), handle, nmat, heapViewF64);
     const roughnessView = readView(mod, ensureFunc('_mjwf_mat_roughness_ptr'), handle, nmat, heapViewF64);
-    const texidView = readView(mod, ensureFunc('_mjwf_mat_texid_ptr'), handle, nmat, heapViewI32);
+    // mjModel.mat_texid is (nmat x mjNTEXROLE). Simulate uses mjTEXROLE_RGB for
+    // regular textures, so we need all roles.
+    const texidView = readView(mod, ensureFunc('_mjwf_mat_texid_ptr'), handle, nmat * 10, heapViewI32);
     const texrepeatView = readView(mod, ensureFunc('_mjwf_mat_texrepeat_ptr'), handle, nmat * 2, heapViewF64);
     const texuniformView = readView(mod, ensureFunc('_mjwf_mat_texuniform_ptr'), handle, nmat, heapViewI32);
     assets.materials = {
@@ -514,6 +590,71 @@ export function collectRenderAssetsFromModule(mod, handle) {
       face: cloneTyped(faceView, Int32Array),
       normal: cloneTyped(normalView, Float32Array),
       texcoord: cloneTyped(texcoordView, Float32Array),
+    };
+  }
+  const nbvh = typeof mod._mjwf_model_nbvh === 'function' ? (mod._mjwf_model_nbvh(handle) | 0) : 0;
+  if (nbvh > 0) {
+    const nbvhstatic = typeof mod._mjwf_model_nbvhstatic === 'function' ? (mod._mjwf_model_nbvhstatic(handle) | 0) : 0;
+    const nbvhdynamic = typeof mod._mjwf_model_nbvhdynamic === 'function' ? (mod._mjwf_model_nbvhdynamic(handle) | 0) : 0;
+    const bvhAabbView = readView(mod, ensureFunc('_mjwf_model_bvh_aabb_ptr'), handle, nbvh * 6, heapViewF64);
+    const bvhChildView = readView(mod, ensureFunc('_mjwf_model_bvh_child_ptr'), handle, nbvh * 2, heapViewI32);
+    const bvhDepthView = readView(mod, ensureFunc('_mjwf_model_bvh_depth_ptr'), handle, nbvh, heapViewI32);
+    const bvhNodeIdView = readView(mod, ensureFunc('_mjwf_model_bvh_nodeid_ptr'), handle, nbvh, heapViewI32);
+    const geomAabbView = ngeom > 0
+      ? readView(mod, ensureFunc('_mjwf_model_geom_aabb_ptr'), handle, ngeom * 6, heapViewF64)
+      : null;
+    const bodyBvhAdrView = nbody > 0
+      ? readView(mod, ensureFunc('_mjwf_model_body_bvhadr_ptr'), handle, nbody, heapViewI32)
+      : null;
+    const bodyBvhNumView = nbody > 0
+      ? readView(mod, ensureFunc('_mjwf_model_body_bvhnum_ptr'), handle, nbody, heapViewI32)
+      : null;
+    const flexCount = assets.flexes?.count | 0;
+    const flexBvhAdrView = flexCount > 0
+      ? readView(mod, ensureFunc('_mjwf_model_flex_bvhadr_ptr'), handle, flexCount, heapViewI32)
+      : null;
+    const flexBvhNumView = flexCount > 0
+      ? readView(mod, ensureFunc('_mjwf_model_flex_bvhnum_ptr'), handle, flexCount, heapViewI32)
+      : null;
+    const meshBvhAdrView = nmesh > 0
+      ? readView(mod, ensureFunc('_mjwf_model_mesh_bvhadr_ptr'), handle, nmesh, heapViewI32)
+      : null;
+    const meshBvhNumView = nmesh > 0
+      ? readView(mod, ensureFunc('_mjwf_model_mesh_bvhnum_ptr'), handle, nmesh, heapViewI32)
+      : null;
+    const meshOctAdrView = nmesh > 0
+      ? readView(mod, ensureFunc('_mjwf_model_mesh_octadr_ptr'), handle, nmesh, heapViewI32)
+      : null;
+    const meshOctNumView = nmesh > 0
+      ? readView(mod, ensureFunc('_mjwf_model_mesh_octnum_ptr'), handle, nmesh, heapViewI32)
+      : null;
+    const noct = typeof mod._mjwf_model_noct === 'function' ? (mod._mjwf_model_noct(handle) | 0) : 0;
+    const octDepthView = noct > 0
+      ? readView(mod, ensureFunc('_mjwf_model_oct_depth_ptr'), handle, noct, heapViewI32)
+      : null;
+    const octAabbView = noct > 0
+      ? readView(mod, ensureFunc('_mjwf_model_oct_aabb_ptr'), handle, noct * 6, heapViewF64)
+      : null;
+    assets.bvh = {
+      count: nbvh,
+      nbvhstatic,
+      nbvhdynamic,
+      aabb: cloneTyped(bvhAabbView, Float64Array),
+      child: cloneTyped(bvhChildView, Int32Array),
+      depth: cloneTyped(bvhDepthView, Int32Array),
+      nodeid: cloneTyped(bvhNodeIdView, Int32Array),
+      geom_aabb: cloneTyped(geomAabbView, Float64Array),
+      body_bvhadr: cloneTyped(bodyBvhAdrView, Int32Array),
+      body_bvhnum: cloneTyped(bodyBvhNumView, Int32Array),
+      flex_bvhadr: cloneTyped(flexBvhAdrView, Int32Array),
+      flex_bvhnum: cloneTyped(flexBvhNumView, Int32Array),
+      mesh_bvhadr: cloneTyped(meshBvhAdrView, Int32Array),
+      mesh_bvhnum: cloneTyped(meshBvhNumView, Int32Array),
+      mesh_octadr: cloneTyped(meshOctAdrView, Int32Array),
+      mesh_octnum: cloneTyped(meshOctNumView, Int32Array),
+      noct,
+      oct_depth: cloneTyped(octDepthView, Int32Array),
+      oct_aabb: cloneTyped(octAabbView, Float64Array),
     };
   }
   const ntex = typeof mod._mjwf_ntex === 'function' ? (mod._mjwf_ntex(handle) | 0) : 0;
@@ -785,13 +926,23 @@ export class MjSimLite {
   }
 
   // --- Basic counts ---
-  nq(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nq']; if (typeof d==='function') return (d.call(m,h)|0)||0; try{ return (m.ccall(pref+'_nq','number',['number'],[h])|0)||0;}catch{return 0;} }
-  nv(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nv']; if (typeof d==='function') return (d.call(m,h)|0)||0; try{ return (m.ccall(pref+'_nv','number',['number'],[h])|0)||0;}catch{return 0;} }
-  nu(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nu']; if (typeof d==='function') return (d.call(m,h)|0)||0; try{ return (m.ccall(pref+'_nu','number',['number'],[h])|0)||0;}catch{return 0;} }
+  nq(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nq']||m['_mjwf_model_nq']; if (typeof d!=='function') return 0; let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; } if(!(v>0)){ let modelPtr=0; try{ modelPtr=this.ensurePointers().modelPtr|0; }catch{ modelPtr=0; } if(modelPtr){ try{ v=d.call(m,modelPtr)|0; }catch{ v=0; } } } return (v>0)?v:0; }
+  nv(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nv']||m['_mjwf_model_nv']; if (typeof d!=='function') return 0; let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; } if(!(v>0)){ let modelPtr=0; try{ modelPtr=this.ensurePointers().modelPtr|0; }catch{ modelPtr=0; } if(modelPtr){ try{ v=d.call(m,modelPtr)|0; }catch{ v=0; } } } return (v>0)?v:0; }
+  nu(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nu']||m['_mjwf_model_nu']; if (typeof d!=='function') return 0; let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; } if(!(v>0)){ let modelPtr=0; try{ modelPtr=this.ensurePointers().modelPtr|0; }catch{ modelPtr=0; } if(modelPtr){ try{ v=d.call(m,modelPtr)|0; }catch{ v=0; } } } return (v>0)?v:0; }
   njnt(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_njnt']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
   ncam(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_ncam']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
   nlight(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_nlight']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
-  nsite(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_nsite']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
+  nsite(){
+    const m=this.mod; const h=this.h|0;
+    const d=m['_mjwf_nsite'];
+    if (typeof d==='function') {
+      const v=d.call(m,h)|0;
+      if (v) return v;
+    }
+    const dm=m['_mjwf_model_nsite'];
+    if (typeof dm==='function') return (dm.call(m,h)|0)||0;
+    return 0;
+  }
   nflex(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nflex']; if (typeof d!=='function') return 0; let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; } if(!(v>0)){ let modelPtr=0; try{ modelPtr=this.ensurePointers().modelPtr|0; }catch{ modelPtr=0; } if(modelPtr){ try{ v=d.call(m,modelPtr)|0; }catch{ v=0; } } } return (v>0)?v:0; }
   nflexvert(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nflexvert']; if (typeof d!=='function') return 0; let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; } if(!(v>0)){ let modelPtr=0; try{ modelPtr=this.ensurePointers().modelPtr|0; }catch{ modelPtr=0; } if(modelPtr){ try{ v=d.call(m,modelPtr)|0; }catch{ v=0; } } } return (v>0)?v:0; }
   ntendon(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_ntendon']||m['_mjwf_ntendon']; if (typeof d!=='function') return 0; let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; } if(!(v>0)){ let modelPtr=0; try{ modelPtr=this.ensurePointers().modelPtr|0; }catch{ modelPtr=0; } if(modelPtr){ try{ v=d.call(m,modelPtr)|0; }catch{ v=0; } } } return (v>0)?v:0; }
@@ -811,9 +962,9 @@ export class MjSimLite {
   jntPosView(){ const m=this.mod; const { modelPtr } = this.ensurePointers(); const h=this.h|0; const d=m['_mjwf_jnt_pos_ptr']||m['_mjwf_model_jnt_pos_ptr']; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; let p=0; try{ p=d.call(m,h|0)|0; }catch{ p=0; } if(!(p>0) && modelPtr){ try{ p=d.call(m,modelPtr|0)|0; }catch{ p=0; } } if(!(p>0)) return; return heapViewF64(m,p,nj*3); }
   jntAxisView(){ const m=this.mod; const { modelPtr } = this.ensurePointers(); const h=this.h|0; const d=m['_mjwf_jnt_axis_ptr']||m['_mjwf_model_jnt_axis_ptr']; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; let p=0; try{ p=d.call(m,h|0)|0; }catch{ p=0; } if(!(p>0) && modelPtr){ try{ p=d.call(m,modelPtr|0)|0; }catch{ p=0; } } if(!(p>0)) return; return heapViewF64(m,p,nj*3); }
   jntBodyIdView(){ const m=this.mod; const { modelPtr } = this.ensurePointers(); const h=this.h|0; let d=m['_mjwf_jnt_bodyid_ptr'] || m['_mjwf_jnt_bodyid'] || m['_mjwf_model_jnt_bodyid_ptr']; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; let p=0; try{ p=d.call(m,h|0)|0; }catch{ p=0; } if(!(p>0) && modelPtr){ try{ p=d.call(m,modelPtr|0)|0; }catch{ p=0; } } if(!p)return; return heapViewI32(m,p,nj); }
-  actuatorTrnidView(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_actuator_trnid_ptr']; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n*2); }
-  actuatorTrntypeView(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_actuator_trntype_ptr']; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  actuatorCranklengthView(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_actuator_cranklength_ptr']; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n); }
+  actuatorTrnidView(){ const m=this.mod; const h=this.h|0; const { modelPtr } = this.ensurePointers(); const d=m['_mjwf_model_actuator_trnid_ptr']||m['_mjwf_actuator_trnid_ptr']; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!(p>0) && modelPtr){ try{ p=d.call(m,modelPtr|0)|0; }catch{ p=0; } } if(!(p>0)) return; return heapViewI32(m,p,n*2); }
+  actuatorTrntypeView(){ const m=this.mod; const h=this.h|0; const { modelPtr } = this.ensurePointers(); const d=m['_mjwf_model_actuator_trntype_ptr']||m['_mjwf_actuator_trntype_ptr']; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!(p>0) && modelPtr){ try{ p=d.call(m,modelPtr|0)|0; }catch{ p=0; } } if(!(p>0)) return; return heapViewI32(m,p,n); }
+  actuatorCranklengthView(){ const m=this.mod; const h=this.h|0; const { modelPtr } = this.ensurePointers(); const d=m['_mjwf_model_actuator_cranklength_ptr']||m['_mjwf_actuator_cranklength_ptr']; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!(p>0) && modelPtr){ try{ p=d.call(m,modelPtr|0)|0; }catch{ p=0; } } if(!(p>0)) return; return heapViewF64(m,p,n); }
   siteXposView(){ const m=this.mod; const h=this.h|0; const n=this.nsite()|0; if(!n)return; const d=m['_mjwf_data_site_xpos_ptr']||m['_mjwf_site_xpos_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*3); }
   siteXmatView(){ const m=this.mod; const h=this.h|0; const n=this.nsite()|0; if(!n)return; const d=m['_mjwf_data_site_xmat_ptr']||m['_mjwf_site_xmat_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*9); }
   tenWrapAdrView(){ const m=this.mod; const h=this.h|0; const n=this.ntendon()|0; if(!(n>0)) return null; const d=m['_mjwf_data_ten_wrapadr_ptr']; if (typeof d!=='function') return null; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p) return null; return heapViewI32(m,p,n); }
@@ -1162,6 +1313,67 @@ export class MjSimLite {
     let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; }
     if(!p)return;
     return heapViewF64(m,p,n*3);
+  }
+  bodyXimatView(){
+    const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return;
+    const d = m._mjwf_data_ximat_ptr || m._mjwf_ximat_ptr;
+    if (typeof d!=='function') return;
+    let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; }
+    if(!p)return;
+    return heapViewF64(m,p,n*9);
+  }
+  xanchorView(){
+    const m=this.mod; const h=this.h|0; const nj=this.njnt()|0; if(!(nj>0)) return;
+    const d = m._mjwf_data_xanchor_ptr || m._mjwf_xanchor_ptr;
+    if (typeof d!=='function') return;
+    let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; }
+    if(!p)return;
+    return heapViewF64(m,p,nj*3);
+  }
+  dofIslandView(){
+    const m=this.mod; const h=this.h|0; const nv=this.nv()|0; if(!(nv>0)) return;
+    const d = m._mjwf_data_dof_island_ptr || m._mjwf_dof_island_ptr;
+    if (typeof d!=='function') return;
+    let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; }
+    if(!p)return;
+    return heapViewI32(m,p,nv);
+  }
+  nisland(){
+    const m=this.mod; const h=this.h|0;
+    const d = m._mjwf_data_nisland || m._mjwf_nisland;
+    if (typeof d!=='function') return 0;
+    let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; }
+    return v|0;
+  }
+  nbvh(){
+    const m=this.mod; const h=this.h|0;
+    const d = m._mjwf_model_nbvh;
+    if (typeof d!=='function') return 0;
+    let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; }
+    return v|0;
+  }
+  nbvhdynamic(){
+    const m=this.mod; const h=this.h|0;
+    const d = m._mjwf_model_nbvhdynamic;
+    if (typeof d!=='function') return 0;
+    let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; }
+    return v|0;
+  }
+  bvhActiveView(){
+    const m=this.mod; const h=this.h|0; const nbvh=this.nbvh()|0; if(!(nbvh>0)) return;
+    const d = m._mjwf_data_bvh_active_ptr;
+    if (typeof d!=='function') return;
+    let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; }
+    if(!p)return;
+    return heapViewU8(m,p,nbvh);
+  }
+  bvhAabbDynView(){
+    const m=this.mod; const h=this.h|0; const ndyn=this.nbvhdynamic()|0; if(!(ndyn>0)) return;
+    const d = m._mjwf_data_bvh_aabb_dyn_ptr;
+    if (typeof d!=='function') return;
+    let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; }
+    if(!p)return;
+    return heapViewF64(m,p,ndyn*6);
   }
   bodyCvelView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const d=m._mjwf_data_cvel_ptr || m._mjwf_cvel_ptr; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewF64(m,p,n*6); }
   bodyXquatView(){
