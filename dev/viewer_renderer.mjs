@@ -830,9 +830,7 @@ function getOrCreateMuJoCoTexture(ctx, assets, descriptor) {
   const cache = getMuJoCoTextureCache(ctx);
   if (!cache) return null;
   const texid = descriptor.texid | 0;
-  const repeatX = Number.isFinite(descriptor.repeatX) ? descriptor.repeatX : 1;
-  const repeatY = Number.isFinite(descriptor.repeatY) ? descriptor.repeatY : 1;
-  const key = `${texid}:${repeatX.toFixed(6)}:${repeatY.toFixed(6)}`;
+  const key = `${texid}`;
   if (cache.has(key)) return cache.get(key) || null;
 
   const texAssets = assets?.textures || null;
@@ -866,12 +864,114 @@ function getOrCreateMuJoCoTexture(ctx, assets, descriptor) {
   const colorspace = colorspaceView && texid < colorspaceView.length ? (colorspaceView[texid] | 0) : 0;
   const texture = createMuJoCoDataTexture(THREE, pixels, width, height, nchannel, colorspace);
   if (!texture) return null;
-  texture.repeat.set(repeatX, repeatY);
+  texture.repeat.set(1, 1);
   cache.set(key, texture);
   return texture;
 }
 
-function applyMuJoCoTextureToMesh(mesh, matId, ctx, assets, textureEnabled) {
+const MJ_MINVAL = 1e-12;
+const MJ_TEXTURE = {
+  TEX2D: 0,
+};
+
+function resolveMuJoCoTextureType(assets, texid) {
+  const typeView = assets?.textures?.type || null;
+  if (!typeView || !(texid >= 0) || texid >= typeView.length) return -1;
+  return typeView[texid] | 0;
+}
+
+function resolveMuJoCoTexcoordScale(geomType, geomSize) {
+  const sx = Math.abs(Number(geomSize?.[0]) || 0);
+  const sy = Math.abs(Number(geomSize?.[1]) || 0);
+  switch (geomType | 0) {
+    case MJ_GEOM.PLANE:
+    case MJ_GEOM.HFIELD:
+    case MJ_GEOM.BOX:
+    case MJ_GEOM.SPHERE:
+    case MJ_GEOM.ELLIPSOID:
+    case MJ_GEOM.CYLINDER:
+    case MJ_GEOM.CAPSULE:
+      return {
+        scaleX: Math.max(MJ_MINVAL, sx),
+        scaleY: Math.max(MJ_MINVAL, sy),
+      };
+    default:
+      return {
+        scaleX: Math.max(MJ_MINVAL, sx),
+        scaleY: Math.max(MJ_MINVAL, sy),
+      };
+  }
+}
+
+function ensureMuJoCo2DGeneratedTexcoords(mesh, geomType, geomSize, geomDataId, matId, descriptor) {
+  if (!mesh || !mesh.geometry) return;
+  const geometry = mesh.geometry;
+  const positionAttr = geometry.getAttribute?.('position') || null;
+  if (!positionAttr || !(positionAttr.count > 0)) return;
+
+  const repeatX = Number.isFinite(descriptor?.repeatX) ? descriptor.repeatX : 1;
+  const repeatY = Number.isFinite(descriptor?.repeatY) ? descriptor.repeatY : 1;
+  const uniform = !!descriptor?.uniform;
+  const size0 = Number(geomSize?.[0]) || 0;
+  const size1 = Number(geomSize?.[1]) || 0;
+
+  let scl0 = repeatX;
+  let scl1 = repeatY;
+  const did = geomDataId | 0;
+  if (did >= 0) {
+    if (size0 > 0) {
+      scl0 /= Math.max(MJ_MINVAL, size0);
+    }
+    if (size1 > 0) {
+      scl1 /= Math.max(MJ_MINVAL, size1);
+    }
+  }
+  if (uniform) {
+    if (size0 > 0) {
+      scl0 *= size0;
+    }
+    if (size1 > 0) {
+      scl1 *= size1;
+    }
+  }
+
+  const { scaleX, scaleY } = resolveMuJoCoTexcoordScale(geomType, geomSize);
+  const vcount = positionAttr.count | 0;
+  const key = [
+    'mj2d:v1',
+    matId | 0,
+    Number.isFinite(scl0) ? scl0.toFixed(6) : '0',
+    Number.isFinite(scl1) ? scl1.toFixed(6) : '0',
+    Number.isFinite(scaleX) ? scaleX.toFixed(6) : '0',
+    Number.isFinite(scaleY) ? scaleY.toFixed(6) : '0',
+    geomType | 0,
+    did,
+    vcount,
+  ].join(':');
+
+  const userData = mesh.userData || (mesh.userData = {});
+  if (userData.mj2dTexcoordKey === key) return;
+
+  if (userData.ownGeometry === false) {
+    const cloned = geometry.clone();
+    mesh.geometry = cloned;
+    userData.ownGeometry = true;
+  }
+
+  const uv = new Float32Array(vcount * 2);
+  for (let i = 0; i < vcount; i += 1) {
+    const x = positionAttr.getX(i);
+    const y = positionAttr.getY(i);
+    const x0 = x / scaleX;
+    const y0 = y / scaleY;
+    uv[i * 2 + 0] = 0.5 * scl0 * x0 - 0.5;
+    uv[i * 2 + 1] = -0.5 * scl1 * y0 - 0.5;
+  }
+  mesh.geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  userData.mj2dTexcoordKey = key;
+}
+
+function applyMuJoCoTextureToMesh(mesh, matId, ctx, assets, textureEnabled, options = {}) {
   if (!mesh || !mesh.material || !ctx) return;
   const material = mesh.material;
   if (!('map' in material)) return;
@@ -895,6 +995,18 @@ function applyMuJoCoTextureToMesh(mesh, matId, ctx, assets, textureEnabled) {
   if (material.map !== nextMap) {
     material.map = nextMap;
     material.needsUpdate = true;
+  }
+
+  if (!texture || !desc) return;
+  const texType = resolveMuJoCoTextureType(assets, desc.texid);
+  const texcoordMode = options?.texcoordMode || 'explicit';
+  if (texType === MJ_TEXTURE.TEX2D && texcoordMode === 'generated') {
+    const geomType = options?.geomType ?? (mesh.userData?.geomType ?? MJ_GEOM.BOX);
+    const geomSize = options?.geomSize ?? (mesh.userData?.geomSize ?? null);
+    const geomDataId = options?.geomDataId ?? (mesh.userData?.geomDataId ?? -1);
+    if (Array.isArray(geomSize) && geomSize.length >= 2) {
+      ensureMuJoCo2DGeneratedTexcoords(mesh, geomType, geomSize, geomDataId, matId, desc);
+    }
   }
 }
 
@@ -4526,7 +4638,12 @@ function applySiteDescriptors(context, descriptors, {
         mesh.material.needsUpdate = true;
       }
     }
-    applyMuJoCoTextureToMesh(mesh, desc.matId, context, assets, textureEnabled);
+    applyMuJoCoTextureToMesh(mesh, desc.matId, context, assets, textureEnabled, {
+      texcoordMode: 'generated',
+      geomType: desc.type,
+      geomSize: desc.size,
+      geomDataId: -1,
+    });
 
     let visible = true;
     if (hideAllGeometry) {
@@ -4818,7 +4935,7 @@ function applyFlexAppearance(entry, flexIndex, assets, ctx, textureEnabled) {
     const matId = matIdView && flexIndex < matIdView.length ? (matIdView[flexIndex] | 0) : -1;
     entry.faces.userData = entry.faces.userData || {};
     entry.faces.userData.matId = matId;
-    applyMuJoCoTextureToMesh(entry.faces, matId, ctx, assets, textureEnabled);
+    applyMuJoCoTextureToMesh(entry.faces, matId, ctx, assets, textureEnabled, { texcoordMode: 'explicit' });
   }
 }
 
@@ -5466,7 +5583,7 @@ function applySkinAppearance(entry, skinIndex, assets, ctx, textureEnabled) {
   const matId = matIdView && skinIndex < matIdView.length ? (matIdView[skinIndex] | 0) : -1;
   entry.mesh.userData = entry.mesh.userData || {};
   entry.mesh.userData.matId = matId;
-  applyMuJoCoTextureToMesh(entry.mesh, matId, ctx, assets, textureEnabled);
+  applyMuJoCoTextureToMesh(entry.mesh, matId, ctx, assets, textureEnabled, { texcoordMode: 'explicit' });
 }
 
 function quatToMat3(w, x, y, z, out) {
@@ -5827,7 +5944,16 @@ function applyGeomDescriptors(context, descriptors, {
         mesh.material.needsUpdate = true;
       }
     }
-    applyMuJoCoTextureToMesh(mesh, desc.matId, context, assets, textureEnabled);
+    const texcoordMode =
+      desc.type === MJ_GEOM.MESH && mesh.geometry && typeof mesh.geometry.getAttribute === 'function' && mesh.geometry.getAttribute('uv')
+        ? 'explicit'
+        : 'generated';
+    applyMuJoCoTextureToMesh(mesh, desc.matId, context, assets, textureEnabled, {
+      texcoordMode,
+      geomType: desc.type,
+      geomSize: sizeVec,
+      geomDataId: desc.dataId,
+    });
 
     mesh.visible = visible;
     if (visible) {
