@@ -258,20 +258,56 @@ function createCubeTextureFromSkybox(THREE_NS, skyTex) {
   if (height !== width * faces) return null;
   const faceSize = width * width * nchan;
   if (data.length < faceSize * faces) return null;
-  const fmt = nchan === 4 ? THREE_NS.RGBAFormat
-    : nchan === 3 ? THREE_NS.RGBFormat
-    : THREE_NS.RedFormat;
   const type = THREE_NS.UnsignedByteType;
   const images = [];
   for (let i = 0; i < faces; i += 1) {
     const start = i * faceSize;
     const end = start + faceSize;
     const faceData = data.subarray(start, end);
-    const tex = new THREE_NS.DataTexture(faceData, width, width, fmt, type);
+    // three@0.161 is strict about pixel formats; keep uploads robust by
+    // expanding to RGBA on the JS side when the MuJoCo skybox is RGB/gray.
+    let rgba = faceData;
+    if (nchan !== 4) {
+      const out = new Uint8Array(width * width * 4);
+      if (nchan === 3) {
+        for (let px = 0, srcIdx = 0; px < width * width; px += 1, srcIdx += 3) {
+          const dst = px * 4;
+          out[dst + 0] = faceData[srcIdx + 0] ?? 0;
+          out[dst + 1] = faceData[srcIdx + 1] ?? 0;
+          out[dst + 2] = faceData[srcIdx + 2] ?? 0;
+          out[dst + 3] = 255;
+        }
+      } else if (nchan === 2) {
+        for (let px = 0, srcIdx = 0; px < width * width; px += 1, srcIdx += 2) {
+          const dst = px * 4;
+          const lum = faceData[srcIdx + 0] ?? 0;
+          out[dst + 0] = lum;
+          out[dst + 1] = lum;
+          out[dst + 2] = lum;
+          out[dst + 3] = faceData[srcIdx + 1] ?? 255;
+        }
+      } else if (nchan === 1) {
+        for (let px = 0; px < width * width; px += 1) {
+          const dst = px * 4;
+          const lum = faceData[px] ?? 0;
+          out[dst + 0] = lum;
+          out[dst + 1] = lum;
+          out[dst + 2] = lum;
+          out[dst + 3] = 255;
+        }
+      } else {
+        for (let dst = 0; dst < out.length; dst += 4) {
+          out[dst + 3] = 255;
+        }
+      }
+      rgba = out;
+    }
+    const tex = new THREE_NS.DataTexture(rgba, width, width, THREE_NS.RGBAFormat, type);
     tex.needsUpdate = true;
     tex.generateMipmaps = false;
     tex.minFilter = THREE_NS.LinearFilter;
     tex.magFilter = THREE_NS.LinearFilter;
+    tex.unpackAlignment = 1;
     tex.colorSpace = THREE_NS.SRGBColorSpace || THREE_NS.LinearSRGBColorSpace || undefined;
     images.push(tex);
   }
