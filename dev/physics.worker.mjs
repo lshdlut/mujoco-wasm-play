@@ -74,6 +74,8 @@ let copySeq = 0;
 let renderAssets = null;
 let frameSeq = 0;
 let optionSupport = { supported: false, pointers: [] };
+let flexLayer = 0;
+let bvhDepth = 1;
 const diagStagesLogged = new Set();
 let lastSyncWallTime = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
 let lastSyncSimTime = 0;
@@ -218,6 +220,9 @@ function cloneSceneFlags(source = sceneFlags) {
 
 function emitOptionState() {
   try {
+    const optionsState = readOptionStruct(mod, h) || {};
+    optionsState.flex_layer = flexLayer;
+    optionsState.bvh_depth = bvhDepth;
     postMessage({
       kind: 'options',
       voptFlags: Array.isArray(voptFlags) ? [...voptFlags] : [],
@@ -226,6 +231,7 @@ function emitOptionState() {
       frameMode,
       cameraMode,
       groups: cloneGroupState(),
+      options: optionsState,
     });
   } catch {}
 }
@@ -1348,6 +1354,8 @@ async function loadXmlWithFallback(xmlText) {
   const actCrankView = sim.actuatorCranklengthView?.();
   const siteXposView = sim.siteXposView?.();
   const siteXmatView = sim.siteXmatView?.();
+  const showFlex = !!(voptFlags?.[24] || voptFlags?.[25] || voptFlags?.[26] || voptFlags?.[27]);
+  const flexvertXposView = showFlex ? (sim.flexvertXposView?.() || null) : null;
   const ntendonLocal = sim.ntendon?.() | 0;
   const nwrapLocal = sim.nwrap?.() | 0;
   let tenWrapAdrView = sim.tenWrapAdrView?.() || null;
@@ -1549,7 +1557,11 @@ async function loadXmlWithFallback(xmlText) {
     if (msg.qpos) transfers.push(msg.qpos.buffer);
   const optionsStruct = readOptionStruct(mod, h);
   if (optionsStruct) {
+    optionsStruct.flex_layer = flexLayer;
+    optionsStruct.bvh_depth = bvhDepth;
     msg.options = optionsStruct;
+  } else {
+    msg.options = { flex_layer: flexLayer, bvh_depth: bvhDepth };
   }
   msg.history = serializeHistoryMeta();
   msg.keyframes = serializeKeyframeMeta();
@@ -1654,6 +1666,12 @@ async function loadXmlWithFallback(xmlText) {
     const wPos = new Float64Array(wrapXposView);
     msg.wrap_xpos = wPos;
     transfers.push(wPos.buffer);
+  }
+  if (flexvertXposView) {
+    const fPos = new Float32Array(flexvertXposView.length | 0);
+    fPos.set(flexvertXposView);
+    msg.flexvert_xpos = fPos;
+    transfers.push(fPos.buffer);
   }
   if (sensorTypeView) {
     const stype = new Int32Array(sensorTypeView);
@@ -1923,6 +1941,53 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.tendons.group);
     push(assets.tendons.rgba);
   }
+  if (assets?.flexes) {
+    push(assets.flexes.dim);
+    push(assets.flexes.radius);
+    push(assets.flexes.matid);
+    push(assets.flexes.group);
+    push(assets.flexes.rgba);
+    push(assets.flexes.flatskin);
+    push(assets.flexes.texcoordadr);
+    push(assets.flexes.texcoord);
+    push(assets.flexes.elemtexcoord);
+    push(assets.flexes.vertadr);
+    push(assets.flexes.vertnum);
+    push(assets.flexes.edgeadr);
+    push(assets.flexes.edgenum);
+    push(assets.flexes.elemadr);
+    push(assets.flexes.elemnum);
+    push(assets.flexes.elemdataadr);
+    push(assets.flexes.shellnum);
+    push(assets.flexes.shelldataadr);
+    push(assets.flexes.edge);
+    push(assets.flexes.elem);
+    push(assets.flexes.elemlayer);
+    push(assets.flexes.shell);
+  }
+  if (assets?.skins) {
+    push(assets.skins.matid);
+    push(assets.skins.group);
+    push(assets.skins.rgba);
+    push(assets.skins.inflate);
+    push(assets.skins.texcoordadr);
+    push(assets.skins.texcoord);
+    push(assets.skins.vertadr);
+    push(assets.skins.vertnum);
+    push(assets.skins.faceadr);
+    push(assets.skins.facenum);
+    push(assets.skins.boneadr);
+    push(assets.skins.bonenum);
+    push(assets.skins.vert);
+    push(assets.skins.face);
+    push(assets.skins.bonevertadr);
+    push(assets.skins.bonevertnum);
+    push(assets.skins.bonebindpos);
+    push(assets.skins.bonebindquat);
+    push(assets.skins.bonebodyid);
+    push(assets.skins.bonevertid);
+    push(assets.skins.bonevertweight);
+  }
   if (assets?.materials) {
     push(assets.materials.rgba);
     push(assets.materials.reflectance);
@@ -2126,6 +2191,8 @@ onmessage = async (ev) => {
       labelMode = 0;
       frameMode = 0;
       cameraMode = 0;
+      flexLayer = 0;
+      bvhDepth = 1;
       const visualState = readStructState('mjVisual');
       const statisticState = readStructState('mjStatistic');
       postMessage({
@@ -2340,6 +2407,20 @@ onmessage = async (ev) => {
       const field = typeof msg.field === 'string' ? msg.field : watchState?.field;
       updateWatchTarget(field, msg.index);
       emitWatchState();
+    } else if (msg.cmd === 'setVisualOption') {
+      const field = typeof msg.field === 'string' ? msg.field : '';
+      const rawValue = Number(msg.value);
+      if (!Number.isFinite(rawValue)) {
+        return;
+      }
+      const normalized = Math.max(0, Math.trunc(rawValue));
+      if (field === 'flex_layer') {
+        flexLayer = normalized;
+        emitOptionState();
+      } else if (field === 'bvh_depth') {
+        bvhDepth = normalized;
+        emitOptionState();
+      }
     } else if (msg.cmd === 'setField') {
       const target = msg.target;
       if (target === 'mjOption') {

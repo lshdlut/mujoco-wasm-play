@@ -165,6 +165,8 @@ export function collectRenderAssetsFromModule(mod, handle) {
     geoms: null,
     sites: null,
     tendons: null,
+    flexes: null,
+    skins: null,
     materials: null,
     meshes: null,
     textures: null,
@@ -252,6 +254,175 @@ export function collectRenderAssetsFromModule(mod, handle) {
       matid: cloneTyped(matidView, Int32Array),
       group: cloneTyped(groupView, Int32Array),
       rgba: cloneTyped(rgbaView, Float32Array),
+    };
+  }
+  const nflex = typeof mod._mjwf_model_nflex === 'function' ? (mod._mjwf_model_nflex(handle) | 0) : 0;
+  if (nflex > 0) {
+    const nflexvert = typeof mod._mjwf_model_nflexvert === 'function' ? (mod._mjwf_model_nflexvert(handle) | 0) : 0;
+    const nflexedge = typeof mod._mjwf_model_nflexedge === 'function' ? (mod._mjwf_model_nflexedge(handle) | 0) : 0;
+    const nflexelem = typeof mod._mjwf_model_nflexelem === 'function' ? (mod._mjwf_model_nflexelem(handle) | 0) : 0;
+    const nflexelemdata = typeof mod._mjwf_model_nflexelemdata === 'function' ? (mod._mjwf_model_nflexelemdata(handle) | 0) : 0;
+    const nflexshelldata = typeof mod._mjwf_model_nflexshelldata === 'function' ? (mod._mjwf_model_nflexshelldata(handle) | 0) : 0;
+
+    const dimView = readView(mod, ensureFunc('_mjwf_model_flex_dim_ptr'), handle, nflex, heapViewI32);
+    const radiusView = readView(mod, ensureFunc('_mjwf_model_flex_radius_ptr'), handle, nflex, heapViewF64);
+    const matidView = readView(mod, ensureFunc('_mjwf_model_flex_matid_ptr'), handle, nflex, heapViewI32);
+    const groupView = readView(mod, ensureFunc('_mjwf_model_flex_group_ptr'), handle, nflex, heapViewI32);
+    const rgbaView = readView(mod, ensureFunc('_mjwf_model_flex_rgba_ptr'), handle, nflex * 4, heapViewF32);
+    const flatskinView = readView(mod, ensureFunc('_mjwf_model_flex_flatskin_ptr'), handle, nflex, heapViewU8);
+    const vertAdrView = readView(mod, ensureFunc('_mjwf_model_flex_vertadr_ptr'), handle, nflex, heapViewI32);
+    const vertNumView = readView(mod, ensureFunc('_mjwf_model_flex_vertnum_ptr'), handle, nflex, heapViewI32);
+    const edgeAdrView = readView(mod, ensureFunc('_mjwf_model_flex_edgeadr_ptr'), handle, nflex, heapViewI32);
+    const edgeNumView = readView(mod, ensureFunc('_mjwf_model_flex_edgenum_ptr'), handle, nflex, heapViewI32);
+    const elemAdrView = readView(mod, ensureFunc('_mjwf_model_flex_elemadr_ptr'), handle, nflex, heapViewI32);
+    const elemNumView = readView(mod, ensureFunc('_mjwf_model_flex_elemnum_ptr'), handle, nflex, heapViewI32);
+    const elemdataAdrView = readView(mod, ensureFunc('_mjwf_model_flex_elemdataadr_ptr'), handle, nflex, heapViewI32);
+    const shellNumView = readView(mod, ensureFunc('_mjwf_model_flex_shellnum_ptr'), handle, nflex, heapViewI32);
+    const shelldataAdrView = readView(mod, ensureFunc('_mjwf_model_flex_shelldataadr_ptr'), handle, nflex, heapViewI32);
+    const nflextexcoord =
+      typeof mod._mjwf_model_nflextexcoord === 'function'
+        ? (mod._mjwf_model_nflextexcoord(handle) | 0)
+        : 0;
+    const texcoordAdrView = readView(mod, ensureFunc('_mjwf_model_flex_texcoordadr_ptr'), handle, nflex, heapViewI32);
+    const texcoordView =
+      nflextexcoord > 0
+        ? readView(mod, ensureFunc('_mjwf_model_flex_texcoord_ptr'), handle, nflextexcoord * 2, heapViewF32)
+        : null;
+    const elemTexcoordView =
+      nflexelemdata > 0
+        ? readView(mod, ensureFunc('_mjwf_model_flex_elemtexcoord_ptr'), handle, nflexelemdata, heapViewI32)
+        : null;
+
+    const edgeView = nflexedge > 0
+      ? readView(mod, ensureFunc('_mjwf_model_flex_edge_ptr'), handle, nflexedge * 2, heapViewI32)
+      : null;
+    const elemView = nflexelemdata > 0
+      ? readView(mod, ensureFunc('_mjwf_model_flex_elem_ptr'), handle, nflexelemdata, heapViewI32)
+      : null;
+    const elemlayerView = nflexelem > 0
+      ? readView(mod, ensureFunc('_mjwf_model_flex_elemlayer_ptr'), handle, nflexelem, heapViewI32)
+      : null;
+    const shellView = nflexshelldata > 0
+      ? readView(mod, ensureFunc('_mjwf_model_flex_shell_ptr'), handle, nflexshelldata, heapViewI32)
+      : null;
+
+    assets.flexes = {
+      count: nflex,
+      nflexvert,
+      nflexedge,
+      nflexelem,
+      nflexelemdata,
+      nflexshelldata,
+      dim: cloneTyped(dimView, Int32Array),
+      radius: cloneTyped(radiusView, Float64Array),
+      matid: cloneTyped(matidView, Int32Array),
+      group: cloneTyped(groupView, Int32Array),
+      rgba: cloneTyped(rgbaView, Float32Array),
+      flatskin: cloneTyped(flatskinView, Uint8Array),
+      vertadr: cloneTyped(vertAdrView, Int32Array),
+      vertnum: cloneTyped(vertNumView, Int32Array),
+      edgeadr: cloneTyped(edgeAdrView, Int32Array),
+      edgenum: cloneTyped(edgeNumView, Int32Array),
+      elemadr: cloneTyped(elemAdrView, Int32Array),
+      elemnum: cloneTyped(elemNumView, Int32Array),
+      elemdataadr: cloneTyped(elemdataAdrView, Int32Array),
+      shellnum: cloneTyped(shellNumView, Int32Array),
+      shelldataadr: cloneTyped(shelldataAdrView, Int32Array),
+      texcoordadr: cloneTyped(texcoordAdrView, Int32Array),
+      texcoord: cloneTyped(texcoordView, Float32Array),
+      elemtexcoord: cloneTyped(elemTexcoordView, Int32Array),
+      nflextexcoord,
+      edge: cloneTyped(edgeView, Int32Array),
+      elem: cloneTyped(elemView, Int32Array),
+      elemlayer: cloneTyped(elemlayerView, Int32Array),
+      shell: cloneTyped(shellView, Int32Array),
+    };
+  }
+  const nskin = typeof mod._mjwf_model_nskin === 'function' ? (mod._mjwf_model_nskin(handle) | 0) : 0;
+  if (nskin > 0) {
+    const nskinvert = typeof mod._mjwf_model_nskinvert === 'function' ? (mod._mjwf_model_nskinvert(handle) | 0) : 0;
+    const nskinface = typeof mod._mjwf_model_nskinface === 'function' ? (mod._mjwf_model_nskinface(handle) | 0) : 0;
+    const nskinbone = typeof mod._mjwf_model_nskinbone === 'function' ? (mod._mjwf_model_nskinbone(handle) | 0) : 0;
+    const nskinbonevert = typeof mod._mjwf_model_nskinbonevert === 'function' ? (mod._mjwf_model_nskinbonevert(handle) | 0) : 0;
+
+    const matidView = readView(mod, ensureFunc('_mjwf_model_skin_matid_ptr'), handle, nskin, heapViewI32);
+    const groupView = readView(mod, ensureFunc('_mjwf_model_skin_group_ptr'), handle, nskin, heapViewI32);
+    const rgbaView = readView(mod, ensureFunc('_mjwf_model_skin_rgba_ptr'), handle, nskin * 4, heapViewF32);
+    const inflateView = readView(mod, ensureFunc('_mjwf_model_skin_inflate_ptr'), handle, nskin, heapViewF32);
+    const vertAdrView = readView(mod, ensureFunc('_mjwf_model_skin_vertadr_ptr'), handle, nskin, heapViewI32);
+    const vertNumView = readView(mod, ensureFunc('_mjwf_model_skin_vertnum_ptr'), handle, nskin, heapViewI32);
+    const faceAdrView = readView(mod, ensureFunc('_mjwf_model_skin_faceadr_ptr'), handle, nskin, heapViewI32);
+    const faceNumView = readView(mod, ensureFunc('_mjwf_model_skin_facenum_ptr'), handle, nskin, heapViewI32);
+    const boneAdrView = readView(mod, ensureFunc('_mjwf_model_skin_boneadr_ptr'), handle, nskin, heapViewI32);
+    const boneNumView = readView(mod, ensureFunc('_mjwf_model_skin_bonenum_ptr'), handle, nskin, heapViewI32);
+    const nskintexvert =
+      typeof mod._mjwf_model_nskintexvert === 'function'
+        ? (mod._mjwf_model_nskintexvert(handle) | 0)
+        : 0;
+    const skinTexcoordAdrView =
+      readView(mod, ensureFunc('_mjwf_model_skin_texcoordadr_ptr'), handle, nskin, heapViewI32);
+    const skinTexcoordView =
+      nskintexvert > 0
+        ? readView(mod, ensureFunc('_mjwf_model_skin_texcoord_ptr'), handle, nskintexvert * 2, heapViewF32)
+        : null;
+
+    const vertView = nskinvert > 0
+      ? readView(mod, ensureFunc('_mjwf_model_skin_vert_ptr'), handle, nskinvert * 3, heapViewF32)
+      : null;
+    const faceView = nskinface > 0
+      ? readView(mod, ensureFunc('_mjwf_model_skin_face_ptr'), handle, nskinface * 3, heapViewI32)
+      : null;
+
+    const boneVertAdrView = nskinbone > 0
+      ? readView(mod, ensureFunc('_mjwf_model_skin_bonevertadr_ptr'), handle, nskinbone, heapViewI32)
+      : null;
+    const boneVertNumView = nskinbone > 0
+      ? readView(mod, ensureFunc('_mjwf_model_skin_bonevertnum_ptr'), handle, nskinbone, heapViewI32)
+      : null;
+    const boneBindPosView = nskinbone > 0
+      ? readView(mod, ensureFunc('_mjwf_model_skin_bonebindpos_ptr'), handle, nskinbone * 3, heapViewF32)
+      : null;
+    const boneBindQuatView = nskinbone > 0
+      ? readView(mod, ensureFunc('_mjwf_model_skin_bonebindquat_ptr'), handle, nskinbone * 4, heapViewF32)
+      : null;
+    const boneBodyIdView = nskinbone > 0
+      ? readView(mod, ensureFunc('_mjwf_model_skin_bonebodyid_ptr'), handle, nskinbone, heapViewI32)
+      : null;
+    const boneVertIdView = nskinbonevert > 0
+      ? readView(mod, ensureFunc('_mjwf_model_skin_bonevertid_ptr'), handle, nskinbonevert, heapViewI32)
+      : null;
+    const boneVertWeightView = nskinbonevert > 0
+      ? readView(mod, ensureFunc('_mjwf_model_skin_bonevertweight_ptr'), handle, nskinbonevert, heapViewF32)
+      : null;
+
+    assets.skins = {
+      count: nskin,
+      nskinvert,
+      nskinface,
+      nskinbone,
+      nskinbonevert,
+      matid: cloneTyped(matidView, Int32Array),
+      group: cloneTyped(groupView, Int32Array),
+      rgba: cloneTyped(rgbaView, Float32Array),
+      inflate: cloneTyped(inflateView, Float32Array),
+      vertadr: cloneTyped(vertAdrView, Int32Array),
+      vertnum: cloneTyped(vertNumView, Int32Array),
+      faceadr: cloneTyped(faceAdrView, Int32Array),
+      facenum: cloneTyped(faceNumView, Int32Array),
+      boneadr: cloneTyped(boneAdrView, Int32Array),
+      bonenum: cloneTyped(boneNumView, Int32Array),
+      vert: cloneTyped(vertView, Float32Array),
+      face: cloneTyped(faceView, Int32Array),
+      bonevertadr: cloneTyped(boneVertAdrView, Int32Array),
+      bonevertnum: cloneTyped(boneVertNumView, Int32Array),
+      bonebindpos: cloneTyped(boneBindPosView, Float32Array),
+      bonebindquat: cloneTyped(boneBindQuatView, Float32Array),
+      bonebodyid: cloneTyped(boneBodyIdView, Int32Array),
+      bonevertid: cloneTyped(boneVertIdView, Int32Array),
+      bonevertweight: cloneTyped(boneVertWeightView, Float32Array),
+      texcoordadr: cloneTyped(skinTexcoordAdrView, Int32Array),
+      texcoord: cloneTyped(skinTexcoordView, Float32Array),
+      nskintexvert,
     };
   }
   const nmat = typeof mod._mjwf_nmat === 'function' ? (mod._mjwf_nmat(handle) | 0) : 0;
@@ -621,6 +792,8 @@ export class MjSimLite {
   ncam(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_ncam']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
   nlight(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_nlight']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
   nsite(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_nsite']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
+  nflex(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nflex']; if (typeof d!=='function') return 0; let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; } if(!(v>0)){ let modelPtr=0; try{ modelPtr=this.ensurePointers().modelPtr|0; }catch{ modelPtr=0; } if(modelPtr){ try{ v=d.call(m,modelPtr)|0; }catch{ v=0; } } } return (v>0)?v:0; }
+  nflexvert(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nflexvert']; if (typeof d!=='function') return 0; let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; } if(!(v>0)){ let modelPtr=0; try{ modelPtr=this.ensurePointers().modelPtr|0; }catch{ modelPtr=0; } if(modelPtr){ try{ v=d.call(m,modelPtr)|0; }catch{ v=0; } } } return (v>0)?v:0; }
   ntendon(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_ntendon']||m['_mjwf_ntendon']; if (typeof d!=='function') return 0; let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; } if(!(v>0)){ let modelPtr=0; try{ modelPtr=this.ensurePointers().modelPtr|0; }catch{ modelPtr=0; } if(modelPtr){ try{ v=d.call(m,modelPtr)|0; }catch{ v=0; } } } return (v>0)?v:0; }
   nwrap(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nwrap']||m['_mjwf_nwrap']; if (typeof d!=='function') return 0; let v=0; try{ v=d.call(m,h)|0; }catch{ v=0; } if(!(v>0)){ let modelPtr=0; try{ modelPtr=this.ensurePointers().modelPtr|0; }catch{ modelPtr=0; } if(modelPtr){ try{ v=d.call(m,modelPtr)|0; }catch{ v=0; } } } return (v>0)?v:0; }
   nsensor(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_nsensor']; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
@@ -647,6 +820,7 @@ export class MjSimLite {
   tenWrapNumView(){ const m=this.mod; const h=this.h|0; const n=this.ntendon()|0; if(!(n>0)) return null; const d=m['_mjwf_data_ten_wrapnum_ptr']; if (typeof d!=='function') return null; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p) return null; return heapViewI32(m,p,n); }
   wrapObjView(){ const m=this.mod; const h=this.h|0; const n=this.nwrap()|0; if(!(n>0)) return null; const d=m['_mjwf_data_wrap_obj_ptr']; if (typeof d!=='function') return null; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p) return null; return heapViewI32(m,p,n*2); }
   wrapXposView(){ const m=this.mod; const h=this.h|0; const n=this.nwrap()|0; if(!(n>0)) return null; const d=m['_mjwf_data_wrap_xpos_ptr']; if (typeof d!=='function') return null; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p) return null; return heapViewF64(m,p,n*6); }
+  flexvertXposView(){ const m=this.mod; const h=this.h|0; const n=this.nflexvert()|0; if(!(n>0)) return null; const d=m['_mjwf_data_flexvert_xpos_ptr']; if (typeof d!=='function') return null; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p) return null; return heapViewF64(m,p,n*3); }
   sensorTypeView(){ const m=this.mod; const h=this.h|0; const n=this.nsensor()|0; if(!n)return; const d=m['_mjwf_sensor_type_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewI32(m,p,n); }
   sensorObjIdView(){ const m=this.mod; const h=this.h|0; const n=this.nsensor()|0; if(!n)return; const d=m['_mjwf_sensor_objid_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewI32(m,p,n); }
   eqTypeView(){ const m=this.mod; const h=this.h|0; const n=this.neq()|0; if(!n)return; const d=m['_mjwf_eq_type_ptr']; if (typeof d!=='function') return; let p=0; try{ p=d.call(m,h)|0; }catch{ p=0; } if(!p)return; return heapViewI32(m,p,n); }

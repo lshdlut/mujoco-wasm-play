@@ -262,6 +262,8 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     sceneFlags: SCENE_FLAG_DEFAULTS.slice(),
     labelMode: 0,
     frameMode: 0,
+    flexLayer: 0,
+    bvhDepth: 1,
     assets: null,
     groups: createViewerGroupState(true),
   },
@@ -758,10 +760,10 @@ function mergeBackendSnapshot(draft, snapshot) {
     const rendering = ensureRenderingState(draft);
     rendering.frameMode = Math.max(0, snapshot.frameMode | 0);
   }
-    if (snapshot.renderAssets) {
-      const rendering = ensureRenderingState(draft);
-      rendering.assets = snapshot.renderAssets;
-    }
+  if (snapshot.renderAssets) {
+    const rendering = ensureRenderingState(draft);
+    rendering.assets = snapshot.renderAssets;
+  }
   if (snapshot.scene) {
     // Persist scene snapshot for diagnostics / external tools
     draft.scene = snapshot.scene;
@@ -787,6 +789,13 @@ function mergeBackendSnapshot(draft, snapshot) {
         ACTUATOR_GROUP_LABELS,
         true,
       );
+    }
+    const rendering = ensureRenderingState(draft);
+    if (typeof snapshot.options.flex_layer === 'number' && Number.isFinite(snapshot.options.flex_layer)) {
+      rendering.flexLayer = Math.max(0, snapshot.options.flex_layer | 0);
+    }
+    if (typeof snapshot.options.bvh_depth === 'number' && Number.isFinite(snapshot.options.bvh_depth)) {
+      rendering.bvhDepth = Math.max(0, snapshot.options.bvh_depth | 0);
     }
   }
   if (snapshot.visual) {
@@ -878,6 +887,8 @@ function ensureRenderingState(target) {
       sceneFlags: SCENE_FLAG_DEFAULTS.slice(),
       labelMode: 0,
       frameMode: 0,
+      flexLayer: 0,
+      bvhDepth: 1,
       groups: createViewerGroupState(true),
     };
   } else {
@@ -903,6 +914,12 @@ function ensureRenderingState(target) {
     }
     if (typeof target.rendering.frameMode !== 'number') {
       target.rendering.frameMode = 0;
+    }
+    if (typeof target.rendering.flexLayer !== 'number') {
+      target.rendering.flexLayer = 0;
+    }
+    if (typeof target.rendering.bvhDepth !== 'number') {
+      target.rendering.bvhDepth = 1;
     }
     if (!target.rendering.groups) {
       target.rendering.groups = createViewerGroupState(true);
@@ -1336,6 +1353,12 @@ function readBindingValue(state, binding, control) {
     const name = control?.label ?? control?.name ?? binding;
     return !!state.physics.actuatorGroups[name];
   }
+  if (binding?.startsWith('Simulate::opt.')) {
+    const field = binding.slice('Simulate::opt.'.length);
+    if (field) {
+      return state.rendering?.[field] ?? 0;
+    }
+  }
   const bindingParts = splitBinding(binding);
   if (bindingParts) {
     const { scope, path } = bindingParts;
@@ -1665,6 +1688,7 @@ function resolveSnapshot(state) {
     ten_wrapnum: viewOrNull(state.ten_wrapnum, Int32Array),
     wrap_obj: viewOrNull(state.wrap_obj, Int32Array),
     wrap_xpos: viewOrNull(state.wrap_xpos, Float64Array),
+    flexvert_xpos: viewOrNull(state.flexvert_xpos, Float32Array),
     sensor_type: viewOrNull(state.sensor_type, Int32Array),
     sensor_objid: viewOrNull(state.sensor_objid, Int32Array),
     eq_type: viewOrNull(state.eq_type, Int32Array),
@@ -2135,6 +2159,7 @@ async function loadDefaultXml() {
     if (data.ten_wrapnum) lastSnapshot.ten_wrapnum = makeView(data.ten_wrapnum, null, Int32Array);
     if (data.wrap_obj) lastSnapshot.wrap_obj = makeView(data.wrap_obj, null, Int32Array);
     if (data.wrap_xpos) lastSnapshot.wrap_xpos = makeView(data.wrap_xpos, null, Float64Array);
+    if (data.flexvert_xpos) lastSnapshot.flexvert_xpos = makeView(data.flexvert_xpos, null, Float32Array);
     if (data.sensor_type) lastSnapshot.sensor_type = makeView(data.sensor_type, null, Int32Array);
     if (data.sensor_objid) lastSnapshot.sensor_objid = makeView(data.sensor_objid, null, Int32Array);
     if (data.eq_type) lastSnapshot.eq_type = makeView(data.eq_type, null, Int32Array);
@@ -2647,6 +2672,26 @@ async function loadDefaultXml() {
     }
     if (binding === 'Simulate::tracking_geom') {
       lastSnapshot.trackingGeom = Math.trunc(toNumber(value));
+      notifyListeners();
+      return resolveSnapshot(lastSnapshot);
+    }
+    const optMatch = binding?.match(/^Simulate::opt\.(flex_layer|bvh_depth)$/);
+    if (optMatch) {
+      const field = optMatch[1];
+      const nextValue = Math.max(0, Math.trunc(toNumber(value)));
+      if (!lastSnapshot.options || typeof lastSnapshot.options !== 'object') {
+        lastSnapshot.options = {};
+      }
+      lastSnapshot.options[field] = nextValue;
+      try {
+        client.postMessage?.({
+          cmd: 'setVisualOption',
+          field,
+          value: nextValue,
+        });
+      } catch (err) {
+        if (debug) console.warn('[backend setVisualOption] post failed', err);
+      }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
