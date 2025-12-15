@@ -9,6 +9,7 @@ const MJ_GEOM = {
   CYLINDER: 5,
   BOX: 6,
   MESH: 7,
+  SDF: 8,
 };
 const FIXED_CAMERA_OFFSET = 2;
 const LABEL_MODES = {
@@ -3746,8 +3747,8 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
     !mesh ||
     mesh.userData?.geomType !== gtype ||
     (!!mesh.userData?.infinitePlane !== infinitePlane) ||
-    (gtype === MJ_GEOM.MESH && mesh.userData?.geomDataId !== dataId) ||
-    (!infinitePlane && gtype !== MJ_GEOM.MESH && mesh.userData?.geomSizeKey !== sizeKey);
+    ((gtype === MJ_GEOM.MESH || gtype === MJ_GEOM.SDF) && mesh.userData?.geomDataId !== dataId) ||
+    (!infinitePlane && (gtype !== MJ_GEOM.MESH && gtype !== MJ_GEOM.SDF) && mesh.userData?.geomSizeKey !== sizeKey);
 
   if (needsRebuild) {
     if (mesh) {
@@ -3771,7 +3772,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
       ctx.meshes[index] = mesh;
     } else {
       let geometryInfo = null;
-      if (gtype === MJ_GEOM.MESH && assets && dataId >= 0) {
+      if ((gtype === MJ_GEOM.MESH || gtype === MJ_GEOM.SDF) && assets && dataId >= 0) {
         const meshGeometry = getSharedMeshGeometry(ctx, assets, dataId);
         if (meshGeometry) {
           geometryInfo = {
@@ -3838,8 +3839,8 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
       mesh.userData = mesh.userData || {};
       mesh.userData.infinitePlane = false;
       mesh.userData.geomType = gtype;
-      mesh.userData.geomDataId = gtype === MJ_GEOM.MESH ? dataId : -1;
-      mesh.userData.geomSizeKey = gtype === MJ_GEOM.MESH ? null : sizeKey;
+      mesh.userData.geomDataId = (gtype === MJ_GEOM.MESH || gtype === MJ_GEOM.SDF) ? dataId : -1;
+      mesh.userData.geomSizeKey = (gtype === MJ_GEOM.MESH || gtype === MJ_GEOM.SDF) ? null : sizeKey;
       mesh.userData.ownGeometry = geometryInfo.ownGeometry !== false;
       mesh.userData.geomIndex = index;
       ctx.root.add(mesh);
@@ -4163,6 +4164,80 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
       xmat?.[matBase + 8] ?? 1,
     ];
   }
+  const quat = mat3ToQuat(rot);
+  if (uniforms.uPlaneOrigin?.value) {
+    uniforms.uPlaneOrigin.value.set(px, py, pz);
+  }
+  if (uniforms.uPlaneAxisU?.value) {
+    uniforms.uPlaneAxisU.value.copy(__TMP_VEC3_A.set(1, 0, 0).applyQuaternion(quat).normalize());
+  }
+  if (uniforms.uPlaneAxisV?.value) {
+    uniforms.uPlaneAxisV.value.copy(__TMP_VEC3_B.set(0, 1, 0).applyQuaternion(quat).normalize());
+  }
+  if (uniforms.uPlaneNormal?.value) {
+    uniforms.uPlaneNormal.value.copy(__TMP_VEC3_C.set(0, 0, 1).applyQuaternion(quat).normalize());
+  }
+
+  // Segment view: temporarily hide the ground grid by zeroing intensity,
+  // but restore original values when segment is disabled.
+  if (segmentEnabled) {
+    if (!userData.segmentGroundGrid) {
+      userData.segmentGroundGrid = {
+        step: uniforms.uGridStep ? uniforms.uGridStep.value : null,
+        intensity: uniforms.uGridIntensity ? uniforms.uGridIntensity.value : null,
+      };
+    }
+    if (uniforms.uGridStep) {
+      uniforms.uGridStep.value = 0;
+    }
+    if (uniforms.uGridIntensity) {
+      uniforms.uGridIntensity.value = 0;
+    }
+  } else if (userData.segmentGroundGrid) {
+    const backup = userData.segmentGroundGrid;
+    if (uniforms.uGridStep && backup.step != null) {
+      uniforms.uGridStep.value = backup.step;
+    }
+    if (uniforms.uGridIntensity && backup.intensity != null) {
+      uniforms.uGridIntensity.value = backup.intensity;
+    }
+    userData.segmentGroundGrid = null;
+  }
+  // Ensure infinite ground remains blended by alpha
+  if (mesh.material) {
+    mesh.material.transparent = true;
+    if ('depthWrite' in mesh.material) mesh.material.depthWrite = true;
+    if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
+  }
+}
+
+function updateInfinitePlaneFromSceneSoA(mesh, scnIndex, snapshot, sceneFlags = null) {
+  const groundData = mesh.userData?.infiniteGround;
+  if (!groundData) return;
+  const xpos = snapshot?.scn_pos;
+  const xmat = snapshot?.scn_mat;
+  if (!xpos || !xmat) return;
+  const uniforms = groundData.uniforms || {};
+  const segmentEnabled = Array.isArray(sceneFlags) ? !!sceneFlags[SEGMENT_FLAG_INDEX] : false;
+  const userData = mesh.userData || (mesh.userData = {});
+
+  const i = scnIndex | 0;
+  const baseIndex = 3 * i;
+  const px = xpos?.[baseIndex + 0] ?? 0;
+  const py = xpos?.[baseIndex + 1] ?? 0;
+  const pz = xpos?.[baseIndex + 2] ?? 0;
+  const matBase = 9 * i;
+  const rot = [
+    xmat?.[matBase + 0] ?? 1,
+    xmat?.[matBase + 1] ?? 0,
+    xmat?.[matBase + 2] ?? 0,
+    xmat?.[matBase + 3] ?? 0,
+    xmat?.[matBase + 4] ?? 1,
+    xmat?.[matBase + 5] ?? 0,
+    xmat?.[matBase + 6] ?? 0,
+    xmat?.[matBase + 7] ?? 0,
+    xmat?.[matBase + 8] ?? 1,
+  ];
   const quat = mat3ToQuat(rot);
   if (uniforms.uPlaneOrigin?.value) {
     uniforms.uPlaneOrigin.value.set(px, py, pz);
@@ -6190,6 +6265,251 @@ function applyGeomDescriptors(context, descriptors, {
 
   return drawn;
 }
+
+function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
+  sceneFlags,
+  reflectionEnabled,
+  hideAllGeometry,
+}) {
+  const scnNgeom = snapshot?.scn_ngeom | 0;
+  if (!(scnNgeom > 0)) return 0;
+  const typeView = snapshot?.scn_type || null;
+  const posView = snapshot?.scn_pos || null;
+  const matView = snapshot?.scn_mat || null;
+  const sizeView = snapshot?.scn_size || null;
+  const rgbaView = snapshot?.scn_rgba || null;
+  const matIdView = snapshot?.scn_matid || null;
+  const dataIdView = snapshot?.scn_dataid || null;
+  const objTypeView = snapshot?.scn_objtype || null;
+  const objIdView = snapshot?.scn_objid || null;
+  const categoryView = snapshot?.scn_category || null;
+  if (!typeView || !posView || !matView || !sizeView || !rgbaView || !matIdView || !dataIdView || !objTypeView || !objIdView || !categoryView) {
+    return 0;
+  }
+
+  const flags = Array.isArray(sceneFlags) ? sceneFlags : state?.rendering?.sceneFlags || [];
+  const segmentEnabled = !!flags[SEGMENT_FLAG_INDEX];
+  const vopt = Array.isArray(state?.rendering?.voptFlags) ? state.rendering.voptFlags : [];
+  const textureEnabled = voptEnabled(vopt, MJ_VIS.TEXTURE);
+  const baseNgeom = snapshot?.ngeom | 0;
+  const geomNameLookup = createGeomNameLookup(state?.model?.geoms);
+
+  const geomToScn = new Int32Array(Math.max(0, baseNgeom));
+  geomToScn.fill(-1);
+  for (let i = 0; i < scnNgeom; i += 1) {
+    const objType = objTypeView[i] | 0;
+    if (objType !== MJ_OBJ.GEOM) continue;
+    const geomId = objIdView[i] | 0;
+    if (!(geomId >= 0 && geomId < baseNgeom)) continue;
+    if (geomToScn[geomId] === -1) {
+      geomToScn[geomId] = i;
+    }
+  }
+
+  ctx.geomState = ctx.geomState || [];
+  const safeHide = (meshIndex) => {
+    const mesh = Array.isArray(ctx.meshes) ? ctx.meshes[meshIndex] : null;
+    if (mesh) mesh.visible = false;
+  };
+  const sizeVecFor = (gtype, scnIndex) => {
+    const base = (scnIndex | 0) * 3;
+    const sx = Number(sizeView?.[base + 0]) || 0;
+    const sy = Number(sizeView?.[base + 1]) || 0;
+    const sz = Number(sizeView?.[base + 2]) || 0;
+    if (gtype === MJ_GEOM.CAPSULE || gtype === MJ_GEOM.CYLINDER) {
+      // mjvGeom stores [radius, radius, halflength] for capsule/cylinder.
+      return [sx, sz, 0];
+    }
+    return [sx, sy, sz];
+  };
+
+  const updateOne = (meshIndex, scnIndex, nameHint = null) => {
+    const si = scnIndex | 0;
+    if (si < 0 || si >= scnNgeom) {
+      safeHide(meshIndex);
+      return false;
+    }
+
+    const gtypeRaw = typeView[si] | 0;
+    const supported =
+      gtypeRaw === MJ_GEOM.PLANE ||
+      gtypeRaw === MJ_GEOM.HFIELD ||
+      gtypeRaw === MJ_GEOM.SPHERE ||
+      gtypeRaw === MJ_GEOM.CAPSULE ||
+      gtypeRaw === MJ_GEOM.ELLIPSOID ||
+      gtypeRaw === MJ_GEOM.CYLINDER ||
+      gtypeRaw === MJ_GEOM.BOX ||
+      gtypeRaw === MJ_GEOM.MESH ||
+      gtypeRaw === MJ_GEOM.SDF;
+    if (!supported) {
+      safeHide(meshIndex);
+      return false;
+    }
+
+    const rawDataId = dataIdView[si] | 0;
+    const meshLike = gtypeRaw === MJ_GEOM.MESH || gtypeRaw === MJ_GEOM.SDF;
+    const dataId = meshLike && rawDataId >= 0 ? (rawDataId >> 1) : rawDataId;
+    const matId = matIdView[si] | 0;
+    const sizeVec = sizeVecFor(gtypeRaw, si);
+    const rgbaBase = si * 4;
+    const rgba = rgbaView && rgbaView.length >= rgbaBase + 4
+      ? [
+          rgbaView[rgbaBase + 0],
+          rgbaView[rgbaBase + 1],
+          rgbaView[rgbaBase + 2],
+          rgbaView[rgbaBase + 3],
+        ]
+      : null;
+    const geomMeta = {
+      index: meshIndex,
+      type: gtypeRaw,
+      dataId,
+      size: sizeVec,
+      name: nameHint || `SceneGeom ${si}`,
+      matId,
+      bodyId: -1,
+      groupId: -1,
+      rgba,
+    };
+    const geomState = ensureGeomState(ctx, meshIndex, geomMeta);
+    const mesh = ensureGeomMesh(ctx, meshIndex, gtypeRaw, assets, dataId, sizeVec, { geomMeta }, state);
+    if (!mesh) return false;
+
+    const reflectanceValue = resolveMaterialReflectance(matId, assets);
+    mesh.userData = mesh.userData || {};
+    mesh.userData.matId = matId;
+    mesh.userData.scnIndex = si;
+    mesh.userData.scnObjType = objTypeView[si] | 0;
+    mesh.userData.scnObjId = objIdView[si] | 0;
+    mesh.userData.scnCategory = categoryView[si] | 0;
+    mesh.userData.scnDataId = rawDataId;
+    applyReflectanceToMaterial(mesh, ctx, reflectanceValue, reflectionEnabled);
+
+    if (segmentEnabled) {
+      const segMat = ensureSegmentMaterial(mesh, flags);
+      if (segMat) {
+        const segColor = segmentColorForIndex(mesh.userData?.geomIndex ?? meshIndex);
+        segMat.color.setHex(segColor);
+        mesh.material = segMat;
+      }
+    } else {
+      restoreSegmentMaterial(mesh);
+    }
+
+    const isInfinitePlane = !!mesh.userData?.infinitePlane;
+    if (isInfinitePlane) {
+      updateInfinitePlaneFromSceneSoA(mesh, si, snapshot, flags);
+    } else {
+      const posBase = si * 3;
+      const px = posView?.[posBase + 0] ?? 0;
+      const py = posView?.[posBase + 1] ?? 0;
+      const pz = posView?.[posBase + 2] ?? 0;
+      mesh.position.set(px, py, pz);
+      const matBase = si * 9;
+      const rot = [
+        matView?.[matBase + 0] ?? 1,
+        matView?.[matBase + 1] ?? 0,
+        matView?.[matBase + 2] ?? 0,
+        matView?.[matBase + 3] ?? 0,
+        matView?.[matBase + 4] ?? 1,
+        matView?.[matBase + 5] ?? 0,
+        matView?.[matBase + 6] ?? 0,
+        matView?.[matBase + 7] ?? 0,
+        matView?.[matBase + 8] ?? 1,
+      ];
+      mesh.quaternion.copy(mat3ToQuat(rot));
+      mesh.scale.set(1, 1, 1);
+    }
+
+    let visible = true;
+    if (hideAllGeometry) visible = false;
+    if (!segmentEnabled) {
+      const baseAppearance = rgba
+        ? { rgba: rgba.slice(), color: rgbFromArray(rgba), opacity: alphaFromArray(rgba) }
+        : { rgba: null, color: null, opacity: null };
+      const composed = composeGeomAppearance(geomState, baseAppearance, true);
+      applyAppearanceToMaterial(mesh, composed.appearance);
+      applyMaterialOverrides(mesh.material, composed.overrides);
+      visible = composed.visible;
+      if (hideAllGeometry) visible = false;
+      mesh.userData = mesh.userData || {};
+      const alpha = composed?.appearance?.opacity;
+      if (typeof alpha === 'number' && Number.isFinite(alpha)) {
+        mesh.userData.baseAlpha = alpha;
+      } else if (mesh.material && typeof mesh.material.opacity === 'number') {
+        mesh.userData.baseAlpha = mesh.material.opacity;
+      }
+      if (geomState?.view) geomState.view.__dirty = false;
+      applyMaterialFlags(mesh, meshIndex, state, flags);
+      const texcoordMode =
+        (gtypeRaw === MJ_GEOM.MESH || gtypeRaw === MJ_GEOM.SDF) && mesh.geometry && typeof mesh.geometry.getAttribute === 'function' && mesh.geometry.getAttribute('uv')
+          ? 'explicit'
+          : 'generated';
+      applyMuJoCoTextureToMesh(mesh, matId, ctx, assets, textureEnabled, {
+        texcoordMode,
+        geomType: gtypeRaw,
+        geomSize: sizeVec,
+        geomDataId: dataId,
+      });
+    }
+
+    mesh.visible = visible;
+    return visible;
+  };
+
+  let drawn = 0;
+  // Base model geoms: keep indices 0..ngeom-1 stable for picking/controls.
+  for (let geomId = 0; geomId < baseNgeom; geomId += 1) {
+    const scnIdx = geomToScn[geomId] | 0;
+    if (scnIdx < 0) {
+      safeHide(geomId);
+      continue;
+    }
+    const name = geomNameFromLookup(geomNameLookup, geomId);
+    if (updateOne(geomId, scnIdx, name)) drawn += 1;
+  }
+
+  // Extra scene geoms (sites/tendons/etc), appended after base geoms.
+  const extras = [];
+  for (let i = 0; i < scnNgeom; i += 1) {
+    const objType = objTypeView[i] | 0;
+    if (objType === MJ_OBJ.GEOM) {
+      const geomId = objIdView[i] | 0;
+      if (geomId >= 0 && geomId < baseNgeom) continue;
+    }
+    extras.push(i);
+  }
+
+  // Creating hundreds of new Three.js meshes/geometries in a single frame can
+  // stall the main thread (especially in headless / SwiftShader runs). Spread
+  // extra-geom construction across frames while always updating existing ones.
+  const createBudget = 8;
+  let createdThisFrame = 0;
+  const tCreateStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : null;
+  const createTimeBudgetMs = 6;
+  for (let k = 0; k < extras.length; k += 1) {
+    const meshIndex = baseNgeom + k;
+    const scnIdx = extras[k] | 0;
+    const existing = Array.isArray(ctx.meshes) ? ctx.meshes[meshIndex] : null;
+    if (!existing) {
+      if (tCreateStart != null && (performance.now() - tCreateStart) > createTimeBudgetMs) continue;
+      if (createdThisFrame >= createBudget) continue;
+      createdThisFrame += 1;
+    }
+    if (updateOne(meshIndex, scnIdx, null)) drawn += 1;
+  }
+
+  // Hide any stale meshes beyond current range.
+  const total = baseNgeom + extras.length;
+  if (Array.isArray(ctx.meshes) && ctx.meshes.length > total) {
+    for (let i = total; i < ctx.meshes.length; i += 1) {
+      if (ctx.meshes[i]) ctx.meshes[i].visible = false;
+    }
+  }
+
+  return drawn;
+}
+
 export function createRendererManager({
   canvas,
   renderCtx,
@@ -6874,39 +7194,34 @@ export function createRendererManager({
       hideExternalPerturbGroup(context);
     }
 
-    const geomDescriptors = buildGeomDescriptors(snapshot, state, assets);
-    drawn = applyGeomDescriptors(context, geomDescriptors, {
-      assets,
-      state,
-      snapshot,
-      sceneFlags,
-      reflectionEnabled,
-      hideAllGeometry,
-      voptFlags,
-      geomGroupIds,
-      geomGroupMask,
-    });
-    const siteDescriptors = buildSiteDescriptors(snapshot, state, assets);
-    applySiteDescriptors(context, siteDescriptors, {
-      assets,
-      state,
-      snapshot,
-      hideAllGeometry,
-      voptFlags,
-      siteGroupIds,
-      siteGroupMask,
-    });
-    const showTendon = voptEnabled(voptFlags, MJ_VIS.TENDON);
-    if (showTendon) {
-      const tendonSegments = buildTendonSegmentDescriptors(snapshot, state, assets);
-      applyTendonSegmentDescriptors(context, tendonSegments, {
+    const hasSceneSoA =
+      (snapshot?.scn_ngeom | 0) > 0 &&
+      !!snapshot?.scn_type &&
+      !!snapshot?.scn_pos &&
+      !!snapshot?.scn_mat &&
+      !!snapshot?.scn_size &&
+      !!snapshot?.scn_rgba &&
+      !!snapshot?.scn_matid &&
+      !!snapshot?.scn_dataid &&
+      !!snapshot?.scn_objtype &&
+      !!snapshot?.scn_objid &&
+      !!snapshot?.scn_category;
+    let geomDescriptors = null;
+    if (hasSceneSoA) {
+      drawn = applyMjvSceneSoAGeoms(context, snapshot, state, assets, {
+        sceneFlags,
+        reflectionEnabled,
+        hideAllGeometry,
+      });
+      applySiteDescriptors(context, [], {
         assets,
         state,
-        hideAllGeometry,
-        tendonGroupIds,
-        tendonGroupMask,
+        snapshot,
+        hideAllGeometry: true,
+        voptFlags,
+        siteGroupIds,
+        siteGroupMask,
       });
-    } else {
       applyTendonSegmentDescriptors(context, [], {
         assets,
         state,
@@ -6914,6 +7229,48 @@ export function createRendererManager({
         tendonGroupIds,
         tendonGroupMask,
       });
+    } else {
+      geomDescriptors = buildGeomDescriptors(snapshot, state, assets);
+      drawn = applyGeomDescriptors(context, geomDescriptors, {
+        assets,
+        state,
+        snapshot,
+        sceneFlags,
+        reflectionEnabled,
+        hideAllGeometry,
+        voptFlags,
+        geomGroupIds,
+        geomGroupMask,
+      });
+      const siteDescriptors = buildSiteDescriptors(snapshot, state, assets);
+      applySiteDescriptors(context, siteDescriptors, {
+        assets,
+        state,
+        snapshot,
+        hideAllGeometry,
+        voptFlags,
+        siteGroupIds,
+        siteGroupMask,
+      });
+      const showTendon = voptEnabled(voptFlags, MJ_VIS.TENDON);
+      if (showTendon) {
+        const tendonSegments = buildTendonSegmentDescriptors(snapshot, state, assets);
+        applyTendonSegmentDescriptors(context, tendonSegments, {
+          assets,
+          state,
+          hideAllGeometry,
+          tendonGroupIds,
+          tendonGroupMask,
+        });
+      } else {
+        applyTendonSegmentDescriptors(context, [], {
+          assets,
+          state,
+          hideAllGeometry: true,
+          tendonGroupIds,
+          tendonGroupMask,
+        });
+      }
     }
     const showFlex =
       voptEnabled(voptFlags, MJ_VIS.FLEXVERT) ||

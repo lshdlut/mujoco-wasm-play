@@ -204,6 +204,9 @@ function ensureModelGradientEnv(ctx, THREE_NS) {
 }
 
 let LAST_SKYBOX_TEXTURE = null;
+let LAST_SKYBOX_KEY = null;
+let LAST_SKYBOX_BUFFER = null;
+let WARNED_SKYBOX_BYTES = false;
 
 function readSkyboxTextureFromAssets(state) {
   const textures = state?.rendering?.assets?.textures || null;
@@ -216,6 +219,9 @@ function readSkyboxTextureFromAssets(state) {
   const heightArr = textures.height;
   const nchanArr = textures.nchannel;
   const data = textures.data;
+  const dataLen = typeof data.length === 'number'
+    ? data.length
+    : (typeof data.byteLength === 'number' ? data.byteLength : 0);
   const count = Array.isArray(typeArr) ? typeArr.length : (typeArr?.length ?? 0);
   for (let i = 0; i < count; i += 1) {
     const t = typeArr[i] ?? 0;
@@ -228,23 +234,55 @@ function readSkyboxTextureFromAssets(state) {
     if (!(width > 0 && height > 0 && nchan > 0)) continue;
     const texSize = width * height * nchan;
     const nextAdr = i + 1 < count ? Number(adrArr?.[i + 1]) || texSize + adr : texSize + adr;
-    const end = Math.min(data.length, nextAdr);
+    const end = Math.min(dataLen, nextAdr);
     const start = Math.max(0, adr);
     if (!(end > start)) continue;
-    // Copy underlying data into a stable Uint8Array slice so later frames
-    // can continue to build a cube texture even if assets.textures is absent.
-    const src = data;
-    const byteOffset = start * (src.BYTES_PER_ELEMENT || 1);
-    const byteLength = (end - start) * (src.BYTES_PER_ELEMENT || 1);
-    const uint8 = new Uint8Array(src.buffer || src, byteOffset, byteLength);
+    const hasSAB = typeof SharedArrayBuffer !== 'undefined';
+    const src = (data instanceof ArrayBuffer || (hasSAB && data instanceof SharedArrayBuffer))
+      ? new Uint8Array(data)
+      : data;
+    const srcBuffer = (src instanceof ArrayBuffer || (hasSAB && src instanceof SharedArrayBuffer))
+      ? src
+      : ((src?.buffer instanceof ArrayBuffer || (hasSAB && src?.buffer instanceof SharedArrayBuffer)) ? src.buffer : null);
+    if (!srcBuffer) continue;
+    const bytesPerElement = src?.BYTES_PER_ELEMENT || 1;
+    const baseOffset = src?.byteOffset || 0;
+    const byteOffset = baseOffset + start * bytesPerElement;
+    const byteLength = (end - start) * bytesPerElement;
+    // Prevent runaway allocations for oversized skyboxes. The renderer will
+    // fall back to a lightweight gradient environment if we skip this.
+    const maxBytes = 128 * 1024 * 1024;
+    if (byteLength > maxBytes) {
+      if (!WARNED_SKYBOX_BYTES) {
+        WARNED_SKYBOX_BYTES = true;
+        // eslint-disable-next-line no-console
+        console.warn('[viewer][skybox] skipping oversized skybox texture', {
+          width,
+          height,
+          nchan,
+          byteLength,
+          maxBytes,
+        });
+      }
+      return LAST_SKYBOX_TEXTURE;
+    }
+    const key = `${width}x${height}x${nchan}:${byteOffset}:${byteLength}`;
+    if (LAST_SKYBOX_TEXTURE && LAST_SKYBOX_KEY === key && LAST_SKYBOX_BUFFER === srcBuffer) {
+      return LAST_SKYBOX_TEXTURE;
+    }
+    // Keep a view into the latest assets buffer. Copying this data every frame
+    // can OOM for high-res skyboxes; holding a view keeps memory stable.
+    const uint8 = new Uint8Array(srcBuffer, byteOffset, byteLength);
     const tex = {
       width,
       height,
       nchan,
-      data: uint8.slice(),
+      data: uint8,
       adr,
     };
     LAST_SKYBOX_TEXTURE = tex;
+    LAST_SKYBOX_KEY = key;
+    LAST_SKYBOX_BUFFER = srcBuffer;
     return tex;
   }
   return LAST_SKYBOX_TEXTURE;
@@ -380,20 +418,21 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
     brightness: 0.72,
   };
   const useShader = !forceCube && (forceShader || classification.kind === 'builtin');
-  const cube = createCubeTextureFromSkybox(THREE_NS, skyTex);
+  const cube = useShader ? null : createCubeTextureFromSkybox(THREE_NS, skyTex);
   if (!cube && !useShader) return false;
   const envRT = cube && ctx.pmrem ? ctx.pmrem.fromCubemap(cube) : null;
 
   if (useShader) {
     const dome = ensureSkyDome(ctx, THREE_NS);
     const background = buildSkyBackground(THREE_NS, palette);
+    const shaderEnvRT = ctx.pmrem ? ctx.pmrem.fromEquirectangular(background) : null;
     updateSkyDome(ctx, palette, THREE_NS);
     if (dome) dome.visible = true;
     if (worldScene) {
-      worldScene.environment = envRT?.texture || null;
+      worldScene.environment = shaderEnvRT?.texture || null;
       worldScene.background = background;
     }
-    ctx.envRT = envRT || null;
+    ctx.envRT = shaderEnvRT || null;
     ctx.envIntensity = 1.0;
     ctx.skyBackground = background;
     ctx.skyMode = 'shader';
@@ -406,7 +445,7 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
     if (cache) {
       cache.model = {
         key: 'model-skybox',
-        envRT,
+        envRT: shaderEnvRT,
         cube,
         background,
         palette,

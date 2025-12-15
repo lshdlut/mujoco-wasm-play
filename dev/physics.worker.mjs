@@ -191,10 +191,12 @@ function resetTimingForCurrentSim(initialRate = null) {
     return null;
   }
 
-function createGroupState(initial = 1) {
+function createGroupState() {
+  // Match MuJoCo mjv_defaultOption: first 3 groups enabled, remaining disabled.
+  const defaultMask = Array.from({ length: MJ_GROUP_COUNT }, (_, idx) => (idx < 3 ? 1 : 0));
   const state = {};
   for (const type of GROUP_TYPES) {
-    state[type] = Array.from({ length: MJ_GROUP_COUNT }, () => (initial ? 1 : 0));
+    state[type] = defaultMask.slice();
   }
   return state;
 }
@@ -236,6 +238,43 @@ function emitOptionState() {
       options: optionsState,
     });
   } catch {}
+}
+
+function syncVoptToWasm() {
+  if (!sim || !mod || !(h > 0)) return false;
+
+  const writeScalar = (view, value) => {
+    if (!view || view.length < 1) return false;
+    view[0] = value | 0;
+    return true;
+  };
+  const writeGroup = (view, values) => {
+    if (!view || !values) return false;
+    const n = Math.min(view.length | 0, values.length | 0);
+    for (let i = 0; i < n; i += 1) {
+      view[i] = values[i] ? 1 : 0;
+    }
+    return true;
+  };
+
+  const flagsView = sim.voptFlagsPtrView?.();
+  if (flagsView && Array.isArray(voptFlags) && flagsView.length > 0) {
+    const n = Math.min(flagsView.length | 0, voptFlags.length | 0);
+    for (let i = 0; i < n; i += 1) flagsView[i] = voptFlags[i] ? 1 : 0;
+  }
+  writeScalar(sim.voptLabelPtrView?.(), labelMode | 0);
+  writeScalar(sim.voptFramePtrView?.(), frameMode | 0);
+  writeScalar(sim.voptFlexLayerPtrView?.(), flexLayer | 0);
+  writeScalar(sim.voptBvhDepthPtrView?.(), bvhDepth | 0);
+
+  writeGroup(sim.voptGeomGroupView?.(), groupState?.geom || []);
+  writeGroup(sim.voptSiteGroupView?.(), groupState?.site || []);
+  writeGroup(sim.voptJointGroupView?.(), groupState?.joint || []);
+  writeGroup(sim.voptTendonGroupView?.(), groupState?.tendon || []);
+  writeGroup(sim.voptActuatorGroupView?.(), groupState?.actuator || []);
+  writeGroup(sim.voptFlexGroupView?.(), groupState?.flex || []);
+  writeGroup(sim.voptSkinGroupView?.(), groupState?.skin || []);
+  return true;
 }
 
 function emitStructState(scope) {
@@ -1321,6 +1360,25 @@ async function loadXmlWithFallback(xmlText) {
 
   function snapshot() {
   if (!sim || !(sim.h > 0)) return;
+  syncVoptToWasm();
+  const catmask = 7; // mjCAT_ALL = mjCAT_STATIC|mjCAT_DYNAMIC|mjCAT_DECOR
+  if (typeof sim.sceneUpdateAndPack === 'function') {
+    sim.sceneUpdateAndPack(catmask);
+  }
+  const scnNgeom = (typeof sim.sceneNgeom === 'function') ? (sim.sceneNgeom() | 0) : 0;
+  const scnTypeView = scnNgeom > 0 ? (sim.sceneGeomTypeView?.() || null) : null;
+  const scnPosView = scnNgeom > 0 ? (sim.sceneGeomPosView?.() || null) : null;
+  const scnMatView = scnNgeom > 0 ? (sim.sceneGeomMatView?.() || null) : null;
+  const scnSizeView = scnNgeom > 0 ? (sim.sceneGeomSizeView?.() || null) : null;
+  const scnRgbaView = scnNgeom > 0 ? (sim.sceneGeomRgbaView?.() || null) : null;
+  const scnMatIdView = scnNgeom > 0 ? (sim.sceneGeomMatIdView?.() || null) : null;
+  const scnDataIdView = scnNgeom > 0 ? (sim.sceneGeomDataIdView?.() || null) : null;
+  const scnObjTypeView = scnNgeom > 0 ? (sim.sceneGeomObjTypeView?.() || null) : null;
+  const scnObjIdView = scnNgeom > 0 ? (sim.sceneGeomObjIdView?.() || null) : null;
+  const scnCategoryView = scnNgeom > 0 ? (sim.sceneGeomCategoryView?.() || null) : null;
+  const scnSegIdView = scnNgeom > 0 ? (sim.sceneGeomSegIdView?.() || null) : null;
+  const scnGeomOrderView = scnNgeom > 0 ? (sim.sceneGeomOrderView?.() || null) : null;
+  const scnTransparentView = scnNgeom > 0 ? (sim.sceneGeomTransparentView?.() || null) : null;
   const n = sim.ngeom?.() | 0;
   const nbodyLocal = sim.nbody?.() | 0;
   const xposView = sim.geomXposView?.();
@@ -1520,6 +1578,7 @@ async function loadXmlWithFallback(xmlText) {
     kind: 'snapshot',
     tSim,
     ngeom: n,
+    scn_ngeom: scnNgeom,
     nq,
     nv,
     nbody: nbodyLocal,
@@ -1619,6 +1678,73 @@ async function loadXmlWithFallback(xmlText) {
     const gdataid = new Int32Array(gdataidView);
     msg.gdataid = gdataid;
     transfers.push(gdataid.buffer);
+  }
+  if (scnNgeom > 0) {
+    if (scnTypeView) {
+      const scnType = new Int32Array(scnTypeView);
+      msg.scn_type = scnType;
+      transfers.push(scnType.buffer);
+    }
+    if (scnPosView) {
+      const scnPos = new Float32Array(scnPosView);
+      msg.scn_pos = scnPos;
+      transfers.push(scnPos.buffer);
+    }
+    if (scnMatView) {
+      const scnMat = new Float32Array(scnMatView);
+      msg.scn_mat = scnMat;
+      transfers.push(scnMat.buffer);
+    }
+    if (scnSizeView) {
+      const scnSize = new Float32Array(scnSizeView);
+      msg.scn_size = scnSize;
+      transfers.push(scnSize.buffer);
+    }
+    if (scnRgbaView) {
+      const scnRgba = new Float32Array(scnRgbaView);
+      msg.scn_rgba = scnRgba;
+      transfers.push(scnRgba.buffer);
+    }
+    if (scnMatIdView) {
+      const scnMatId = new Int32Array(scnMatIdView);
+      msg.scn_matid = scnMatId;
+      transfers.push(scnMatId.buffer);
+    }
+    if (scnDataIdView) {
+      const scnDataId = new Int32Array(scnDataIdView);
+      msg.scn_dataid = scnDataId;
+      transfers.push(scnDataId.buffer);
+    }
+    if (scnObjTypeView) {
+      const scnObjType = new Int32Array(scnObjTypeView);
+      msg.scn_objtype = scnObjType;
+      transfers.push(scnObjType.buffer);
+    }
+    if (scnObjIdView) {
+      const scnObjId = new Int32Array(scnObjIdView);
+      msg.scn_objid = scnObjId;
+      transfers.push(scnObjId.buffer);
+    }
+    if (scnCategoryView) {
+      const scnCategory = new Int32Array(scnCategoryView);
+      msg.scn_category = scnCategory;
+      transfers.push(scnCategory.buffer);
+    }
+    if (scnSegIdView) {
+      const scnSegId = new Int32Array(scnSegIdView);
+      msg.scn_segid = scnSegId;
+      transfers.push(scnSegId.buffer);
+    }
+    if (scnGeomOrderView) {
+      const scnGeomOrder = new Int32Array(scnGeomOrderView);
+      msg.scn_geomorder = scnGeomOrder;
+      transfers.push(scnGeomOrder.buffer);
+    }
+    if (scnTransparentView) {
+      const scnTransparent = new Int32Array(scnTransparentView);
+      msg.scn_transparent = scnTransparent;
+      transfers.push(scnTransparent.buffer);
+    }
   }
   if (jntTypeView) {
     const jtype = new Int32Array(jntTypeView);
@@ -2262,6 +2388,7 @@ onmessage = async (ev) => {
       dragState = { dx: 0, dy: 0 };
       voptFlags = DEFAULT_VOPT_FLAGS.slice();
       sceneFlags = SCENE_FLAG_DEFAULTS.slice();
+      groupState = createGroupState();
       labelMode = 0;
       frameMode = 0;
       cameraMode = 0;

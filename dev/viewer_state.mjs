@@ -1659,6 +1659,20 @@ function resolveSnapshot(state) {
     visualDefaults: cloneStruct(state.visualDefaults),
     xpos: viewOrNull(state.xpos, Float64Array),
       xmat: viewOrNull(state.xmat, Float64Array),
+      scn_ngeom: Number.isFinite(state.scn_ngeom) ? (state.scn_ngeom | 0) : 0,
+      scn_type: viewOrNull(state.scn_type, Int32Array),
+      scn_pos: viewOrNull(state.scn_pos, Float32Array),
+      scn_mat: viewOrNull(state.scn_mat, Float32Array),
+      scn_size: viewOrNull(state.scn_size, Float32Array),
+      scn_rgba: viewOrNull(state.scn_rgba, Float32Array),
+      scn_matid: viewOrNull(state.scn_matid, Int32Array),
+      scn_dataid: viewOrNull(state.scn_dataid, Int32Array),
+      scn_objtype: viewOrNull(state.scn_objtype, Int32Array),
+      scn_objid: viewOrNull(state.scn_objid, Int32Array),
+      scn_category: viewOrNull(state.scn_category, Int32Array),
+      scn_segid: viewOrNull(state.scn_segid, Int32Array),
+      scn_geomorder: viewOrNull(state.scn_geomorder, Int32Array),
+      scn_transparent: viewOrNull(state.scn_transparent, Int32Array),
       gsize: viewOrNull(state.gsize, Float64Array),
       gtype: viewOrNull(state.gtype, Int32Array),
       gmatid: viewOrNull(state.gmatid, Int32Array),
@@ -2152,6 +2166,22 @@ async function loadDefaultXml() {
     };
     lastSnapshot.xpos = makeView(data.xpos, new Float64Array(0), Float64Array);
     lastSnapshot.xmat = makeView(data.xmat, new Float64Array(0), Float64Array);
+    if (typeof data.scn_ngeom === 'number' && Number.isFinite(data.scn_ngeom)) {
+      lastSnapshot.scn_ngeom = data.scn_ngeom | 0;
+    }
+    if (data.scn_type) lastSnapshot.scn_type = makeView(data.scn_type, null, Int32Array);
+    if (data.scn_pos) lastSnapshot.scn_pos = makeView(data.scn_pos, null, Float32Array);
+    if (data.scn_mat) lastSnapshot.scn_mat = makeView(data.scn_mat, null, Float32Array);
+    if (data.scn_size) lastSnapshot.scn_size = makeView(data.scn_size, null, Float32Array);
+    if (data.scn_rgba) lastSnapshot.scn_rgba = makeView(data.scn_rgba, null, Float32Array);
+    if (data.scn_matid) lastSnapshot.scn_matid = makeView(data.scn_matid, null, Int32Array);
+    if (data.scn_dataid) lastSnapshot.scn_dataid = makeView(data.scn_dataid, null, Int32Array);
+    if (data.scn_objtype) lastSnapshot.scn_objtype = makeView(data.scn_objtype, null, Int32Array);
+    if (data.scn_objid) lastSnapshot.scn_objid = makeView(data.scn_objid, null, Int32Array);
+    if (data.scn_category) lastSnapshot.scn_category = makeView(data.scn_category, null, Int32Array);
+    if (data.scn_segid) lastSnapshot.scn_segid = makeView(data.scn_segid, null, Int32Array);
+    if (data.scn_geomorder) lastSnapshot.scn_geomorder = makeView(data.scn_geomorder, null, Int32Array);
+    if (data.scn_transparent) lastSnapshot.scn_transparent = makeView(data.scn_transparent, null, Int32Array);
     if (data.bxpos) lastSnapshot.bxpos = makeView(data.bxpos, null, Float64Array);
     if (data.bxmat) lastSnapshot.bxmat = makeView(data.bxmat, null, Float64Array);
     if (data.xipos) lastSnapshot.xipos = makeView(data.xipos, null, Float64Array);
