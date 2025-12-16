@@ -85,6 +85,8 @@ let simTimeApprox = 0;
 let stepDebt = 0;
 let hasLoggedNoSim = false;
 let measuredSlowdown = 1;
+let lastSnapshotSentMs = 0;
+let lastScnNgeomForRate = 0;
 
 const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
 
@@ -1238,6 +1240,52 @@ async function loadModule() {
   }
   const jsAbs = new URL(`mujoco.js`, distBase);
   const wasmAbs = new URL(`mujoco.wasm`, distBase);
+
+  const assertForgeViewerAbi = (moduleRef) => {
+    const required = [
+      // Scene pipeline (mjv_updateScene -> packed SoA)
+      '_mjwf_scene_update_and_pack',
+      '_mjwf_scene_ngeom',
+      '_mjwf_scene_geomorder_ptr',
+      '_mjwf_scene_geoms_type_ptr',
+      '_mjwf_scene_geoms_pos_ptr',
+      '_mjwf_scene_geoms_mat_ptr',
+      '_mjwf_scene_geoms_size_ptr',
+      '_mjwf_scene_geoms_rgba_ptr',
+      '_mjwf_scene_geoms_matid_ptr',
+      '_mjwf_scene_geoms_dataid_ptr',
+      '_mjwf_scene_geoms_objtype_ptr',
+      '_mjwf_scene_geoms_objid_ptr',
+      '_mjwf_scene_geoms_category_ptr',
+      '_mjwf_scene_geoms_segid_ptr',
+      '_mjwf_scene_geoms_transparent_ptr',
+      // Viewer options (vopt pointers)
+      '_mjwf_vopt_flags_ptr',
+      '_mjwf_vopt_label_ptr',
+      '_mjwf_vopt_frame_ptr',
+      '_mjwf_vopt_flex_layer_ptr',
+      '_mjwf_vopt_bvh_depth_ptr',
+      '_mjwf_vopt_geomgroup_ptr',
+      '_mjwf_vopt_sitegroup_ptr',
+      '_mjwf_vopt_jointgroup_ptr',
+      '_mjwf_vopt_tendongroup_ptr',
+      '_mjwf_vopt_actuatorgroup_ptr',
+      '_mjwf_vopt_flexgroup_ptr',
+      '_mjwf_vopt_skingroup_ptr',
+    ];
+    const missing = required.filter((name) => typeof moduleRef?.[name] !== 'function');
+    if (missing.length === 0) return;
+
+    const message =
+      `[forge] Missing viewer ABI exports (${missing.length}): ${missing.join(', ')}. ` +
+      `This repo now requires a forge build with viewer extensions (scene + vopt pointers). ` +
+      `distBase=${distBase.href}`;
+    try {
+      postMessage({ kind: 'error', message, distBase: distBase.href, missing });
+    } catch {}
+    throw new Error(message);
+  };
+
   // Optional cache tag from version.json (sha8) to avoid stale caching
   let vTag = '';
   try {
@@ -1266,6 +1314,7 @@ async function loadModule() {
     if (!vTag) wasmUrl.searchParams.set('cb', String(Date.now()));
     mod = await load_mujoco({ locateFile: (p) => (p.endsWith('.wasm') ? wasmUrl.href : p) });
     try { installForgeAbiCompat(mod); } catch {}
+    assertForgeViewerAbi(mod);
     try {
       const enableTimers =
         typeof mod._mjwf_enable_timers === 'function'
@@ -1366,6 +1415,7 @@ async function loadXmlWithFallback(xmlText) {
     sim.sceneUpdateAndPack(catmask);
   }
   const scnNgeom = (typeof sim.sceneNgeom === 'function') ? (sim.sceneNgeom() | 0) : 0;
+  lastScnNgeomForRate = scnNgeom;
   const scnTypeView = scnNgeom > 0 ? (sim.sceneGeomTypeView?.() || null) : null;
   const scnPosView = scnNgeom > 0 ? (sim.sceneGeomPosView?.() || null) : null;
   const scnMatView = scnNgeom > 0 ? (sim.sceneGeomMatView?.() || null) : null;
@@ -2186,6 +2236,14 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.meshes.face);
     push(assets.meshes.normal);
     push(assets.meshes.texcoord);
+    push(assets.meshes.graphadr);
+    push(assets.meshes.graph);
+    push(assets.meshes.polynum);
+    push(assets.meshes.polyadr);
+    push(assets.meshes.polynormal);
+    push(assets.meshes.polyvertadr);
+    push(assets.meshes.polyvertnum);
+    push(assets.meshes.polyvert);
   }
   if (assets?.textures) {
     push(assets.textures.type);
@@ -2313,7 +2371,14 @@ setInterval(() => {
 }, 8);
 
 // Snapshot timer at ~60Hz
-setInterval(() => { if (sim && h) snapshot(); }, 16);
+setInterval(() => {
+  if (!sim || !h) return;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const intervalMs = (lastScnNgeomForRate | 0) > 2000 ? 33 : 16;
+  if ((now - lastSnapshotSentMs) < intervalMs) return;
+  lastSnapshotSentMs = now;
+  snapshot();
+}, 16);
 
 onmessage = async (ev) => {
   const msg = ev.data || {};
@@ -2478,7 +2543,8 @@ onmessage = async (ev) => {
       snapshot();
       emitRenderAssets();
     } else if (msg.cmd === 'reset') {
-      if (sim && sim.reset?.()) {
+      if (sim && typeof sim.reset === 'function') {
+        sim.reset();
         initHistoryBuffers();
         captureHistorySample(true);
         emitHistoryMeta();

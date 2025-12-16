@@ -41,12 +41,7 @@ const overlayInfo = document.querySelector('[data-testid="overlay-info"]');
 const overlayProfiler = document.querySelector('[data-testid="overlay-profiler"]');
 const overlaySensor = document.querySelector('[data-testid="overlay-sensor"]');
 const toastEl = document.querySelector('[data-testid="toast"]');
-// TODO(play): legacy header HUD elements (sim time/status/camera/gesture) are no longer used.
-// Leave the queries commented out for now; remove once header is fully deleted.
-// const simTimeEl = document.querySelector('[data-testid="sim-time"]');
-// const simStatusEl = document.querySelector('[data-testid="sim-status"]');
-// const cameraSummaryEl = document.querySelector('[data-testid="camera-summary"]');
-// const gestureEl = document.querySelector('[data-testid="perturb-state"]');
+const simTimeEl = document.querySelector('[data-testid="sim-time"]');
 let viewerStoreRef = null;
 
 let latestSnapshot = null;
@@ -167,27 +162,25 @@ const rendererManager = createRendererManager({
   debugMode,
   setRenderStats: (stats) => {
     renderStats = { ...renderStats, ...stats };
-    try {
-      const frame = Number(stats?.frame);
-      const now = (typeof performance !== 'undefined' && performance.now)
-        ? performance.now()
-        : Date.now();
-      if (Number.isFinite(frame) && frame > lastFpsFrameSample) {
-        const deltaFrame = frame - lastFpsFrameSample;
-        const deltaMs = Math.max(1, now - lastFpsSampleTimeMs);
-        const instFps = (deltaFrame * 1000) / deltaMs;
-        if (Number.isFinite(instFps) && instFps > 0) {
-          if (!Number.isFinite(fpsEstimate) || fpsEstimate <= 0) {
-            fpsEstimate = instFps;
-          } else {
-            const alpha = 0.2;
-            fpsEstimate = fpsEstimate * (1 - alpha) + instFps * alpha;
-          }
-          lastFpsFrameSample = frame;
-          lastFpsSampleTimeMs = now;
+    const frame = Number(stats?.frame);
+    const now = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now()
+      : Date.now();
+    if (Number.isFinite(frame) && frame > lastFpsFrameSample) {
+      const deltaFrame = frame - lastFpsFrameSample;
+      const deltaMs = Math.max(1, now - lastFpsSampleTimeMs);
+      const instFps = (deltaFrame * 1000) / deltaMs;
+      if (Number.isFinite(instFps) && instFps > 0) {
+        if (!Number.isFinite(fpsEstimate) || fpsEstimate <= 0) {
+          fpsEstimate = instFps;
+        } else {
+          const alpha = 0.2;
+          fpsEstimate = fpsEstimate * (1 - alpha) + instFps * alpha;
         }
+        lastFpsFrameSample = frame;
+        lastFpsSampleTimeMs = now;
       }
-    } catch {}
+    }
   },
 });
 rendererManager.setup();
@@ -202,22 +195,26 @@ const controlManager = createControlManager({
   cameraPresets: CAMERA_PRESETS,
 });
 const { loadUiSpec, renderPanels, updateControls, toggleControl, cycleCamera, registerGlobalShortcut } = controlManager;
-try {
-  const initialInfo = typeof backend?.getInitialModelInfo === 'function'
-    ? backend.getInitialModelInfo()
-    : null;
-  if (initialInfo && (initialInfo.label || initialInfo.file)) {
-    const label = initialInfo.label || initialInfo.file || '';
-    store.update((draft) => {
-      if (!draft.hud) draft.hud = {};
-      draft.hud.modelLabel = label;
-    });
-  }
-} catch {}
+const initialInfo = typeof backend?.getInitialModelInfo === 'function'
+  ? backend.getInitialModelInfo()
+  : null;
+if (initialInfo && (initialInfo.label || initialInfo.file)) {
+  const label = initialInfo.label || initialInfo.file || '';
+  store.update((draft) => {
+    if (!draft.hud) draft.hud = {};
+    draft.hud.modelLabel = label;
+  });
+}
 
 function updateOverlay(card, visible) {
   if (!card) return;
   card.classList.toggle('visible', !!visible);
+}
+
+function updateSimTime(state) {
+  if (!simTimeEl) return;
+  const displayTime = typeof state?.hud?.time === 'number' ? state.hud.time : 0;
+  simTimeEl.textContent = `t = ${displayTime.toFixed(3)}`;
 }
 
 function updateRealtimeOverlay(state) {
@@ -456,6 +453,13 @@ function updatePanels(state) {
   const rightVisible = !!state.panels.right;
   const fullscreen = !!state.overlays.fullscreen;
 
+  const changed =
+    leftVisible !== panelStateCache.left ||
+    rightVisible !== panelStateCache.right ||
+    fullscreen !== panelStateCache.fullscreen;
+
+  if (!changed) return;
+
   if (leftPanel) leftPanel.classList.toggle('is-hidden', !leftVisible);
   if (rightPanel) rightPanel.classList.toggle('is-hidden', !rightVisible);
 
@@ -477,10 +481,6 @@ function updatePanels(state) {
   // Keep legacy fullscreen flag for other visual toggles
   document.body.classList.toggle('fullscreen', fullscreen);
 
-  const changed =
-    leftVisible !== panelStateCache.left ||
-    rightVisible !== panelStateCache.right ||
-    fullscreen !== panelStateCache.fullscreen;
   panelStateCache.left = leftVisible;
   panelStateCache.right = rightVisible;
   panelStateCache.fullscreen = fullscreen;
@@ -507,6 +507,42 @@ backend.subscribe((snapshot) => {
 
 let lastLayoutKey = null;
 let lastFontIndex = null;
+let pendingUiFrame = false;
+let pendingUiState = null;
+let lastUiUpdateMs = 0;
+const UI_UPDATE_INTERVAL_MS = 120;
+
+function scheduleUiUpdate(state) {
+  pendingUiState = state;
+  if (pendingUiFrame) return;
+  pendingUiFrame = true;
+  const tick = () => {
+    pendingUiFrame = false;
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if ((now - lastUiUpdateMs) < UI_UPDATE_INTERVAL_MS) {
+      pendingUiFrame = true;
+      setTimeout(() => {
+        if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+          window.requestAnimationFrame(tick);
+        } else {
+          tick();
+        }
+      }, UI_UPDATE_INTERVAL_MS);
+      return;
+    }
+    lastUiUpdateMs = now;
+    const snapshot = pendingUiState || state;
+    updateControls(snapshot);
+    updateInfoOverlayCard(snapshot);
+    updateToast(snapshot);
+    updateSimTime(snapshot);
+  };
+  if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+    window.requestAnimationFrame(tick);
+  } else {
+    tick();
+  }
+}
 
 store.subscribe((state) => {
   if (latestSnapshot) {
@@ -520,51 +556,41 @@ store.subscribe((state) => {
   // updateHud(state); // legacy header HUD (kept for reference, replaced by F2 info overlay)
   updatePanels(state);
 
-  try {
-    const leftVisible = !!state.panels?.left;
-    const rightVisible = !!state.panels?.right;
-    const fullscreen = !!state.overlays?.fullscreen;
-    const layoutKey = `${leftVisible ? '1' : '0'}${rightVisible ? '1' : '0'}${fullscreen ? '1' : '0'}`;
-    const fontIndex = Number.isFinite(state.theme?.font) ? (state.theme.font | 0) : null;
-    if (layoutKey !== lastLayoutKey || fontIndex !== lastFontIndex) {
-      lastLayoutKey = layoutKey;
-      lastFontIndex = fontIndex;
-      queueResizeCanvas();
-    }
-  } catch {}
-  updateToast(state);
-  updateControls(state);
-  updateInfoOverlayCard(state);
+  const leftVisible = !!state.panels?.left;
+  const rightVisible = !!state.panels?.right;
+  const fullscreen = !!state.overlays?.fullscreen;
+  const layoutKey = `${leftVisible ? '1' : '0'}${rightVisible ? '1' : '0'}${fullscreen ? '1' : '0'}`;
+  const fontIndex = Number.isFinite(state.theme?.font) ? (state.theme.font | 0) : null;
+  if (layoutKey !== lastLayoutKey || fontIndex !== lastFontIndex) {
+    lastLayoutKey = layoutKey;
+    lastFontIndex = fontIndex;
+    queueResizeCanvas();
+  }
+  scheduleUiUpdate(state);
   const screenshotSeq = Number(state.runtime?.screenshotSeq) || 0;
   if (screenshotSeq > lastScreenshotSeq) {
     pendingScreenshotSeq = Math.max(pendingScreenshotSeq, screenshotSeq);
   }
   processScreenshotQueue(state);
   // Dynamic: build actuator sliders when metadata arrives
-  try {
-    const acts = latestSnapshot && Array.isArray(latestSnapshot.actuators)
-      ? latestSnapshot.actuators
-      : null;
-    if (acts && acts.length > 0 && typeof controlManager.ensureActuatorSliders === 'function') {
-      // Prefer freshest ctrl values from the latest backend snapshot; fallback to state
-      const ctrlValues = (latestSnapshot && latestSnapshot.ctrl != null)
-        ? latestSnapshot.ctrl
-        : (state.model && state.model.ctrl != null ? state.model.ctrl : []);
-      controlManager.ensureActuatorSliders(acts, ctrlValues);
-    }
-  } catch {}
-  try {
-    const dofs = deriveJointDofs(latestSnapshot, state);
-    if (typeof controlManager.ensureJointSliders === 'function') {
-      controlManager.ensureJointSliders(dofs);
-    }
-  } catch {}
-  try {
-    const eqs = deriveEqualityList(latestSnapshot);
-    if (typeof controlManager.ensureEqualityToggles === 'function') {
-      controlManager.ensureEqualityToggles(eqs);
-    }
-  } catch {}
+  const acts = latestSnapshot && Array.isArray(latestSnapshot.actuators)
+    ? latestSnapshot.actuators
+    : null;
+  if (acts && acts.length > 0 && typeof controlManager.ensureActuatorSliders === 'function') {
+    // Prefer freshest ctrl values from the latest backend snapshot; fallback to state
+    const ctrlValues = (latestSnapshot && latestSnapshot.ctrl != null)
+      ? latestSnapshot.ctrl
+      : (state.model && state.model.ctrl != null ? state.model.ctrl : []);
+    controlManager.ensureActuatorSliders(acts, ctrlValues);
+  }
+  const dofs = deriveJointDofs(latestSnapshot, state);
+  if (typeof controlManager.ensureJointSliders === 'function') {
+    controlManager.ensureJointSliders(dofs);
+  }
+  const eqs = deriveEqualityList(latestSnapshot);
+  if (typeof controlManager.ensureEqualityToggles === 'function') {
+    controlManager.ensureEqualityToggles(eqs);
+  }
 });
 
 rendererManager.renderScene(latestSnapshot, store.get());
@@ -903,21 +929,20 @@ if (typeof registerGlobalShortcut === 'function') {
   });
 }
   if (typeof window !== 'undefined') {
-    try {
-      window.__viewerStore = store;
-      window.__viewerControls = {
-        getBinding: (id) => controlManager.getBinding(id),
-        listIds: (prefix) => controlManager.listIds(prefix),
-        toggleControl: (id, value) => controlManager.toggleControl(id, value),
-        getControl: (id) => controlManager.getControl(id),
-      };
-      window.__viewerRenderer = {
-        getStats: () => ({ ...renderStats }),
-        getContext: () => (rendererManager.getContext ? rendererManager.getContext() : (renderCtx.initialized ? renderCtx : null)),
-        ensureLoop: () => rendererManager.ensureRenderLoop(),
-        renderScene: (snapshot, state) => rendererManager.renderScene(snapshot, state),
-      };
-    } catch {}
+    window.__viewerStore = store;
+    window.__viewerControls = {
+      getBinding: (id) => controlManager.getBinding(id),
+      listIds: (prefix) => controlManager.listIds(prefix),
+      toggleControl: (id, value) => controlManager.toggleControl(id, value),
+      getControl: (id) => controlManager.getControl(id),
+      loadXmlTextAsModel: (xmlText, label) => controlManager.loadXmlTextAsModel?.(xmlText, label),
+    };
+    window.__viewerRenderer = {
+      getStats: () => ({ ...renderStats }),
+      getContext: () => (rendererManager.getContext ? rendererManager.getContext() : (renderCtx.initialized ? renderCtx : null)),
+      ensureLoop: () => rendererManager.ensureRenderLoop(),
+      renderScene: (snapshot, state) => rendererManager.renderScene(snapshot, state),
+    };
   }
 
 // Keep canvas resized to container.
@@ -958,11 +983,9 @@ window.addEventListener('resize', queueResizeCanvas);
     .catch((err) => {
       console.warn('[screenshot] capture failed', err);
       if (store) {
-        try {
-          store.update((draft) => {
-            draft.toast = { message: 'Screenshot failed', ts: Date.now() };
-          });
-        } catch {}
+        store.update((draft) => {
+          draft.toast = { message: 'Screenshot failed', ts: Date.now() };
+        });
       }
     })
     .finally(() => {

@@ -10,6 +10,8 @@ const MJ_GEOM = {
   BOX: 6,
   MESH: 7,
   SDF: 8,
+  FLEX: 100,
+  SKIN: 101,
 };
 const FIXED_CAMERA_OFFSET = 2;
 const LABEL_MODES = {
@@ -1150,6 +1152,47 @@ function applyMuJoCoTextureToMesh(mesh, matId, ctx, assets, textureEnabled, opti
   if (!mesh || !mesh.material || !ctx) return;
   const material = mesh.material;
   if (!('map' in material)) return;
+  const isInfinitePlane = !!mesh.userData?.infinitePlane;
+  if (isInfinitePlane) {
+    const uniforms =
+      mesh.userData?.infiniteGround?.uniforms ||
+      material.userData?.infiniteUniforms ||
+      null;
+    if (material.map) {
+      material.map = null;
+      material.needsUpdate = true;
+    }
+    if (!uniforms) return;
+    if (!uniforms.uMuJoCoTexEnabled) uniforms.uMuJoCoTexEnabled = { value: 0 };
+    if (!uniforms.uMuJoCoMap) uniforms.uMuJoCoMap = { value: null };
+    if (!uniforms.uMuJoCoTexScl) uniforms.uMuJoCoTexScl = { value: new THREE.Vector2(1, 1) };
+
+    if (!textureEnabled || !(matId >= 0) || !assets) {
+      uniforms.uMuJoCoTexEnabled.value = 0;
+      uniforms.uMuJoCoMap.value = null;
+      return;
+    }
+
+    const desc = resolveMaterialTextureDescriptor(matId, assets);
+    const texType = desc ? resolveMuJoCoTextureType(assets, desc.texid) : -1;
+    const isCube = texType !== -1 && texType !== MJ_TEXTURE.TEX2D;
+    const texture = desc && !isCube ? getOrCreateMuJoCoTexture(ctx, assets, desc) : null;
+    if (!texture) {
+      uniforms.uMuJoCoTexEnabled.value = 0;
+      uniforms.uMuJoCoMap.value = null;
+      return;
+    }
+
+    const repeatX = Number.isFinite(desc?.repeatX) ? desc.repeatX : 1;
+    const repeatY = Number.isFinite(desc?.repeatY) ? desc.repeatY : 1;
+    const scl = uniforms.uMuJoCoTexScl.value;
+    if (scl?.set) {
+      scl.set(repeatX, repeatY);
+    }
+    uniforms.uMuJoCoMap.value = texture;
+    uniforms.uMuJoCoTexEnabled.value = 1;
+    return;
+  }
   if (!textureEnabled || !(matId >= 0)) {
     if (material.map) {
       material.map = null;
@@ -3343,8 +3386,23 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
   if (geometry?.computeBoundingSphere) geometry.computeBoundingSphere();
   return { geometry, materialOpts, postCreate };
 }
-function createMeshGeometryFromAssets(assets, meshId) {
-  if (!assets || !assets.meshes || !(meshId >= 0)) return null;
+function createMeshGeometryFromAssets(assets, dataId) {
+  if (!assets || !assets.meshes) return null;
+  const rawDataId = dataId | 0;
+  const MESH_DATAID_MASK = 1 << 30;
+  const isEncoded = (rawDataId & MESH_DATAID_MASK) !== 0;
+  const payload = isEncoded ? (rawDataId & (MESH_DATAID_MASK - 1)) : rawDataId;
+  const meshCountGuess =
+    Number.isFinite(assets.meshes.count)
+      ? (assets.meshes.count | 0)
+      : (assets.meshes.vertnum ? (assets.meshes.vertnum.length | 0) : 0);
+  const decodedId = payload >> 1;
+  const meshId = (!isEncoded && meshCountGuess > 0 && decodedId >= meshCountGuess && rawDataId >= 0 && rawDataId < meshCountGuess)
+    ? rawDataId
+    : decodedId;
+  const hull = (payload & 1) !== 0;
+  if (!(meshId >= 0)) return null;
+
   const {
     vert,
     vertadr,
@@ -3356,17 +3414,105 @@ function createMeshGeometryFromAssets(assets, meshId) {
     texcoord,
     texcoordadr,
     texcoordnum,
+    graph,
+    graphadr,
+    graphnum,
+    nmeshgraph,
+    polynum,
+    polyadr,
+    polynormal,
+    polyvertadr,
+    polyvertnum,
+    polyvert,
+    nmeshpoly,
+    nmeshpolyvert,
   } = assets.meshes;
   const hasValidVert =
     vert
     && typeof vert.length === 'number'
     && typeof vert.slice === 'function';
   if (!hasValidVert || !vertadr || !vertnum) return null;
+
   const count = vertnum[meshId] | 0;
   if (!(count > 0)) return null;
   const start = (vertadr[meshId] | 0) * 3;
   const end = start + count * 3;
   if (start < 0 || end > vert.length) return null;
+
+  if (isEncoded && hull) {
+    const polyCount = polynum && meshId < polynum.length ? (polynum[meshId] | 0) : 0;
+    const polyStart = polyadr && meshId < polyadr.length ? (polyadr[meshId] | 0) : -1;
+    const totalPoly = Number.isFinite(nmeshpoly) ? (nmeshpoly | 0) : (polyvertnum ? (polyvertnum.length | 0) : 0);
+    const totalPolyVert = Number.isFinite(nmeshpolyvert) ? (nmeshpolyvert | 0) : (polyvert ? (polyvert.length | 0) : 0);
+
+    if (
+      polyCount > 0 &&
+      polyStart >= 0 &&
+      polyvertadr &&
+      polyvertnum &&
+      polyvert &&
+      polynormal &&
+      polyStart < totalPoly
+    ) {
+      const polyEnd = Math.min(totalPoly, polyStart + polyCount);
+      let triCount = 0;
+      for (let pid = polyStart; pid < polyEnd; pid += 1) {
+        const n = polyvertnum[pid] | 0;
+        if (n >= 3) triCount += (n - 2);
+      }
+      if (triCount > 0) {
+        const positions = new Float32Array(triCount * 9);
+        const normals = new Float32Array(triCount * 9);
+        let t = 0;
+        for (let pid = polyStart; pid < polyEnd; pid += 1) {
+          const vStart = polyvertadr[pid] | 0;
+          const vNum = polyvertnum[pid] | 0;
+          if (!(vNum >= 3) || vStart < 0 || (vStart + vNum) > totalPolyVert) continue;
+          const v0 = polyvert[vStart] | 0;
+          if (v0 < 0 || v0 >= count) continue;
+          const nBase = pid * 3;
+          const nx = Number(polynormal[nBase + 0]) || 0;
+          const ny = Number(polynormal[nBase + 1]) || 0;
+          const nz = Number(polynormal[nBase + 2]) || 1;
+
+          for (let j = 1; j < vNum - 1; j += 1) {
+            const v1 = polyvert[vStart + j] | 0;
+            const v2 = polyvert[vStart + j + 1] | 0;
+            if (v1 < 0 || v1 >= count) continue;
+            if (v2 < 0 || v2 >= count) continue;
+
+            const dstBase = 9 * t;
+            const vtx = [v0, v1, v2];
+            for (let k = 0; k < 3; k += 1) {
+              const vi = vtx[k] | 0;
+              const srcBase = start + 3 * vi;
+              const outBase = dstBase + 3 * k;
+              positions[outBase + 0] = vert[srcBase + 0] ?? 0;
+              positions[outBase + 1] = vert[srcBase + 1] ?? 0;
+              positions[outBase + 2] = vert[srcBase + 2] ?? 0;
+              normals[outBase + 0] = nx;
+              normals[outBase + 1] = ny;
+              normals[outBase + 2] = nz;
+            }
+            t += 1;
+          }
+        }
+        if (t > 0) {
+          const geometry = new THREE.BufferGeometry();
+          const usedPositions = t === triCount ? positions : positions.subarray(0, t * 9);
+          const usedNormals = t === triCount ? normals : normals.subarray(0, t * 9);
+          geometry.setAttribute('position', new THREE.BufferAttribute(usedPositions, 3));
+          geometry.setAttribute('normal', new THREE.BufferAttribute(usedNormals, 3));
+          geometry.computeBoundingBox();
+          geometry.computeBoundingSphere();
+          return geometry;
+        }
+      }
+    }
+
+    // Fallback: if convex hull data is missing, render the original mesh.
+  }
+
   const positions = vert.slice(start, end);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -6226,8 +6372,15 @@ function applyGeomDescriptors(context, descriptors, {
       if (!(typeof userData.baseAlpha === 'number' && Number.isFinite(userData.baseAlpha))) {
         userData.baseAlpha = mesh.material.opacity;
       }
-      const baseAlpha = userData.baseAlpha;
       const shouldFade = transparentDynamic && !isBodyStatic(desc.bodyId);
+      if (shouldFade && Number.isFinite(alphaScale) && alphaScale > 1e-6 && alphaScale < 0.999) {
+        const currentAlpha = mesh.material.opacity;
+        const stored = userData.baseAlpha;
+        if (Number.isFinite(currentAlpha) && Number.isFinite(stored) && Math.abs(stored - currentAlpha) < 1e-6) {
+          userData.baseAlpha = clampUnit(stored / alphaScale);
+        }
+      }
+      const baseAlpha = userData.baseAlpha;
       const desiredAlpha = shouldFade ? baseAlpha * alphaScale : baseAlpha;
       const nextAlpha = Number.isFinite(desiredAlpha) ? desiredAlpha : baseAlpha;
       const nextTransparent = nextAlpha < 0.999;
@@ -6291,8 +6444,18 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   const segmentEnabled = !!flags[SEGMENT_FLAG_INDEX];
   const vopt = Array.isArray(state?.rendering?.voptFlags) ? state.rendering.voptFlags : [];
   const textureEnabled = voptEnabled(vopt, MJ_VIS.TEXTURE);
+  const showFlexVert = voptEnabled(vopt, MJ_VIS.FLEXVERT);
+  const showFlexEdge = voptEnabled(vopt, MJ_VIS.FLEXEDGE);
+  const showFlexFace = voptEnabled(vopt, MJ_VIS.FLEXFACE);
+  const showFlexSkin = voptEnabled(vopt, MJ_VIS.FLEXSKIN);
+  const showFlexAny = showFlexVert || showFlexEdge || showFlexFace || showFlexSkin;
+  const showSkin = voptEnabled(vopt, MJ_VIS.SKIN);
+  const flexLayerValue = Number.isFinite(state?.rendering?.flexLayer)
+    ? (state.rendering.flexLayer | 0)
+    : 0;
   const baseNgeom = snapshot?.ngeom | 0;
   const geomNameLookup = createGeomNameLookup(state?.model?.geoms);
+  const geomBodyIdView = state?.model?.geomBodyId || null;
 
   const geomToScn = new Int32Array(Math.max(0, baseNgeom));
   geomToScn.fill(-1);
@@ -6303,6 +6466,92 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     if (!(geomId >= 0 && geomId < baseNgeom)) continue;
     if (geomToScn[geomId] === -1) {
       geomToScn[geomId] = i;
+    }
+  }
+
+  // In scene mode, flex/skin lifetime is driven solely by mjvScene.
+  // Hide any stale JS-driven entries and let the scene loop re-enable them.
+  hideFlexGroup(ctx);
+  hideSkinGroup(ctx);
+
+  // Flex/skin are special: their geometry comes from separate buffers, so they are
+  // rendered via their dedicated pools but are still *enumerated* by mjvScene.
+  if (!hideAllGeometry && (showFlexAny || showSkin)) {
+    if (showFlexAny) {
+      const flexAssets = assets?.flexes || null;
+      const count = flexAssets?.count | 0;
+      if (count > 0) {
+        let used = 0;
+        const seen = new Set();
+        for (let si = 0; si < scnNgeom; si += 1) {
+          if ((objTypeView[si] | 0) !== MJ_OBJ.FLEX) continue;
+          const flexIndex = objIdView[si] | 0;
+          if (flexIndex < 0 || flexIndex >= count) continue;
+          if (seen.has(flexIndex)) continue;
+          seen.add(flexIndex);
+          const entry = ensureFlexEntry(ctx, flexIndex, assets, state);
+          if (!entry) continue;
+          entry.group.visible = true;
+          applyFlexAppearance(entry, flexIndex, assets, ctx, textureEnabled);
+
+          const vertadr = flexAssets.vertadr && flexIndex < flexAssets.vertadr.length ? (flexAssets.vertadr[flexIndex] | 0) : 0;
+          const vertnum = entry.vertnum | 0;
+          const srcAll = snapshot?.flexvert_xpos || null;
+          const base = Math.max(0, vertadr) * 3;
+          const end = base + vertnum * 3;
+          if (!srcAll || end > srcAll.length) {
+            entry.points.visible = false;
+            entry.edges.visible = false;
+            entry.faces.visible = false;
+            continue;
+          }
+          const vertxpos = srcAll.subarray(base, end);
+          if (entry.vertexPositions && entry.vertexPositions.length === vertxpos.length) {
+            entry.vertexPositions.set(vertxpos);
+            const attr0 = entry.points?.geometry?.attributes?.position;
+            if (attr0) attr0.needsUpdate = true;
+            const attr1 = entry.edges?.geometry?.attributes?.position;
+            if (attr1) attr1.needsUpdate = true;
+          }
+
+          entry.points.visible = showFlexVert;
+          entry.edges.visible = showFlexEdge;
+          if (showFlexSkin) {
+            updateFlexFaces(entry, flexIndex, snapshot, state, assets, true, flexLayerValue);
+          } else if (showFlexFace) {
+            updateFlexFaces(entry, flexIndex, snapshot, state, assets, false, flexLayerValue);
+          } else {
+            entry.faces.visible = false;
+          }
+          used += 1;
+        }
+        const group = ensureFlexGroup(ctx);
+        if (group) group.visible = used > 0;
+      }
+    }
+
+    if (showSkin) {
+      const skinAssets = assets?.skins || null;
+      const count = skinAssets?.count | 0;
+      if (count > 0) {
+        let used = 0;
+        const seen = new Set();
+        for (let si = 0; si < scnNgeom; si += 1) {
+          if ((objTypeView[si] | 0) !== MJ_OBJ.SKIN) continue;
+          const skinIndex = objIdView[si] | 0;
+          if (skinIndex < 0 || skinIndex >= count) continue;
+          if (seen.has(skinIndex)) continue;
+          seen.add(skinIndex);
+          const entry = ensureSkinEntry(ctx, skinIndex, assets, state);
+          if (!entry) continue;
+          applySkinAppearance(entry, skinIndex, assets, ctx, textureEnabled);
+          const ok = updateSkinMesh(entry, skinIndex, snapshot, assets);
+          entry.mesh.visible = ok;
+          if (ok) used += 1;
+        }
+        const group = ensureSkinGroup(ctx);
+        if (group) group.visible = used > 0;
+      }
     }
   }
 
@@ -6348,7 +6597,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
 
     const rawDataId = dataIdView[si] | 0;
     const meshLike = gtypeRaw === MJ_GEOM.MESH || gtypeRaw === MJ_GEOM.SDF;
-    const dataId = meshLike && rawDataId >= 0 ? (rawDataId >> 1) : rawDataId;
+    const MESH_DATAID_MASK = 1 << 30;
+    const dataId = meshLike && rawDataId >= 0 ? (MESH_DATAID_MASK | rawDataId) : rawDataId;
+    const meshModelDataId = meshLike && rawDataId >= 0 ? (rawDataId >> 1) : null;
     const matId = matIdView[si] | 0;
     const sizeVec = sizeVecFor(gtypeRaw, si);
     const rgbaBase = si * 4;
@@ -6360,6 +6611,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
           rgbaView[rgbaBase + 3],
         ]
       : null;
+    const bodyId = geomBodyIdView && meshIndex >= 0 && meshIndex < geomBodyIdView.length
+      ? (geomBodyIdView[meshIndex] | 0)
+      : -1;
     const geomMeta = {
       index: meshIndex,
       type: gtypeRaw,
@@ -6367,7 +6621,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       size: sizeVec,
       name: nameHint || `SceneGeom ${si}`,
       matId,
-      bodyId: -1,
+      bodyId,
       groupId: -1,
       rgba,
     };
@@ -6383,6 +6637,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     mesh.userData.scnObjId = objIdView[si] | 0;
     mesh.userData.scnCategory = categoryView[si] | 0;
     mesh.userData.scnDataId = rawDataId;
+    mesh.userData.geomModelDataId = meshLike ? meshModelDataId : null;
     applyReflectanceToMaterial(mesh, ctx, reflectanceValue, reflectionEnabled);
 
     if (segmentEnabled) {
@@ -6473,6 +6728,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   const extras = [];
   for (let i = 0; i < scnNgeom; i += 1) {
     const objType = objTypeView[i] | 0;
+    if (objType === MJ_OBJ.FLEX || objType === MJ_OBJ.SKIN) continue;
     if (objType === MJ_OBJ.GEOM) {
       const geomId = objIdView[i] | 0;
       if (geomId >= 0 && geomId < baseNgeom) continue;
@@ -7206,97 +7462,51 @@ export function createRendererManager({
       !!snapshot?.scn_objtype &&
       !!snapshot?.scn_objid &&
       !!snapshot?.scn_category;
-    let geomDescriptors = null;
+    const geomDescriptors = null;
+
+    // Scene-first: base-layer rendering is driven solely by mjvScene SoA.
+    // Legacy JS-side scene construction (geom/site/tendon/flex/skin) is disabled.
     if (hasSceneSoA) {
       drawn = applyMjvSceneSoAGeoms(context, snapshot, state, assets, {
         sceneFlags,
         reflectionEnabled,
         hideAllGeometry,
       });
-      applySiteDescriptors(context, [], {
-        assets,
-        state,
-        snapshot,
-        hideAllGeometry: true,
-        voptFlags,
-        siteGroupIds,
-        siteGroupMask,
-      });
-      applyTendonSegmentDescriptors(context, [], {
-        assets,
-        state,
-        hideAllGeometry: true,
-        tendonGroupIds,
-        tendonGroupMask,
-      });
     } else {
-      geomDescriptors = buildGeomDescriptors(snapshot, state, assets);
-      drawn = applyGeomDescriptors(context, geomDescriptors, {
-        assets,
-        state,
-        snapshot,
-        sceneFlags,
-        reflectionEnabled,
-        hideAllGeometry,
-        voptFlags,
-        geomGroupIds,
-        geomGroupMask,
-      });
-      const siteDescriptors = buildSiteDescriptors(snapshot, state, assets);
-      applySiteDescriptors(context, siteDescriptors, {
-        assets,
-        state,
-        snapshot,
-        hideAllGeometry,
-        voptFlags,
-        siteGroupIds,
-        siteGroupMask,
-      });
-      const showTendon = voptEnabled(voptFlags, MJ_VIS.TENDON);
-      if (showTendon) {
-        const tendonSegments = buildTendonSegmentDescriptors(snapshot, state, assets);
-        applyTendonSegmentDescriptors(context, tendonSegments, {
-          assets,
-          state,
-          hideAllGeometry,
-          tendonGroupIds,
-          tendonGroupMask,
-        });
-      } else {
-        applyTendonSegmentDescriptors(context, [], {
-          assets,
-          state,
-          hideAllGeometry: true,
-          tendonGroupIds,
-          tendonGroupMask,
+      // No fallback: wait for scene to become available (initial frames after load).
+      if (!context._missingSceneSoALogged) {
+        context._missingSceneSoALogged = true;
+        warnLog('[render] mjvScene SoA missing; base-layer rendering disabled until scene arrives', {
+          ngeom: snapshot?.ngeom | 0,
+          scn_ngeom: snapshot?.scn_ngeom | 0,
         });
       }
-    }
-    const showFlex =
-      voptEnabled(voptFlags, MJ_VIS.FLEXVERT) ||
-      voptEnabled(voptFlags, MJ_VIS.FLEXEDGE) ||
-      voptEnabled(voptFlags, MJ_VIS.FLEXFACE) ||
-      voptEnabled(voptFlags, MJ_VIS.FLEXSKIN);
-    if (showFlex) {
-      applyFlexRendering(context, snapshot, state, assets, {
-        hideAllGeometry,
-        voptFlags,
-        flexGroupIds,
-        flexGroupMask,
-      });
-    } else {
+      drawn = 0;
+      if (Array.isArray(context.meshes)) {
+        for (const mesh of context.meshes) {
+          if (mesh) mesh.visible = false;
+        }
+      }
       hideFlexGroup(context);
-    }
-    const showSkin = voptEnabled(voptFlags, MJ_VIS.SKIN);
-    if (showSkin) {
-      applySkinRendering(context, snapshot, state, assets, {
-        hideAllGeometry,
-        skinGroupIds,
-        skinGroupMask,
-      });
-    } else {
       hideSkinGroup(context);
     }
+    // Always hide legacy base-layer groups in scene-first mode.
+    applySiteDescriptors(context, [], {
+      assets,
+      state,
+      snapshot,
+      hideAllGeometry: true,
+      voptFlags,
+      siteGroupIds,
+      siteGroupMask,
+    });
+    applyTendonSegmentDescriptors(context, [], {
+      assets,
+      state,
+      hideAllGeometry: true,
+      tendonGroupIds,
+      tendonGroupMask,
+    });
 
     context.ground = null;
     for (let i = 0; i < ngeom; i += 1) {

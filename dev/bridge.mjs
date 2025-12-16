@@ -578,8 +578,44 @@ export function collectRenderAssetsFromModule(mod, handle) {
     const texcoordView = ensureFunc('_mjwf_mesh_texcoord_ptr')
       ? readView(mod, mod._mjwf_mesh_texcoord_ptr, handle, Math.max(0, texcoordElemCount), heapViewF32)
       : null;
+    const nmeshgraph = typeof mod._mjwf_model_nmeshgraph === 'function'
+      ? (mod._mjwf_model_nmeshgraph(handle) | 0)
+      : 0;
+    const graphAdrView = nmeshgraph > 0
+      ? readView(mod, ensureFunc('_mjwf_model_mesh_graphadr_ptr'), handle, nmesh, heapViewI32)
+      : null;
+    const graphView = nmeshgraph > 0
+      ? readView(mod, ensureFunc('_mjwf_model_mesh_graph_ptr'), handle, nmeshgraph, heapViewI32)
+      : null;
+    const nmeshpoly = typeof mod._mjwf_model_nmeshpoly === 'function'
+      ? (mod._mjwf_model_nmeshpoly(handle) | 0)
+      : 0;
+    const nmeshpolyvert = typeof mod._mjwf_model_nmeshpolyvert === 'function'
+      ? (mod._mjwf_model_nmeshpolyvert(handle) | 0)
+      : 0;
+    const polyNumView = ensureFunc('_mjwf_model_mesh_polynum_ptr')
+      ? readView(mod, mod._mjwf_model_mesh_polynum_ptr, handle, nmesh, heapViewI32)
+      : null;
+    const polyAdrView = ensureFunc('_mjwf_model_mesh_polyadr_ptr')
+      ? readView(mod, mod._mjwf_model_mesh_polyadr_ptr, handle, nmesh, heapViewI32)
+      : null;
+    const polyNormalView = nmeshpoly > 0 && ensureFunc('_mjwf_model_mesh_polynormal_ptr')
+      ? readView(mod, mod._mjwf_model_mesh_polynormal_ptr, handle, nmeshpoly * 3, heapViewF64)
+      : null;
+    const polyVertAdrView = nmeshpoly > 0 && ensureFunc('_mjwf_model_mesh_polyvertadr_ptr')
+      ? readView(mod, mod._mjwf_model_mesh_polyvertadr_ptr, handle, nmeshpoly, heapViewI32)
+      : null;
+    const polyVertNumView = nmeshpoly > 0 && ensureFunc('_mjwf_model_mesh_polyvertnum_ptr')
+      ? readView(mod, mod._mjwf_model_mesh_polyvertnum_ptr, handle, nmeshpoly, heapViewI32)
+      : null;
+    const polyVertView = nmeshpolyvert > 0 && ensureFunc('_mjwf_model_mesh_polyvert_ptr')
+      ? readView(mod, mod._mjwf_model_mesh_polyvert_ptr, handle, nmeshpolyvert, heapViewI32)
+      : null;
     assets.meshes = {
       count: nmesh,
+      nmeshgraph,
+      nmeshpoly,
+      nmeshpolyvert,
       vertadr: cloneTyped(vertAdr, Int32Array),
       vertnum: cloneTyped(vertNum, Int32Array),
       faceadr: cloneTyped(faceAdr, Int32Array),
@@ -590,6 +626,14 @@ export function collectRenderAssetsFromModule(mod, handle) {
       face: cloneTyped(faceView, Int32Array),
       normal: cloneTyped(normalView, Float32Array),
       texcoord: cloneTyped(texcoordView, Float32Array),
+      graphadr: cloneTyped(graphAdrView, Int32Array),
+      graph: cloneTyped(graphView, Int32Array),
+      polynum: cloneTyped(polyNumView, Int32Array),
+      polyadr: cloneTyped(polyAdrView, Int32Array),
+      polynormal: cloneTyped(polyNormalView, Float64Array),
+      polyvertadr: cloneTyped(polyVertAdrView, Int32Array),
+      polyvertnum: cloneTyped(polyVertNumView, Int32Array),
+      polyvert: cloneTyped(polyVertView, Int32Array),
     };
   }
   const nbvh = typeof mod._mjwf_model_nbvh === 'function' ? (mod._mjwf_model_nbvh(handle) | 0) : 0;

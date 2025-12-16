@@ -1,4 +1,4 @@
-import { prepareBindingUpdate, splitBinding } from './viewer_bindings.mjs';
+import { prefetchBindingIndex, prepareBindingUpdate, splitBinding } from './viewer_bindings.mjs';
 import { VISUAL_FIELD_DESCRIPTORS } from './viewer_visual_struct.mjs';
 import { VISUAL_FIELD_GROUPS } from './visual_field_groups.mjs';
 
@@ -1842,6 +1842,8 @@ export async function createBackend(options = {}) {
   let messageHandler = null;
   let lastXmlText = null;
 
+  await prefetchBindingIndex();
+
   async function spawnWorkerBackend() {
     const workerUrl = new URL(WORKER_URL.href);
     if (SNAPSHOT_DEBUG_FLAG) workerUrl.searchParams.set('snapshot', '1');
@@ -2629,9 +2631,17 @@ async function loadDefaultXml() {
           console.log('[backend]', data.message ?? '', data.extra ?? '');
         }
         break;
-      case 'error':
+      case 'error': {
+        const message =
+          typeof data.message === 'string' && data.message.length
+            ? data.message
+            : `Backend error: ${JSON.stringify(data)}`;
+        lastSnapshot.toast = { message, ts: Date.now() };
+        lastSnapshot.backendError = message;
         if (debug) console.error('[backend error]', data);
+        notifyListeners();
         break;
+      }
       default:
         break;
     }
@@ -3003,6 +3013,9 @@ async function loadDefaultXml() {
           size: prepared.meta.size,
           value: prepared.value,
         });
+        // Force a fresh snapshot so UI can observe the updated struct fields,
+        // even when the worker is paused or snapshot delivery is delayed.
+        client.postMessage?.({ cmd: 'snapshot' });
       } catch (err) {
         if (debug) console.warn('[backend setField] post failed', err);
       }
