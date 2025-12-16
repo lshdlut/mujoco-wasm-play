@@ -1570,6 +1570,7 @@ async function loadXmlWithFallback(xmlText) {
   const scnSegIdView = scnNgeom > 0 ? (sim.sceneGeomSegIdView?.() || null) : null;
   const scnGeomOrderView = scnNgeom > 0 ? (sim.sceneGeomOrderView?.() || null) : null;
   const scnTransparentView = scnNgeom > 0 ? (sim.sceneGeomTransparentView?.() || null) : null;
+  const scnLabelView = scnNgeom > 0 ? (sim.sceneGeomLabelView?.() || null) : null;
   const n = sim.ngeom?.() | 0;
   const nbodyLocal = sim.nbody?.() | 0;
   const xposView = sim.geomXposView?.();
@@ -1935,6 +1936,11 @@ async function loadXmlWithFallback(xmlText) {
       const scnTransparent = new Int32Array(scnTransparentView);
       msg.scn_transparent = scnTransparent;
       transfers.push(scnTransparent.buffer);
+    }
+    if (scnLabelView) {
+      const scnLabel = new Uint8Array(scnLabelView);
+      msg.scn_label = scnLabel;
+      transfers.push(scnLabel.buffer);
     }
   }
   if (jntTypeView) {

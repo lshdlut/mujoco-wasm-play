@@ -1673,6 +1673,7 @@ function resolveSnapshot(state) {
       scn_segid: viewOrNull(state.scn_segid, Int32Array),
       scn_geomorder: viewOrNull(state.scn_geomorder, Int32Array),
       scn_transparent: viewOrNull(state.scn_transparent, Int32Array),
+      scn_label: viewOrNull(state.scn_label, Uint8Array),
       gsize: viewOrNull(state.gsize, Float64Array),
       gtype: viewOrNull(state.gtype, Int32Array),
       gmatid: viewOrNull(state.gmatid, Int32Array),
@@ -2184,6 +2185,7 @@ async function loadDefaultXml() {
     if (data.scn_segid) lastSnapshot.scn_segid = makeView(data.scn_segid, null, Int32Array);
     if (data.scn_geomorder) lastSnapshot.scn_geomorder = makeView(data.scn_geomorder, null, Int32Array);
     if (data.scn_transparent) lastSnapshot.scn_transparent = makeView(data.scn_transparent, null, Int32Array);
+    if (data.scn_label) lastSnapshot.scn_label = makeView(data.scn_label, null, Uint8Array);
     if (data.bxpos) lastSnapshot.bxpos = makeView(data.bxpos, null, Float64Array);
     if (data.bxmat) lastSnapshot.bxmat = makeView(data.bxmat, null, Float64Array);
     if (data.xipos) lastSnapshot.xipos = makeView(data.xipos, null, Float64Array);

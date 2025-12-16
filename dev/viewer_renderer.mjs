@@ -10,8 +10,17 @@ const MJ_GEOM = {
   BOX: 6,
   MESH: 7,
   SDF: 8,
-  FLEX: 100,
-  SKIN: 101,
+  // rendering-only geom types (from mjmodel_tmp.h:mjtGeom)
+  ARROW: 100,
+  ARROW1: 101,
+  ARROW2: 102,
+  LINE: 103,
+  LINEBOX: 104,
+  FLEX: 105,
+  SKIN: 106,
+  LABEL: 107,
+  TRIANGLE: 108,
+  NONE: 1001,
 };
 const FIXED_CAMERA_OFFSET = 2;
 const LABEL_MODES = {
@@ -138,6 +147,8 @@ const LABEL_TEXTURE_CACHE = new Map();
 const LABEL_TEXTURE_VERSION = 3;
 const LABEL_DEFAULT_HEIGHT = 0.08;
 const LABEL_DEFAULT_OFFSET = 0.04;
+const MJ_LABEL_STRIDE = 100;
+const MJ_LABEL_DECODER = (typeof TextDecoder !== 'undefined') ? new TextDecoder('utf-8') : null;
 const LABEL_LOD_NEAR = 2.0;
 const LABEL_LOD_MID = 4.5;
 const LABEL_LOD_FACTORS = { near: 2, mid: 1.4, far: 1 };
@@ -1961,6 +1972,77 @@ function hideLabelGroup(context) {
   }
 }
 
+function updateSceneLabelOverlays(context, snapshot, state, options = {}) {
+  const scnNgeom = snapshot?.scn_ngeom | 0;
+  const labelBytes = snapshot?.scn_label || null;
+  const posView = snapshot?.scn_pos || null;
+  if (!(scnNgeom > 0) || !labelBytes || !posView || !MJ_LABEL_DECODER) {
+    hideLabelGroup(context);
+    return;
+  }
+  if (labelBytes.length < scnNgeom * MJ_LABEL_STRIDE || posView.length < scnNgeom * 3) {
+    hideLabelGroup(context);
+    return;
+  }
+  const hideAllGeometry = !!options.hideAllGeometry;
+  if (hideAllGeometry) {
+    hideLabelGroup(context);
+    return;
+  }
+
+  const labelGroup = ensureLabelGroup(context);
+  const pool = context.labelPool;
+  const camera = context.camera;
+  const labelHeight = LABEL_DEFAULT_HEIGHT;
+  const verticalOffset = LABEL_DEFAULT_OFFSET;
+  const maxLabels = LABEL_GEOM_LIMIT;
+  let used = 0;
+
+  for (let si = 0; si < scnNgeom; si += 1) {
+    const base = si * MJ_LABEL_STRIDE;
+    if ((labelBytes[base] | 0) === 0) continue;
+    if (used >= maxLabels) break;
+    const bytes = labelBytes.subarray(base, base + MJ_LABEL_STRIDE);
+    let end = bytes.indexOf(0);
+    if (end < 0) end = MJ_LABEL_STRIDE;
+    const text = MJ_LABEL_DECODER.decode(bytes.subarray(0, end)).trim();
+    if (!text) continue;
+    const pbase = si * 3;
+    const px = Number(posView[pbase + 0]);
+    const py = Number(posView[pbase + 1]);
+    const pz = Number(posView[pbase + 2]);
+    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
+
+    let quality = LABEL_LOD_FACTORS.far;
+    if (camera) {
+      const dist = camera.position.distanceTo(__TMP_VEC3.set(px, py, pz));
+      if (dist < LABEL_LOD_NEAR) quality = LABEL_LOD_FACTORS.near;
+      else if (dist < LABEL_LOD_MID) quality = LABEL_LOD_FACTORS.mid;
+    }
+    const texture = getLabelTexture(text, quality);
+    if (!texture) continue;
+    let sprite = pool[used];
+    if (!sprite) {
+      sprite = createLabelSprite();
+      pool[used] = sprite;
+      labelGroup.add(sprite);
+    }
+    sprite.material.map = texture;
+    sprite.material.needsUpdate = true;
+    const aspect = Number(texture.userData?.aspect) || 3;
+    const width = labelHeight * aspect;
+    sprite.scale.set(width, labelHeight, 1);
+    sprite.position.set(px, py, pz + verticalOffset);
+    sprite.visible = true;
+    used += 1;
+  }
+
+  for (let i = used; i < pool.length; i += 1) {
+    if (pool[i]) pool[i].visible = false;
+  }
+  labelGroup.visible = used > 0;
+}
+
 function updateLabelOverlays(context, snapshot, state, options = {}) {
   const mode = Number(state.rendering?.labelMode) | 0;
   if (mode === LABEL_MODES.NONE) {
@@ -3050,10 +3132,65 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
     roughness: 0.65,
   };
   let postCreate = null;
+  let objectKind = 'mesh';
   const sx = Number(sizeVec?.[0]) || 0;
   const sy = Number(sizeVec?.[1]) || 0;
   const sz = Number(sizeVec?.[2]) || 0;
   switch (gtype) {
+    case MJ_GEOM.LINE: {
+      // mjGEOM_LINE is a connector: local +Z is the segment direction.
+      // Width is denominated in pixels in MuJoCo; WebGL line width is not reliable,
+      // so we render as a 1px line and rely on scene RGBA + depth ordering.
+      const length = Math.max(1e-6, sy || sz || 0);
+      geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+        0, 0, 0,
+        0, 0, length,
+      ]), 3));
+      materialOpts = { color: 0xffffff, kind: 'line' };
+      objectKind = 'line';
+      break;
+    }
+    case MJ_GEOM.LINEBOX: {
+      // mjGEOM_LINEBOX uses half-sizes (AABB extents).
+      const bx = Math.max(1e-6, sx || 0.1);
+      const by = Math.max(1e-6, sy || bx);
+      const bz = Math.max(1e-6, sz || bx);
+      const box = new THREE.BoxGeometry(2 * bx, 2 * by, 2 * bz);
+      geometry = new THREE.EdgesGeometry(box);
+      box.dispose();
+      materialOpts = { color: 0xffffff, kind: 'line' };
+      objectKind = 'line';
+      break;
+    }
+    case MJ_GEOM.ARROW:
+    case MJ_GEOM.ARROW1:
+    case MJ_GEOM.ARROW2: {
+      // Connector arrow: local +Z is the arrow direction, origin at the "from" endpoint.
+      // Approximate with a single cone (MuJoCo uses wedges; we keep it simple).
+      const radius = Math.max(1e-6, sx || 0.02);
+      const length = Math.max(1e-6, sy || sz || 0.1);
+      geometry = new THREE.CylinderGeometry(0, radius, length, 12, 1, false);
+      geometry.rotateX(Math.PI / 2);
+      geometry.translate(0, 0, length * 0.5);
+      materialOpts = { color: 0xffffff, kind: 'basic' };
+      break;
+    }
+    case MJ_GEOM.TRIANGLE: {
+      // Triangle: local X is edge v0->v1, local Y is edge v0->v2 (see engine_vis_visualize.c:makeTriangle).
+      const e1 = Math.max(0, sx || 0);
+      const e2 = Math.max(0, sy || 0);
+      geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+        0, 0, 0,
+        e1, 0, 0,
+        0, e2, 0,
+      ]), 3));
+      geometry.setIndex([0, 1, 2]);
+      geometry.computeVertexNormals();
+      materialOpts = { color: 0xffffff, kind: 'basic', doubleSided: true };
+      break;
+    }
     case MJ_GEOM.SPHERE: {
       const r = Math.max(1e-6, sx || sy || sz || 0.1);
       geometry = new THREE.SphereGeometry(1, 24, 16);
@@ -3139,7 +3276,7 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
   }
   if (geometry?.computeBoundingBox) geometry.computeBoundingBox();
   if (geometry?.computeBoundingSphere) geometry.computeBoundingSphere();
-  return { geometry, materialOpts, postCreate };
+  return { geometry, materialOpts, postCreate, objectKind };
 }
 function createMeshGeometryFromAssets(assets, dataId) {
   if (!assets || !assets.meshes) return null;
@@ -3699,6 +3836,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
         });
         geometryInfo.ownGeometry = true;
       }
+      const objectKind = geometryInfo.objectKind || 'mesh';
 
       let material;
       if (geometryInfo.materialOpts && geometryInfo.materialOpts.shadow) {
@@ -3711,31 +3849,62 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
         const useStandard = gtype === MJ_GEOM.PLANE || gtype === MJ_GEOM.HFIELD;
         const sceneFlags = state?.rendering?.sceneFlags || [];
         const wire = !!sceneFlags[1];
-        const poolKey = {
-          kind: useStandard ? 'standard' : 'physical',
-          color: baseOpts.color ?? 0xffffff,
-          roughness: baseOpts.roughness ?? 0.55,
-          metalness: baseOpts.metalness ?? 0.0,
-          wireframe: wire,
-        };
-        if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
-        material = ctx.materialPool.get(poolKey);
-        if (material && material.userData?.pooled) {
-          const cloned = material.clone();
-          cloned.userData = cloned.userData || {};
-          cloned.userData.pooled = false;
-          material = cloned;
+        const kind = baseOpts.kind || null;
+        if (objectKind === 'line' || kind === 'line') {
+          material = new THREE.LineBasicMaterial({
+            color: baseOpts.color ?? 0xffffff,
+            transparent: true,
+            opacity: 1,
+            depthWrite: true,
+            depthTest: true,
+            toneMapped: false,
+          });
+        } else if (kind === 'basic') {
+          material = new THREE.MeshBasicMaterial({
+            color: baseOpts.color ?? 0xffffff,
+            transparent: true,
+            opacity: 1,
+            depthWrite: true,
+            depthTest: true,
+            toneMapped: false,
+          });
+          if (baseOpts.doubleSided) {
+            material.side = THREE.DoubleSide;
+          }
+        } else {
+          const poolKey = {
+            kind: useStandard ? 'standard' : 'physical',
+            color: baseOpts.color ?? 0xffffff,
+            roughness: baseOpts.roughness ?? 0.55,
+            metalness: baseOpts.metalness ?? 0.0,
+            wireframe: wire,
+          };
+          if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
+          material = ctx.materialPool.get(poolKey);
+          if (material && material.userData?.pooled) {
+            const cloned = material.clone();
+            cloned.userData = cloned.userData || {};
+            cloned.userData.pooled = false;
+            material = cloned;
+          }
+          if (!useStandard) material.envMapIntensity = 0;
         }
-        if (!useStandard) material.envMapIntensity = 0;
       }
-      material.side = THREE.FrontSide;
-      mesh = new THREE.Mesh(geometryInfo.geometry, material);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      if (material && 'side' in material) material.side = THREE.FrontSide;
+      mesh = objectKind === 'line'
+        ? new THREE.LineSegments(geometryInfo.geometry, material)
+        : new THREE.Mesh(geometryInfo.geometry, material);
+      const isDebugGeom =
+        gtype === MJ_GEOM.LINE ||
+        gtype === MJ_GEOM.LINEBOX ||
+        gtype === MJ_GEOM.ARROW ||
+        gtype === MJ_GEOM.ARROW1 ||
+        gtype === MJ_GEOM.ARROW2 ||
+        gtype === MJ_GEOM.TRIANGLE;
+      mesh.castShadow = !isDebugGeom;
+      mesh.receiveShadow = !isDebugGeom;
       if (typeof geometryInfo.postCreate === 'function') {
-        try {
-          geometryInfo.postCreate(mesh);
-        } catch {}
+        geometryInfo.postCreate(mesh);
       }
       mesh.userData = mesh.userData || {};
       mesh.userData.infinitePlane = false;
@@ -6191,6 +6360,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   const objTypeView = snapshot?.scn_objtype || null;
   const objIdView = snapshot?.scn_objid || null;
   const categoryView = snapshot?.scn_category || null;
+  const geomOrderView = snapshot?.scn_geomorder || null;
   if (!typeView || !posView || !matView || !sizeView || !rgbaView || !matIdView || !dataIdView || !objTypeView || !objIdView || !categoryView) {
     return 0;
   }
@@ -6211,6 +6381,21 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   const baseNgeom = snapshot?.ngeom | 0;
   const geomNameLookup = createGeomNameLookup(state?.model?.geoms);
   const geomBodyIdView = state?.model?.geomBodyId || null;
+
+  let geomOrderRank = ctx._scnGeomOrderRank || null;
+  if (!geomOrderRank || geomOrderRank.length !== scnNgeom) {
+    geomOrderRank = new Int32Array(scnNgeom);
+    ctx._scnGeomOrderRank = geomOrderRank;
+  }
+  for (let i = 0; i < scnNgeom; i += 1) {
+    geomOrderRank[i] = i;
+  }
+  if (geomOrderView && geomOrderView.length >= scnNgeom) {
+    for (let k = 0; k < scnNgeom; k += 1) {
+      const si = geomOrderView[k] | 0;
+      if (si >= 0 && si < scnNgeom) geomOrderRank[si] = k;
+    }
+  }
 
   const geomToScn = new Int32Array(Math.max(0, baseNgeom));
   geomToScn.fill(-1);
@@ -6320,8 +6505,16 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     const sx = Number(sizeView?.[base + 0]) || 0;
     const sy = Number(sizeView?.[base + 1]) || 0;
     const sz = Number(sizeView?.[base + 2]) || 0;
-    if (gtype === MJ_GEOM.CAPSULE || gtype === MJ_GEOM.CYLINDER) {
+    if (
+      gtype === MJ_GEOM.CAPSULE ||
+      gtype === MJ_GEOM.CYLINDER ||
+      gtype === MJ_GEOM.LINE ||
+      gtype === MJ_GEOM.ARROW ||
+      gtype === MJ_GEOM.ARROW1 ||
+      gtype === MJ_GEOM.ARROW2
+    ) {
       // mjvGeom stores [radius, radius, halflength] for capsule/cylinder.
+      // mjvGeom stores [width,width,length] for connector line/arrow types.
       return [sx, sz, 0];
     }
     return [sx, sy, sz];
@@ -6335,6 +6528,11 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     }
 
     const gtypeRaw = typeView[si] | 0;
+    if (gtypeRaw === MJ_GEOM.LABEL || gtypeRaw === MJ_GEOM.NONE) {
+      // Labels are rendered via the scene label buffer (mjvGeom.label); no mesh needed.
+      safeHide(meshIndex);
+      return false;
+    }
     const supported =
       gtypeRaw === MJ_GEOM.PLANE ||
       gtypeRaw === MJ_GEOM.HFIELD ||
@@ -6344,7 +6542,13 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       gtypeRaw === MJ_GEOM.CYLINDER ||
       gtypeRaw === MJ_GEOM.BOX ||
       gtypeRaw === MJ_GEOM.MESH ||
-      gtypeRaw === MJ_GEOM.SDF;
+      gtypeRaw === MJ_GEOM.SDF ||
+      gtypeRaw === MJ_GEOM.LINE ||
+      gtypeRaw === MJ_GEOM.LINEBOX ||
+      gtypeRaw === MJ_GEOM.ARROW ||
+      gtypeRaw === MJ_GEOM.ARROW1 ||
+      gtypeRaw === MJ_GEOM.ARROW2 ||
+      gtypeRaw === MJ_GEOM.TRIANGLE;
     if (!supported) {
       safeHide(meshIndex);
       return false;
@@ -6383,6 +6587,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     const geomState = ensureGeomState(ctx, meshIndex, geomMeta);
     const mesh = ensureGeomMesh(ctx, meshIndex, gtypeRaw, assets, dataId, sizeVec, { geomMeta }, state);
     if (!mesh) return false;
+    if (!mesh.userData?.infinitePlane) {
+      mesh.renderOrder = geomOrderRank ? (geomOrderRank[si] | 0) : (mesh.renderOrder || 0);
+    }
 
     const reflectanceValue = resolveMaterialReflectance(matId, assets);
     mesh.userData = mesh.userData || {};
@@ -6455,12 +6662,24 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
         (gtypeRaw === MJ_GEOM.MESH || gtypeRaw === MJ_GEOM.SDF) && mesh.geometry && typeof mesh.geometry.getAttribute === 'function' && mesh.geometry.getAttribute('uv')
           ? 'explicit'
           : 'generated';
-      applyMuJoCoTextureToMesh(mesh, matId, ctx, assets, textureEnabled, {
-        texcoordMode,
-        geomType: gtypeRaw,
-        geomSize: sizeVec,
-        geomDataId: dataId,
-      });
+      const textureCompatible =
+        gtypeRaw === MJ_GEOM.PLANE ||
+        gtypeRaw === MJ_GEOM.HFIELD ||
+        gtypeRaw === MJ_GEOM.SPHERE ||
+        gtypeRaw === MJ_GEOM.CAPSULE ||
+        gtypeRaw === MJ_GEOM.ELLIPSOID ||
+        gtypeRaw === MJ_GEOM.CYLINDER ||
+        gtypeRaw === MJ_GEOM.BOX ||
+        gtypeRaw === MJ_GEOM.MESH ||
+        gtypeRaw === MJ_GEOM.SDF;
+      if (textureCompatible) {
+        applyMuJoCoTextureToMesh(mesh, matId, ctx, assets, textureEnabled, {
+          texcoordMode,
+          geomType: gtypeRaw,
+          geomSize: sizeVec,
+          geomDataId: dataId,
+        });
+      }
     }
 
     mesh.visible = visible;
@@ -7088,112 +7307,6 @@ export function createRendererManager({
       { trackingBounds, trackingOverride },
     );
     let drawn = 0;
-    const sizeView = snapshot.gsize || assets?.geoms?.size || null;
-    const typeView = snapshot.gtype || assets?.geoms?.type || null;
-    const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
-    const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
-    const bodyIdView = state?.model?.geomBodyId || null;
-    const overlayOptions = {
-      geomGroupIds,
-      geomGroupMask,
-      hideAllGeometry,
-      typeView,
-      bounds: nextBounds || context.bounds || null,
-    };
-    updateLabelOverlays(context, snapshot, state, overlayOptions);
-    const showCamera = voptEnabled(voptFlags, MJ_VIS.CAMERA);
-    let cameraDescriptors = null;
-    const showLight = voptEnabled(voptFlags, MJ_VIS.LIGHT);
-    const showCom = voptEnabled(voptFlags, MJ_VIS.COM);
-    const showJoint = voptEnabled(voptFlags, MJ_VIS.JOINT);
-    const showActuator = voptEnabled(voptFlags, MJ_VIS.ACTUATOR);
-    const showRangefinder = voptEnabled(voptFlags, MJ_VIS.RANGEFINDER);
-    const showConstraint = voptEnabled(voptFlags, MJ_VIS.CONSTRAINT);
-    const showBodyBvh = voptEnabled(voptFlags, MJ_VIS.BODYBVH);
-    const showMeshBvh = voptEnabled(voptFlags, MJ_VIS.MESHBVH);
-    const showInertia = voptEnabled(voptFlags, MJ_VIS.INERTIA);
-    const showAutoConnect = voptEnabled(voptFlags, MJ_VIS.AUTOCONNECT);
-    const showPertForce = voptEnabled(voptFlags, MJ_VIS.PERTFORCE);
-
-    if (showCamera) {
-      cameraDescriptors = buildCameraOverlayDescriptors(snapshot, state, context);
-      applyCameraOverlayDescriptors(context, cameraDescriptors);
-    } else {
-      hideCameraGroup(context);
-    }
-    if (showLight) {
-      const lightDescriptors = buildLightOverlayDescriptors(snapshot, state, context);
-      applyLightOverlayDescriptors(context, lightDescriptors);
-    } else {
-      hideLightGroup(context);
-    }
-    if (showCom) {
-      const comDescriptors = buildComOverlayDescriptors(snapshot, state, context);
-      applyComOverlayDescriptors(context, comDescriptors);
-    } else {
-      hideComGroup(context);
-    }
-    if (showJoint) {
-      const jointDescriptors = buildJointOverlayDescriptors(snapshot, state, context);
-      applyJointOverlayDescriptors(context, jointDescriptors);
-    } else {
-      hideJointGroup(context);
-    }
-    if (showActuator) {
-      const actuatorDescriptors = buildActuatorOverlayDescriptors(snapshot, state, context);
-      applyActuatorOverlayDescriptors(context, actuatorDescriptors);
-    } else {
-      hideActuatorGroup(context);
-    }
-    // Simulate renders slider-crank geoms whenever mjTRN_SLIDERCRANK actuators exist,
-    // independent of mjVIS_ACTUATOR; keep parity by not gating this overlay on showActuator.
-    if (hideAllGeometry) {
-      hideSlidercrankGroup(context);
-    } else {
-      const sliderDescriptors = buildSlidercrankOverlayDescriptors(snapshot, state, context);
-      applySlidercrankOverlayDescriptors(context, sliderDescriptors);
-    }
-    if (showRangefinder) {
-      const rangeDescriptors = buildRangefinderOverlayDescriptors(snapshot, state, context);
-      applyRangefinderOverlayDescriptors(context, rangeDescriptors);
-    } else {
-      hideRangefinderGroup(context);
-    }
-    if (showConstraint) {
-      const constraintDescriptors = buildConstraintOverlayDescriptors(snapshot, state, context);
-      applyConstraintOverlayDescriptors(context, constraintDescriptors);
-    } else {
-      hideConstraintGroup(context);
-    }
-    // Perturb overlay is driven by runtime.pertViz in state; descriptors take care of the helpers.
-    const perturbDescriptors = buildPerturbOverlayDescriptors(snapshot, state, context, overlayOptions);
-    applyPerturbOverlayDescriptors(context, perturbDescriptors);
-
-    if (showBodyBvh || showMeshBvh) {
-      updateBvhOverlays(context, snapshot, state, assets, {
-        voptFlags,
-        hideAllGeometry,
-        flexGroupIds,
-        flexGroupMask,
-      });
-    } else {
-      hideBvhGroup(context);
-    }
-    if (showInertia) {
-      updateInertiaOverlays(context, snapshot, state, assets, { voptFlags, hideAllGeometry });
-    } else {
-      hideInertiaGroup(context);
-    }
-    if (showAutoConnect) {
-      updateAutoConnectOverlays(context, snapshot, state, assets, { voptFlags, hideAllGeometry });
-    } else {
-      hideAutoConnectGroup(context);
-    }
-    if (showPertForce) {
-      updateExternalPerturbOverlays(context, snapshot, state, { voptFlags });
-    } else {
-      hideExternalPerturbGroup(context);
-    }
 
     const hasSceneSoA =
       (snapshot?.scn_ngeom | 0) > 0 &&
@@ -7207,6 +7320,134 @@ export function createRendererManager({
       !!snapshot?.scn_objtype &&
       !!snapshot?.scn_objid &&
       !!snapshot?.scn_category;
+
+    const sizeView = snapshot.gsize || assets?.geoms?.size || null;
+    const typeView = snapshot.gtype || assets?.geoms?.type || null;
+    const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
+    const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
+    const bodyIdView = state?.model?.geomBodyId || null;
+    const overlayOptions = {
+      geomGroupIds,
+      geomGroupMask,
+      hideAllGeometry,
+      typeView,
+      bounds: nextBounds || context.bounds || null,
+    };
+
+    if (hasSceneSoA) {
+      // Scene-first: all decor/debug visuals come from mjvScene; disable JS-side overlay builders.
+      updateSceneLabelOverlays(context, snapshot, state, { hideAllGeometry });
+      hideCameraGroup(context);
+      hideLightGroup(context);
+      hideComGroup(context);
+      hideJointGroup(context);
+      hideActuatorGroup(context);
+      hideSlidercrankGroup(context);
+      hideRangefinderGroup(context);
+      hideConstraintGroup(context);
+      hideBvhGroup(context);
+      hideInertiaGroup(context);
+      hideAutoConnectGroup(context);
+      hideExternalPerturbGroup(context);
+      hidePerturbTranslate(context);
+      hidePerturbRotate(context);
+    } else {
+      updateLabelOverlays(context, snapshot, state, overlayOptions);
+      const showCamera = voptEnabled(voptFlags, MJ_VIS.CAMERA);
+      let cameraDescriptors = null;
+      const showLight = voptEnabled(voptFlags, MJ_VIS.LIGHT);
+      const showCom = voptEnabled(voptFlags, MJ_VIS.COM);
+      const showJoint = voptEnabled(voptFlags, MJ_VIS.JOINT);
+      const showActuator = voptEnabled(voptFlags, MJ_VIS.ACTUATOR);
+      const showRangefinder = voptEnabled(voptFlags, MJ_VIS.RANGEFINDER);
+      const showConstraint = voptEnabled(voptFlags, MJ_VIS.CONSTRAINT);
+      const showBodyBvh = voptEnabled(voptFlags, MJ_VIS.BODYBVH);
+      const showMeshBvh = voptEnabled(voptFlags, MJ_VIS.MESHBVH);
+      const showInertia = voptEnabled(voptFlags, MJ_VIS.INERTIA);
+      const showAutoConnect = voptEnabled(voptFlags, MJ_VIS.AUTOCONNECT);
+      const showPertForce = voptEnabled(voptFlags, MJ_VIS.PERTFORCE);
+
+      if (showCamera) {
+        cameraDescriptors = buildCameraOverlayDescriptors(snapshot, state, context);
+        applyCameraOverlayDescriptors(context, cameraDescriptors);
+      } else {
+        hideCameraGroup(context);
+      }
+      if (showLight) {
+        const lightDescriptors = buildLightOverlayDescriptors(snapshot, state, context);
+        applyLightOverlayDescriptors(context, lightDescriptors);
+      } else {
+        hideLightGroup(context);
+      }
+      if (showCom) {
+        const comDescriptors = buildComOverlayDescriptors(snapshot, state, context);
+        applyComOverlayDescriptors(context, comDescriptors);
+      } else {
+        hideComGroup(context);
+      }
+      if (showJoint) {
+        const jointDescriptors = buildJointOverlayDescriptors(snapshot, state, context);
+        applyJointOverlayDescriptors(context, jointDescriptors);
+      } else {
+        hideJointGroup(context);
+      }
+      if (showActuator) {
+        const actuatorDescriptors = buildActuatorOverlayDescriptors(snapshot, state, context);
+        applyActuatorOverlayDescriptors(context, actuatorDescriptors);
+      } else {
+        hideActuatorGroup(context);
+      }
+      // Simulate renders slider-crank geoms whenever mjTRN_SLIDERCRANK actuators exist,
+      // independent of mjVIS_ACTUATOR; keep parity by not gating this overlay on showActuator.
+      if (hideAllGeometry) {
+        hideSlidercrankGroup(context);
+      } else {
+        const sliderDescriptors = buildSlidercrankOverlayDescriptors(snapshot, state, context);
+        applySlidercrankOverlayDescriptors(context, sliderDescriptors);
+      }
+      if (showRangefinder) {
+        const rangeDescriptors = buildRangefinderOverlayDescriptors(snapshot, state, context);
+        applyRangefinderOverlayDescriptors(context, rangeDescriptors);
+      } else {
+        hideRangefinderGroup(context);
+      }
+      if (showConstraint) {
+        const constraintDescriptors = buildConstraintOverlayDescriptors(snapshot, state, context);
+        applyConstraintOverlayDescriptors(context, constraintDescriptors);
+      } else {
+        hideConstraintGroup(context);
+      }
+      // Perturb overlay is driven by runtime.pertViz in state; descriptors take care of the helpers.
+      const perturbDescriptors = buildPerturbOverlayDescriptors(snapshot, state, context, overlayOptions);
+      applyPerturbOverlayDescriptors(context, perturbDescriptors);
+
+      if (showBodyBvh || showMeshBvh) {
+        updateBvhOverlays(context, snapshot, state, assets, {
+          voptFlags,
+          hideAllGeometry,
+          flexGroupIds,
+          flexGroupMask,
+        });
+      } else {
+        hideBvhGroup(context);
+      }
+      if (showInertia) {
+        updateInertiaOverlays(context, snapshot, state, assets, { voptFlags, hideAllGeometry });
+      } else {
+        hideInertiaGroup(context);
+      }
+      if (showAutoConnect) {
+        updateAutoConnectOverlays(context, snapshot, state, assets, { voptFlags, hideAllGeometry });
+      } else {
+        hideAutoConnectGroup(context);
+      }
+      if (showPertForce) {
+        updateExternalPerturbOverlays(context, snapshot, state, { voptFlags });
+      } else {
+        hideExternalPerturbGroup(context);
+      }
+    }
+
     const geomDescriptors = null;
 
     // Scene-first: base-layer rendering is driven solely by mjvScene SoA.
@@ -7319,7 +7560,12 @@ export function createRendererManager({
       }
     }
 
-    if (voptEnabled(voptFlags, MJ_VIS.SELECT)) {
+    if (hasSceneSoA) {
+      // Scene-first: selection visuals are emitted by mjvScene when applicable (mjVIS_SELECT).
+      // Disable JS-side selection overlays to avoid double-rendering.
+      clearSelectionHighlight(context);
+      hideSelectionPoint(context);
+    } else if (voptEnabled(voptFlags, MJ_VIS.SELECT)) {
       const selectionDescriptor = buildSelectionOverlayDescriptors(snapshot, state, context);
       applySelectionOverlayDescriptors(context, selectionDescriptor);
     } else {
