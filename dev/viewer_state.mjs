@@ -3236,24 +3236,42 @@ async function loadDefaultXml() {
   }
 
   async function applyPerturbCommand(options = {}) {
-    const bodyId = Number.isFinite(options.bodyId) ? (options.bodyId | 0) : -1;
-    const geomIndex = Number.isFinite(options.geomIndex) ? (options.geomIndex | 0) : -1;
+    const phase = typeof options.phase === 'string' ? options.phase : '';
+    if (!phase) return resolveSnapshot(lastSnapshot);
+
+    const msg = { cmd: 'applyPerturb', phase };
     const mode = options.mode === 'rotate' ? 'rotate' : 'translate';
-    const msg = {
-      cmd: 'applyPerturb',
-      bodyId,
-      geomIndex,
-      mode,
-      anchor: toVec3(options.anchor),
-      cursor: toVec3(options.cursor),
-    };
-    if (Array.isArray(options.rotVec) && options.rotVec.length >= 3) {
-      msg.rotVec = [
-        Number(options.rotVec[0]) || 0,
-        Number(options.rotVec[1]) || 0,
-        Number(options.rotVec[2]) || 0,
-      ];
+    const cam = options.cam && typeof options.cam === 'object' ? options.cam : null;
+    const camPayload = cam
+      ? {
+          lookat: toVec3(cam.lookat),
+          distance: Number(cam.distance) || 0,
+          azimuth: Number(cam.azimuth) || 0,
+          elevation: Number(cam.elevation) || 0,
+          orthographic: !!cam.orthographic,
+        }
+      : null;
+
+    if (phase === 'begin') {
+      msg.mode = mode;
+      msg.shiftKey = !!options.shiftKey;
+      msg.bodyId = Number(options.bodyId) | 0;
+      msg.localpos = toVec3(options.localpos);
+      msg.scale = Number(options.scale) || 0;
+      if (camPayload) msg.cam = camPayload;
+    } else if (phase === 'move') {
+      msg.mode = mode;
+      msg.shiftKey = !!options.shiftKey;
+      msg.reldx = Number(options.reldx) || 0;
+      msg.reldy = Number(options.reldy) || 0;
+      if (camPayload) msg.cam = camPayload;
+    } else if (phase === 'end') {
+      // nothing else
+    } else {
+      // TODO: delete legacy applyPerturb payload format once all callers are migrated.
+      return resolveSnapshot(lastSnapshot);
     }
+
     try {
       client.postMessage?.(msg);
     } catch (err) {

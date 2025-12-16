@@ -67,10 +67,12 @@ const GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'ski
 const MJ_GROUP_COUNT = 6;
 let groupState = createGroupState();
 let lastBounds = { center: [0, 0, 0], radius: 0 };
+/* TODO: delete legacy perturb cache state (manual xfrc_applied path) once mjvPerturb migration is complete.
 let perturbBodyId = -1;
 let perturbLocalmass = null;
 let perturbInertia = null;
 let perturbRefQuat = null;
+*/
 let alignSeq = 0;
 let copySeq = 0;
 let renderAssets = null;
@@ -79,6 +81,24 @@ let optionSupport = { supported: false, pointers: [] };
 let flexLayer = 0;
 let bvhDepth = 1;
 const diagStagesLogged = new Set();
+
+// mjv perturb pipeline (forge exports): JS only sends begin/move/end + normalized deltas,
+// wasm handles mjv_movePerturb + mjv_applyPerturbForce.
+const MJ_CAMERA = { FREE: 0 };
+const MJ_MOUSE = {
+  ROTATE_V: 1,
+  ROTATE_H: 2,
+  MOVE_V: 3,
+  MOVE_H: 4,
+};
+const MJ_PERT = {
+  TRANSLATE: 1,
+  ROTATE: 2,
+};
+let mjvPerturbActive = false;
+let mjvPerturbBodyId = -1;
+let mjvPerturbPtrs = { modelPtr: 0, dataPtr: 0, camPtr: 0, scnPtr: 0, pertPtr: 0 };
+let mjvPerturbFns = null;
 let lastSyncWallTime = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
 let lastSyncSimTime = 0;
 let simTimeApprox = 0;
@@ -277,6 +297,104 @@ function syncVoptToWasm() {
   writeGroup(sim.voptFlexGroupView?.(), groupState?.flex || []);
   writeGroup(sim.voptSkinGroupView?.(), groupState?.skin || []);
   return true;
+}
+
+function ensureMjvPerturbAbi() {
+  if (mjvPerturbFns) return mjvPerturbFns;
+  const requiredFns = [
+    '_mjwf_mjv_updateCamera',
+    '_mjwf_mjv_initPerturb',
+    '_mjwf_mjv_movePerturb',
+    '_mjwf_mjv_applyPerturbForce',
+  ];
+  const requiredPtrs = [
+    '_mjwf_scene_maxgeom_ptr',
+    '_mjwf_cam_type_ptr',
+    '_mjwf_cam_lookat_ptr',
+    '_mjwf_cam_distance_ptr',
+    '_mjwf_cam_azimuth_ptr',
+    '_mjwf_cam_elevation_ptr',
+    '_mjwf_cam_orthographic_ptr',
+    '_mjwf_pert_select_ptr',
+    '_mjwf_pert_active_ptr',
+    '_mjwf_pert_active2_ptr',
+    '_mjwf_pert_localpos_ptr',
+    '_mjwf_pert_scale_ptr',
+    '_mjwf_pert_flexselect_ptr',
+    '_mjwf_pert_skinselect_ptr',
+  ];
+  const missing = [
+    ...requiredFns.filter((name) => typeof mod?.[name] !== 'function'),
+    ...requiredPtrs.filter((name) => typeof mod?.[name] !== 'function'),
+  ];
+  if (missing.length) {
+    throw new Error(`[forge] Missing mjv perturb ABI exports: ${missing.join(', ')}`);
+  }
+  mjvPerturbFns = {
+    updateCamera: mod._mjwf_mjv_updateCamera,
+    initPerturb: mod._mjwf_mjv_initPerturb,
+    movePerturb: mod._mjwf_mjv_movePerturb,
+    applyForce: mod._mjwf_mjv_applyPerturbForce,
+  };
+  return mjvPerturbFns;
+}
+
+function mjvMouseActionFor(mode, shiftKey) {
+  const m = mode === 'rotate' ? 'rotate' : 'translate';
+  if (m === 'translate') {
+    return shiftKey ? MJ_MOUSE.MOVE_H : MJ_MOUSE.MOVE_V;
+  }
+  if (m === 'rotate') {
+    return shiftKey ? MJ_MOUSE.ROTATE_H : MJ_MOUSE.ROTATE_V;
+  }
+  return null;
+}
+
+function writeViewerFreeCameraFromPayload(payload) {
+  if (!payload || !sim) return;
+  const lookat = Array.isArray(payload.lookat) ? payload.lookat : null;
+  const lookatView = sim.camLookatPtrView?.();
+  const typeView = sim.camTypePtrView?.();
+  const distView = sim.camDistancePtrView?.();
+  const azView = sim.camAzimuthPtrView?.();
+  const elView = sim.camElevationPtrView?.();
+  const orthoView = sim.camOrthographicPtrView?.();
+  const fixedView = sim.camFixedcamidPtrView?.();
+  const trackView = sim.camTrackbodyidPtrView?.();
+  if (typeView && typeView.length) typeView[0] = MJ_CAMERA.FREE;
+  if (fixedView && fixedView.length) fixedView[0] = -1;
+  if (trackView && trackView.length) trackView[0] = -1;
+  if (lookatView && lookatView.length >= 3 && lookat) {
+    lookatView[0] = Number(lookat[0]) || 0;
+    lookatView[1] = Number(lookat[1]) || 0;
+    lookatView[2] = Number(lookat[2]) || 0;
+  }
+  if (distView && distView.length) distView[0] = Number(payload.distance) || 0;
+  if (azView && azView.length) azView[0] = Number(payload.azimuth) || 0;
+  if (elView && elView.length) elView[0] = Number(payload.elevation) || 0;
+  if (orthoView && orthoView.length) orthoView[0] = payload.orthographic ? 1 : 0;
+}
+
+function clearPerturbXfrcIfNeeded() {
+  if (!sim) return;
+  const bodyId = mjvPerturbBodyId | 0;
+  if (!(bodyId > 0)) return;
+  const zero = [0, 0, 0];
+  const ok = typeof sim.applyXfrcByBody === 'function' ? sim.applyXfrcByBody(bodyId, zero, zero) : false;
+  if (!ok && typeof sim.clearAllXfrc === 'function') {
+    sim.clearAllXfrc();
+  }
+}
+
+function applyMjvPerturbForceIfActive() {
+  if (!mjvPerturbActive) return;
+  if (!sim || !mod || !(h > 0)) return;
+  const fns = ensureMjvPerturbAbi();
+  const modelPtr = mjvPerturbPtrs.modelPtr | 0;
+  const dataPtr = mjvPerturbPtrs.dataPtr | 0;
+  const pertPtr = mjvPerturbPtrs.pertPtr | 0;
+  if (!(modelPtr > 0) || !(dataPtr > 0) || !(pertPtr > 0)) return;
+  fns.applyForce.call(mod, modelPtr, dataPtr, pertPtr);
 }
 
 function emitStructState(scope) {
@@ -1241,14 +1359,15 @@ async function loadModule() {
   const jsAbs = new URL(`mujoco.js`, distBase);
   const wasmAbs = new URL(`mujoco.wasm`, distBase);
 
-  const assertForgeViewerAbi = (moduleRef) => {
-    const required = [
-      // Scene pipeline (mjv_updateScene -> packed SoA)
-      '_mjwf_scene_update_and_pack',
-      '_mjwf_scene_ngeom',
-      '_mjwf_scene_geomorder_ptr',
-      '_mjwf_scene_geoms_type_ptr',
-      '_mjwf_scene_geoms_pos_ptr',
+    const assertForgeViewerAbi = (moduleRef) => {
+      const required = [
+        // Scene pipeline (mjv_updateScene -> packed SoA)
+        '_mjwf_scene_update_and_pack',
+        '_mjwf_scene_maxgeom_ptr',
+        '_mjwf_scene_ngeom',
+        '_mjwf_scene_geomorder_ptr',
+        '_mjwf_scene_geoms_type_ptr',
+        '_mjwf_scene_geoms_pos_ptr',
       '_mjwf_scene_geoms_mat_ptr',
       '_mjwf_scene_geoms_size_ptr',
       '_mjwf_scene_geoms_rgba_ptr',
@@ -1267,12 +1386,34 @@ async function loadModule() {
       '_mjwf_vopt_bvh_depth_ptr',
       '_mjwf_vopt_geomgroup_ptr',
       '_mjwf_vopt_sitegroup_ptr',
-      '_mjwf_vopt_jointgroup_ptr',
-      '_mjwf_vopt_tendongroup_ptr',
-      '_mjwf_vopt_actuatorgroup_ptr',
-      '_mjwf_vopt_flexgroup_ptr',
-      '_mjwf_vopt_skingroup_ptr',
-    ];
+        '_mjwf_vopt_jointgroup_ptr',
+        '_mjwf_vopt_tendongroup_ptr',
+        '_mjwf_vopt_actuatorgroup_ptr',
+        '_mjwf_vopt_flexgroup_ptr',
+        '_mjwf_vopt_skingroup_ptr',
+        // Viewer camera pointers (mjvCamera fields)
+        '_mjwf_cam_type_ptr',
+        '_mjwf_cam_lookat_ptr',
+        '_mjwf_cam_distance_ptr',
+        '_mjwf_cam_azimuth_ptr',
+        '_mjwf_cam_elevation_ptr',
+        '_mjwf_cam_fixedcamid_ptr',
+        '_mjwf_cam_orthographic_ptr',
+        '_mjwf_cam_trackbodyid_ptr',
+        // Perturb pointers (mjvPerturb fields)
+        '_mjwf_pert_select_ptr',
+        '_mjwf_pert_active_ptr',
+        '_mjwf_pert_active2_ptr',
+        '_mjwf_pert_localpos_ptr',
+        '_mjwf_pert_scale_ptr',
+        '_mjwf_pert_flexselect_ptr',
+        '_mjwf_pert_skinselect_ptr',
+        // mjv helpers for perturb pipeline
+        '_mjwf_mjv_updateCamera',
+        '_mjwf_mjv_initPerturb',
+        '_mjwf_mjv_movePerturb',
+        '_mjwf_mjv_applyPerturbForce',
+      ];
     const missing = required.filter((name) => typeof moduleRef?.[name] !== 'function');
     if (missing.length === 0) return;
 
@@ -2340,6 +2481,7 @@ setInterval(() => {
     try {
       captureHistorySample(true);
       applyCtrlNoise();
+      applyMjvPerturbForceIfActive();
       sim.step(1);
     } catch {
       break;
@@ -2558,6 +2700,7 @@ onmessage = async (ev) => {
         while (steps < n) {
           try { captureHistorySample(true); } catch {}
           try {
+            applyMjvPerturbForceIfActive();
             sim.step(1);
           } catch {
             break;
@@ -2770,6 +2913,90 @@ onmessage = async (ev) => {
         }
       }
     } else if (msg.cmd === 'applyPerturb') {
+      if (!sim || !mod || !(h > 0)) return;
+      const phase = typeof msg.phase === 'string' ? msg.phase : '';
+      if (phase === 'begin') {
+        ensureMjvPerturbAbi();
+        clearPerturbXfrcIfNeeded();
+
+        const bodyId = Number(msg.bodyId) | 0;
+        if (!(bodyId > 0)) return;
+        const localpos = Array.isArray(msg.localpos) ? msg.localpos : null;
+        if (!localpos || localpos.length < 3) {
+          throw new Error('[worker] applyPerturb(begin) missing localpos');
+        }
+
+        const { modelPtr, dataPtr } = sim.ensurePointers();
+        const camPtr = mod._mjwf_cam_type_ptr(h) | 0;
+        const scnPtr = sim.scenePtr() | 0;
+        const pertPtr = sim.pertPtr() | 0;
+        if (!(camPtr > 0) || !(scnPtr > 0) || !(pertPtr > 0)) {
+          throw new Error('[worker] applyPerturb(begin) missing cam/scn/pert pointers');
+        }
+        mjvPerturbPtrs = { modelPtr: modelPtr | 0, dataPtr: dataPtr | 0, camPtr, scnPtr, pertPtr };
+
+        writeViewerFreeCameraFromPayload(msg.cam || null);
+        mjvPerturbFns = ensureMjvPerturbAbi();
+        mjvPerturbFns.updateCamera.call(mod, modelPtr | 0, dataPtr | 0, camPtr | 0, scnPtr | 0);
+
+        const selectView = sim.pertSelectPtrView?.();
+        const localposView = sim.pertLocalposPtrView?.();
+        const activeView = sim.pertActivePtrView?.();
+        const active2View = sim.pertActive2PtrView?.();
+        const scaleView = sim.pertScalePtrView?.();
+        const flexView = sim.pertFlexselectPtrView?.();
+        const skinView = sim.pertSkinselectPtrView?.();
+        if (!selectView || !localposView || !activeView || !active2View || !scaleView) {
+          throw new Error('[worker] applyPerturb(begin) missing pert field views');
+        }
+        selectView[0] = bodyId | 0;
+        if (flexView && flexView.length) flexView[0] = -1;
+        if (skinView && skinView.length) skinView[0] = -1;
+        localposView[0] = Number(localpos[0]) || 0;
+        localposView[1] = Number(localpos[1]) || 0;
+        localposView[2] = Number(localpos[2]) || 0;
+        activeView[0] = (msg.mode === 'rotate' ? MJ_PERT.ROTATE : MJ_PERT.TRANSLATE) | 0;
+        active2View[0] = 0;
+
+        mjvPerturbFns.initPerturb.call(mod, modelPtr | 0, dataPtr | 0, scnPtr | 0, pertPtr | 0);
+        const scale = Number(msg.scale);
+        if (Number.isFinite(scale) && scale > 0) {
+          scaleView[0] = scale;
+        }
+        mjvPerturbActive = true;
+        mjvPerturbBodyId = bodyId | 0;
+      } else if (phase === 'move') {
+        if (!mjvPerturbActive) return;
+        ensureMjvPerturbAbi();
+        const mode = msg.mode === 'rotate' ? 'rotate' : 'translate';
+        const action = mjvMouseActionFor(mode, !!msg.shiftKey);
+        const reldx = Number(msg.reldx) || 0;
+        const reldy = Number(msg.reldy) || 0;
+        writeViewerFreeCameraFromPayload(msg.cam || null);
+        mjvPerturbFns = ensureMjvPerturbAbi();
+        mjvPerturbFns.updateCamera.call(mod, mjvPerturbPtrs.modelPtr | 0, mjvPerturbPtrs.dataPtr | 0, mjvPerturbPtrs.camPtr | 0, mjvPerturbPtrs.scnPtr | 0);
+        const activeView = sim.pertActivePtrView?.();
+        const active2View = sim.pertActive2PtrView?.();
+        if (activeView && activeView.length) activeView[0] = (mode === 'rotate' ? MJ_PERT.ROTATE : MJ_PERT.TRANSLATE) | 0;
+        if (active2View && active2View.length) active2View[0] = 0;
+        mjvPerturbFns.movePerturb.call(mod, mjvPerturbPtrs.modelPtr | 0, mjvPerturbPtrs.dataPtr | 0, action | 0, reldx, reldy, mjvPerturbPtrs.scnPtr | 0, mjvPerturbPtrs.pertPtr | 0);
+      } else if (phase === 'end') {
+        if (!mjvPerturbActive) return;
+        const activeView = sim.pertActivePtrView?.();
+        const active2View = sim.pertActive2PtrView?.();
+        const selectView = sim.pertSelectPtrView?.();
+        if (activeView && activeView.length) activeView[0] = 0;
+        if (active2View && active2View.length) active2View[0] = 0;
+        if (selectView && selectView.length) selectView[0] = -1;
+        clearPerturbXfrcIfNeeded();
+        mjvPerturbActive = false;
+        mjvPerturbBodyId = -1;
+        mjvPerturbPtrs = { modelPtr: 0, dataPtr: 0, camPtr: 0, scnPtr: 0, pertPtr: 0 };
+      } else {
+        throw new Error(`[worker] applyPerturb requires phase=begin|move|end (got ${String(phase || msg.phase)})`);
+      }
+
+      /* TODO: delete legacy applyPerturb (manual xfrc_applied) implementation once mjvPerturb is stable.
       try {
         if (!sim) return;
         const bodyId = Number(msg.bodyId) | 0;
@@ -3198,6 +3425,7 @@ onmessage = async (ev) => {
         }, { force: true });
         throw err;
       }
+      */
     } else if (msg.cmd === 'applyForce') {
       // Expected: { geomIndex, force:[fx,fy,fz], torque:[tx,ty,tz], point:[x,y,z] }
       try {
@@ -3242,11 +3470,17 @@ onmessage = async (ev) => {
       ctrlNoiseRate = +msg.rate || 0;
     } else if (msg.cmd === 'clearForces') {
       try { sim?.clearAllXfrc?.(); } catch {}
-      perturbBodyId = -1;
-      perturbLocalmass = null;
-      perturbInertia = null;
-      perturbRefQuat = null;
-      perturbRefQuat = null;
+      try {
+        const activeView = sim?.pertActivePtrView?.();
+        const active2View = sim?.pertActive2PtrView?.();
+        const selectView = sim?.pertSelectPtrView?.();
+        if (activeView && activeView.length) activeView[0] = 0;
+        if (active2View && active2View.length) active2View[0] = 0;
+        if (selectView && selectView.length) selectView[0] = -1;
+      } catch {}
+      mjvPerturbActive = false;
+      mjvPerturbBodyId = -1;
+      mjvPerturbPtrs = { modelPtr: 0, dataPtr: 0, camPtr: 0, scnPtr: 0, pertPtr: 0 };
     } else if (msg.cmd === 'setCtrl') {
       // Write a single actuator control value if pointers available
       try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch {}

@@ -1626,6 +1626,26 @@ export class MjSimLite {
   voptActuatorGroupView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_vopt_actuatorgroup_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewU8(m, ptr, 6); }
   voptFlexGroupView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_vopt_flexgroup_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewU8(m, ptr, 6); }
   voptSkinGroupView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_vopt_skingroup_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewU8(m, ptr, 6); }
+
+  // Viewer camera/scene/perturb pointers (forge viewer ABI).
+  scenePtr(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_scene_maxgeom_ptr; if (typeof fn!=='function' || !(h>0)) return 0; try { return fn.call(m, h) | 0; } catch { return 0; } }
+  camTypePtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_cam_type_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }
+  camLookatPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_cam_lookat_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF64(m, ptr, 3); }
+  camDistancePtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_cam_distance_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF64(m, ptr, 1); }
+  camAzimuthPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_cam_azimuth_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF64(m, ptr, 1); }
+  camElevationPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_cam_elevation_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF64(m, ptr, 1); }
+  camOrthographicPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_cam_orthographic_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }
+  camFixedcamidPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_cam_fixedcamid_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }
+  camTrackbodyidPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_cam_trackbodyid_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }
+
+  pertPtr(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_pert_select_ptr; if (typeof fn!=='function' || !(h>0)) return 0; try { return fn.call(m, h) | 0; } catch { return 0; } }
+  pertSelectPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_pert_select_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }
+  pertActivePtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_pert_active_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }
+  pertActive2PtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_pert_active2_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }
+  pertLocalposPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_pert_localpos_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF64(m, ptr, 3); }
+  pertScalePtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_pert_scale_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF64(m, ptr, 1); }
+  pertFlexselectPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_pert_flexselect_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }
+  pertSkinselectPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_pert_skinselect_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }
   nmat(){ const m=this.mod; const h=this.h|0; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_nmat']; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
   matRgbaView(){ const m=this.mod; const h=this.h|0; const nm=this.nmat(); if(!nm)return; const pref=this.pref||'mjwf'; const d=m['_' + pref + '_mat_rgba_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF32(m,p,nm*4); }
   nmesh(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_nmesh; if (typeof d!=='function') return 0; try { return (d.call(m,h)|0)||0; } catch { return 0; } }

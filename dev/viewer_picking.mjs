@@ -332,6 +332,7 @@ export function createPickingController({
     return true;
   }
 
+  /* TODO: delete legacy JS-side perturb math (convert2D + alignToCamera + scale) now that mjv_movePerturb runs in wasm.
   function computePerturbScale(referencePoint) {
     if (!renderCtx.camera || !referencePoint) {
       return 1;
@@ -442,11 +443,12 @@ export function createPickingController({
       } else {
         dragState.lastTorqueVec.set(0, 0, 0);
       }
-      // Rotate模式不移动锚点/指示点，保持与 simulate 一致（仅改变 refquat）。
+      // Rotate mode does not move anchor/cursor; only refquat changes.
     } else {
       dragState.pointerTarget.addScaledVector(worldVec, scale);
     }
   }
+  */
 
   function applyRotation(mat, vec, out) {
     out.set(
@@ -540,6 +542,44 @@ export function createPickingController({
     } catch {}
   }
 
+  function currentMjvFreeCameraPayload() {
+    const camera = renderCtx.camera;
+    if (!camera) return null;
+    const target = renderCtx.cameraTarget || new THREE_NS.Vector3(0, 0, 0);
+    if (!renderCtx.cameraTarget) {
+      renderCtx.cameraTarget = target;
+    }
+    const forward = tempVecA.copy(target).sub(camera.position);
+    const dist = forward.length();
+    if (!(dist > 1e-9)) {
+      return {
+        lookat: [target.x, target.y, target.z],
+        distance: 0,
+        azimuth: 0,
+        elevation: 0,
+        orthographic: !!camera.isOrthographicCamera,
+      };
+    }
+    forward.multiplyScalar(1 / dist);
+    const fz = Math.max(-1, Math.min(1, forward.z));
+    const elevation = (Math.asin(fz) * 180) / Math.PI;
+    const azimuth = (Math.atan2(forward.y, forward.x) * 180) / Math.PI;
+    return {
+      lookat: [target.x, target.y, target.z],
+      distance: dist,
+      azimuth,
+      elevation,
+      orthographic: !!camera.isOrthographicCamera,
+    };
+  }
+
+  function dispatchMjvPerturb(phase, payload) {
+    if (!phase) return;
+    if (typeof backend.applyPerturb !== 'function') return;
+    backend.applyPerturb({ ...(payload || {}), phase });
+  }
+
+  /* TODO: delete legacy perturb dispatch (manual xfrc_applied path).
   function dispatchPerturbState(payload) {
     if (!payload) return;
     if (typeof backend.applyPerturb === 'function') {
@@ -550,11 +590,11 @@ export function createPickingController({
       backend.applyForce?.(payload);
     }
   }
+  */
 
   function applyPerturb(fromLoop = false) {
     const selection = currentSelection();
     if (!selection || selection.geom < 0) return false;
-    const geomIndex = selection.geom | 0;
     const camera = renderCtx.camera;
     if (!camera) return false;
     const bodyCapable = Number.isFinite(dragState.bodyId) && dragState.bodyId >= 0 && refreshBodyPose(dragState.bodyId);
@@ -564,35 +604,14 @@ export function createPickingController({
     } else if (!resolveSelectionWorldPoint(selection, dragState.anchorPoint)) {
       return false;
     }
-    dragState.scale = computePerturbScale(dragState.anchorPoint);
-    samplePointerFromScreen();
     const target = dragState.pointerTarget;
     if (!target) return false;
     const mode = dragState.mode === 'rotate' ? 'rotate' : 'translate';
-    const payload = {
-      bodyId: bodyCapable ? dragState.bodyId : -1,
-      geomIndex: bodyCapable ? -1 : geomIndex,
-      mode,
-      anchor: [dragState.anchorPoint.x, dragState.anchorPoint.y, dragState.anchorPoint.z],
-      cursor: mode === 'rotate'
-        ? [dragState.anchorPoint.x, dragState.anchorPoint.y, dragState.anchorPoint.z]
-        : [target.x, target.y, target.z],
-    };
-    if (mode === 'rotate' && !fromLoop) {
-      payload.rotVec = [
-        dragState.lastRotVec.x,
-        dragState.lastRotVec.y,
-        dragState.lastRotVec.z,
-      ];
-    }
-    dragState.payload = payload;
+    dragState.payload = null;
     setPerturbState(mode, true);
-    dispatchPerturbState(payload);
     const offsetVec = tempVecWorld.copy(dragState.pointerTarget).sub(dragState.anchorPoint);
     const vizForce = mode === 'translate' ? offsetVec : null;
-    const vizTorque = mode === 'rotate'
-      ? (dragState.lastTorqueVec.lengthSq() > 0 ? dragState.lastTorqueVec.clone() : offsetVec)
-      : null;
+    const vizTorque = null;
     updatePerturbViz({
       active: true,
       mode,
@@ -617,7 +636,7 @@ export function createPickingController({
     if (!updateAnchorWorldFromLocal(dragState.anchorPoint)) {
       resolveSelectionWorldPoint(currentSelection(), dragState.anchorPoint);
     }
-    dragState.scale = computePerturbScale(dragState.anchorPoint);
+    dragState.scale = null;
     const cameraForward = renderCtx.camera?.getWorldDirection(new THREE_NS.Vector3()).normalize() || globalUp.clone();
     dragState.planeNormal.copy(cameraForward);
     dragState.planePoint.copy(dragState.anchorPoint);
@@ -650,7 +669,15 @@ export function createPickingController({
       dragState.lastTorqueVec.set(0, 0, 0);
       dragState.lastRotVec.set(0, 0, 0);
     }
-    backend.clearForces?.();
+    // TODO: delete legacy clearForces call; mjvPerturb end now clears its own xfrc.
+    // backend.clearForces?.();
+    dispatchMjvPerturb('begin', {
+      mode,
+      shiftKey: dragState.shiftKey,
+      bodyId: dragState.bodyId | 0,
+      localpos: [dragState.anchorLocal.x, dragState.anchorLocal.y, dragState.anchorLocal.z],
+      cam: currentMjvFreeCameraPayload(),
+    });
     if (typeof dragState.pointerId === 'number' && canvas.setPointerCapture) {
       try {
         canvas.setPointerCapture(dragState.pointerId);
@@ -662,7 +689,9 @@ export function createPickingController({
 
   function endPerturb() {
     if (!dragState.active) return;
-    backend.clearForces?.();
+    dispatchMjvPerturb('end', null);
+    // TODO: delete legacy clearForces call; mjvPerturb end now clears its own xfrc.
+    // backend.clearForces?.();
     dragState.payload = null;
     dragState.lastForceVec.set(0, 0, 0);
     dragState.lastTorqueVec.set(0, 0, 0);
@@ -820,10 +849,24 @@ export function createPickingController({
     if (renderCtx.camera) {
       dragState.planeNormal.copy(renderCtx.camera.getWorldDirection(new THREE_NS.Vector3()).normalize());
     }
+    const deltaX = Number.isFinite(prevX) ? event.clientX - prevX : 0;
+    const deltaY = Number.isFinite(prevY) ? event.clientY - prevY : 0;
+    const rect = typeof canvas.getBoundingClientRect === 'function'
+      ? canvas.getBoundingClientRect()
+      : { height: 1 };
+    const height = Math.max(1, rect.height || 1);
+    const reldx = deltaX / height;
+    // MuJoCo mjv_movePerturb expects reldy > 0 for mouse-down (screen Y+).
+    const reldy = deltaY / height;
+    dispatchMjvPerturb('move', {
+      mode: dragState.mode,
+      shiftKey: dragState.shiftKey,
+      reldx,
+      reldy,
+      cam: currentMjvFreeCameraPayload(),
+    });
     if (!samplePointerFromScreen()) {
-      const deltaX = Number.isFinite(prevX) ? event.clientX - prevX : 0;
-      const deltaY = Number.isFinite(prevY) ? event.clientY - prevY : 0;
-      applyPointerDelta(deltaX, deltaY);
+      dragState.pointerTarget.copy(dragState.anchorPoint);
     }
     applyPerturb();
   }
