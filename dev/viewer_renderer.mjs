@@ -2144,29 +2144,6 @@ function updateLabelOverlays(context, snapshot, state, options = {}) {
   labelGroup.visible = used > 0;
 }
 
-function createFrameHelper() {
-  const helper = new THREE.AxesHelper(1);
-  helper.visible = false;
-  helper.renderOrder = 600;
-  if (helper.material) {
-    helper.material.depthTest = true;
-    helper.material.depthWrite = false;
-    helper.material.transparent = false;
-  }
-  return helper;
-}
-
-function ensureFrameGroup(context) {
-  if (!context.frameGroup) {
-    context.frameGroup = new THREE.Group();
-    context.frameGroup.name = 'overlay:frames';
-    const worldScene = getWorldScene(context);
-    if (worldScene) worldScene.add(context.frameGroup);
-    context.framePool = [];
-  }
-  return context.frameGroup;
-}
-
 function ensureCameraGroup(ctx) {
   if (!ctx.cameraGroup) {
     const group = new THREE.Group();
@@ -2275,47 +2252,6 @@ function ensureSelectionGroup(ctx) {
   return ctx.selectionGroup;
 }
 
-function ensureContactGroup(ctx) {
-  if (!ctx) return null;
-  if (!ctx.contactGroup) {
-    const group = new THREE.Group();
-    group.name = 'overlay:contacts';
-    const world = getWorldScene(ctx);
-    if (world) world.add(group);
-    ctx.contactGroup = group;
-    if (!Array.isArray(ctx.contactPool)) {
-      ctx.contactPool = [];
-    }
-  }
-  return ctx.contactGroup;
-}
-
-function ensureContactForceGroup(ctx) {
-  if (!ctx) return null;
-  if (!ctx.contactForceGroup) {
-    const group = new THREE.Group();
-    group.name = 'overlay:contactForces';
-    const world = getWorldScene(ctx);
-    if (world) world.add(group);
-    ctx.contactForceGroup = group;
-    if (!Array.isArray(ctx.contactForcePool)) {
-      ctx.contactForcePool = [];
-    }
-  }
-  return ctx.contactForceGroup;
-}
-
-function hideFrameGroup(context) {
-  if (Array.isArray(context?.framePool)) {
-    for (const helper of context.framePool) {
-      if (helper) helper.visible = false;
-    }
-  }
-  if (context?.frameGroup) {
-    context.frameGroup.visible = false;
-  }
-}
-
 function hideCameraGroup(ctx) {
   if (Array.isArray(ctx?.cameraPool)) {
     ctx.cameraPool.forEach((mesh) => { if (mesh) mesh.visible = false; });
@@ -2373,191 +2309,10 @@ function hideConstraintGroup(ctx) {
 }
 
 function updateFrameOverlays(context, snapshot, state, options = {}) {
-    const mode = Number(state.rendering?.frameMode) | 0;
-    if (mode === FRAME_MODES.NONE) {
-      hideFrameGroup(context);
-      return;
-    }
-  const frameGroup = ensureFrameGroup(context);
-    const pool = context.framePool;
-    const bounds = options.bounds || context.bounds || null;
-    const radius = Number.isFinite(bounds?.radius) ? bounds.radius : 1;
-    const { meanSize, scaleAll } = computeMeanScale(state, context);
-    if (!Number.isFinite(context.frameBaseMeanSize) || context.frameBaseMeanSize <= 0) {
-      context.frameBaseMeanSize = Number.isFinite(meanSize) && meanSize > 0 ? meanSize : 1;
-    }
-  const baseMeanSize = Number.isFinite(context.frameBaseMeanSize) && context.frameBaseMeanSize > 0
-    ? context.frameBaseMeanSize
-    : 1;
-  const meanScale = Number.isFinite(meanSize) && meanSize > 0
-    ? (meanSize / baseMeanSize)
-      : 1;
-    const scaleStruct = state?.model?.vis?.scale || {};
-  const frameLengthScale = Number.isFinite(Number(scaleStruct.framelength)) && Number(scaleStruct.framelength) > 0
-    ? Number(scaleStruct.framelength)
-    : 1;
-  const frameWidthScale = Number.isFinite(Number(scaleStruct.framewidth)) && Number(scaleStruct.framewidth) > 0
-    ? Number(scaleStruct.framewidth)
-    : 1;
-  let used = 0;
-  const addHelper = () => {
-    let helper = pool[used];
-    if (!helper) {
-      helper = createFrameHelper();
-      pool[used] = helper;
-      frameGroup.add(helper);
-    }
-    helper.visible = true;
-    used += 1;
-    return helper;
-  };
-  if (mode === FRAME_MODES.GEOM) {
-    const ngeom = snapshot.ngeom | 0;
-    const xpos = snapshot.xpos;
-    const xmat = snapshot.xmat;
-    if (!(ngeom > 0) || !xpos || !xmat) {
-      hideFrameGroup(context);
-      return;
-    }
-    const typeView = options.typeView;
-    const limit = Math.min(ngeom, FRAME_GEOM_LIMIT);
-    for (let i = 0; i < limit; i += 1) {
-      if (!shouldDisplayGeom(i, options)) continue;
-      const base = 3 * i;
-      const px = Number(xpos[base + 0]);
-      const py = Number(xpos[base + 1]);
-      const pz = Number(xpos[base + 2]);
-      if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
-      const geomType = Number(typeView?.[i]);
-      if (geomType === MJ_GEOM.PLANE || geomType === MJ_GEOM.HFIELD) continue;
-      const helper = addHelper();
-      helper.position.set(px, py, pz);
-      const matBase = 9 * i;
-      const rot = [
-        xmat?.[matBase + 0] ?? 1,
-        xmat?.[matBase + 1] ?? 0,
-        xmat?.[matBase + 2] ?? 0,
-        xmat?.[matBase + 3] ?? 0,
-        xmat?.[matBase + 4] ?? 1,
-        xmat?.[matBase + 5] ?? 0,
-        xmat?.[matBase + 6] ?? 0,
-        xmat?.[matBase + 7] ?? 0,
-        xmat?.[matBase + 8] ?? 1,
-      ];
-      TEMP_MAT4.set(
-        rot[0], rot[1], rot[2], 0,
-        rot[3], rot[4], rot[5], 0,
-        rot[6], rot[7], rot[8], 0,
-        0, 0, 0, 1,
-      );
-      helper.quaternion.setFromRotationMatrix(TEMP_MAT4);
-      const axisScale = overlayScale(radius, 0.12, 0.1, 3) * 0.25 * scaleAll * frameLengthScale * meanScale;
-      helper.scale.set(axisScale, axisScale, axisScale);
-      if (helper.material && 'linewidth' in helper.material) {
-        helper.material.linewidth = frameWidthScale * scaleAll * meanScale;
-      }
-    }
-  } else if (mode === FRAME_MODES.BODY) {
-    const bxpos = snapshot.bxpos;
-    const bxmat = snapshot.bxmat;
-    const nbody = bxpos ? Math.floor(bxpos.length / 3) : 0;
-    if (!bxpos || !bxmat || nbody <= 1) {
-      hideFrameGroup(context);
-      return;
-    }
-    const limit = Math.min(nbody, FRAME_GEOM_LIMIT + 1);
-    for (let i = 1; i < limit; i += 1) {
-      const base = 3 * i;
-      const px = Number(bxpos[base + 0]) || 0;
-      const py = Number(bxpos[base + 1]) || 0;
-      const pz = Number(bxpos[base + 2]) || 0;
-      const helper = addHelper();
-      helper.position.set(px, py, pz);
-      const matBase = 9 * i;
-      const rot = [
-        bxmat?.[matBase + 0] ?? 1,
-        bxmat?.[matBase + 1] ?? 0,
-        bxmat?.[matBase + 2] ?? 0,
-        bxmat?.[matBase + 3] ?? 0,
-        bxmat?.[matBase + 4] ?? 1,
-        bxmat?.[matBase + 5] ?? 0,
-        bxmat?.[matBase + 6] ?? 0,
-        bxmat?.[matBase + 7] ?? 0,
-        bxmat?.[matBase + 8] ?? 1,
-      ];
-      TEMP_MAT4.set(
-        rot[0], rot[1], rot[2], 0,
-        rot[3], rot[4], rot[5], 0,
-        rot[6], rot[7], rot[8], 0,
-        0, 0, 0, 1,
-      );
-      helper.quaternion.setFromRotationMatrix(TEMP_MAT4);
-      const axisScale = overlayScale(radius, 0.12, 0.1, 3) * 0.25 * scaleAll * frameLengthScale * meanScale;
-      helper.scale.set(axisScale, axisScale, axisScale);
-      if (helper.material && 'linewidth' in helper.material) {
-        helper.material.linewidth = frameWidthScale * scaleAll * meanScale;
-      }
-    }
-  } else if (mode === FRAME_MODES.SITE) {
-    const siteXpos = snapshot.site_xpos;
-    const siteXmat = snapshot.site_xmat;
-    const nsite = siteXpos ? Math.floor(siteXpos.length / 3) : 0;
-    if (!siteXpos || !siteXmat || nsite <= 0) {
-      hideFrameGroup(context);
-      return;
-    }
-    const limit = Math.min(nsite, FRAME_GEOM_LIMIT);
-    for (let i = 0; i < limit; i += 1) {
-      const base = 3 * i;
-      const px = Number(siteXpos[base + 0]) || 0;
-      const py = Number(siteXpos[base + 1]) || 0;
-      const pz = Number(siteXpos[base + 2]) || 0;
-      const helper = addHelper();
-      helper.position.set(px, py, pz);
-      const rotBase = 9 * i;
-      const rot = [
-        siteXmat?.[rotBase + 0] ?? 1,
-        siteXmat?.[rotBase + 1] ?? 0,
-        siteXmat?.[rotBase + 2] ?? 0,
-        siteXmat?.[rotBase + 3] ?? 0,
-        siteXmat?.[rotBase + 4] ?? 1,
-        siteXmat?.[rotBase + 5] ?? 0,
-        siteXmat?.[rotBase + 6] ?? 0,
-        siteXmat?.[rotBase + 7] ?? 0,
-        siteXmat?.[rotBase + 8] ?? 1,
-      ];
-      TEMP_MAT4.set(
-        rot[0], rot[1], rot[2], 0,
-        rot[3], rot[4], rot[5], 0,
-        rot[6], rot[7], rot[8], 0,
-        0, 0, 0, 1,
-      );
-      helper.quaternion.setFromRotationMatrix(TEMP_MAT4);
-      const axisScale = overlayScale(radius, 0.12, 0.1, 3) * 0.25 * scaleAll * frameLengthScale * meanScale;
-      helper.scale.set(axisScale, axisScale, axisScale);
-      if (helper.material && 'linewidth' in helper.material) {
-        helper.material.linewidth = frameWidthScale * scaleAll * meanScale;
-      }
-    }
-  } else if (mode === FRAME_MODES.WORLD) {
-    const helper = addHelper();
-    // Lift world frame slightly above ground to avoid z-fighting
-    helper.position.set(0, 0, 0.01);
-    helper.quaternion.set(0, 0, 0, 1);
-    const axisScale = overlayScale(radius, 0.25, 0.5, 5) * scaleAll * frameLengthScale * meanScale;
-    helper.scale.set(axisScale, axisScale, axisScale);
-    if (helper.material && 'linewidth' in helper.material) {
-      helper.material.linewidth = frameWidthScale * scaleAll * meanScale;
-    }
-  } else {
-    hideFrameGroup(context);
-    warnOnce(FRAME_MODE_WARNINGS, mode, '[render] Frame mode not yet supported in viewer (pending data)');
-    return;
+  // TODO: drop this JS frame overlay once mjvScene-based frame geoms are fully stable.
+  if (context?.frameGroup) {
+    context.frameGroup.visible = false;
   }
-  for (let i = used; i < pool.length; i += 1) {
-    if (pool[i]) pool[i].visible = false;
-  }
-  frameGroup.visible = used > 0;
 }
 
 function updateLightOverlays(ctx, snapshot, state) {
@@ -7287,22 +7042,13 @@ export function createRendererManager({
       context.light.castShadow = shadowEnabled;
     }
 
-    const showContactPoint = voptEnabled(voptFlags, MJ_VIS.CONTACTPOINT);
-    const showContactForce = voptEnabled(voptFlags, MJ_VIS.CONTACTFORCE);
-    if (showContactPoint) {
-      const pointPayload = buildContactPointOverlayDescriptors(snapshot, state, context, { segmentEnabled });
-      applyContactPointOverlayDescriptors(context, pointPayload);
-      updateTactileOverlays(context, snapshot, state, assets, { voptFlags });
-    } else {
-      if (context.contactGroup) context.contactGroup.visible = false;
-      hideTactileGroup(context);
-    }
-    if (showContactForce) {
-      const forcePayload = buildContactForceOverlayDescriptors(snapshot, state, context, { segmentEnabled });
-      applyContactForceOverlayDescriptors(context, forcePayload);
-    } else {
-      if (context.contactForceGroup) context.contactForceGroup.visible = false;
-    }
+    // TODO: remove JS contact overlays once mjvScene contact geoms render the data.
+    // const showContactPoint = voptEnabled(voptFlags, MJ_VIS.CONTACTPOINT);
+    // if (showContactPoint) {
+    //   updateTactileOverlays(context, snapshot, state, assets, { voptFlags });
+    // } else {
+    //   hideTactileGroup(context);
+    // }
 
     const hideAllGeometry = !!hideAllGeometryDefault;
 
@@ -7354,7 +7100,6 @@ export function createRendererManager({
       typeView,
       bounds: nextBounds || context.bounds || null,
     };
-    updateFrameOverlays(context, snapshot, state, overlayOptions);
     updateLabelOverlays(context, snapshot, state, overlayOptions);
     const showCamera = voptEnabled(voptFlags, MJ_VIS.CAMERA);
     let cameraDescriptors = null;
@@ -9829,362 +9574,27 @@ function applyConstraintOverlayDescriptors(ctx, descriptors) {
 }
 
 function buildContactPointOverlayDescriptors(snapshot, state, ctx, options = {}) {
-  const contacts = snapshot?.contacts || null;
-  if (!contacts || typeof contacts.n !== 'number' || !contacts.pos) {
-    if (contacts && typeof contacts.n === 'number' && !contacts.pos) {
-      try { warnLog('[render] contact points enabled but no position array in snapshot; n=', contacts.n); } catch {}
-    }
-    return { descriptors: [], radius: 0, thickness: 0, offsetScale: 0, colorHex: 0, opacity: 0 };
-  }
-  const contactCount = Math.max(0, contacts.n | 0);
-  if (contactCount <= 0) return { descriptors: [], radius: 0, thickness: 0, offsetScale: 0, colorHex: 0, opacity: 0 };
-  const visStruct = state?.model?.vis || {};
-  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
-  const base = Math.max(1e-6, meanSize * scaleAll);
-  const widthScale = Number(visStruct?.scale?.contactwidth);
-  const heightScale = Number(visStruct?.scale?.contactheight);
-  const radius = Number.isFinite(widthScale) && widthScale > 0
-    ? Math.max(0.0015, widthScale * base)
-    : Math.max(0.002, Math.min(base * 0.02, base * 0.1));
-  const thickness = Number.isFinite(heightScale) && heightScale > 0
-    ? Math.max(0.0015, heightScale * base)
-    : Math.max(0.001, radius * 0.65);
-  const offsetScale = Math.max(thickness * 0.5, 0.003);
-  const overlayCfg = ctx?.fallback?.overlays || null;
-  const contactFallback =
-    overlayCfg && Number.isFinite(overlayCfg.contactPoint)
-      ? overlayCfg.contactPoint
-      : CONTACT_POINT_FALLBACK_COLOR;
-  const segmentEnabled = options.segmentEnabled === true;
-  const contactColorHex = segmentEnabled
-    ? segmentColorForIndex(contacts?.n ? contacts.n + 1 : 0)
-    : rgbaToHex(visStruct?.rgba?.contact, contactFallback);
-  const contactOpacity = segmentEnabled ? 1 : alphaFromArray(visStruct?.rgba?.contact, 0.85);
-  const frame = ArrayBuffer.isView(contacts.frame) ? contacts.frame : null;
-  const pos = contacts.pos;
-  const descriptors = [];
-  for (let i = 0; i < contactCount; i += 1) {
-    const baseIdx = 3 * i;
-    const x = Number(pos[baseIdx + 0]) || 0;
-    const y = Number(pos[baseIdx + 1]) || 0;
-    const z = Number(pos[baseIdx + 2]) || 0;
-    let nx = 0;
-    let ny = 0;
-    let nz = 1;
-    if (frame && frame.length >= 9 * (i + 1)) {
-      const rotBase = 9 * i;
-      nx = Number(frame[rotBase + 0]) || 0;
-      ny = Number(frame[rotBase + 1]) || 0;
-      nz = Number(frame[rotBase + 2]) || 1;
-      const inv = 1 / (Math.hypot(nx, ny, nz) || 1);
-      nx *= inv;
-      ny *= inv;
-      nz *= inv;
-    }
-    descriptors.push({
-      kind: 'overlay',
-      subtype: OVERLAY_SUBTYPE.CONTACT_POINT,
-      index: i,
-      position: [x, y, z],
-      normal: [nx, ny, nz],
-      radius,
-      thickness,
-      colorHex: contactColorHex,
-      opacity: contactOpacity,
-    });
-  }
-  return {
-    descriptors,
-    radius,
-    thickness,
-    offsetScale,
-    colorHex: contactColorHex,
-    opacity: contactOpacity,
-  };
+  // TODO: remove this legacy JS contact overlay once mjvScene contacts (and perturb) cover the same data.
+  return { descriptors: [], radius: 0, thickness: 0, offsetScale: 0, colorHex: 0, opacity: 0 };
 }
 
 function applyContactPointOverlayDescriptors(ctx, payload) {
-  if (!ctx || !payload) return;
-  const descriptors = Array.isArray(payload.descriptors) ? payload.descriptors : [];
-  const radius = Number(payload.radius) || 0;
-  const thickness = Number(payload.thickness) || 0;
-  const offsetScale = Number(payload.offsetScale) || 0;
-  const colorHex = Number(payload.colorHex) || 0;
-  const opacity = Number(payload.opacity);
-  if (descriptors.length === 0) {
-    if (ctx.contactGroup) ctx.contactGroup.visible = false;
-    return;
+  // TODO: remove this legacy JS contact overlay once mjvScene contacts (and perturb) cover the same data.
+  if (ctx?.contactGroup) {
+    ctx.contactGroup.visible = false;
   }
-  const group = ensureContactGroup(ctx);
-  const pool = Array.isArray(ctx.contactPool) ? ctx.contactPool : (ctx.contactPool = []);
-  const currentGeom = group.userData.geometry;
-  if (
-    radius > 0 &&
-    thickness > 0 &&
-    (
-      !currentGeom
-      || currentGeom.parameters?.radiusTop !== radius
-      || currentGeom.parameters?.height !== thickness
-    )
-  ) {
-    try { currentGeom?.dispose?.(); } catch {}
-    const cyl = new THREE.CylinderGeometry(radius * 0.85, radius * 0.85, thickness, 24, 1);
-    cyl.rotateX(Math.PI / 2);
-    group.userData.geometry = cyl;
-    for (const mesh of pool) {
-      if (mesh) mesh.geometry = cyl;
-    }
-  }
-  if (!group.userData.material) {
-    group.userData.material = new THREE.MeshBasicMaterial({
-      color: colorHex,
-      side: THREE.DoubleSide,
-      transparent: opacity < 0.999,
-      opacity,
-      depthTest: true,
-      depthWrite: true,
-      toneMapped: false,
-      fog: false,
-    });
-  } else {
-    group.userData.material.color.setHex(colorHex);
-    group.userData.material.opacity = opacity;
-    group.userData.material.transparent = opacity < 0.999;
-    group.userData.material.depthWrite = true;
-  }
-  const material = group.userData.material;
-  const geometry = group.userData.geometry;
-  for (let i = pool.length; i < descriptors.length; i += 1) {
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.matrixAutoUpdate = true;
-    mesh.frustumCulled = false;
-    pool.push(mesh);
-    group.add(mesh);
-  }
-  for (let idx = 0; idx < pool.length; idx += 1) {
-    const mesh = pool[idx];
-    if (!mesh) continue;
-    if (idx < descriptors.length) {
-      const desc = descriptors[idx];
-      mesh.visible = true;
-      const nx = Number(desc.normal?.[0]) || 0;
-      const ny = Number(desc.normal?.[1]) || 0;
-      const nz = Number(desc.normal?.[2]) || 1;
-      const normal = CONTACT_TMP_NORMAL.set(nx, ny, nz);
-      if (normal.lengthSq() <= 0) normal.set(0, 0, 1);
-      normal.normalize();
-      mesh.quaternion.setFromUnitVectors(CONTACT_UP, normal);
-      const pos = desc.position;
-      const offset = offsetScale || 0;
-      mesh.position.set(
-        (pos?.[0] || 0) + normal.x * offset,
-        (pos?.[1] || 0) + normal.y * offset,
-        (pos?.[2] || 0) + normal.z * offset,
-      );
-    } else {
-      mesh.visible = false;
-    }
-  }
-  ctx.contactPool = pool;
-  group.visible = descriptors.length > 0;
 }
 
 function buildContactForceOverlayDescriptors(snapshot, state, ctx, options = {}) {
-  const contacts = snapshot?.contacts || null;
-  if (!contacts || typeof contacts.n !== 'number' || contacts.n <= 0) {
-    return { descriptors: [], colorHex: 0, opacity: 0 };
-  }
-  const visStruct = state?.model?.vis || {};
-  const statStruct = state?.model?.stat || null;
-  const meanMass = (() => {
-    const value = Number(statStruct?.meanmass);
-    if (Number.isFinite(value) && value > 1e-9) return value;
-    return 1;
-  })();
-  const { meanSize, scaleAll } = computeMeanScale(state, ctx);
-  const mapForce = (() => {
-    const value = Number(visStruct?.map?.force);
-    if (Number.isFinite(value) && value > 0) return value;
-    return 0.005;
-  })();
-  const forceWidthScale = (() => {
-    const value = Number(visStruct?.scale?.forcewidth);
-    if (Number.isFinite(value) && value > 0) return value;
-    return 0.1;
-  })();
-  const shaftRadius = Math.max(meanSize * 0.015, forceWidthScale * meanSize * 0.5, 0.008) * scaleAll;
-  const minLength = Math.max(shaftRadius * 2.5, meanSize * 0.02);
-  const fallbackLength = Math.max(minLength, shaftRadius * 3);
-  const maxLength = Math.max(meanSize * 6, (ctx.bounds?.radius || meanSize) * 8);
-  const lengthScale = (mapForce / meanMass) * scaleAll;
-  const overlayCfg = ctx?.fallback?.overlays || null;
-  const forceFallback =
-    overlayCfg && Number.isFinite(overlayCfg.contactForce)
-      ? overlayCfg.contactForce
-      : CONTACT_FORCE_FALLBACK_COLOR;
-  const colorHex = (options.segmentEnabled ? segmentColorForIndex((contacts.n || 0) + 2) : rgbaToHex(visStruct?.rgba?.contactforce, forceFallback));
-  const opacity = options.segmentEnabled ? 1 : alphaFromArray(visStruct?.rgba?.contactforce, 0.8);
-  const frame = ArrayBuffer.isView(contacts.frame) ? contacts.frame : null;
-  const forceValues = ArrayBuffer.isView(contacts.force) ? contacts.force : null;
-  const positionValues = ArrayBuffer.isView(contacts.pos) ? contacts.pos : null;
-  const descriptors = [];
-  const count = Math.max(0, contacts.n | 0);
-  for (let i = 0; i < count; i += 1) {
-    if (!positionValues) break;
-    const base = 3 * i;
-    const x = Number(positionValues[base + 0]) || 0;
-    const y = Number(positionValues[base + 1]) || 0;
-    const z = Number(positionValues[base + 2]) || 0;
-    let magnitude = 0;
-    let dx = 0;
-    let dy = 0;
-    let dz = 0;
-    if (forceValues && forceValues.length >= base + 3) {
-      const fx = Number(forceValues[base + 0]) || 0;
-      const fy = Number(forceValues[base + 1]) || 0;
-      const fz = Number(forceValues[base + 2]) || 0;
-      dx = fx;
-      dy = fy;
-      dz = fz;
-      magnitude = Math.hypot(fx, fy, fz);
-    }
-    let directionReady = false;
-    if (magnitude > CONTACT_FORCE_EPS) {
-      const inv = 1 / magnitude;
-      dx *= inv;
-      dy *= inv;
-      dz *= inv;
-      directionReady = true;
-    }
-    if (!directionReady) {
-      if (frame && frame.length >= 9 * (i + 1)) {
-        const rotBase = 9 * i;
-        dx = Number(frame[rotBase + 0]) || 0;
-        dy = Number(frame[rotBase + 1]) || 0;
-        dz = Number(frame[rotBase + 2]) || 0;
-        const len = Math.hypot(dx, dy, dz);
-        if (len <= CONTACT_FORCE_EPS) {
-          dx = CONTACT_UP.x;
-          dy = CONTACT_UP.y;
-          dz = CONTACT_UP.z;
-        } else {
-          const inv = 1 / len;
-          dx *= inv;
-          dy *= inv;
-          dz *= inv;
-        }
-      } else {
-        dx = CONTACT_UP.x;
-        dy = CONTACT_UP.y;
-        dz = CONTACT_UP.z;
-      }
-    }
-    const scaledLength = magnitude > CONTACT_FORCE_EPS ? magnitude * lengthScale : fallbackLength;
-    const length = Math.min(maxLength, Math.max(minLength, scaledLength));
-    let headLength = Math.max(length * 0.3, shaftRadius * 3);
-    headLength = Math.min(headLength, length * 0.6);
-    const headRadius = Math.max(shaftRadius * 1.6, headLength * 0.4);
-    let rawShaft = Math.max(length - headLength, shaftRadius * 1.5);
-    const totalRaw = rawShaft + headLength;
-    const scaleFactor = totalRaw > CONTACT_FORCE_EPS ? (length / totalRaw) : 1;
-    rawShaft *= scaleFactor;
-    const finalHeadLength = headLength * scaleFactor;
-    descriptors.push({
-      kind: 'overlay',
-      subtype: OVERLAY_SUBTYPE.CONTACT_FORCE,
-      index: i,
-      position: [x, y, z],
-      direction: [dx, dy, dz],
-      shaftLength: rawShaft,
-      headLength: finalHeadLength,
-      shaftRadius,
-      headRadius,
-      colorHex,
-      opacity,
-    });
-  }
-  return { descriptors, colorHex, opacity };
+  // TODO: remove this legacy JS contact force overlay once mjvScene contacts (and perturb) cover the same data.
+  return { descriptors: [], colorHex: 0, opacity: 0 };
 }
 
 function applyContactForceOverlayDescriptors(ctx, payload) {
-  if (!ctx || !payload) return;
-  const descriptors = Array.isArray(payload.descriptors) ? payload.descriptors : [];
-  const colorHex = Number(payload.colorHex) || 0;
-  const opacity = Number(payload.opacity);
-  if (!descriptors.length) {
-    if (ctx.contactForceGroup) ctx.contactForceGroup.visible = false;
-    return;
+  // TODO: remove this legacy JS contact force overlay once mjvScene contacts (and perturb) cover the same data.
+  if (ctx?.contactForceGroup) {
+    ctx.contactForceGroup.visible = false;
   }
-  const group = ensureContactForceGroup(ctx);
-  const pool = Array.isArray(ctx.contactForcePool) ? ctx.contactForcePool : (ctx.contactForcePool = []);
-  if (!ctx.contactForceMaterial) {
-    ctx.contactForceMaterial = new THREE.MeshBasicMaterial({
-      color: colorHex,
-      transparent: opacity < 0.999,
-      opacity,
-      depthWrite: true,
-      toneMapped: false,
-      fog: false,
-    });
-  } else {
-    ctx.contactForceMaterial.color.setHex(colorHex);
-    ctx.contactForceMaterial.opacity = opacity;
-    ctx.contactForceMaterial.transparent = opacity < 0.999;
-    ctx.contactForceMaterial.depthWrite = true;
-  }
-  const material = ctx.contactForceMaterial;
-  for (let i = pool.length; i < descriptors.length; i += 1) {
-    const shaft = new THREE.Mesh(CONTACT_FORCE_SHAFT_GEOMETRY, material);
-    shaft.matrixAutoUpdate = true;
-    shaft.frustumCulled = false;
-    const head = new THREE.Mesh(CONTACT_FORCE_HEAD_GEOMETRY, material);
-    head.matrixAutoUpdate = true;
-    head.frustumCulled = false;
-    const node = new THREE.Group();
-    node.matrixAutoUpdate = true;
-    node.frustumCulled = false;
-    node.add(shaft);
-    node.add(head);
-    pool.push({ node, shaft, head });
-    group.add(node);
-  }
-  for (let idx = 0; idx < pool.length; idx += 1) {
-    const arrow = pool[idx];
-    if (!arrow || !arrow.node) continue;
-    if (idx < descriptors.length) {
-      const desc = descriptors[idx];
-      arrow.node.visible = true;
-      const pos = desc.position || [0, 0, 0];
-      arrow.node.position.set(
-        Number(pos[0]) || 0,
-        Number(pos[1]) || 0,
-        Number(pos[2]) || 0,
-      );
-      const dir = desc.direction || [0, 1, 0];
-      CONTACT_FORCE_DIR.set(dir[0] || 0, dir[1] || 0, dir[2] || 1);
-      if (CONTACT_FORCE_DIR.lengthSq() <= 0) {
-        CONTACT_FORCE_DIR.copy(CONTACT_FORCE_AXIS);
-      } else {
-        CONTACT_FORCE_DIR.normalize();
-      }
-      CONTACT_FORCE_TMP_QUAT.setFromUnitVectors(CONTACT_FORCE_AXIS, CONTACT_FORCE_DIR);
-      arrow.node.quaternion.copy(CONTACT_FORCE_TMP_QUAT);
-      const shaft = arrow.shaft;
-      const head = arrow.head;
-      if (shaft) {
-        shaft.scale.set(desc.shaftRadius, desc.shaftLength, desc.shaftRadius);
-        shaft.position.set(0, desc.shaftLength / 2, 0);
-      }
-      if (head) {
-        head.scale.set(desc.headRadius, desc.headLength, desc.headRadius);
-        head.position.set(0, desc.shaftLength + desc.headLength / 2, 0);
-      }
-    } else {
-      arrow.node.visible = false;
-    }
-  }
-  ctx.contactForcePool = pool;
-  group.visible = descriptors.length > 0;
 }
 
 function updateSelectionOverlay(ctx, snapshot, state) {
