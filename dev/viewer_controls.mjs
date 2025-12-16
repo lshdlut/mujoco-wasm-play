@@ -18,6 +18,68 @@ export function createControlManager({
   const CAMERA_FALLBACK_PRESETS = ['Free', 'Tracking'];
   const modelLibrary = [];
   let modelSelectEl = null;
+  const refreshModelSelectOptions = () => {
+    if (!modelSelectEl) return;
+    modelSelectEl.innerHTML = '';
+    if (modelLibrary.length === 0) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'No models loaded';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      modelSelectEl.appendChild(placeholder);
+      modelSelectEl.disabled = true;
+      return;
+    }
+    modelSelectEl.disabled = false;
+    for (let i = 0; i < modelLibrary.length; i += 1) {
+      const entry = modelLibrary[i];
+      const opt = document.createElement('option');
+      opt.value = entry.id;
+      opt.textContent = entry.label || `Model ${i + 1}`;
+      modelSelectEl.appendChild(opt);
+    }
+  };
+
+  const addModelEntry = (entry) => {
+    const existingIndex = modelLibrary.findIndex((item) => item.id === entry.id);
+    if (existingIndex >= 0) {
+      modelLibrary[existingIndex] = entry;
+    } else {
+      modelLibrary.push(entry);
+    }
+    refreshModelSelectOptions();
+    if (modelSelectEl && entry.id) {
+      modelSelectEl.value = entry.id;
+    }
+    const label = entry.label || entry.file || entry.id || '';
+    if (label) {
+      store.update((draft) => {
+        if (!draft.hud) draft.hud = {};
+        draft.hud.modelLabel = label;
+      });
+    }
+  };
+
+  async function loadXmlTextAsModel(xmlText, label) {
+    const text = typeof xmlText === 'string' ? xmlText : '';
+    const name = typeof label === 'string' && label.trim().length ? label.trim() : `Model ${modelLibrary.length + 1}`;
+    if (!text.trim()) {
+      throw new Error('loadXmlTextAsModel: empty xml text');
+    }
+    const entry = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      label: name,
+      kind: 'xmlText',
+      xmlText: text,
+    };
+    addModelEntry(entry);
+    resetModelFrontendState(store);
+    if (typeof backend?.loadXmlText === 'function') {
+      await backend.loadXmlText(text);
+      pushToast?.(`Loaded model: ${name}`);
+    }
+  }
 
   function applyThemeFromColorControl(value) {
     if (typeof document === 'undefined' || !document.body) return;
@@ -612,11 +674,16 @@ function shortcutFromEvent(event) {
   function renderFileSectionExtras(body) {
     const row = createControlRow(null);
 
-    const loadButton = document.createElement('button');
-    loadButton.type = 'button';
-    loadButton.className = 'btn-primary';
-    loadButton.textContent = 'Load xml';
-    loadButton.setAttribute('data-testid', 'file.load_xml_custom');
+    const loadLabel = document.createElement('label');
+    loadLabel.className = 'btn-primary btn-file';
+    loadLabel.textContent = 'Load xml';
+    loadLabel.setAttribute('data-testid', 'file.load_xml_custom');
+
+    const loadInput = document.createElement('input');
+    loadInput.type = 'file';
+    loadInput.accept = '.xml';
+    loadInput.setAttribute('data-testid', 'file.load_xml_input');
+    loadLabel.appendChild(loadInput);
 
     const field = document.createElement('div');
     field.className = 'control-field';
@@ -625,55 +692,11 @@ function shortcutFromEvent(event) {
     select.setAttribute('data-testid', 'file.model_select');
 
     field.append(select);
-    row.append(loadButton, field);
+    row.append(loadLabel, field);
     body.append(row);
 
     modelSelectEl = select;
-
-    const refreshModelSelectOptions = () => {
-      if (!modelSelectEl) return;
-      modelSelectEl.innerHTML = '';
-      if (modelLibrary.length === 0) {
-        const placeholder = document.createElement('option');
-        placeholder.value = '';
-        placeholder.textContent = 'No models loaded';
-        placeholder.disabled = true;
-        placeholder.selected = true;
-        modelSelectEl.appendChild(placeholder);
-        modelSelectEl.disabled = true;
-        return;
-      }
-      modelSelectEl.disabled = false;
-      for (let i = 0; i < modelLibrary.length; i += 1) {
-        const entry = modelLibrary[i];
-        const opt = document.createElement('option');
-        opt.value = entry.id;
-        opt.textContent = entry.label || `Model ${i + 1}`;
-        modelSelectEl.appendChild(opt);
-      }
-    };
-
-    const addModelEntry = (entry) => {
-      const existingIndex = modelLibrary.findIndex((item) => item.id === entry.id);
-      if (existingIndex >= 0) {
-        modelLibrary[existingIndex] = entry;
-      } else {
-        modelLibrary.push(entry);
-      }
-      refreshModelSelectOptions();
-      if (modelSelectEl && entry.id) {
-        modelSelectEl.value = entry.id;
-      }
-      try {
-        const label = entry.label || entry.file || entry.id || '';
-        if (label) {
-          store.update((draft) => {
-            if (!draft.hud) draft.hud = {};
-            draft.hud.modelLabel = label;
-          });
-        }
-      } catch {}
-    };
+    refreshModelSelectOptions();
 
     const initialInfo = typeof backend?.getInitialModelInfo === 'function'
       ? backend.getInitialModelInfo()
@@ -690,52 +713,19 @@ function shortcutFromEvent(event) {
       addModelEntry(entry);
     }
 
-    loadButton.addEventListener('click', () => {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.xml';
-      input.style.display = 'none';
-      const root = body.ownerDocument?.body || document.body;
-      root.appendChild(input);
-      const cleanup = () => {
-        if (input.parentNode) {
-          input.parentNode.removeChild(input);
-        }
-      };
-      input.addEventListener(
-        'change',
-        async () => {
-          const file = input.files && input.files[0];
-          if (!file) {
-            cleanup();
-            return;
-          }
-          try {
-            const text = await file.text();
-            const label = file.name || `Model ${modelLibrary.length + 1}`;
-            const entry = {
-              id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-              label,
-              kind: 'xmlText',
-              xmlText: text,
-            };
-            addModelEntry(entry);
-            resetModelFrontendState(store);
-            if (typeof backend?.loadXmlText === 'function') {
-              await backend.loadXmlText(text);
-              pushToast?.(`Loaded model: ${label}`);
-            }
-          } catch (err) {
-            console.error('[ui] load xml from file failed', err);
-            pushToast?.('Failed to load xml from file');
-            throw err;
-          } finally {
-            cleanup();
-          }
-        },
-        { once: true },
-      );
-      input.click();
+    loadInput.addEventListener('change', async () => {
+      const file = loadInput.files && loadInput.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        await loadXmlTextAsModel(text, file.name || null);
+      } catch (err) {
+        console.error('[ui] load xml from file failed', err);
+        pushToast?.('Failed to load xml from file');
+        throw err;
+      } finally {
+        loadInput.value = '';
+      }
     });
 
     select.addEventListener('change', async () => {
@@ -2375,6 +2365,7 @@ function shortcutFromEvent(event) {
     updateControls,
       toggleControl,
       cycleCamera,
+      loadXmlTextAsModel,
       getBinding: (id) => controlBindings.get(id) ?? null,
       registerGlobalShortcut,
       listIds: (prefix) => {

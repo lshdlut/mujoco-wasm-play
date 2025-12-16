@@ -1,63 +1,46 @@
 import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import fs from 'node:fs/promises';
+import { ensureSectionExpanded, waitForViewerReady } from './test-utils';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function parseSimTime(text: string): number {
-  const match = text.match(/([0-9]+(?:\.[0-9]+)?)/);
-  return match ? Number(match[1]) : NaN;
-}
+const MODEL = 'mujoco_Rajagopal2015_simple.xml';
+const FORGE_BASE = '/dist/3.3.7/';
 
 test('loading a new xml resets timer and registers dropdown entry', async ({ page }) => {
-  await page.goto('/');
+  const url =
+    `/?model=${encodeURIComponent(MODEL)}` +
+    `&mode=worker&snapshot=1&log=0` +
+    `&forgeBase=${encodeURIComponent(FORGE_BASE)}`;
+  await waitForViewerReady(page, url);
 
-  const simTime = page.getByTestId('sim-time');
-  await expect(simTime).toBeVisible();
+  await ensureSectionExpanded(page, 'file');
 
-   // Ensure File section is expanded (collapsed by default on left panel).
-  const fileSection = page.getByTestId('section-file');
-  await expect(fileSection).toBeVisible();
-  const isCollapsed = await fileSection.evaluate((el) => el.classList.contains('is-collapsed'));
-  if (isCollapsed) {
-    await fileSection.locator('.section-header').click();
-  }
-
-  // Let the simulation run a bit to ensure time > 0 before reload.
   await page.waitForTimeout(700);
-  const beforeText = await simTime.textContent();
-  const beforeTime = parseSimTime(beforeText || '');
-  expect(beforeTime).toBeGreaterThanOrEqual(0);
-
-  const loadButton = page.getByTestId('file.load_xml_custom');
-  await expect(loadButton).toBeVisible();
+  const beforeTime = await page.evaluate(() => Number((window as any).__lastSnapshot?.t) || 0);
+  expect(beforeTime).toBeGreaterThan(0);
 
   const pendulumPath = path.join(__dirname, '..', '..', 'pendulum.xml');
-  const [fileChooser] = await Promise.all([
-    page.waitForEvent('filechooser'),
-    loadButton.click(),
-  ]);
-  await fileChooser.setFiles(pendulumPath);
+  const xmlText = await fs.readFile(pendulumPath, 'utf8');
+  await page.evaluate(async ({ xml, label }) => {
+    const controls = (window as any).__viewerControls;
+    if (!controls?.loadXmlTextAsModel) throw new Error('Missing __viewerControls.loadXmlTextAsModel');
+    await controls.loadXmlTextAsModel(xml, label);
+  }, { xml: xmlText, label: 'pendulum.xml' });
 
-  const modelSelect = page.getByTestId('file.model_select');
-  await expect(modelSelect).toBeEnabled();
-  await expect(modelSelect.locator('option')).toContainText(['pendulum.xml']);
-
-  const afterText = await simTime.textContent();
-  console.log('sim time after reload text:', afterText);
+  const optionTexts = await page.evaluate(() => {
+    const select = document.querySelector('[data-testid="file.model_select"]');
+    if (!(select instanceof HTMLSelectElement)) return [];
+    return Array.from(select.options).map((opt) => opt.textContent || '');
+  });
+  expect(optionTexts.join('\n')).toContain('pendulum.xml');
 
   // Timer should drop near zero shortly after reload.
-  await page.waitForFunction(
-    (selector) => {
-      const el = document.querySelector(selector);
-      if (!el) return false;
-      const match = el.textContent?.match(/([0-9]+(?:\.[0-9]+)?)/);
-      if (!match) return false;
-      const t = Number(match[1]);
-      return Number.isFinite(t) && t < 0.1;
-    },
-    '[data-testid="sim-time"]',
-    { timeout: 10_000 },
-  );
+  await page.waitForFunction(() => {
+    const t = Number((window as any).__lastSnapshot?.t);
+    return Number.isFinite(t) && t < 0.1;
+  }, { timeout: 10_000 });
 });

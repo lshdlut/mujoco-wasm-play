@@ -95,6 +95,9 @@ export function createInfiniteGroundHelper({
     side: THREE.DoubleSide,
   });
   const uniforms = {
+    uMuJoCoTexEnabled: { value: 0 },
+    uMuJoCoMap: { value: null },
+    uMuJoCoTexScl: { value: new THREE.Vector2(1, 1) },
     uDistance: { value: distance },
     uFadeStart: { value: distance * 0.9 },
     uFadeEnd: { value: distance },
@@ -114,6 +117,9 @@ export function createInfiniteGroundHelper({
   material.extensions.derivatives = true;
   material.userData.infiniteUniforms = uniforms;
   material.onBeforeCompile = (shader) => {
+    shader.uniforms.uMuJoCoTexEnabled = uniforms.uMuJoCoTexEnabled;
+    shader.uniforms.uMuJoCoMap = uniforms.uMuJoCoMap;
+    shader.uniforms.uMuJoCoTexScl = uniforms.uMuJoCoTexScl;
     shader.uniforms.uDistance = uniforms.uDistance;
     shader.uniforms.uFadeStart = uniforms.uFadeStart;
     shader.uniforms.uFadeEnd = uniforms.uFadeEnd;
@@ -158,6 +164,9 @@ ${shader.vertexShader.replace(
 varying vec3 vInfiniteWorldPosition;
 varying vec2 vPlaneCoord;
 varying float vCameraSide;
+uniform float uMuJoCoTexEnabled;
+uniform sampler2D uMuJoCoMap;
+uniform vec2 uMuJoCoTexScl;
 uniform float uDistance;
 uniform float uFadeStart;
 uniform float uFadeEnd;
@@ -207,6 +216,11 @@ ${shader.fragmentShader.replace(
       if (alpha <= 0.0) discard;
       // Grid overlay: tint towards uGridColor where grid lines fall.
       vec3 baseColor = gl_FragColor.rgb;
+      if (uMuJoCoTexEnabled > 0.5) {
+        vec2 uv = vPlaneCoord * max(uMuJoCoTexScl, vec2(1e-6));
+        vec4 texColor = texture2D(uMuJoCoMap, uv);
+        baseColor *= texColor.rgb;
+      }
       if (uGridStep > 1e-6 && uGridIntensity > 1e-6) {
         vec2 r = vPlaneCoord / max(uGridStep, 1e-6);
         vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);

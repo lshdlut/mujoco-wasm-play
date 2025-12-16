@@ -13,13 +13,25 @@ async function ensureBindingIndex() {
         if (!res.ok) throw new Error(`Failed to load ui_bindings_index.json (${res.status})`);
         return res.json();
       })
+      .then((json) => {
+        try {
+          const count = json && typeof json === 'object' ? Object.keys(json).length : 0;
+          // eslint-disable-next-line no-console
+          console.log('[bindings] loaded', { count });
+        } catch {}
+        return json;
+      })
       .catch((err) => {
-        console.warn('[bindings] load failed', err);
-        return {};
+        console.error('[bindings] load failed', err);
+        throw err;
       });
   }
   bindingIndex = await bindingIndexPromise;
   return bindingIndex;
+}
+
+export async function prefetchBindingIndex() {
+  return ensureBindingIndex();
 }
 
 export function splitBinding(binding) {

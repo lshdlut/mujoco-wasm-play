@@ -254,17 +254,23 @@ body.fullscreen {
 .overlay-card[data-testid="overlay-info"] {
   background: var(--color-overlay-soft);
 }
-.overlay-card[data-testid="overlay-realtime"] {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  min-width: 90px;
-}
-.overlay-card[data-testid="overlay-info"] {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  min-width: 0;
+  .overlay-card[data-testid="overlay-realtime"] {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    min-width: 90px;
+  }
+  .overlay-card[data-testid="overlay-simtime"] {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    min-width: 96px;
+  }
+  .overlay-card[data-testid="overlay-info"] {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    min-width: 0;
   width: 180px;
 }
 .info-grid {
@@ -632,6 +638,18 @@ body.fullscreen {
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
+.btn-file {
+  position: relative;
+  overflow: hidden;
+}
+.btn-file input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.001;
+  cursor: pointer;
+}
 .btn-primary {
   background: var(--color-primary);
   color: var(--color-primary-contrast);
@@ -824,13 +842,16 @@ body.layout-main {
   <aside class="panel panel-left" data-testid="panel-left">
   </aside>
   <main class="viewer">
-   <canvas data-testid="viewer-canvas">
-   </canvas>
-   <div class="overlay-stack">
-     <div class="overlay-card" data-testid="overlay-realtime">
-      <div data-testid="overlay-realtime-desired">Speed : 100%</div>
-      <div data-testid="overlay-realtime-actual">Physics: 100%</div>
-     </div>
+    <canvas data-testid="viewer-canvas">
+    </canvas>
+    <div class="overlay-stack">
+      <div class="overlay-card visible" data-testid="overlay-simtime">
+       <div data-testid="sim-time">t = 0.000</div>
+      </div>
+      <div class="overlay-card" data-testid="overlay-realtime">
+       <div data-testid="overlay-realtime-desired">Speed : 100%</div>
+       <div data-testid="overlay-realtime-actual">Physics: 100%</div>
+      </div>
      <div class="overlay-card" data-testid="overlay-help">
       <div class="help-title">Help</div>
       <div class="help-subtitle">Keyboard & mouse shortcuts (Simulate parity)</div>
