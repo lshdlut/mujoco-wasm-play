@@ -1,6 +1,7 @@
 import { prefetchBindingIndex, prepareBindingUpdate, splitBinding } from './viewer_bindings.mjs';
 import { VISUAL_FIELD_DESCRIPTORS } from './viewer_visual_struct.mjs';
 import { VISUAL_FIELD_GROUPS } from './visual_field_groups.mjs';
+import { isPerfEnabled, perfMarkOnce, perfNow, perfSample } from './viewer_perf.mjs';
 
 // Lightweight state container and backend helpers for the simulate parity UI.
 // Runtime implementation lives in JS so it can be consumed directly by the
@@ -1810,6 +1811,7 @@ function resolveSnapshot(state) {
 export async function createBackend(options = {}) {
   const mode = 'worker'; // play UI only supports worker backend
   const debug = !!options.debug;
+  const perfEnabled = isPerfEnabled();
   const snapshotDebug =
     typeof window !== 'undefined'
     && (
@@ -1818,6 +1820,7 @@ export async function createBackend(options = {}) {
     );
   if (typeof window !== 'undefined') {
     window.PLAY_SNAPSHOT_DEBUG = snapshotDebug;
+    try { window.PLAY_PERF_DEBUG = perfEnabled; } catch (err) { throw err; }
   }
   const modelToken = typeof options.model === 'string' ? options.model.trim() : '';
   const modelKey = modelToken.toLowerCase();
@@ -1858,10 +1861,14 @@ export async function createBackend(options = {}) {
         if (forgeBase) {
           workerUrl.searchParams.set('forgeBase', forgeBase);
         }
+        const perf = params.get('perf');
+        if (perf) {
+          workerUrl.searchParams.set('perf', perf);
+        }
       }
-  } catch {
-    // ignore query parsing issues
-  }
+    } catch {
+      // ignore query parsing issues
+    }
   workerUrl.searchParams.set('cb', String(Date.now()));
   const worker = new Worker(workerUrl, { type: 'module' });
   return worker;
@@ -2257,6 +2264,12 @@ async function loadDefaultXml() {
         break;
       }
       case 'ready':
+        perfMarkOnce('play:backend:worker_ready', {
+          sentWallMs: (typeof data?.perf?.sentWallMs === 'number') ? data.perf.sentWallMs : null,
+          transferMs: (typeof data?.perf?.sentWallMs === 'number') ? (Date.now() - data.perf.sentWallMs) : null,
+          worker: data?.perf && typeof data.perf === 'object' ? data.perf : null,
+          ngeom: typeof data.ngeom === 'number' ? (data.ngeom | 0) : null,
+        });
         lastFrameId = -1;
         lastSnapshot.history = createDefaultHistoryState();
         lastSnapshot.keyframes = createDefaultKeyframeState();
@@ -2392,6 +2405,15 @@ async function loadDefaultXml() {
         break;
       }
       case 'snapshot': {
+        const tDecodeStart = perfEnabled ? perfNow() : 0;
+        const recvWallMs = perfEnabled ? Date.now() : 0;
+        if (perfEnabled) {
+          perfMarkOnce('play:backend:first_snapshot', {
+            sentWallMs: (typeof data?.perf?.sentWallMs === 'number') ? data.perf.sentWallMs : null,
+            transferMs: (typeof data?.perf?.sentWallMs === 'number') ? (recvWallMs - data.perf.sentWallMs) : null,
+            worker: data?.perf && typeof data.perf === 'object' ? data.perf : null,
+          });
+        }
         const frameId = Number.isFinite(data.frameId) ? (data.frameId | 0) : null;
         if (frameId !== null) {
           if (frameId <= lastFrameId) {
@@ -2500,7 +2522,50 @@ async function loadDefaultXml() {
           lastSnapshot.options = data.options;
         }
         applyOptionSnapshot(data);
+        if (perfEnabled) {
+          const workerPerf = data?.perf && typeof data.perf === 'object' ? data.perf : null;
+          const ngeomValue = typeof data.ngeom === 'number' ? (data.ngeom | 0) : null;
+          const scnNgeomValue = typeof data.scn_ngeom === 'number' ? (data.scn_ngeom | 0) : null;
+          const decodeMs = perfNow() - tDecodeStart;
+          perfSample('backend:snapshot_decode_ms', decodeMs, {
+            frameId,
+            ngeom: ngeomValue,
+            scn_ngeom: scnNgeomValue,
+          });
+          if (workerPerf) {
+            if (typeof workerPerf.snapshotMs === 'number' && Number.isFinite(workerPerf.snapshotMs)) {
+              perfSample('worker:snapshot_ms', workerPerf.snapshotMs, {
+                ngeom: ngeomValue,
+                scn_ngeom: scnNgeomValue,
+              });
+            }
+            if (typeof workerPerf.createSceneSnapMs === 'number' && Number.isFinite(workerPerf.createSceneSnapMs)) {
+              perfSample('worker:createSceneSnap_ms', workerPerf.createSceneSnapMs, {
+                ngeom: ngeomValue,
+                scn_ngeom: scnNgeomValue,
+              });
+            }
+          }
+          const sentWallMs = typeof data?.perf?.sentWallMs === 'number' ? data.perf.sentWallMs : null;
+          if (sentWallMs != null) {
+            perfSample('worker_to_main:snapshot_transfer_ms', recvWallMs - sentWallMs);
+          }
+          if ((data?.scn_ngeom | 0) > 0) {
+            perfMarkOnce('play:backend:first_scene_snapshot', {
+              frameId,
+              scn_ngeom: data?.scn_ngeom | 0,
+            });
+          }
+        }
+        const tNotifyStart = perfEnabled ? perfNow() : 0;
         notifyListeners();
+        if (perfEnabled) {
+          perfSample('backend:notifyListeners_ms', perfNow() - tNotifyStart, {
+            frameId,
+            ngeom: typeof data.ngeom === 'number' ? (data.ngeom | 0) : null,
+            scn_ngeom: typeof data.scn_ngeom === 'number' ? (data.scn_ngeom | 0) : null,
+          });
+        }
         break;
       }
       case 'keyframes': {
@@ -2535,14 +2600,31 @@ async function loadDefaultXml() {
         notifyListeners();
         break;
       }
-  case 'render_assets':
-    if (data.assets) {
-      lastSnapshot.renderAssets = data.assets;
-      const rendering = ensureRenderingState(lastSnapshot);
-      rendering.assets = data.assets;
-      notifyListeners();
-    }
-    break;
+      case 'render_assets':
+        if (data.assets) {
+          lastSnapshot.renderAssets = data.assets;
+          const rendering = ensureRenderingState(lastSnapshot);
+          rendering.assets = data.assets;
+          notifyListeners();
+          if (perfEnabled) {
+            const recvWallMs = Date.now();
+            const sentWallMs = typeof data?.perf?.sentWallMs === 'number' ? data.perf.sentWallMs : null;
+            if (sentWallMs != null) {
+              perfSample('worker_to_main:render_assets_transfer_ms', recvWallMs - sentWallMs);
+            }
+            if (typeof data?.perf?.collectRenderAssetsMs === 'number' && Number.isFinite(data.perf.collectRenderAssetsMs)) {
+              perfSample('worker:collectRenderAssets_ms', data.perf.collectRenderAssetsMs);
+            }
+            perfMarkOnce('play:backend:render_assets', {
+              sentWallMs,
+              transferMs: sentWallMs != null ? (recvWallMs - sentWallMs) : null,
+              worker: data?.perf && typeof data.perf === 'object' ? data.perf : null,
+            });
+          } else {
+            perfMarkOnce('play:backend:render_assets');
+          }
+        }
+        break;
       case 'scene_snapshot': {
         const source = data.source || 'sim';
         if (typeof window !== 'undefined' && data.snap) {
@@ -2552,6 +2634,22 @@ async function loadDefaultXml() {
         if (data.snap) {
           lastSnapshot.scene = data.snap;
           notifyListeners();
+          if (perfEnabled) {
+            const recvWallMs = Date.now();
+            const sentWallMs = typeof data?.perf?.sentWallMs === 'number' ? data.perf.sentWallMs : null;
+            if (sentWallMs != null) {
+              perfSample('worker_to_main:scene_snapshot_transfer_ms', recvWallMs - sentWallMs);
+            }
+            perfMarkOnce('play:backend:first_scene_snapshot', {
+              source,
+              frame: Number.isFinite(data.frame) ? (data.frame | 0) : null,
+              sentWallMs,
+              transferMs: sentWallMs != null ? (recvWallMs - sentWallMs) : null,
+              worker: data?.perf && typeof data.perf === 'object' ? data.perf : null,
+            });
+          } else {
+            perfMarkOnce('play:backend:first_scene_snapshot', { source });
+          }
         }
         if (debug) console.log('[snapshot]', source, data.frame ?? null);
         break;

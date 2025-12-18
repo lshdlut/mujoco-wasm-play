@@ -110,6 +110,52 @@ let lastScnNgeomForRate = 0;
 
 const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
 
+const WORKER_START_WALL_MS = Date.now();
+const WORKER_START_PERF_MS =
+  (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now()
+    : Date.now();
+
+function perfNowMs() {
+  return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now()
+    : Date.now();
+}
+
+const perfEnabled = (() => {
+  const TRUE = new Set(['1', 'true', 'yes', 'on', 'debug']);
+  try {
+    const url = new URL(import.meta.url);
+    const token = String(url.searchParams.get('perf') || '').trim().toLowerCase();
+    return !!token && TRUE.has(token);
+  } catch (err) {
+    // If perf flag parsing fails, surface the error instead of silently disabling.
+    throw err;
+  }
+})();
+
+const perfStages = {
+  loadModuleMs: null,
+  initFromXmlMs: null,
+  collectRenderAssetsMs: null,
+};
+
+function buildPerf(extra = null, { includeStages = false } = {}) {
+  if (!perfEnabled) return null;
+  const payload = {
+    sentWallMs: Date.now(),
+    workerStartWallMs: WORKER_START_WALL_MS,
+    workerUptimeMs: perfNowMs() - WORKER_START_PERF_MS,
+  };
+  if (includeStages) {
+    payload.stages = { ...perfStages };
+  }
+  if (extra && typeof extra === 'object') {
+    return { ...payload, ...extra };
+  }
+  return payload;
+}
+
 const snapshotDebug = (() => {
   if (typeof self !== 'undefined') {
     const flag = self.PLAY_SNAPSHOT_DEBUG;
@@ -1330,6 +1376,7 @@ function captureCopyState(precision) {
 
 async function loadModule() {
   emitLog('worker: loading forge module...');
+  const tLoadStart = perfEnabled ? perfNowMs() : 0;
   // Build absolute URLs and import dynamically to avoid ref path/caching pitfalls
   // Versioned dist base from worker URL (?ver=...) and optional forgeBase override.
   let ver = '3.3.7';
@@ -1484,6 +1531,9 @@ async function loadModule() {
       emitLog('worker: no contact exports detected');
     }
   } catch {}
+  if (perfEnabled) {
+    perfStages.loadModuleMs = perfNowMs() - tLoadStart;
+  }
   return mod;
 }
 
@@ -1503,10 +1553,14 @@ async function loadXmlWithFallback(xmlText) {
   for (const attempt of attempts) {
     try {
       const text = await attempt.loader();
+      const tInitStart = perfEnabled ? perfNowMs() : 0;
       ensureSim();
       sim.term();
       sim.initFromXmlStrict(text);
       h = sim.h | 0;
+      if (perfEnabled) {
+        perfStages.initFromXmlMs = perfNowMs() - tInitStart;
+      }
       logSimPointers(`load:${attempt.stage}`, { force: true });
       emitLog(`worker: loaded via ${attempt.stage}`, { abi });
       return {
@@ -1548,8 +1602,10 @@ async function loadXmlWithFallback(xmlText) {
 
 
 
-  function snapshot() {
+function snapshot() {
   if (!sim || !(sim.h > 0)) return;
+  const tSnapshotStart = perfEnabled ? perfNowMs() : 0;
+  let createSceneSnapMs = null;
   syncVoptToWasm();
   const catmask = 7; // mjCAT_ALL = mjCAT_STATIC|mjCAT_DYNAMIC|mjCAT_DECOR
   if (typeof sim.sceneUpdateAndPack === 'function') {
@@ -1703,6 +1759,7 @@ async function loadXmlWithFallback(xmlText) {
   let scenePayload = null;
   if (n > 0 && xposView && xmatView) {
     try {
+      const tSceneSnapStart = perfEnabled ? perfNowMs() : 0;
       scenePayload = createSceneSnap({
         frame: snapshotState.frame,
         ngeom: n,
@@ -1715,6 +1772,9 @@ async function loadXmlWithFallback(xmlText) {
         xmat,
         mesh: renderAssets?.meshes ?? null,
       });
+      if (perfEnabled) {
+        createSceneSnapMs = perfNowMs() - tSceneSnapStart;
+      }
     } catch (err) {
       if (snapshotDebug) {
         try { postMessage({ kind: 'log', message: 'worker: scene snapshot prep failed', extra: String(err) }); } catch {}
@@ -2222,6 +2282,14 @@ async function loadXmlWithFallback(xmlText) {
   if (scenePayload) {
     msg.scene_snapshot = { source: 'sim', frame: snapshotState.frame - 1, snap: scenePayload };
   }
+  if (perfEnabled) {
+    msg.perf = buildPerf({
+      snapshotMs: perfNowMs() - tSnapshotStart,
+      createSceneSnapMs,
+      ngeom: n | 0,
+      scn_ngeom: scnNgeom | 0,
+    });
+  }
   try {
     if (snapshotLogEnabled && !loggedSnapshotKeys) {
       loggedSnapshotKeys = true;
@@ -2236,12 +2304,20 @@ async function loadXmlWithFallback(xmlText) {
 function emitRenderAssets() {
   if (!mod || !(h > 0)) return;
   try {
+    const tCollectStart = perfEnabled ? perfNowMs() : 0;
     const assets = collectRenderAssetsFromModule(mod, h);
     if (!assets) return;
     renderAssets = assets;
+    if (perfEnabled) {
+      perfStages.collectRenderAssetsMs = perfNowMs() - tCollectStart;
+    }
     const transfers = collectAssetBuffersForTransfer(assets);
     try {
-      postMessage({ kind: 'render_assets', assets }, transfers);
+      postMessage({
+        kind: 'render_assets',
+        assets,
+        perf: buildPerf({ collectRenderAssetsMs: perfStages.collectRenderAssetsMs }, { includeStages: true }),
+      }, transfers);
     } catch (err) {
       postMessage({ kind: 'log', message: 'worker: render_assets post failed', extra: String(err) });
     }
@@ -2614,6 +2690,7 @@ onmessage = async (ev) => {
         abi,
         dt,
         ngeom,
+        perf: buildPerf({ abi }, { includeStages: true }),
         optionSupport: (typeof optionSupport === 'object' && optionSupport) ? optionSupport : { supported: false, pointers: [] },
         visual: visualState || null,
         statistic: statisticState || null,

@@ -53,6 +53,7 @@ export function createPickingController({
   const normalMatrix = new THREE_NS.Matrix3();
   const tempQuat = new THREE_NS.Quaternion();
   const tempMat4 = new THREE_NS.Matrix4();
+  const tempMat4B = new THREE_NS.Matrix4();
   const tempVecA = new THREE_NS.Vector3();
   const tempVecB = new THREE_NS.Vector3();
   const tempVecC = new THREE_NS.Vector3();
@@ -155,7 +156,23 @@ export function createPickingController({
   }
 
   function getMeshList() {
-    return Array.isArray(renderCtx.meshes) ? renderCtx.meshes.filter(Boolean) : [];
+    const list = [];
+    const batches = renderCtx?._instancing?.batches || null;
+    if (batches instanceof Map) {
+      for (const batch of batches.values()) {
+        const mesh = batch?.mesh || null;
+        const count = typeof mesh?.count === 'number' ? (mesh.count | 0) : 0;
+        if (mesh && mesh.visible !== false && count > 0) {
+          list.push(mesh);
+        }
+      }
+    }
+    if (Array.isArray(renderCtx.meshes)) {
+      for (const mesh of renderCtx.meshes) {
+        if (mesh && mesh.visible !== false) list.push(mesh);
+      }
+    }
+    return list;
   }
 
   function projectPointer(event) {
@@ -235,17 +252,46 @@ export function createPickingController({
     if (!intersections.length) return null;
     let skippedStatic = false;
     for (const hit of intersections) {
-      const mesh = resolveGeomMesh(hit.object);
-      if (!mesh || mesh.visible === false) continue;
-      const geomIndex = mesh.userData.geomIndex | 0;
-      if (!(geomIndex >= 0)) continue;
-      const worldPoint = hit.point.clone();
-      const localPoint = mesh.worldToLocal(hit.point.clone());
-      const worldNormal = hit.face
-        ? hit.face.normal.clone()
-        : new THREE_NS.Vector3(0, 0, 1);
-      normalMatrix.getNormalMatrix(mesh.matrixWorld);
-      worldNormal.applyMatrix3(normalMatrix).normalize();
+      const obj = hit?.object || null;
+      if (!obj || obj.visible === false) continue;
+      let mesh = null;
+      let geomIndex = -1;
+      let worldPoint = null;
+      let localPoint = null;
+      let worldNormal = null;
+      if (obj.isInstancedMesh && typeof hit.instanceId === 'number') {
+        const instanceId = hit.instanceId | 0;
+        const count = typeof obj.count === 'number' ? (obj.count | 0) : null;
+        if (count != null && (instanceId < 0 || instanceId >= count)) continue;
+        const mapping = obj.userData?.instanceToGeomIndex || null;
+        if (!mapping || instanceId < 0 || instanceId >= mapping.length) continue;
+        geomIndex = mapping[instanceId] | 0;
+        if (!(geomIndex >= 0)) continue;
+        mesh = obj;
+        worldPoint = hit.point.clone();
+        if (typeof obj.getMatrixAt !== 'function') continue;
+        obj.getMatrixAt(instanceId, tempMat4);
+        tempMat4B.multiplyMatrices(obj.matrixWorld, tempMat4);
+        worldNormal = hit.face
+          ? hit.face.normal.clone()
+          : new THREE_NS.Vector3(0, 0, 1);
+        normalMatrix.getNormalMatrix(tempMat4B);
+        worldNormal.applyMatrix3(normalMatrix).normalize();
+        tempMat4B.invert();
+        localPoint = worldPoint.clone().applyMatrix4(tempMat4B);
+      } else {
+        mesh = resolveGeomMesh(obj);
+        if (!mesh || mesh.visible === false) continue;
+        geomIndex = mesh.userData.geomIndex | 0;
+        if (!(geomIndex >= 0)) continue;
+        worldPoint = hit.point.clone();
+        localPoint = mesh.worldToLocal(hit.point.clone());
+        worldNormal = hit.face
+          ? hit.face.normal.clone()
+          : new THREE_NS.Vector3(0, 0, 1);
+        normalMatrix.getNormalMatrix(mesh.matrixWorld);
+        worldNormal.applyMatrix3(normalMatrix).normalize();
+      }
       const geomName = geomNameFor(geomIndex);
       const bodyId = bodyIdFor(geomIndex);
       if (isStaticBody(bodyId)) {
@@ -271,11 +317,18 @@ export function createPickingController({
 
   function resolveSelectionWorldPoint(selection, outVec) {
     if (!selection || selection.geom < 0) return false;
-    const mesh = Array.isArray(renderCtx.meshes) ? renderCtx.meshes[selection.geom] : null;
-    if (mesh && Array.isArray(selection.localPoint) && selection.localPoint.length >= 3) {
+    const geomIndex = selection.geom | 0;
+    if (Array.isArray(selection.localPoint) && selection.localPoint.length >= 3) {
       outVec.set(selection.localPoint[0], selection.localPoint[1], selection.localPoint[2]);
-      mesh.localToWorld(outVec);
-      return true;
+      if (typeof renderCtx.resolveGeomWorldMatrix === 'function' && renderCtx.resolveGeomWorldMatrix(geomIndex, tempMat4)) {
+        outVec.applyMatrix4(tempMat4);
+        return true;
+      }
+      const mesh = Array.isArray(renderCtx.meshes) ? renderCtx.meshes[geomIndex] : null;
+      if (mesh) {
+        mesh.localToWorld(outVec);
+        return true;
+      }
     }
     if (Array.isArray(selection.point) && selection.point.length >= 3) {
       outVec.set(selection.point[0], selection.point[1], selection.point[2]);
@@ -644,24 +697,34 @@ export function createPickingController({
       dragState.pointerTarget.copy(dragState.anchorPoint);
     }
     // Initialize reference orientation for rotate perturb using current body pose
-    if (mode === 'rotate') {
-      dragState.refQuat = null;
-      const sel = currentSelection();
-      const geomIndex = sel?.geom;
-      const mesh = Number.isInteger(geomIndex) && geomIndex >= 0 && Array.isArray(renderCtx.meshes)
-        ? renderCtx.meshes[geomIndex]
-        : null;
-      if (mesh && mesh.quaternion) {
-        dragState.refQuat = mesh.quaternion.clone();
-      } else if (refreshBodyPose(dragState.bodyId)) {
-        tempMat4.identity();
-        tempMat4.makeBasis(
-          new THREE_NS.Vector3(tempBodyRot[0], tempBodyRot[3], tempBodyRot[6]),
-          new THREE_NS.Vector3(tempBodyRot[1], tempBodyRot[4], tempBodyRot[7]),
-          new THREE_NS.Vector3(tempBodyRot[2], tempBodyRot[5], tempBodyRot[8]),
-        );
-        dragState.refQuat = new THREE_NS.Quaternion().setFromRotationMatrix(tempMat4);
-      }
+      if (mode === 'rotate') {
+        dragState.refQuat = null;
+        const sel = currentSelection();
+        const geomIndex = sel?.geom;
+        if (
+          Number.isInteger(geomIndex) &&
+          geomIndex >= 0 &&
+          typeof renderCtx.resolveGeomWorldPose === 'function' &&
+          renderCtx.resolveGeomWorldPose(geomIndex, tempVecA, tempQuat, tempVecB)
+        ) {
+          dragState.refQuat = tempQuat.clone();
+        } else {
+          const mesh = Number.isInteger(geomIndex) && geomIndex >= 0 && Array.isArray(renderCtx.meshes)
+            ? renderCtx.meshes[geomIndex]
+            : null;
+          if (mesh && mesh.quaternion) {
+            dragState.refQuat = mesh.quaternion.clone();
+          }
+        }
+        if (!dragState.refQuat && refreshBodyPose(dragState.bodyId)) {
+          tempMat4.identity();
+          tempMat4.makeBasis(
+            new THREE_NS.Vector3(tempBodyRot[0], tempBodyRot[3], tempBodyRot[6]),
+            new THREE_NS.Vector3(tempBodyRot[1], tempBodyRot[4], tempBodyRot[7]),
+            new THREE_NS.Vector3(tempBodyRot[2], tempBodyRot[5], tempBodyRot[8]),
+          );
+          dragState.refQuat = new THREE_NS.Quaternion().setFromRotationMatrix(tempMat4);
+        }
       dragState.lastTorqueVec.set(0, 0, 0);
       dragState.lastRotVec.set(0, 0, 0);
     } else {

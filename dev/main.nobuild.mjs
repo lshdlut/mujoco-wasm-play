@@ -9,6 +9,7 @@ import {
   mergeBackendSnapshot,
 } from './viewer_state.mjs';
 import { consumeViewerParams } from './viewer_params.mjs';
+import { isPerfEnabled, perfMarkOnce, perfNow, perfSample } from './viewer_perf.mjs';
 import {
   FALLBACK_PRESET_ALIASES,
   FALLBACK_PRESETS,
@@ -18,6 +19,10 @@ import { createControlManager } from './viewer_controls.mjs';
 import { createCameraController } from './viewer_camera.mjs';
 import { createRendererManager } from './viewer_renderer.mjs';
 import { createPickingController } from './viewer_picking.mjs';
+
+perfMarkOnce('play:main:start', {
+  href: (typeof window !== 'undefined' && window.location?.href) ? window.location.href : null,
+});
 
 const CAMERA_PRESETS = ['Free', 'Tracking'];
 const MJ_GEOM = {
@@ -491,12 +496,63 @@ function updatePanels(state) {
 
 function applySnapshot(snapshot) {
   latestSnapshot = snapshot;
+  const perfEnabled = isPerfEnabled();
+  const t0 = perfEnabled ? perfNow() : 0;
+  let mergeMs = null;
   store.update((draft) => {
-    mergeBackendSnapshot(draft, snapshot);
+    if (perfEnabled) {
+      const tMergeStart = perfNow();
+      mergeBackendSnapshot(draft, snapshot);
+      mergeMs = perfNow() - tMergeStart;
+    } else {
+      mergeBackendSnapshot(draft, snapshot);
+    }
   });
+  if (perfEnabled) {
+    perfSample('main:store_update_ms', perfNow() - t0, {
+      frameId: Number.isFinite(snapshot?.frameId) ? (snapshot.frameId | 0) : null,
+      ngeom: typeof snapshot?.ngeom === 'number' ? (snapshot.ngeom | 0) : null,
+      hasSceneSoA: (snapshot?.scn_ngeom | 0) > 0,
+    });
+    if (typeof mergeMs === 'number' && Number.isFinite(mergeMs)) {
+      perfSample('main:mergeBackendSnapshot_ms', mergeMs, {
+        frameId: Number.isFinite(snapshot?.frameId) ? (snapshot.frameId | 0) : null,
+        ngeom: typeof snapshot?.ngeom === 'number' ? (snapshot.ngeom | 0) : null,
+        hasSceneSoA: (snapshot?.scn_ngeom | 0) > 0,
+      });
+    }
+    perfMarkOnce('play:main:first_store_update_end');
+  }
   if (typeof window !== 'undefined') {
     window.__lastSnapshot = snapshot;
   }
+  scheduleRenderScene();
+}
+
+let pendingRenderFrame = false;
+let renderSceneDirty = false;
+function scheduleRenderScene() {
+  renderSceneDirty = true;
+  if (pendingRenderFrame) return;
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return;
+  pendingRenderFrame = true;
+  window.requestAnimationFrame(() => {
+    pendingRenderFrame = false;
+    if (!renderSceneDirty) return;
+    renderSceneDirty = false;
+    if (!latestSnapshot) return;
+    const perfEnabled = isPerfEnabled();
+    const tRenderStart = perfEnabled ? perfNow() : 0;
+    rendererManager.renderScene(latestSnapshot, store.get());
+    if (perfEnabled) {
+      perfSample('main:raf_renderScene_ms', perfNow() - tRenderStart, {
+        frameId: Number.isFinite(latestSnapshot?.frameId) ? (latestSnapshot.frameId | 0) : null,
+        ngeom: typeof latestSnapshot?.ngeom === 'number' ? (latestSnapshot.ngeom | 0) : null,
+        scn_ngeom: (latestSnapshot?.scn_ngeom | 0) > 0 ? (latestSnapshot.scn_ngeom | 0) : null,
+      });
+      perfMarkOnce('play:main:first_raf_renderScene_end');
+    }
+  });
 }
 
 const initialSnapshot = await backend.snapshot();
@@ -545,9 +601,9 @@ function scheduleUiUpdate(state) {
 }
 
 store.subscribe((state) => {
-  if (latestSnapshot) {
-    rendererManager.renderScene(latestSnapshot, state);
-  }
+  const perfEnabled = isPerfEnabled();
+  const tSubStart = perfEnabled ? perfNow() : 0;
+  scheduleRenderScene();
   updateOverlay(overlayHelp, state.overlays.help);
   updateOverlay(overlayInfo, state.overlays.info);
   updateOverlay(overlayProfiler, state.overlays.profiler);
@@ -583,7 +639,14 @@ store.subscribe((state) => {
       : (state.model && state.model.ctrl != null ? state.model.ctrl : []);
     controlManager.ensureActuatorSliders(acts, ctrlValues);
   }
+  const tDofsStart = perfEnabled ? perfNow() : 0;
   const dofs = deriveJointDofs(latestSnapshot, state);
+  if (perfEnabled) {
+    perfSample('main:subscriber_deriveJointDofs_ms', perfNow() - tDofsStart, {
+      ngeom: typeof latestSnapshot?.ngeom === 'number' ? (latestSnapshot.ngeom | 0) : null,
+      hasDofs: Array.isArray(dofs) ? dofs.length : null,
+    });
+  }
   if (typeof controlManager.ensureJointSliders === 'function') {
     controlManager.ensureJointSliders(dofs);
   }
@@ -591,9 +654,15 @@ store.subscribe((state) => {
   if (typeof controlManager.ensureEqualityToggles === 'function') {
     controlManager.ensureEqualityToggles(eqs);
   }
+  if (perfEnabled) {
+    perfSample('main:store_subscriber_ms', perfNow() - tSubStart, {
+      ngeom: typeof latestSnapshot?.ngeom === 'number' ? (latestSnapshot.ngeom | 0) : null,
+      scn_ngeom: (latestSnapshot?.scn_ngeom | 0) > 0 ? (latestSnapshot.scn_ngeom | 0) : null,
+    });
+  }
 });
 
-rendererManager.renderScene(latestSnapshot, store.get());
+scheduleRenderScene();
 
 
 const cameraController = createCameraController({
