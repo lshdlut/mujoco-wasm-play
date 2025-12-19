@@ -1,6 +1,7 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
+import { logError, logStatus, logWarn } from './debug_log.mjs';
 import { withCacheTag } from './paths.mjs';
 import { writeOptionField, readOptionStruct, detectOptionSupport } from './viewer_option_struct.mjs';
 import { writeVisualField, readVisualStruct } from './viewer_visual_struct.mjs';
@@ -73,7 +74,6 @@ let frameSeq = 0;
 let optionSupport = { supported: false, pointers: [] };
 let flexLayer = 0;
 let bvhDepth = 1;
-const diagStagesLogged = new Set();
 
 // mjv perturb pipeline (forge exports): JS only sends begin/move/end + normalized deltas,
 // wasm handles mjv_movePerturb + mjv_applyPerturbForce.
@@ -149,35 +149,7 @@ function buildPerf(extra = null, { includeStages = false } = {}) {
   return payload;
 }
 
-const snapshotDebug = (() => {
-  if (typeof self !== 'undefined') {
-    const flag = self.PLAY_SNAPSHOT_DEBUG;
-    if (flag === true || flag === 1 || flag === '1') return true;
-  }
-  try {
-    const url = new URL(import.meta.url);
-    return url.searchParams.get('snapshot') === '1';
-  } catch {}
-  return false;
-})();
-
-const verboseWorkerLogs = (() => {
-  try {
-    const url = new URL(import.meta.url);
-    if (url.searchParams.get('verbose') === '1') return true;
-  } catch {}
-  try {
-    if (typeof self !== 'undefined' && self.PLAY_VERBOSE_DEBUG === true) return true;
-  } catch {}
-  return false;
-})();
-const snapshotLogEnabled = snapshotDebug && verboseWorkerLogs;
-const verboseLogEnabled = verboseWorkerLogs;
-
-function emitLog(message, extra, { force = false } = {}) {
-  if (!force && !verboseLogEnabled) return;
-  try { postMessage({ kind: 'log', message, extra }); } catch {}
-}
+// Log minimal status lines to the main thread, keep the rest in the worker console.
 
 // Noise controls are currently disabled in the web build.
 // Keep the helpers defined as no-ops so the message wiring stays intact
@@ -190,7 +162,7 @@ function applyCtrlNoise() {
   // Intentionally left blank: ctrl noise is disabled.
 }
 
-const snapshotState = { frame: 0, lastSim: null, loggedCtrlSample: false };
+const snapshotState = { frame: 0, lastSim: null };
 
 const HISTORY_DEFAULT_CAPTURE_HZ = 30;
 const HISTORY_DEFAULT_CAPACITY = 900;
@@ -202,11 +174,6 @@ let historyState = null;
 let keyframeState = null;
 let watchState = null;
 let keySliderIndex = -1;
-let lastPerturbLogTimeMs = 0;
-let loggedGsizeDiag = false;
-let loggedGtypeDiag = false;
-let loggedContactDiag = false;
-let loggedSnapshotKeys = false;
 
 function setRunning(next, source = 'backend', notify = true) {
   const target = !!next;
@@ -504,9 +471,7 @@ function emitCameraMeta() {
     const cameras = collectCameraMeta();
     postMessage({ kind: 'meta_cameras', cameras });
   } catch (err) {
-    if (snapshotDebug) {
-      postMessage({ kind: 'log', message: 'worker: camera meta failed', extra: String(err) });
-    }
+    logWarn('worker: camera meta failed', String(err || ''));
   }
 }
 
@@ -529,9 +494,7 @@ function emitGeomMeta() {
     const geoms = collectGeomMeta();
     postMessage({ kind: 'meta_geoms', geoms });
   } catch (err) {
-    if (snapshotDebug) {
-      postMessage({ kind: 'log', message: 'worker: geom meta failed', extra: String(err) });
-    }
+    logWarn('worker: geom meta failed', String(err || ''));
   }
 }
 
@@ -1096,8 +1059,7 @@ function collectWatchSources() {
 
 function wasmUrl(rel) { return new URL(rel, import.meta.url).href; }
 
-// Boot log for diagnostics
-emitLog('worker: boot');
+logStatus('worker: boot');
 
 function cstr(modRef, ptr) {
   return readCString(modRef, ptr);
@@ -1138,17 +1100,6 @@ function readLastErrorMeta(modRef) {
 function readErrno(modRef) {
   const meta = readLastErrorMeta(modRef);
   return meta.errno || meta.helperErrno || 0;
-}
-
-function logHandleFailure(stage, info) {
-  const meta = readLastErrorMeta(mod);
-  emitLog(`worker: handle failure (${stage})`, {
-    errno: meta.errno,
-    errmsg: meta.errmsg,
-    helperErrno: meta.helperErrno,
-    helperErrmsg: meta.helperErrmsg,
-    extra: info ?? null,
-  }, { force: true });
 }
 
 function readModelCount(name) {
@@ -1192,21 +1143,6 @@ function readPtr(owner, name) {
 
 const readModelPtr = (name) => readPtr('model', name);
 const readDataPtr = (name) => readPtr('data', name);
-
-function logSimPointers(stage, { force = false } = {}) {
-  if (!sim || typeof sim.pointerDiagnostics !== 'function') return;
-  if (!force && diagStagesLogged.has(stage)) return;
-  try {
-    const diag = sim.pointerDiagnostics(stage);
-    diag.modMatch = sim.mod === mod;
-    diag.moduleTag = sim.mod?.__forgeModuleId || null;
-    diagStagesLogged.add(stage);
-    emitLog(`worker: sim pointer diag (${stage})`, diag, { force });
-  } catch (err) {
-    emitLog(`worker: sim pointer diag failed (${stage})`, String(err || ''), { force });
-  }
-}
-
 
 function computeBoundsFromPositions(arr, n) {
   if (!arr || !n) {
@@ -1368,7 +1304,7 @@ function captureCopyState(precision) {
 }
 
 async function loadModule() {
-  emitLog('worker: loading forge module...');
+  logStatus('worker: loading forge module...');
   const tLoadStart = perfEnabled ? perfNowMs() : 0;
   // Build absolute URLs and import dynamically to avoid ref path/caching pitfalls
   // Versioned dist base from worker URL (?ver=...) and optional forgeBase override.
@@ -1399,7 +1335,7 @@ async function loadModule() {
   const jsAbs = new URL(`mujoco.js`, distBase);
   const wasmAbs = new URL(`mujoco.wasm`, distBase);
 
-    const assertForgeViewerAbi = (moduleRef) => {
+  const assertForgeViewerAbi = (moduleRef) => {
       const required = [
         // Scene pipeline (mjv_updateScene -> packed SoA)
         '_mjwf_scene_update_and_pack',
@@ -1477,13 +1413,6 @@ async function loadModule() {
       const j = await r.json();
       const s = String(j.sha256 || j.git_sha || j.mujoco_git_sha || '');
       vTag = s.slice(0, 8);
-      emitLog('worker: forge version.json', {
-        distBase: distBase.href,
-        mujocoVersion: j.mujocoVersion || null,
-        buildProfile: j.profile || null,
-        exceptions: j.exceptions || null,
-        shaTag: vTag || null,
-      }, { force: true });
     }
   } catch {}
   try {
@@ -1507,22 +1436,7 @@ async function loadModule() {
   } catch (e) {
     throw e;
   }
-  try {
-    emitLog('worker: forge module ready', {
-      hasMake: typeof (mod)._mjwf_helper_make_from_xml === 'function',
-      hasCcall: typeof mod.ccall === 'function',
-    });
-    const geomKeys = Object.keys(mod || {}).filter((k) => k.includes('_geom_')).slice(0, 16);
-    emitLog('worker: geom export sample', geomKeys);
-    const contactKeys = Object.keys(mod || {})
-      .filter((k) => k.includes('_contact') || k.includes('_data_contact'))
-      .slice(0, 24);
-    if (contactKeys.length > 0) {
-      emitLog('worker: contact export sample', contactKeys);
-    } else {
-      emitLog('worker: no contact exports detected');
-    }
-  } catch {}
+  logStatus('worker: forge module ready');
   if (perfEnabled) {
     perfStages.loadModuleMs = perfNowMs() - tLoadStart;
   }
@@ -1553,8 +1467,7 @@ async function loadXmlWithFallback(xmlText) {
       if (perfEnabled) {
         perfStages.initFromXmlMs = perfNowMs() - tInitStart;
       }
-      logSimPointers(`load:${attempt.stage}`, { force: true });
-      emitLog(`worker: loaded via ${attempt.stage}`, { abi });
+      logStatus(`worker: loaded via ${attempt.stage}`);
       return {
         ok: true,
         abi,
@@ -1566,16 +1479,6 @@ async function loadXmlWithFallback(xmlText) {
       };
     } catch (err) {
       const meta = readLastErrorMeta(mod || {});
-      const errPayload = {
-        stage: attempt.stage,
-        error: String(err || ''),
-        errno: meta.errno,
-        errmsg: meta.errmsg,
-        helperErrno: meta.helperErrno,
-        helperErrmsg: meta.helperErrmsg,
-        file: attempt.stage === 'primary' ? 'primary' : 'fallback-none',
-      };
-      logHandleFailure('tryMakeHandle_fail', errPayload);
       if (attempts.length === 1) {
         return {
           ok: false,
@@ -1616,7 +1519,6 @@ function snapshot() {
   const scnObjIdView = scnNgeom > 0 ? (sim.sceneGeomObjIdView?.() || null) : null;
   const scnCategoryView = scnNgeom > 0 ? (sim.sceneGeomCategoryView?.() || null) : null;
   const scnSegIdView = scnNgeom > 0 ? (sim.sceneGeomSegIdView?.() || null) : null;
-  const scnCamDistView = (snapshotDebug || perfEnabled) && scnNgeom > 0 ? (sim.sceneGeomCamDistView?.() || null) : null;
   const scnGeomOrderView = scnNgeom > 0 ? (sim.sceneGeomOrderView?.() || null) : null;
   const scnTransparentView = scnNgeom > 0 ? (sim.sceneGeomTransparentView?.() || null) : null;
   const scnLabelView = scnNgeom > 0 ? (sim.sceneGeomLabelView?.() || null) : null;
@@ -1639,17 +1541,6 @@ function snapshot() {
   const jntPosView = sim.jntPosView?.();
   const jntAxisView = sim.jntAxisView?.();
   const jntBodyView = sim.jntBodyIdView?.();
-  const jointDebug = {
-    njnt: typeof sim.njnt === 'function' ? (sim.njnt() | 0) : null,
-    modelPtr: sim?.modelPtr ?? null,
-    dataPtr: sim?.dataPtr ?? null,
-    hasPos: !!jntPosView,
-    lenPos: jntPosView?.length || 0,
-    hasAxis: !!jntAxisView,
-    lenAxis: jntAxisView?.length || 0,
-    hasBody: !!jntBodyView,
-    lenBody: jntBodyView?.length || 0,
-  };
   const actTrnidView = sim.actuatorTrnidView?.();
   const actTrntypeView = sim.actuatorTrntypeView?.();
   const actCrankView = sim.actuatorCranklengthView?.();
@@ -1680,49 +1571,6 @@ function snapshot() {
     const ptr = mod._mjwf_data_wrap_xpos_ptr(h | 0) | 0;
     if (ptr) wrapXposView = heapViewF64(mod, ptr, nwrapLocal * 6);
   }
-  // One-off tendon wrap pointer diagnostics (helps debug missing wrap arrays).
-  if ((snapshotDebug || verboseWorkerLogs) && !diagStagesLogged.has('tendon_wrap_diag')) {
-    try {
-      const ptrDiag = (field) => {
-        const fn = mod && mod[`_mjwf_data_${field}_ptr`];
-        const out = { handle: 0, data: 0, errorHandle: null, errorData: null };
-        if (typeof fn !== 'function') {
-          out.errorHandle = 'missing';
-          out.errorData = 'missing';
-          return out;
-        }
-        try { out.handle = fn.call(mod, h | 0) | 0; } catch (err) { out.errorHandle = String(err || ''); }
-        try {
-          const dataPtrLocal = sim?.dataPtr ? (sim.dataPtr | 0) : 0;
-          if (dataPtrLocal) out.data = fn.call(mod, dataPtrLocal) | 0;
-        } catch (err) { out.errorData = String(err || ''); }
-        return out;
-      };
-      const viewLen = (v) => (v && typeof v.length === 'number' ? (v.length | 0) : null);
-      const diag = {
-        ntendon: sim?.ntendon?.() | 0,
-        nwrap: sim?.nwrap?.() | 0,
-        modelPtr: sim?.modelPtr | 0,
-        dataPtr: sim?.dataPtr | 0,
-        views: {
-          ten_wrapadr: viewLen(tenWrapAdrView),
-          ten_wrapnum: viewLen(tenWrapNumView),
-          wrap_obj: viewLen(wrapObjView),
-          wrap_xpos: viewLen(wrapXposView),
-        },
-        ptrs: {
-          ten_wrapadr: ptrDiag('ten_wrapadr'),
-          ten_wrapnum: ptrDiag('ten_wrapnum'),
-          wrap_obj: ptrDiag('wrap_obj'),
-          wrap_xpos: ptrDiag('wrap_xpos'),
-        },
-      };
-      diagStagesLogged.add('tendon_wrap_diag');
-      emitLog('worker: tendon wrap diag', diag, { force: true });
-    } catch (err) {
-      emitLog('worker: tendon wrap diag failed', { err: String(err || '') }, { force: true });
-    }
-  }
   const sensorTypeView = sim.sensorTypeView?.();
   const sensorObjIdView = sim.sensorObjIdView?.();
   const eqTypeView = sim.eqTypeView?.();
@@ -1746,9 +1594,6 @@ function snapshot() {
   const lightXposView = sim.lightXposView?.();
   const lightXdirView = sim.lightXdirView?.();
   const tSim = sim.time?.() || 0;
-  if (!diagStagesLogged.has('first_snapshot')) {
-    logSimPointers('first_snapshot');
-  }
   let scenePayload = null;
   if (n > 0 && xposView && xmatView) {
     try {
@@ -1769,9 +1614,7 @@ function snapshot() {
         createSceneSnapMs = perfNowMs() - tSceneSnapStart;
       }
     } catch (err) {
-      if (snapshotDebug) {
-        try { postMessage({ kind: 'log', message: 'worker: scene snapshot prep failed', extra: String(err) }); } catch {}
-      }
+      logWarn('worker: scene snapshot prep failed', String(err || ''));
     }
     if (snapshotState) {
       snapshotState.lastSim = scenePayload ?? null;
@@ -1897,19 +1740,11 @@ function snapshot() {
     msg.keyIndex = keySliderIndex | 0;
   }
   if (gsizeView) {
-    if (snapshotLogEnabled && !loggedGsizeDiag) {
-      loggedGsizeDiag = true;
-      console.log('[worker] gsize view len', gsizeView.length);
-    }
     const gsize = new Float64Array(gsizeView);
     msg.gsize = gsize;
     transfers.push(gsize.buffer);
   }
   if (gtypeView) {
-    if (snapshotLogEnabled && !loggedGtypeDiag) {
-      loggedGtypeDiag = true;
-      console.log('[worker] gtype view len', gtypeView.length);
-    }
     const gtype = new Int32Array(gtypeView);
     msg.gtype = gtype;
     transfers.push(gtype.buffer);
@@ -1980,11 +1815,6 @@ function snapshot() {
       msg.scn_segid = scnSegId;
       transfers.push(scnSegId.buffer);
     }
-    if (scnCamDistView) {
-      const scnCamDist = new Float32Array(scnCamDistView);
-      msg.scn_camdist = scnCamDist;
-      transfers.push(scnCamDist.buffer);
-    }
     if (scnGeomOrderView) {
       const scnGeomOrder = new Int32Array(scnGeomOrderView);
       msg.scn_geomorder = scnGeomOrder;
@@ -2021,7 +1851,6 @@ function snapshot() {
     msg.jbody = jbody;
     transfers.push(jbody.buffer);
   }
-  msg.debugJoint = jointDebug;
   if (actTrnidView) {
     const atrn = new Int32Array(actTrnidView);
     msg.act_trnid = atrn;
@@ -2132,16 +1961,6 @@ function snapshot() {
       msg.eq_names = names;
     }
   }
-  if (snapshotDebug && !diagStagesLogged.has('eq_snapshot')) {
-    diagStagesLogged.add('eq_snapshot');
-    const neqVal = typeof sim?.neq === 'function' ? (sim.neq() | 0) : 0;
-    const eqActiveLen = ArrayBuffer.isView(eqActiveView) ? eqActiveView.length : 0;
-    emitLog('worker: eq snapshot diag', {
-      neq: neqVal,
-      hasEqActiveView: !!eqActiveView,
-      eqActiveLen,
-    }, { force: true });
-  }
   if (matRgbaView) {
     const matrgba = new Float32Array(matRgbaView);
     msg.matrgba = matrgba;
@@ -2150,10 +1969,6 @@ function snapshot() {
   if (ctrl) {
     msg.ctrl = ctrl;
     transfers.push(ctrl.buffer);
-    if (!snapshotState.loggedCtrlSample) {
-      snapshotState.loggedCtrlSample = true;
-      emitLog('worker: ctrl sample', { len: ctrl.length, sample: Array.from(ctrl.slice(0, Math.min(4, ctrl.length))) });
-    }
   }
   if (xfrcView) {
     const xfrc = new Float64Array(xfrcView);
@@ -2191,18 +2006,6 @@ function snapshot() {
         const frame = new Float64Array(frameView);
         contacts.frame = frame;
         transfers.push(frame.buffer);
-      }
-      if (snapshotLogEnabled && !loggedContactDiag) {
-        loggedContactDiag = true;
-        try {
-          console.log('[worker] contact view diag', {
-            ncon,
-            hasPos: !!posView,
-            hasFrame: !!frameView,
-            posLen: posView ? posView.length : 0,
-            frameLen: frameView ? frameView.length : 0,
-          });
-        } catch {}
       }
       const geom1View = sim.contactGeom1View?.();
       if (geom1View) {
@@ -2259,22 +2062,11 @@ function snapshot() {
           transfers.push(forceOut.buffer);
         }
       } catch (err) {
-        if (typeof console !== 'undefined') {
-          console.error('[worker] contact force compute failed', err);
-        }
-        try {
-          postMessage({
-            kind: 'log',
-            message: 'worker: contact force failed',
-            extra: { error: String(err?.message || err), stack: err?.stack || null },
-          });
-        } catch {}
+        logError('[worker] contact force compute failed', err);
       }
     }
   } catch (err) {
-    if (snapshotDebug) {
-      try { postMessage({ kind: 'log', message: 'worker: contact extraction failed', extra: String(err) }); } catch {}
-    }
+    logWarn('worker: contact extraction failed', String(err || ''));
   }
   msg.contacts = contacts || null;
   if (scenePayload) {
@@ -2289,10 +2081,6 @@ function snapshot() {
     });
   }
   try {
-    if (snapshotLogEnabled && !loggedSnapshotKeys) {
-      loggedSnapshotKeys = true;
-      console.log('[worker] snapshot keys', Object.keys(msg));
-    }
     postMessage(msg, transfers);
   } catch (err) {
     try { postMessage({ kind:'error', message: `snapshot postMessage failed: ${err}` }); } catch {}
@@ -2317,12 +2105,10 @@ function emitRenderAssets() {
         perf: buildPerf({ collectRenderAssetsMs: perfStages.collectRenderAssetsMs }, { includeStages: true }),
       }, transfers);
     } catch (err) {
-      postMessage({ kind: 'log', message: 'worker: render_assets post failed', extra: String(err) });
+      logWarn('worker: render_assets post failed', String(err || ''));
     }
   } catch (err) {
-    try {
-      postMessage({ kind: 'log', message: 'worker: collectRenderAssets failed', extra: String(err) });
-    } catch {}
+    logWarn('worker: collectRenderAssets failed', String(err || ''));
   }
 }
 
@@ -2500,7 +2286,7 @@ setInterval(() => {
   if (!mod || !h || !running) return;
   if (!sim || typeof sim.step !== 'function') {
     if (!hasLoggedNoSim) {
-      try { console.error('[physics.worker] sim is not available, cannot step simulation'); } catch {}
+      logError('[physics.worker] sim is not available, cannot step simulation');
       hasLoggedNoSim = true;
     }
     return;
@@ -2649,7 +2435,6 @@ onmessage = async (ev) => {
       if (snapshotState) {
         snapshotState.frame = 0;
         snapshotState.lastSim = null;
-        snapshotState.loggedCtrlSample = false;
       }
       optionSupport = detectOptionSupport(mod);
       dt = sim?.timestep?.() || 0.002;
@@ -2917,41 +2702,8 @@ onmessage = async (ev) => {
       if (target === 'mjOption') {
         try {
           const pathArr = Array.isArray(msg.path) ? msg.path : [];
-          if (snapshotDebug) {
-            try {
-              postMessage({
-                kind: 'log',
-                message: 'worker: setField (mjOption) request',
-                extra: {
-                  path: pathArr,
-                  kind: msg.kind,
-                  size: msg.size,
-                  value: msg.value,
-                },
-              });
-            } catch {}
-          }
           const ok = writeOptionField(mod, h, pathArr, msg.kind, msg.value);
           if (ok) {
-            if (snapshotDebug) {
-              try {
-                const opts = readOptionStruct(mod, h);
-                const field = pathArr[0];
-                const preview =
-                  opts && field && Object.prototype.hasOwnProperty.call(opts, field)
-                    ? opts[field]
-                    : undefined;
-                postMessage({
-                  kind: 'log',
-                  message: 'worker: setField (mjOption) applied',
-                  extra: {
-                    path: pathArr,
-                    value: msg.value,
-                    preview,
-                  },
-                });
-              } catch {}
-            }
             if (Array.isArray(pathArr) && pathArr.length === 1 && pathArr[0] === 'timestep') {
               try {
                 const rawDt = sim?.timestep?.() || dt;
@@ -2964,33 +2716,27 @@ onmessage = async (ev) => {
               } catch {}
             }
             snapshot();
-          } else if (snapshotDebug) {
-            postMessage({ kind: 'log', message: 'worker: setField (mjOption) unsupported', extra: String(msg.path || []) });
           }
         } catch (err) {
-          postMessage({ kind: 'log', message: 'worker: setField (mjOption) failed', extra: String(err) });
+          logWarn('worker: setField (mjOption) failed', String(err || ''));
         }
       } else if (target === 'mjVisual') {
         try {
           const ok = writeVisualField(mod, h, Array.isArray(msg.path) ? msg.path : [], msg.kind, msg.value, msg.size);
           if (ok) {
             emitStructState('mjVisual');
-          } else if (snapshotDebug) {
-            postMessage({ kind: 'log', message: 'worker: setField (mjVisual) unsupported', extra: String(msg.path || []) });
           }
         } catch (err) {
-          postMessage({ kind: 'log', message: 'worker: setField (mjVisual) failed', extra: String(err) });
+          logWarn('worker: setField (mjVisual) failed', String(err || ''));
         }
       } else if (target === 'mjStatistic') {
         try {
           const ok = writeStatisticField(mod, h, Array.isArray(msg.path) ? msg.path : [], msg.kind, msg.value, msg.size);
           if (ok) {
             emitStructState('mjStatistic');
-          } else if (snapshotDebug) {
-            postMessage({ kind: 'log', message: 'worker: setField (mjStatistic) unsupported', extra: String(msg.path || []) });
           }
         } catch (err) {
-          postMessage({ kind: 'log', message: 'worker: setField (mjStatistic) failed', extra: String(err) });
+          logWarn('worker: setField (mjStatistic) failed', String(err || ''));
         }
       }
     } else if (msg.cmd === 'applyPerturb') {
@@ -3115,7 +2861,7 @@ onmessage = async (ev) => {
         qpos[idx] = v;
         try { sim.forward?.(); } catch {}
       } catch (err) {
-        if (snapshotDebug) emitLog('worker: setQpos failed', { err: String(err) });
+        logWarn('worker: setQpos failed', String(err || ''));
       }
     } else if (msg.cmd === 'setEqualityActive') {
       try {
@@ -3127,7 +2873,7 @@ onmessage = async (ev) => {
         eqActive[idx] = active ? 1 : 0;
         try { sim.forward?.(); } catch {}
       } catch (err) {
-        if (snapshotDebug) emitLog('worker: setEqualityActive failed', { err: String(err) });
+        logWarn('worker: setEqualityActive failed', String(err || ''));
       }
     } else if (msg.cmd === 'setRate') {
       const nextRate = +msg.rate || 1;

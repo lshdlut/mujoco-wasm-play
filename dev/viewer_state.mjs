@@ -2,6 +2,7 @@ import { prefetchBindingIndex, prepareBindingUpdate, splitBinding } from './view
 import { VISUAL_FIELD_DESCRIPTORS } from './viewer_visual_struct.mjs';
 import { VISUAL_FIELD_GROUPS } from './visual_field_groups.mjs';
 import { isPerfEnabled, perfMarkOnce, perfNow, perfSample } from './viewer_perf.mjs';
+import { logError, logStatus, logWarn } from './debug_log.mjs';
 
 // Lightweight state container and backend helpers for the simulate parity UI.
 // Runtime implementation lives in JS so it can be consumed directly by the
@@ -306,30 +307,6 @@ const MODEL_ALIASES = {
 const MODEL_POOL = [
   'mujoco_Rajagopal2015_simple.xml',
 ];
-
-const SNAPSHOT_DEBUG_FLAG = (() => {
-  try {
-    if (typeof location !== 'undefined' && location?.href) {
-      const url = new URL(location.href);
-      return url.searchParams.get('snapshot') === '1';
-    }
-  } catch {}
-  return false;
-})();
-
-const VERBOSE_DEBUG_LOGS = (() => {
-  try {
-    if (typeof window !== 'undefined') {
-      if (window.PLAY_VERBOSE_DEBUG === true) return true;
-      const url = new URL(window.location.href);
-      if (url.searchParams.get('log') === '1') return true;
-    }
-  } catch {}
-  return false;
-})();
-if (typeof window !== 'undefined') {
-  try { window.PLAY_VERBOSE_DEBUG = VERBOSE_DEBUG_LOGS; } catch {}
-}
 
 function ctrlMirrorEnabled() {
   return false;
@@ -1152,10 +1129,6 @@ function applyStructBindingToModel(draft, scope, pathSegments, value) {
   if (!draft.model) draft.model = {};
   if (scope === 'mjOption') {
     draft.model.opt = draft.model.opt || {};
-    try {
-      // eslint-disable-next-line no-console
-      console.log('[applyStructBindingToModel]', { scope, path: pathSegments, value });
-    } catch {}
     assignStructPath(draft.model.opt, pathSegments, value);
     return true;
   }
@@ -1426,7 +1399,7 @@ export function createViewerStore(initialState) {
       try {
         fn(state);
       } catch (err) {
-        console.error(err);
+        logError(err);
       }
     }
   }
@@ -1458,14 +1431,6 @@ export function createViewerStore(initialState) {
 export async function applySpecAction(store, backend, control, rawValue) {
   if (!control) return;
   const value = normaliseControlValue(control, rawValue);
-  try {
-    // eslint-disable-next-line no-console
-    console.log('[applySpecAction]', {
-      id: control.item_id,
-      binding: control.binding,
-      value,
-    });
-  } catch {}
   if (control.item_id === 'option.visual_source') {
     let nextMode = 'model';
     if (typeof value === 'string') {
@@ -1481,7 +1446,7 @@ export async function applySpecAction(store, backend, control, rawValue) {
     try {
       await switchVisualSourceMode(store, backend, nextMode);
     } catch (err) {
-      console.error('[option.visual_source] switch failed', err);
+      logError('[option.visual_source] switch failed', err);
     }
     return;
   }
@@ -1497,7 +1462,7 @@ export async function applySpecAction(store, backend, control, rawValue) {
         snapshot = await backend.apply({ kind: 'ui', id: control.item_id, value, control });
       }
     } catch (err) {
-      console.error('[backend.apply] failed', err);
+      logError('[backend.apply] failed', err);
     }
   }
 
@@ -1576,7 +1541,7 @@ export function applyGesture(store, backend, payload) {
         }
       })
       .catch((err) => {
-        console.error('[backend.apply gesture] failed', err);
+        logError('[backend.apply gesture] failed', err);
       });
   }
 }
@@ -1672,7 +1637,6 @@ function resolveSnapshot(state) {
       scn_objid: viewOrNull(state.scn_objid, Int32Array),
       scn_category: viewOrNull(state.scn_category, Int32Array),
       scn_segid: viewOrNull(state.scn_segid, Int32Array),
-      scn_camdist: viewOrNull(state.scn_camdist, Float32Array),
       scn_geomorder: viewOrNull(state.scn_geomorder, Int32Array),
       scn_transparent: viewOrNull(state.scn_transparent, Uint8Array),
       scn_label: viewOrNull(state.scn_label, Uint8Array),
@@ -1725,7 +1689,6 @@ function resolveSnapshot(state) {
     eq_active: viewOrNull(state.eq_active, Uint8Array),
     eq_names: Array.isArray(state.eq_names) ? state.eq_names.slice() : null,
     eq_data: viewOrNull(state.eq_data, Float64Array),
-    debugJoint: state.debugJoint || null,
     matrgba: viewOrNull(state.matrgba, Float32Array),
     contacts:
       state.contacts && typeof state.contacts === 'object'
@@ -1811,7 +1774,6 @@ function resolveSnapshot(state) {
 
 export async function createBackend(options = {}) {
   const mode = 'worker'; // play UI only supports worker backend
-  const debug = !!options.debug;
   const perfEnabled = isPerfEnabled();
   const snapshotDebug =
     typeof window !== 'undefined'
@@ -1851,8 +1813,6 @@ export async function createBackend(options = {}) {
 
   async function spawnWorkerBackend() {
     const workerUrl = new URL(WORKER_URL.href);
-    if (SNAPSHOT_DEBUG_FLAG) workerUrl.searchParams.set('snapshot', '1');
-    if (VERBOSE_DEBUG_LOGS) workerUrl.searchParams.set('verbose', '1');
     // Propagate forgeBase (if present) so the worker can choose
     // between local dist/ and forge CDN artifacts.
     try {
@@ -1896,18 +1856,17 @@ async function loadDefaultXml() {
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) {
         errors.push(`fetch ${file} status ${res.status}`);
-        if (debug) console.warn(`[backend] fetch ${file} failed with status ${res.status}`);
+        logWarn(`[backend] fetch ${file} failed with status ${res.status}`);
         continue;
       }
       const text = await res.text();
       if (text && text.trim().length > 0) {
-        if (debug) console.log('[backend] loaded xml', file);
         return text;
       }
       errors.push(`empty content for ${file}`);
     } catch (err) {
       errors.push(`fetch ${file} error ${String(err)}`);
-      if (debug) console.warn('[backend] failed to fetch xml', { file, err });
+      logWarn('[backend] failed to fetch xml', { file, err });
     }
   }
   throw new Error(`No model loaded. Tried: ${Array.from(seen).join(', ')}. Errors: ${errors.join('; ')}`);
@@ -1923,7 +1882,7 @@ async function loadDefaultXml() {
       try {
         fn(snapshot);
       } catch (err) {
-        console.error(err);
+        logError(err);
       }
     }
     return snapshot;
@@ -1949,7 +1908,7 @@ async function loadDefaultXml() {
     try {
       client = await spawnWorkerBackend();
     } catch (err) {
-      if (debug) console.warn('[backend] worker init failed', err);
+      logError('[backend] worker init failed', err);
       throw err;
     }
     // Attach message handler to the new worker.
@@ -1969,7 +1928,7 @@ async function loadDefaultXml() {
       client.postMessage({ cmd: 'load', rate, xmlText: payload });
       client.postMessage({ cmd: 'snapshot' });
     } catch (err) {
-      console.error('[backend load] failed', err);
+      logError('[backend load] failed', err);
       throw err;
     }
     return resolveSnapshot(lastSnapshot);
@@ -2039,13 +1998,13 @@ async function loadDefaultXml() {
   async function writeCopyKeyToClipboard(xml) {
     if (!xml) return;
     if (typeof navigator === 'undefined' || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
-      if (debug) console.warn('[backend copyState] clipboard API unavailable');
+      logWarn('[backend copyState] clipboard API unavailable');
       return;
     }
     try {
       await navigator.clipboard.writeText(xml);
     } catch (err) {
-      console.error('[backend copyState] clipboard write failed', err);
+      logError('[backend copyState] clipboard write failed', err);
       throw err;
     }
   }
@@ -2093,14 +2052,14 @@ async function loadDefaultXml() {
       lastSnapshot.history.live = true;
       historyScrubbing = false;
       try { client.postMessage?.({ cmd: 'historyScrub', offset: 0 }); } catch (err) {
-        if (debug) console.warn('[backend history reset] post failed', err);
+        logWarn('[backend history reset] post failed', err);
       }
     }
     if (notifyBackend) {
       try {
         client.postMessage?.({ cmd: 'setPaused', paused: nextPaused, source });
       } catch (err) {
-        if (debug) console.warn('[backend] setPaused post failed', err);
+        logWarn('[backend] setPaused post failed', err);
       }
     }
     return notifyListeners();
@@ -2115,7 +2074,7 @@ async function loadDefaultXml() {
     try {
       client.postMessage?.({ cmd: 'setRate', rate });
     } catch (err) {
-      if (debug) console.warn('[backend] setRate post failed', err);
+      logWarn('[backend] setRate post failed', err);
     }
     return notifyListeners();
   }
@@ -2144,7 +2103,7 @@ async function loadDefaultXml() {
             value,
           });
         } catch (err) {
-          if (debug) console.warn('[backend setField] failed', descriptor.path, err);
+          logWarn('[backend setField] failed', descriptor.path, err);
         }
       }
     }
@@ -2154,7 +2113,7 @@ async function loadDefaultXml() {
         try {
           client.postMessage?.({ cmd: 'setSceneFlag', index: i, enabled });
         } catch (err) {
-          if (debug) console.warn('[backend setSceneFlag] failed', { index: i, enabled }, err);
+          logWarn('[backend setSceneFlag] failed', { index: i, enabled }, err);
         }
       }
     }
@@ -2191,7 +2150,6 @@ async function loadDefaultXml() {
     if (data.scn_objid) lastSnapshot.scn_objid = makeView(data.scn_objid, null, Int32Array);
     if (data.scn_category) lastSnapshot.scn_category = makeView(data.scn_category, null, Int32Array);
     if (data.scn_segid) lastSnapshot.scn_segid = makeView(data.scn_segid, null, Int32Array);
-    if (data.scn_camdist) lastSnapshot.scn_camdist = makeView(data.scn_camdist, null, Float32Array);
     if (data.scn_geomorder) lastSnapshot.scn_geomorder = makeView(data.scn_geomorder, null, Int32Array);
     if (data.scn_transparent) lastSnapshot.scn_transparent = makeView(data.scn_transparent, null, Uint8Array);
     if (data.scn_label) lastSnapshot.scn_label = makeView(data.scn_label, null, Uint8Array);
@@ -2228,7 +2186,6 @@ async function loadDefaultXml() {
       if (data.eq_active0) lastSnapshot.eq_active0 = makeView(data.eq_active0, null, Uint8Array);
       if (data.eq_active) lastSnapshot.eq_active = makeView(data.eq_active, null, Uint8Array);
       if (Array.isArray(data.eq_names)) lastSnapshot.eq_names = data.eq_names.slice();
-      if ('debugJoint' in data) lastSnapshot.debugJoint = data.debugJoint || null;
       if (data.qpos) lastSnapshot.qpos = makeView(data.qpos, null, Float64Array);
       if (data.cam_xpos) lastSnapshot.cam_xpos = makeView(data.cam_xpos, null, Float64Array);
       if (data.cam_xmat) lastSnapshot.cam_xmat = makeView(data.cam_xmat, null, Float64Array);
@@ -2244,20 +2201,6 @@ async function loadDefaultXml() {
   function handleMessage(event) {
     const data = event?.data ?? event;
     if (!data || typeof data !== 'object') return;
-    if (debug && VERBOSE_DEBUG_LOGS) {
-      const key = '__backendLogCounter';
-      handleMessage[key] = handleMessage[key] || { snapshot: 0 };
-      if (data.kind === 'snapshot') {
-        const info = handleMessage[key];
-        if (info.snapshot < 3 || (Date.now() - (info.lastSnapshotTs || 0)) > 5000) {
-          console.log('[backend] message', data.kind, { ngeom: data.ngeom, t: data.tSim });
-        }
-        info.snapshot += 1;
-        info.lastSnapshotTs = Date.now();
-      } else {
-        console.log('[backend] message', data.kind, data);
-      }
-    }
     switch (data.kind) {
       case 'run_state': {
         if (typeof data.running === 'boolean') {
@@ -2309,7 +2252,7 @@ async function loadDefaultXml() {
             ? data.ctrl.slice()
             : Array.from(data.ctrl);
         } catch (err) {
-          if (debug) console.warn('[backend] ctrl decode failed', err);
+          logWarn('[backend] ctrl decode failed', err);
           lastSnapshot.ctrl = [];
         }
       }
@@ -2419,7 +2362,6 @@ async function loadDefaultXml() {
         const frameId = Number.isFinite(data.frameId) ? (data.frameId | 0) : null;
         if (frameId !== null) {
           if (frameId <= lastFrameId) {
-            if (debug) console.warn('[backend] drop stale snapshot', frameId, lastFrameId);
             break;
           }
           lastFrameId = frameId;
@@ -2652,7 +2594,6 @@ async function loadDefaultXml() {
             perfMarkOnce('play:backend:first_scene_snapshot', { source });
           }
         }
-        if (debug) console.log('[snapshot]', source, data.frame ?? null);
         break;
       }
       case 'info_debug': {
@@ -2728,9 +2669,7 @@ async function loadDefaultXml() {
         notifyListeners();
         break;
       case 'log':
-        if (debug && VERBOSE_DEBUG_LOGS) {
-          console.log('[backend]', data.message ?? '', data.extra ?? '');
-        }
+        logStatus(`[backend] ${data.message ?? ''}`, data.extra ?? null);
         break;
       case 'error': {
         const message =
@@ -2739,7 +2678,7 @@ async function loadDefaultXml() {
             : `Backend error: ${JSON.stringify(data)}`;
         lastSnapshot.toast = { message, ts: Date.now() };
         lastSnapshot.backendError = message;
-        if (debug) console.error('[backend error]', data);
+        logError('[backend error]', data);
         notifyListeners();
         break;
       }
@@ -2800,7 +2739,7 @@ async function loadDefaultXml() {
           drag: lastSnapshot.drag,
         });
       } catch (err) {
-        console.error('[backend gesture] failed', err);
+        logError('[backend gesture] failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -2810,18 +2749,12 @@ async function loadDefaultXml() {
     }
     const { id, value, control } = payload;
     const binding = typeof control?.binding === 'string' ? control.binding : null;
-    if (binding) {
-      try {
-        // eslint-disable-next-line no-console
-        console.log('[backend.apply ui]', { id, binding, value });
-      } catch {}
-    }
     if (binding === 'Simulate::camera') {
       const totalModes = Math.max(1, 2 + (lastSnapshot.cameras?.length || 0));
       const modeValue = Math.max(0, Math.min(totalModes - 1, Math.trunc(toNumber(value))));
       lastSnapshot.cameraMode = modeValue;
       try { client.postMessage?.({ cmd: 'setCameraMode', mode: modeValue }); } catch (err) {
-        if (debug) console.warn('[backend camera] post failed', err);
+        logWarn('[backend camera] post failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -2846,7 +2779,7 @@ async function loadDefaultXml() {
           value: nextValue,
         });
       } catch (err) {
-        if (debug) console.warn('[backend setVisualOption] post failed', err);
+        logWarn('[backend setVisualOption] post failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -2876,7 +2809,7 @@ async function loadDefaultXml() {
             value: [nextMask],
           });
         } catch (err) {
-          if (debug) console.warn('[backend disableflags] post failed', err);
+          logWarn('[backend disableflags] post failed', err);
         }
         notifyListeners();
       }
@@ -2907,7 +2840,7 @@ async function loadDefaultXml() {
             value: [nextMask],
           });
         } catch (err) {
-          if (debug) console.warn('[backend enableflags] post failed', err);
+          logWarn('[backend enableflags] post failed', err);
         }
         notifyListeners();
       }
@@ -2939,7 +2872,7 @@ async function loadDefaultXml() {
             value: [nextMask],
           });
         } catch (err) {
-          if (debug) console.warn('[backend disableactuator] post failed', err);
+          logWarn('[backend disableactuator] post failed', err);
         }
         notifyListeners();
       }
@@ -2959,7 +2892,7 @@ async function loadDefaultXml() {
         lastSnapshot.groups[type][idx] = bool(value);
       }
       try { client.postMessage?.({ cmd: 'setGroupState', group: type, index: idx, enabled: bool(value) }); } catch (err) {
-        if (debug) console.warn('[backend group] post failed', err);
+        logWarn('[backend group] post failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -2970,7 +2903,7 @@ async function loadDefaultXml() {
       lastSnapshot.history.scrubIndex = offset;
       lastSnapshot.history.live = offset === 0;
       try { client.postMessage?.({ cmd: 'historyScrub', offset }); } catch (err) {
-        if (debug) console.warn('[backend history] post failed', err);
+        logWarn('[backend history] post failed', err);
       }
       historyScrubbing = offset < 0;
       if (offset < 0 && !paused) {
@@ -2985,7 +2918,7 @@ async function loadDefaultXml() {
       try {
         client.postMessage?.({ cmd: 'keyframeSelect', index });
       } catch (err) {
-        if (debug) console.warn('[backend keyframe select] failed', err);
+        logWarn('[backend keyframe select] failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -2993,14 +2926,14 @@ async function loadDefaultXml() {
     if (id === 'simulation.save_key') {
       const index = normaliseInt(lastSnapshot.keyIndex ?? -1, -1);
       try { client.postMessage?.({ cmd: 'keyframeSave', index }); } catch (err) {
-        if (debug) console.warn('[backend keyframe save] failed', err);
+        logWarn('[backend keyframe save] failed', err);
       }
       return resolveSnapshot(lastSnapshot);
     }
     if (id === 'simulation.load_key') {
       const index = Math.max(0, normaliseInt(lastSnapshot.keyIndex ?? 0, 0));
       try { client.postMessage?.({ cmd: 'keyframeLoad', index }); } catch (err) {
-        if (debug) console.warn('[backend keyframe load] failed', err);
+        logWarn('[backend keyframe load] failed', err);
       }
       return resolveSnapshot(lastSnapshot);
     }
@@ -3018,7 +2951,7 @@ async function loadDefaultXml() {
           index: Number.isFinite(lastSnapshot.watch.index) ? (lastSnapshot.watch.index | 0) : 0,
         });
       } catch (err) {
-        if (debug) console.warn('[backend watch field] failed', err);
+        logWarn('[backend watch field] failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -3035,7 +2968,7 @@ async function loadDefaultXml() {
           index: target,
         });
       } catch (err) {
-        if (debug) console.warn('[backend watch index] failed', err);
+        logWarn('[backend watch index] failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -3054,7 +2987,7 @@ async function loadDefaultXml() {
             notifyListeners();
           }
         } catch (err) {
-          if (debug) console.warn('[backend control.actuator] failed', err);
+          logWarn('[backend control.actuator] failed', err);
         }
         return resolveSnapshot(lastSnapshot);
       }
@@ -3072,7 +3005,7 @@ async function loadDefaultXml() {
             notifyListeners();
           }
         } catch (err) {
-          if (debug) console.warn('[backend joint.slider] failed', err);
+          logWarn('[backend joint.slider] failed', err);
         }
         return resolveSnapshot(lastSnapshot);
       }
@@ -3088,7 +3021,7 @@ async function loadDefaultXml() {
             notifyListeners();
           }
         } catch (err) {
-          if (debug) console.warn('[backend equality.toggle] failed', err);
+          logWarn('[backend equality.toggle] failed', err);
         }
         return resolveSnapshot(lastSnapshot);
       }
@@ -3118,7 +3051,7 @@ async function loadDefaultXml() {
         // even when the worker is paused or snapshot delivery is delayed.
         client.postMessage?.({ cmd: 'snapshot' });
       } catch (err) {
-        if (debug) console.warn('[backend setField] post failed', err);
+        logWarn('[backend setField] post failed', err);
       }
       return resolveSnapshot(lastSnapshot);
     }
@@ -3131,7 +3064,7 @@ async function loadDefaultXml() {
       }
       lastSnapshot.voptFlags[idx] = enabled ? 1 : 0;
       try { client.postMessage?.({ cmd: 'setVoptFlag', index: idx, enabled }); } catch (err) {
-        if (debug) console.warn('[backend vopt flag] post failed', err);
+        logWarn('[backend vopt flag] post failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -3147,7 +3080,7 @@ async function loadDefaultXml() {
         lastSnapshot.sceneFlags[idx] = enabled ? 1 : 0;
       }
       try { client.postMessage?.({ cmd: 'setSceneFlag', index: idx, enabled }); } catch (err) {
-        if (debug) console.warn('[backend scene flag] post failed', err);
+        logWarn('[backend scene flag] post failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -3156,7 +3089,7 @@ async function loadDefaultXml() {
       const mode = Math.max(0, Math.trunc(toNumber(value)));
       lastSnapshot.labelMode = mode;
       try { client.postMessage?.({ cmd: 'setLabelMode', mode }); } catch (err) {
-        if (debug) console.warn('[backend label mode] post failed', err);
+        logWarn('[backend label mode] post failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -3165,7 +3098,7 @@ async function loadDefaultXml() {
       const mode = Math.max(0, Math.trunc(toNumber(value)));
       lastSnapshot.frameMode = mode;
       try { client.postMessage?.({ cmd: 'setFrameMode', mode }); } catch (err) {
-        if (debug) console.warn('[backend frame mode] post failed', err);
+        logWarn('[backend frame mode] post failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -3192,7 +3125,7 @@ async function loadDefaultXml() {
         try {
           client.postMessage?.({ cmd: 'align', source: 'ui' });
         } catch (err) {
-          if (debug) console.warn('[backend align] post failed', err);
+          logWarn('[backend align] post failed', err);
         }
         break;
       }
@@ -3202,7 +3135,7 @@ async function loadDefaultXml() {
         try {
           client.postMessage?.({ cmd: 'copyState', precision, source: 'ui' });
         } catch (err) {
-          if (debug) console.warn('[backend copyState] post failed', err);
+          logWarn('[backend copyState] post failed', err);
         }
         break;
       }
@@ -3268,7 +3201,7 @@ async function loadDefaultXml() {
       try {
         client.postMessage?.({ cmd: 'historyScrub', offset: nextOffset });
       } catch (err) {
-        if (debug) console.warn('[backend history step] post failed', err);
+        logWarn('[backend history step] post failed', err);
       }
       notifyListeners();
       return resolveSnapshot(lastSnapshot);
@@ -3279,7 +3212,7 @@ async function loadDefaultXml() {
     try {
       client.postMessage?.({ cmd: 'step', n });
     } catch (err) {
-      if (debug) console.warn('[backend step] post failed', err);
+      logWarn('[backend step] post failed', err);
     }
     return resolveSnapshot(lastSnapshot);
   }
@@ -3338,7 +3271,7 @@ async function loadDefaultXml() {
     try {
       client.postMessage?.(msg);
     } catch (err) {
-      if (debug) console.warn('[backend applyPerturb] failed', err);
+      logWarn('[backend applyPerturb] failed', err);
     }
     return resolveSnapshot(lastSnapshot);
   }
@@ -3544,7 +3477,7 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
   try {
     snapshot = await backend.snapshot();
   } catch (err) {
-    console.error('[visual source switch] snapshot failed', err);
+    logError('[visual source switch] snapshot failed', err);
     throw err;
   }
   if (!snapshot) {
@@ -3650,26 +3583,6 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       baselines.presetSun ||
       applyPresetOverridesToStruct(baselines.model || {}),
   );
-  if (typeof console !== 'undefined') {
-    try {
-      console.log('[visual source switch]', {
-        from: currentMode,
-        to: targetMode,
-        hasBackups: {
-          model: !!backups.model,
-          preset: !!backups.preset,
-        },
-        headlight: targetVisual?.headlight
-          ? {
-              active: targetVisual.headlight.active,
-              diffuse: targetVisual.headlight.diffuse,
-              ambient: targetVisual.headlight.ambient,
-            }
-          : null,
-        sceneFlags: targetSceneFlags,
-      });
-    } catch {}
-  }
   store.update((draft) => {
     draft.visualSourceMode = targetMode;
     if (!draft.model) draft.model = {};
@@ -3687,16 +3600,7 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     try {
       await backend.setVisualState({ visual: targetVisual, sceneFlags: targetSceneFlags });
     } catch (err) {
-      console.error('[visual source switch] apply failed', err);
-    }
-  }
-  /* istanbul ignore next */
-  if (typeof console !== 'undefined') {
-    const changedGroups = Object.values(diagnostics || {}).filter((info) => info?.changed);
-    if (changedGroups.length > 0) {
-      console.log('[visual group diff]', changedGroups.map((info) => info.id));
-    } else {
-      console.log('[visual group diff] none');
+      logError('[visual source switch] apply failed', err);
     }
   }
   return {

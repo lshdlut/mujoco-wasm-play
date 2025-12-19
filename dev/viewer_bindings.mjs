@@ -1,3 +1,5 @@
+import { logError, logWarn } from './debug_log.mjs';
+
 let bindingIndex = null;
 let bindingIndexPromise = null;
 
@@ -14,15 +16,10 @@ async function ensureBindingIndex() {
         return res.json();
       })
       .then((json) => {
-        try {
-          const count = json && typeof json === 'object' ? Object.keys(json).length : 0;
-          // eslint-disable-next-line no-console
-          console.log('[bindings] loaded', { count });
-        } catch {}
         return json;
       })
       .catch((err) => {
-        console.error('[bindings] load failed', err);
+        logError('[bindings] load failed', err);
         throw err;
       });
   }
@@ -132,7 +129,7 @@ export async function prepareBindingUpdate(control, rawValue) {
   const meta = await ensureBindingIndex();
   const entry = meta?.[binding];
   if (!entry || !entry.value) {
-    console.warn?.('[bindings] no binding metadata for', binding);
+    logWarn('[bindings] no binding metadata for', binding);
     return null;
   }
   const bindingParts = splitBinding(binding);
@@ -157,7 +154,7 @@ export async function prepareBindingUpdate(control, rawValue) {
   if (kind === 'static') return null;
   const normalised = normaliseValueByKind(kind, size, rawValue, control);
   if (normalised == null) {
-    console.warn('[bindings] unable to normalise value for', binding, rawValue);
+    logWarn('[bindings] unable to normalise value for', binding, rawValue);
     if (control && typeof control.binding === 'string' && control.binding.startsWith('mjVisual::headlight.')) {
       try {
         addToast(`[${control.label || 'headlight'}] invalid vector input`);
@@ -165,10 +162,6 @@ export async function prepareBindingUpdate(control, rawValue) {
     }
     return null;
   }
-  try {
-    // eslint-disable-next-line no-console
-    console.log('[prepareBindingUpdate]', { binding, scope, path, kind, size, value: normalised });
-  } catch {}
   return {
     meta: {
       scope,

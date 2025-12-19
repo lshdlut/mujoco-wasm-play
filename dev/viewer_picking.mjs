@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { applySpecAction } from './viewer_state.mjs';
+import { logWarn } from './debug_log.mjs';
 
 function clampVector(vec, max = Infinity) {
   if (!Number.isFinite(max) || max <= 0) return vec;
@@ -700,7 +701,7 @@ export function createPickingController({
     )
       .then(() => applySpecAction(store, backend, cameraCtrl, 1))
       .catch((err) => {
-        console.warn('[pick] tracking camera apply failed', err);
+        logWarn('[pick] tracking camera apply failed', err);
       });
     const ts = Date.now();
     store.update((draft) => {

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createInfiniteGroundHelper } from './infinite_grid_helper.mjs';
 import { isPerfEnabled, perfMarkOnce, perfNow, perfSample } from './viewer_perf.mjs';
+import { isVerboseDebug, logDebug, logWarn } from './debug_log.mjs';
 const MJ_GEOM = {
   PLANE: 0,
   HFIELD: 1,
@@ -278,22 +279,6 @@ const SELECTION_HL_SCALE = new THREE.Vector3();
 const TRANSPARENT_BIN_CAM_POS = new THREE.Vector3();
 const TRANSPARENT_BIN_CAM_DIR = new THREE.Vector3();
 const TRANSPARENT_BIN_WORLD_POS = new THREE.Vector3();
-
-function warnLogEnabled() {
-  try {
-    if (typeof window !== 'undefined') {
-      return window.PLAY_VERBOSE_DEBUG === true;
-    }
-  } catch {}
-  return false;
-}
-
-function warnLog(message, ...extra) {
-  if (!warnLogEnabled()) return;
-  try {
-    console.warn(message, ...extra);
-  } catch {}
-}
 
 function isMatrixLike(value) {
   return value && typeof value.copy === 'function';
@@ -1912,11 +1897,9 @@ function meanSizeFromState(state, context = null) {
 
   function isSceneDebugEnabled(state = null) {
     if (state?.debugMode === true || state?.rendering?.debugMode === true) return true;
+    if (isVerboseDebug()) return true;
     if (typeof window !== 'undefined') {
-      try {
-        if (window.PLAY_VERBOSE_DEBUG === true) return true;
-        if (window.__PLAY_SCENE_DEBUG === true) return true;
-      } catch {}
+      if (window.__PLAY_SCENE_DEBUG === true) return true;
     }
     return false;
   }
@@ -1931,12 +1914,9 @@ function meanSizeFromState(state, context = null) {
   }
 
 function warnOnce(cache, key, message) {
-  if (!warnLogEnabled()) return;
   if (!key || cache.has(key)) return;
   cache.add(key);
-  try {
-    console.warn(message);
-  } catch {}
+  logWarn(message);
 }
 
 function shouldDisplayGeom(index, options = {}) {
@@ -4596,7 +4576,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
             ownGeometry: false,
           };
         } else if (!ctx.meshAssetMissingLogged) {
-          warnLog('[render] mesh geometry missing', { dataId });
+          logDebug('[render] mesh geometry missing', { dataId });
           ctx.meshAssetMissingLogged = true;
         }
       }
@@ -7790,19 +7770,21 @@ export function createRendererManager({
 
   function debugHazeState(summary) {
     const globalDebug = typeof window !== 'undefined' ? window.__PLAY_HAZE_DEBUG : undefined;
-    const verbose = typeof window !== 'undefined' ? window.PLAY_VERBOSE_DEBUG === true : false;
+    const verbose = isVerboseDebug();
     const logEnabled = globalDebug === true || verbose;
     if (!logEnabled) return;
     const payload = summary || { mode: 'overlay', enabled: false };
     const key = JSON.stringify(payload);
     if (ctx._lastHazeDebugKey === key) return;
     ctx._lastHazeDebugKey = key;
-    try {
-      if (logEnabled) console.log('[viewer][haze]', payload);
-      if (typeof window !== 'undefined') {
-        window.__viewerHazeDebug = payload;
-      }
-    } catch {}
+    if (verbose) {
+      logDebug('[viewer][haze]', payload);
+    } else {
+      logWarn('[viewer][haze]', payload);
+    }
+    if (typeof window !== 'undefined') {
+      window.__viewerHazeDebug = payload;
+    }
   }
 
   function updateRendererViewport() {
@@ -7996,7 +7978,7 @@ export function createRendererManager({
           return url;
         } catch (err) {
           primaryErr = err;
-          if (typeof warnLog === 'function') warnLog('[render] exportPNG failed', err);
+          logWarn('[render] exportPNG failed', err);
           throw err;
         } finally {
           try {
@@ -8007,7 +7989,7 @@ export function createRendererManager({
               o.renderOrder = m.ro;
             }
           } catch (err) {
-            if (typeof warnLog === 'function') warnLog('[render] exportPNG restore failed', err);
+            logWarn('[render] exportPNG restore failed', err);
             if (!primaryErr) throw err;
           }
         }
@@ -8496,7 +8478,7 @@ export function createRendererManager({
       // No fallback: wait for scene to become available (initial frames after load).
       if (!context._missingSceneSoALogged) {
         context._missingSceneSoALogged = true;
-        warnLog('[render] mjvScene SoA missing; base-layer rendering disabled until scene arrives', {
+        logDebug('[render] mjvScene SoA missing; base-layer rendering disabled until scene arrives', {
           ngeom: snapshot?.ngeom | 0,
           scn_ngeom: snapshot?.scn_ngeom | 0,
         });
@@ -8712,9 +8694,6 @@ export function createRendererManager({
           }
         }
         context.autoAligned = true;
-        if (typeof window !== 'undefined' && window.PLAY_VERBOSE_DEBUG === true) {
-          console.log('[render] auto align', { radius, center: bounds.center });
-        }
       }
       if (context.currentCameraMode === 0) {
         cacheTrackingPoseFromCurrent(context, bounds);
@@ -8765,7 +8744,6 @@ export function createRendererManager({
       context.cameraTarget.copy(target);
       cacheTrackingPoseFromCurrent(context, { radius, center });
       if (debugMode) {
-        console.log('[render] align', { radius, center });
       }
     }
 

@@ -19,6 +19,7 @@ import { createControlManager } from './viewer_controls.mjs';
 import { createCameraController } from './viewer_camera.mjs';
 import { createRendererManager } from './viewer_renderer.mjs';
 import { createPickingController } from './viewer_picking.mjs';
+import { logDebug, logWarn } from './debug_log.mjs';
 
 perfMarkOnce('play:main:start', {
   href: (typeof window !== 'undefined' && window.location?.href) ? window.location.href : null,
@@ -559,34 +560,6 @@ function summarizeGeomOrder(snapshot, order) {
   };
 }
 
-function summarizeCamDist(camdistView, n) {
-  const out = { present: false, n: 0, min: null, max: null, zero: 0, finite: 0, uniqueFirst32: null };
-  if (!camdistView || !(n > 0) || camdistView.length < n) return out;
-  out.present = true;
-  out.n = n | 0;
-  let min = Number.POSITIVE_INFINITY;
-  let max = Number.NEGATIVE_INFINITY;
-  let zero = 0;
-  let finite = 0;
-  const uniq = new Set();
-  const take = Math.min(32, n);
-  for (let i = 0; i < n; i += 1) {
-    const v = Number(camdistView[i]);
-    if (!Number.isFinite(v)) continue;
-    finite += 1;
-    if (v === 0) zero += 1;
-    if (v < min) min = v;
-    if (v > max) max = v;
-    if (i < take) uniq.add(v);
-  }
-  out.zero = zero;
-  out.finite = finite;
-  out.min = Number.isFinite(min) ? min : null;
-  out.max = Number.isFinite(max) ? max : null;
-  out.uniqueFirst32 = uniq.size;
-  return out;
-}
-
 function summarizeTransparentFlags(view, n) {
   const out = { present: false, n: 0, nonZero: 0, uniqueFirst32: null, min: null, max: null };
   if (!view || !(n > 0) || view.length < n) return out;
@@ -661,7 +634,6 @@ if (typeof window !== 'undefined') {
     if (!(n > 0)) throw new Error('No scene geoms (scn_ngeom <= 0)');
     const wasmOrder = snapshot?.scn_geomorder || null;
     const transparentView = snapshot?.scn_transparent || null;
-    const camdistView = snapshot?.scn_camdist || null;
     const transparentSummary = summarizeTransparentFlags(transparentView, n);
     const nt = transparentSummary.present ? (transparentSummary.nonZero | 0) : null;
     const prefixLen = (typeof nt === 'number' && nt >= 0) ? nt : 0;
@@ -674,7 +646,6 @@ if (typeof window !== 'undefined') {
         len: wasmOrder?.length ?? 0,
       },
       transparent: transparentSummary,
-      camdist: summarizeCamDist(camdistView, n),
       expected: {
         transparentCount: nt,
         geomorderPrefixLen: prefixLen,
@@ -684,7 +655,7 @@ if (typeof window !== 'undefined') {
     };
     if (options.log !== false) {
       // eslint-disable-next-line no-console
-      console.log('[PLAY] geomorder dump', payload);
+      logDebug('[PLAY] geomorder dump', payload);
     }
     return payload;
   };
@@ -1123,7 +1094,7 @@ if (typeof registerGlobalShortcut === 'function') {
         await backend.setRate(nextRate, 'ui');
       }
     } catch (err) {
-      console.warn('[ui] setRate failed', err);
+      logWarn('[ui] setRate failed', err);
     }
   };
 
@@ -1210,7 +1181,7 @@ window.addEventListener('resize', queueResizeCanvas);
     screenshotInFlight = true;
     captureScreenshot(ctx, state)
     .catch((err) => {
-      console.warn('[screenshot] capture failed', err);
+      logWarn('[screenshot] capture failed', err);
       if (store) {
         store.update((draft) => {
           draft.toast = { message: 'Screenshot failed', ts: Date.now() };

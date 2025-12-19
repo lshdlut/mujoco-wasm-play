@@ -1,3 +1,5 @@
+import { logWarn } from './debug_log.mjs';
+
 export const FALLBACK_PRESETS = {
   sun: {
     // Bright daytime preset: strong directional light with moderate IBL so
@@ -255,8 +257,7 @@ function readSkyboxTextureFromAssets(state) {
     if (byteLength > maxBytes) {
       if (!WARNED_SKYBOX_BYTES) {
         WARNED_SKYBOX_BYTES = true;
-        // eslint-disable-next-line no-console
-        console.warn('[viewer][skybox] skipping oversized skybox texture', {
+        logWarn('[viewer][skybox] skipping oversized skybox texture', {
           width,
           height,
           nchan,
@@ -1015,7 +1016,6 @@ export function createEnvironmentManager({
             if (!mod || !mod.RGBELoader) return false;
             loader = new mod.RGBELoader().setDataType(THREE_NS.FloatType);
           }
-          if (typeof console !== 'undefined') console.log('[env] trying HDRI', hdriUrl);
           ctx.hdriLoading = true;
           const hdr = await new Promise((resolve, reject) =>
             loader.load(hdriUrl, resolve, undefined, reject),
@@ -1065,9 +1065,6 @@ export function createEnvironmentManager({
             };
           }
           const intensity = typeof preset?.envIntensity === 'number' ? preset.envIntensity : 1.0;
-          if (typeof console !== 'undefined') {
-            console.log('[env] HDRI loaded', { url: hdriUrl, intensity });
-          }
           ctx.envIntensity = intensity;
           ctx._envDebugPreset = {
             key: visualPresetKey,
@@ -1080,9 +1077,7 @@ export function createEnvironmentManager({
         } catch (error) {
           ctx.hdriLoading = false;
           ctx.hdriReady = false;
-          if (typeof console !== 'undefined') {
-            console.warn('[env] HDRI load failed', { url: hdriUrl, error: String(error) });
-          }
+          logWarn('[env] HDRI load failed', { url: hdriUrl, error: String(error) });
           return false;
         }
       };
@@ -1102,9 +1097,7 @@ export function createEnvironmentManager({
         return false;
       })()
         .catch((err) => {
-          if (typeof console !== 'undefined') {
-            console.warn('[env] HDRI queue failed', err);
-          }
+          logWarn('[env] HDRI queue failed', err);
           ctx.hdriLoading = false;
           if (!ctx.envFromHDRI) {
             ctx.hdriReady = false;

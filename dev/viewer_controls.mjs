@@ -1,4 +1,5 @@
 import { resetModelFrontendState } from './viewer_state.mjs';
+import { logError, logWarn } from './debug_log.mjs';
 
 export function createControlManager({
   store,
@@ -720,7 +721,7 @@ function shortcutFromEvent(event) {
         const text = await file.text();
         await loadXmlTextAsModel(text, file.name || null);
       } catch (err) {
-        console.error('[ui] load xml from file failed', err);
+        logError('[ui] load xml from file failed', err);
         pushToast?.('Failed to load xml from file');
         throw err;
       } finally {
@@ -759,7 +760,7 @@ function shortcutFromEvent(event) {
           }
         }
       } catch (err) {
-        console.error('[ui] model select reload failed', err);
+        logError('[ui] model select reload failed', err);
         pushToast?.('Failed to load selected model');
         throw err;
       }
@@ -845,7 +846,6 @@ function shortcutFromEvent(event) {
       throw new Error(`Failed to load ui_spec.json (${res.status})`);
     }
     const json = await res.json();
-    console.log('[ui] spec loaded', json.left_panel?.length ?? 0, json.right_panel?.length ?? 0);
     return {
       left: (json.left_panel ?? []).map(expandSection),
       right: (json.right_panel ?? []).map(expandSection),
@@ -909,7 +909,6 @@ function shortcutFromEvent(event) {
       binding.setValue(active);
       try {
         // eslint-disable-next-line no-console
-        console.log('[checkbox-change]', { id: control.item_id, binding: control.binding, value: active });
       } catch {}
       await applySpecAction(store, backend, control, active);
       // UX hint: if enabling Contact Point but there are no contacts yet, show a brief tip
@@ -1230,7 +1229,6 @@ function shortcutFromEvent(event) {
                 : select.value;
           try {
             // eslint-disable-next-line no-console
-            console.log('[select-change]', { id: control.item_id, binding: control.binding, value });
           } catch {}
           if (control?.item_id === 'option.color') {
             applyThemeFromColorControl(value);
@@ -1328,7 +1326,7 @@ function shortcutFromEvent(event) {
             try {
               await applySpecAction(store, backend, control, modeValue);
             } catch (err) {
-              console.warn('[ui] visual source toggle failed', err);
+              logWarn('[ui] visual source toggle failed', err);
             }
           }),
         );
@@ -2220,7 +2218,7 @@ function shortcutFromEvent(event) {
             }
             await applySpecAction(store, backend, control, value);
           } catch (error) {
-            console.warn('[ui] reset failed', target.id, error);
+            logWarn('[ui] reset failed', target.id, error);
           }
         }
       });
@@ -2233,7 +2231,6 @@ function shortcutFromEvent(event) {
 
   function renderPanels(spec) {
     if (!leftPanel || !rightPanel) return;
-    console.log('[ui] render panels', spec.left.length, spec.right.length);
     controlById.clear();
     controlBindings.clear();
     shortcutHandlers.clear();
@@ -2329,10 +2326,10 @@ function shortcutFromEvent(event) {
         try {
           const result = fn(event);
           if (result && typeof result.then === 'function') {
-            result.catch?.((error) => console.warn('[ui] shortcut handler error', error));
+            result.catch?.((error) => logWarn('[ui] shortcut handler error', error));
           }
         } catch (error) {
-          console.warn('[ui] shortcut handler error', error);
+          logWarn('[ui] shortcut handler error', error);
         }
       }
     };
@@ -2449,13 +2446,13 @@ function shortcutFromEvent(event) {
             try {
               await backend.apply?.({ kind: 'ui', id: 'control.actuator', value: { index: idx, value: v }, control: { item_id: `control.act.${idx}` } });
             } catch (err) {
-              console.warn('[ui] set actuator failed', err);
+              logWarn('[ui] set actuator failed', err);
             }
           });
         }
         container.setAttribute('data-count', String(actuators.length));
       } catch (err) {
-        console.warn('[ui] ensureActuatorSliders error', err);
+        logWarn('[ui] ensureActuatorSliders error', err);
         }
       },
     // Dynamic: ensure Joint sliders exist under right panel 'joint' section
@@ -2532,13 +2529,13 @@ function shortcutFromEvent(event) {
                 control: { item_id: `joint.${idx}` },
               });
             } catch (err) {
-              console.warn('[ui] set joint qpos failed', err);
+              logWarn('[ui] set joint qpos failed', err);
             }
           });
         }
         container.setAttribute('data-count', String(dofs.length));
       } catch (err) {
-        console.warn('[ui] ensureJointSliders error', err);
+        logWarn('[ui] ensureJointSliders error', err);
       }
     },
     // Dynamic: ensure Equality toggles exist under right panel 'equality' section
@@ -2620,13 +2617,13 @@ function shortcutFromEvent(event) {
                 control: { item_id: control.item_id },
               });
             } catch (err) {
-              console.warn('[ui] equality toggle failed', err);
+              logWarn('[ui] equality toggle failed', err);
             }
           });
         }
         container.setAttribute('data-count', String(eqs.length));
       } catch (err) {
-        console.warn('[ui] ensureEqualityToggles error', err);
+        logWarn('[ui] ensureEqualityToggles error', err);
       }
     },
     dispose,

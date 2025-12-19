@@ -1,4 +1,5 @@
 // Minimal browser-only bridge: heap views + MjSimLite (no Node deps)
+import { logError, logWarn } from './debug_log.mjs';
 
 let __forgeModuleSeq = 1;
 function tagForgeModule(mod) {
@@ -744,8 +745,8 @@ export function collectRenderAssetsFromModule(mod, handle) {
       }
       return false;
     })();
-    if (shouldLog && typeof console !== 'undefined') {
-      console.warn('[render-assets] diagnostics', diagnostics);
+    if (shouldLog) {
+      logWarn('[render-assets] diagnostics', diagnostics);
     }
   }
   return assets;
@@ -911,7 +912,7 @@ export class MjSimLite {
       let eno = 0, emsg = '';
       try { if (typeof m._mjwf_errno_last==='function') eno = m._mjwf_errno_last()|0; } catch {}
       try { if (typeof m._mjwf_errmsg_last==='function') emsg = this._cstr(m._mjwf_errmsg_last()|0); } catch {}
-      console.error('make_from_xml strict failed', { eno, emsg });
+      logError('make_from_xml strict failed', { eno, emsg });
       throw new Error('make_from_xml failed');
     }
     this._validateHandleOrThrow(h);

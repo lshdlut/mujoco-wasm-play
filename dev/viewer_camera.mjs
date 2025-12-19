@@ -59,7 +59,6 @@ export function createCameraController({
   let initialised = false;
   let upNormalised = new THREE_NS.Vector3().copy(globalUp).normalize();
   let up0 = upNormalised.clone();
-  let warnedUpDrift = false;
 
   const cameraModeIndex = () => {
     try {
@@ -133,10 +132,6 @@ export function createCameraController({
         const dot = renderCtx.camera.up.clone().normalize().dot(up0);
         if (dot < 0.999) {
           renderCtx.camera.up.copy(upNormalised);
-          if (!warnedUpDrift && debugMode) {
-            console.warn('[camera] up drift corrected');
-            warnedUpDrift = true;
-          }
         }
       } catch {}
     }
@@ -269,18 +264,6 @@ export function createCameraController({
 
     if (cameraModeIndex() === 1) {
       syncTrackingOffsetFromCamera();
-    }
-    const cameraDebug = (typeof window !== 'undefined' && window.PLAY_CAMERA_DEBUG === true);
-    if (debugMode && cameraDebug) {
-      try {
-        console.log('[camera] gesture', {
-          mode,
-          dx,
-          dy,
-          position: camera.position.toArray().map((v) => Number(v.toFixed(3))),
-          target: target.toArray().map((v) => Number(v.toFixed(3))),
-        });
-      } catch {}
     }
   }
 
