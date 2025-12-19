@@ -1624,6 +1624,7 @@ function snapshot() {
   const scnObjIdView = scnNgeom > 0 ? (sim.sceneGeomObjIdView?.() || null) : null;
   const scnCategoryView = scnNgeom > 0 ? (sim.sceneGeomCategoryView?.() || null) : null;
   const scnSegIdView = scnNgeom > 0 ? (sim.sceneGeomSegIdView?.() || null) : null;
+  const scnCamDistView = (snapshotDebug || perfEnabled) && scnNgeom > 0 ? (sim.sceneGeomCamDistView?.() || null) : null;
   const scnGeomOrderView = scnNgeom > 0 ? (sim.sceneGeomOrderView?.() || null) : null;
   const scnTransparentView = scnNgeom > 0 ? (sim.sceneGeomTransparentView?.() || null) : null;
   const scnLabelView = scnNgeom > 0 ? (sim.sceneGeomLabelView?.() || null) : null;
@@ -1987,13 +1988,18 @@ function snapshot() {
       msg.scn_segid = scnSegId;
       transfers.push(scnSegId.buffer);
     }
+    if (scnCamDistView) {
+      const scnCamDist = new Float32Array(scnCamDistView);
+      msg.scn_camdist = scnCamDist;
+      transfers.push(scnCamDist.buffer);
+    }
     if (scnGeomOrderView) {
       const scnGeomOrder = new Int32Array(scnGeomOrderView);
       msg.scn_geomorder = scnGeomOrder;
       transfers.push(scnGeomOrder.buffer);
     }
     if (scnTransparentView) {
-      const scnTransparent = new Int32Array(scnTransparentView);
+      const scnTransparent = new Uint8Array(scnTransparentView);
       msg.scn_transparent = scnTransparent;
       transfers.push(scnTransparent.buffer);
     }

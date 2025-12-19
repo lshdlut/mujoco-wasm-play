@@ -529,6 +529,197 @@ function applySnapshot(snapshot) {
   scheduleRenderScene();
 }
 
+function nameForObjType(objType) {
+  const t = objType | 0;
+  if (t === 5) return 'GEOM';
+  if (t === 6) return 'SITE';
+  if (t === 18) return 'TENDON';
+  if (t === 9) return 'FLEX';
+  if (t === 11) return 'SKIN';
+  if (t === 1) return 'BODY';
+  return String(t);
+}
+
+function summarizeGeomOrder(snapshot, order) {
+  const n = snapshot?.scn_ngeom | 0;
+  const objType = snapshot?.scn_objtype || null;
+  const transparent = snapshot?.scn_transparent || null;
+  if (!objType || objType.length < n) throw new Error('Missing scn_objtype');
+  if (!transparent || transparent.length < n) throw new Error('Missing scn_transparent');
+  const counts = Object.create(null);
+  let transparentCount = 0;
+  for (let i = 0; i < n; i += 1) {
+    const t = objType[i] | 0;
+    const key = nameForObjType(t);
+    counts[key] = (counts[key] || 0) + 1;
+    if ((transparent[i] | 0) !== 0) transparentCount += 1;
+  }
+  const runs = [];
+  let lastType = null;
+  let lastName = null;
+  let runLen = 0;
+  const nn = Math.min(n, order?.length | 0);
+  for (let k = 0; k < nn; k += 1) {
+    const si = order[k] | 0;
+    const t = objType[si] | 0;
+    const name = nameForObjType(t);
+    if (lastType === null) {
+      lastType = t;
+      lastName = name;
+      runLen = 1;
+      continue;
+    }
+    if (t === lastType) {
+      runLen += 1;
+      continue;
+    }
+    runs.push({ type: lastType, name: lastName, len: runLen });
+    lastType = t;
+    lastName = name;
+    runLen = 1;
+  }
+  if (lastType !== null) runs.push({ type: lastType, name: lastName, len: runLen });
+  return {
+    scn_ngeom: n,
+    transparentCount,
+    opaqueCount: n - transparentCount,
+    objTypeCounts: counts,
+    runs,
+    transitions: Math.max(0, runs.length - 1),
+  };
+}
+
+function summarizeCamDist(camdistView, n) {
+  const out = { present: false, n: 0, min: null, max: null, zero: 0, finite: 0, uniqueFirst32: null };
+  if (!camdistView || !(n > 0) || camdistView.length < n) return out;
+  out.present = true;
+  out.n = n | 0;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  let zero = 0;
+  let finite = 0;
+  const uniq = new Set();
+  const take = Math.min(32, n);
+  for (let i = 0; i < n; i += 1) {
+    const v = Number(camdistView[i]);
+    if (!Number.isFinite(v)) continue;
+    finite += 1;
+    if (v === 0) zero += 1;
+    if (v < min) min = v;
+    if (v > max) max = v;
+    if (i < take) uniq.add(v);
+  }
+  out.zero = zero;
+  out.finite = finite;
+  out.min = Number.isFinite(min) ? min : null;
+  out.max = Number.isFinite(max) ? max : null;
+  out.uniqueFirst32 = uniq.size;
+  return out;
+}
+
+function summarizeTransparentFlags(view, n) {
+  const out = { present: false, n: 0, nonZero: 0, uniqueFirst32: null, min: null, max: null };
+  if (!view || !(n > 0) || view.length < n) return out;
+  out.present = true;
+  out.n = n | 0;
+  let nonZero = 0;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  const uniq = new Set();
+  const take = Math.min(32, n);
+  for (let i = 0; i < n; i += 1) {
+    const v = view[i] | 0;
+    if (v !== 0) nonZero += 1;
+    if (v < min) min = v;
+    if (v > max) max = v;
+    if (i < take) uniq.add(v);
+  }
+  out.nonZero = nonZero;
+  out.min = Number.isFinite(min) ? min : null;
+  out.max = Number.isFinite(max) ? max : null;
+  out.uniqueFirst32 = uniq.size;
+  return out;
+}
+
+function summarizeGeomOrderList(snapshot, order, { prefixLen } = {}) {
+  const n = snapshot?.scn_ngeom | 0;
+  if (!(n > 0)) throw new Error('No scene geoms (scn_ngeom <= 0)');
+  if (!order || order.length < n) throw new Error('Missing scn_geomorder');
+  const objType = snapshot?.scn_objtype || null;
+  const transparent = snapshot?.scn_transparent || null;
+  if (!objType || objType.length < n) throw new Error('Missing scn_objtype');
+
+  const take = Math.max(0, Math.min(n, Number(prefixLen) | 0 || 0));
+  const seen = new Uint8Array(n);
+  let outOfRange = 0;
+  let duplicate = 0;
+  let transparentMismatch = 0;
+  const counts = Object.create(null);
+
+  for (let k = 0; k < take; k += 1) {
+    const i = order[k] | 0;
+    if (i < 0 || i >= n) {
+      outOfRange += 1;
+      continue;
+    }
+    if (seen[i]) {
+      duplicate += 1;
+      continue;
+    }
+    seen[i] = 1;
+    const key = nameForObjType(objType[i] | 0);
+    counts[key] = (counts[key] || 0) + 1;
+    if (transparent && transparent.length >= n && (transparent[i] | 0) === 0) {
+      transparentMismatch += 1;
+    }
+  }
+
+  return {
+    prefixLen: take,
+    outOfRange,
+    duplicate,
+    transparentMismatch: (transparent && transparent.length >= n) ? transparentMismatch : null,
+    objTypeCounts: counts,
+  };
+}
+
+if (typeof window !== 'undefined') {
+  window.__PLAY_DUMP_GEOMORDER = (options = {}) => {
+    const snapshot = options.snapshot || window.__lastSnapshot || null;
+    if (!snapshot) throw new Error('No snapshot available');
+    const n = snapshot?.scn_ngeom | 0;
+    if (!(n > 0)) throw new Error('No scene geoms (scn_ngeom <= 0)');
+    const wasmOrder = snapshot?.scn_geomorder || null;
+    const transparentView = snapshot?.scn_transparent || null;
+    const camdistView = snapshot?.scn_camdist || null;
+    const transparentSummary = summarizeTransparentFlags(transparentView, n);
+    const nt = transparentSummary.present ? (transparentSummary.nonZero | 0) : null;
+    const prefixLen = (typeof nt === 'number' && nt >= 0) ? nt : 0;
+    const orderPrefixSummary = wasmOrder ? summarizeGeomOrderList(snapshot, wasmOrder, { prefixLen }) : null;
+    const prefixRuns = (wasmOrder && prefixLen > 0) ? summarizeGeomOrder(snapshot, wasmOrder.subarray(0, prefixLen)) : null;
+    const payload = {
+      scn_ngeom: n,
+      geomorder: {
+        present: !!wasmOrder,
+        len: wasmOrder?.length ?? 0,
+      },
+      transparent: transparentSummary,
+      camdist: summarizeCamDist(camdistView, n),
+      expected: {
+        transparentCount: nt,
+        geomorderPrefixLen: prefixLen,
+      },
+      orderPrefixSummary,
+      orderPrefixRuns: prefixRuns,
+    };
+    if (options.log !== false) {
+      // eslint-disable-next-line no-console
+      console.log('[PLAY] geomorder dump', payload);
+    }
+    return payload;
+  };
+}
+
 let pendingRenderFrame = false;
 let renderSceneDirty = false;
 function scheduleRenderScene() {

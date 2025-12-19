@@ -275,6 +275,9 @@ const SELECTION_TEMP_MAT4 = new THREE.Matrix4();
 const SELECTION_HL_POS = new THREE.Vector3();
 const SELECTION_HL_QUAT = new THREE.Quaternion();
 const SELECTION_HL_SCALE = new THREE.Vector3();
+const TRANSPARENT_BIN_CAM_POS = new THREE.Vector3();
+const TRANSPARENT_BIN_CAM_DIR = new THREE.Vector3();
+const TRANSPARENT_BIN_WORLD_POS = new THREE.Vector3();
 
 function warnLogEnabled() {
   try {
@@ -3995,6 +3998,11 @@ function instancingForceBasicMaterial() {
   return search.includes('forceBasic=1');
 }
 
+function instancingIsOverlayObjType(objType) {
+  const ot = objType | 0;
+  return ot === MJ_OBJ.SITE || ot === MJ_OBJ.TENDON;
+}
+
 function instancingDisabledByUrl() {
   if (typeof globalThis !== 'undefined') {
     const override = globalThis.PLAY_DISABLE_INSTANCING;
@@ -4010,11 +4018,44 @@ function instancingDisabledByUrl() {
   );
 }
 
-function ensureInstancedMaterial(inst, reflectanceQ, { wireframe = false, opacityQ = 1000 } = {}) {
+function transparentBinsFromUrl(defaultBins = 16) {
+  if (typeof globalThis !== 'undefined') {
+    const override = globalThis.PLAY_TRANSPARENT_BINS;
+    if (Number.isFinite(override)) {
+      return Math.max(0, Math.min(16, override | 0));
+    }
+  }
+  if (typeof window === 'undefined') return defaultBins;
+  const search = window.location?.search || '';
+  const match = search.match(/(?:^|[?&])tbins=(\d+)/);
+  if (!match) return defaultBins;
+  const parsed = Number(match[1]);
+  if (!Number.isFinite(parsed)) return defaultBins;
+  const clamped = Math.max(0, Math.min(16, parsed | 0));
+  if (clamped === 0) return 0;
+  if (clamped <= 1) return 1;
+  if (clamped <= 4) return 4;
+  if (clamped <= 8) return 8;
+  return 16;
+}
+
+function transparentSortModeFromUrl() {
+  if (typeof globalThis !== 'undefined') {
+    const override = globalThis.PLAY_TRANSPARENT_SORT_MODE;
+    if (override === 'strict' || override === 'bins' || override === 'nosort') return override;
+  }
+  if (typeof window === 'undefined') return 'bins';
+  const search = window.location?.search || '';
+  if (search.includes('tmode=nosort') || search.includes('tmode=fast')) return 'nosort';
+  if (search.includes('tmode=strict')) return 'strict';
+  return 'bins';
+}
+
+function ensureInstancedMaterial(inst, reflectanceQ, { wireframe = false, opacityQ = 1000, objType = MJ_OBJ.UNKNOWN } = {}) {
   if (!inst) return null;
   if (!(inst.materials instanceof Map)) inst.materials = new Map();
   const oq = Math.max(0, Math.min(1000, opacityQ | 0));
-  const forceBasic = instancingForceBasicMaterial();
+  const forceBasic = instancingForceBasicMaterial() || instancingIsOverlayObjType(objType);
   const key = `inst:${forceBasic ? 1 : 0}:o${oq}:r${reflectanceQ | 0}`;
   if (inst.materials.has(key)) {
     const mat = inst.materials.get(key);
@@ -4030,8 +4071,9 @@ function ensureInstancedMaterial(inst, reflectanceQ, { wireframe = false, opacit
         color: 0xffffff,
         transparent,
         opacity,
-        depthWrite: true,
+        depthWrite: !transparent,
         depthTest: true,
+        toneMapped: false,
       })
     : new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -4039,6 +4081,8 @@ function ensureInstancedMaterial(inst, reflectanceQ, { wireframe = false, opacit
         metalness: 0.05,
         transparent,
         opacity,
+        depthWrite: !transparent,
+        depthTest: true,
       });
   material.vertexColors = true;
   material.wireframe = !!wireframe;
@@ -4058,8 +4102,6 @@ function ensureInstancedBatch(ctx, inst, batchKey, geometry, material, capacity)
   const cap = Math.max(1, capacity | 0);
   let batch = inst.batches.get(key) || null;
   if (batch && batch.capacity >= cap && batch.mesh) {
-    batch.mesh.material = material;
-    batch.mesh.geometry = geometry;
     if (!(batch.instanceOrderRank instanceof Int32Array) || batch.instanceOrderRank.length !== batch.capacity) {
       batch.instanceOrderRank = new Int32Array(batch.capacity);
       batch.instanceOrderRank.fill(-1);
@@ -4069,7 +4111,29 @@ function ensureInstancedBatch(ctx, inst, batchKey, geometry, material, capacity)
   if (batch?.mesh && batch.mesh.parent && typeof batch.mesh.parent.remove === 'function') {
     batch.mesh.parent.remove(batch.mesh);
   }
-  const mesh = new THREE.InstancedMesh(geometry, material, cap);
+  // NOTE: InstancedMesh mutates its geometry by attaching instanced attributes
+  // (instanceMatrix/instanceColor). Do not share the same geometry object
+  // between multiple InstancedMesh instances, or attributes will collide and
+  // cause incorrect transforms/colors.
+  const geomClone = geometry?.clone ? geometry.clone() : geometry;
+  // three.js uses `material.vertexColors` to enable instance colors for InstancedMesh,
+  // but the shader path also expects a per-vertex `color` attribute. When missing,
+  // WebGL provides a default (0,0,0,1) which can multiply instance colors to black.
+  // Provide a constant white per-vertex color attribute when needed.
+  if (material?.vertexColors && geomClone?.getAttribute && geomClone?.setAttribute) {
+    const hasColor = !!geomClone.getAttribute('color');
+    const posAttr = geomClone.getAttribute('position') || null;
+    const vcount = posAttr?.count | 0;
+    if (!hasColor && vcount > 0) {
+      const arr = new Uint8Array(vcount * 3);
+      arr.fill(255);
+      const attr = typeof THREE.Uint8BufferAttribute === 'function'
+        ? new THREE.Uint8BufferAttribute(arr, 3, true)
+        : new THREE.BufferAttribute(new Float32Array(arr.length).fill(1), 3);
+      geomClone.setAttribute('color', attr);
+    }
+  }
+  const mesh = new THREE.InstancedMesh(geomClone, material, cap);
   mesh.frustumCulled = false;
   mesh.count = 0;
   mesh.visible = false;
@@ -4080,6 +4144,9 @@ function ensureInstancedBatch(ctx, inst, batchKey, geometry, material, capacity)
   }
   mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
   mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  if (mesh.geometry && typeof mesh.geometry.setAttribute === 'function') {
+    mesh.geometry.setAttribute('instanceColor', mesh.instanceColor);
+  }
   mesh.userData = mesh.userData || {};
   mesh.userData.instanced = true;
   mesh.userData.batchKey = key;
@@ -4091,7 +4158,7 @@ function ensureInstancedBatch(ctx, inst, batchKey, geometry, material, capacity)
   if (inst.root) inst.root.add(mesh);
   batch = {
     key,
-    geometry,
+    geometry: mesh.geometry,
     material,
     mesh,
     capacity: cap,
@@ -7295,6 +7362,8 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       batch.used = 0;
       batch.orderMin = Number.POSITIVE_INFINITY;
       batch.orderMax = Number.NEGATIVE_INFINITY;
+      batch.renderOrder = null;
+      batch.transparentBin = -1;
     }
   } else if (!instancingEnabled && ctx?._instancing?.batches instanceof Map) {
     for (const batch of ctx._instancing.batches.values()) {
@@ -7304,8 +7373,110 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       batch.used = 0;
       batch.orderMin = Number.POSITIVE_INFINITY;
       batch.orderMax = Number.NEGATIVE_INFINITY;
+      batch.renderOrder = null;
+      batch.transparentBin = -1;
     }
   }
+
+  const transparentBinsRequested = transparentBinsFromUrl(16);
+  const transparentSortMode = transparentSortModeFromUrl();
+  const transparentBins = transparentSortMode === 'strict' ? 1 : transparentBinsRequested;
+  const transparentOrderingEnabled = transparentBins > 0;
+  const sortTransparentInstances = transparentOrderingEnabled && transparentSortMode === 'strict';
+  const transparentBinningEnabled = transparentBins > 1;
+
+  const camera = ctx?.camera || null;
+  const rootMatWorld = ctx?.root?.matrixWorld || null;
+  let transparentCameraReady = false;
+  if (transparentOrderingEnabled && camera && typeof camera.getWorldDirection === 'function' && typeof camera.getWorldPosition === 'function') {
+    camera.getWorldPosition(TRANSPARENT_BIN_CAM_POS);
+    camera.getWorldDirection(TRANSPARENT_BIN_CAM_DIR);
+    transparentCameraReady = true;
+  }
+
+  let transparentBinsUsed = null;
+  if (transparentOrderingEnabled && transparentBins > 0) {
+    transparentBinsUsed = ctx._transparentBinsUsed || null;
+    if (!(transparentBinsUsed instanceof Uint8Array) || transparentBinsUsed.length !== transparentBins) {
+      transparentBinsUsed = new Uint8Array(transparentBins);
+      ctx._transparentBinsUsed = transparentBinsUsed;
+    }
+    transparentBinsUsed.fill(0);
+  }
+
+  let transparentBinPrev = null;
+  let transparentBinMigrations = 0;
+  let transparentSortMs = 0;
+  let transparentSortedInstances = 0;
+  if (transparentOrderingEnabled && baseNgeom > 0) {
+    transparentBinPrev = ctx._transparentBinPrev || null;
+    if (!(transparentBinPrev instanceof Int16Array) || transparentBinPrev.length !== baseNgeom) {
+      transparentBinPrev = new Int16Array(baseNgeom);
+      transparentBinPrev.fill(-1);
+      ctx._transparentBinPrev = transparentBinPrev;
+    }
+  }
+
+  let transparentDepthMin = 0;
+  let transparentDepthInvSpan = 0;
+  let transparentCandidateCount = 0;
+  if (transparentOrderingEnabled && transparentCameraReady) {
+    let min = 0;
+    let max = 0;
+    let count = 0;
+    for (let si = 0; si < scnNgeom; si += 1) {
+      const a0 = Number(rgbaView[si * 4 + 3]) || 0;
+      if (!(a0 < 0.999)) continue;
+      const posBase = si * 3;
+      TRANSPARENT_BIN_WORLD_POS.set(
+        posView[posBase + 0] || 0,
+        posView[posBase + 1] || 0,
+        posView[posBase + 2] || 0,
+      );
+      if (rootMatWorld) TRANSPARENT_BIN_WORLD_POS.applyMatrix4(rootMatWorld);
+      TRANSPARENT_BIN_WORLD_POS.sub(TRANSPARENT_BIN_CAM_POS);
+      const depth = TRANSPARENT_BIN_WORLD_POS.dot(TRANSPARENT_BIN_CAM_DIR);
+      if (count === 0) {
+        min = depth;
+        max = depth;
+      } else {
+        if (depth < min) min = depth;
+        if (depth > max) max = depth;
+      }
+      count += 1;
+    }
+    transparentCandidateCount = count;
+    if (count > 0) {
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        min = 0;
+        max = 1;
+      } else if (max - min < 1e-6) {
+        max = min + 1;
+      }
+
+      const prev = ctx._transparentDepthRange || null;
+      const ema = 0.2;
+      if (prev && typeof prev.min === 'number' && typeof prev.max === 'number' && Number.isFinite(prev.min) && Number.isFinite(prev.max)) {
+        prev.min = prev.min + (min - prev.min) * ema;
+        prev.max = prev.max + (max - prev.max) * ema;
+        min = prev.min;
+        max = prev.max;
+      } else {
+        ctx._transparentDepthRange = { min, max };
+      }
+
+      const span = Math.max(1e-6, max - min);
+      const margin = Math.max(1e-3, span * 0.05);
+      const minWithMargin = min - margin;
+      const maxWithMargin = max + margin;
+      transparentDepthMin = minWithMargin;
+      transparentDepthInvSpan = 1 / Math.max(1e-6, maxWithMargin - minWithMargin);
+    }
+  }
+
+  const transparentBatchCapacity = transparentOrderingEnabled
+    ? Math.max(32, Math.min(scnNgeom, transparentCandidateCount > 0 ? transparentCandidateCount : scnNgeom))
+    : scnNgeom;
 
   let geomOrderRank = ctx._scnGeomOrderRank || null;
   if (!geomOrderRank || geomOrderRank.length !== scnNgeom) {
@@ -7611,13 +7782,54 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       const wantsTexture = !!textureEnabled && !!resolveMaterialTextureDescriptor(matId, assets);
       const opacityQ = Math.max(0, Math.min(1000, quantize1e3(a)));
       const opaque = opacityQ >= 999;
+      const isTransparent = opacityQ < 999;
+
+      let transparentBin = isTransparent ? 0 : -1;
+      let transparentOrder = 0;
+      let transparentDepthNorm = 0;
+      if (transparentCameraReady && transparentOrderingEnabled && isTransparent) {
+        const posBase = si * 3;
+        TRANSPARENT_BIN_WORLD_POS.set(
+          posView[posBase + 0] || 0,
+          posView[posBase + 1] || 0,
+          posView[posBase + 2] || 0,
+        );
+        if (rootMatWorld) TRANSPARENT_BIN_WORLD_POS.applyMatrix4(rootMatWorld);
+        TRANSPARENT_BIN_WORLD_POS.sub(TRANSPARENT_BIN_CAM_POS);
+        const depth = TRANSPARENT_BIN_WORLD_POS.dot(TRANSPARENT_BIN_CAM_DIR);
+        const depthNorm = transparentDepthInvSpan > 1e-12 ? ((depth - transparentDepthMin) * transparentDepthInvSpan) : 0;
+        transparentDepthNorm = Math.max(0, Math.min(1, depthNorm));
+        if (transparentBinningEnabled) {
+          const k = Math.floor(transparentDepthNorm * transparentBins);
+          transparentBin = Math.max(0, Math.min((transparentBins | 0) - 1, k | 0));
+        } else {
+          transparentBin = 0;
+        }
+        transparentOrder = (transparentBins | 0) - 1 - (transparentBin | 0);
+        if (transparentBinsUsed && transparentBin >= 0 && transparentBin < transparentBinsUsed.length) {
+          transparentBinsUsed[transparentBin] = 1;
+        }
+      }
+      const transparentBinKey = (transparentOrderingEnabled && isTransparent) ? (transparentBin | 0) : -1;
+      if (transparentBinPrev && meshIndex >= 0 && meshIndex < transparentBinPrev.length) {
+        const prevBin = transparentBinPrev[meshIndex] | 0;
+        if (prevBin !== transparentBinKey) {
+          transparentBinMigrations += 1;
+          transparentBinPrev[meshIndex] = transparentBinKey;
+        }
+      }
+
       const instancedType =
         gtypeRaw === MJ_GEOM.SPHERE ||
         gtypeRaw === MJ_GEOM.ELLIPSOID ||
         gtypeRaw === MJ_GEOM.CAPSULE ||
         gtypeRaw === MJ_GEOM.CYLINDER ||
         gtypeRaw === MJ_GEOM.BOX;
-      const eligibleForInstancing = instancedType && opaque && !materialOverrides && !wantsTexture;
+      const eligibleForInstancing =
+        instancedType &&
+        (opaque || (transparentOrderingEnabled && isTransparent)) &&
+        !materialOverrides &&
+        !wantsTexture;
       if (eligibleForInstancing) {
         if (meshIndex >= 0 && meshIndex < baseNgeom) {
           const proxy = ensureGeomProxy(meshIndex);
@@ -7661,15 +7873,29 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
         const reflectanceQ = quantize1e6(reflectanceValue);
         const wireframe = !!flags?.[1];
         const geometry = ensureInstancedGeometry(inst, gtypeRaw);
-        const material = geometry ? ensureInstancedMaterial(inst, reflectanceQ, { wireframe, opacityQ }) : null;
         const scnObjType = objTypeView[si] | 0;
-        const orderRank = geomOrderRank ? (geomOrderRank[si] | 0) : si;
-        const batchKey = `g${gtypeRaw | 0}:ot${scnObjType}:o${opaque ? 1000 : opacityQ | 0}:r${reflectanceQ | 0}`;
-        const batchCapacity = scnNgeom;
+        const material = geometry ? ensureInstancedMaterial(inst, reflectanceQ, { wireframe, opacityQ, objType: scnObjType }) : null;
+        let depthQ16 = 0;
+        if (transparentBinKey >= 0 && sortTransparentInstances) {
+          depthQ16 = Math.max(0, Math.min(65535, Math.floor((1 - transparentDepthNorm) * 65535))) | 0;
+        }
+        const orderRank = (transparentBinKey >= 0)
+          ? (sortTransparentInstances ? (((transparentOrder | 0) << 16) | (depthQ16 | 0)) : (transparentOrder | 0))
+          : (geomOrderRank ? (geomOrderRank[si] | 0) : si);
+        const batchKey = `g${gtypeRaw | 0}:ot${scnObjType}:o${opaque ? 1000 : opacityQ | 0}:r${reflectanceQ | 0}:tb${transparentBinKey | 0}`;
+        const batchCapacity = (transparentBinKey >= 0) ? transparentBatchCapacity : scnNgeom;
         const batch = (geometry && material)
           ? ensureInstancedBatch(ctx, inst, batchKey, geometry, material, batchCapacity)
           : null;
         if (batch?.mesh && batch.used < batch.capacity) {
+          batch.objType = scnObjType;
+          if (transparentBinKey >= 0) {
+            batch.transparentBin = transparentBinKey | 0;
+            if (batch.mesh.userData) batch.mesh.userData.transparentBin = transparentBinKey | 0;
+            if (!sortTransparentInstances) {
+              batch.renderOrder = transparentOrder | 0;
+            }
+          }
           if (Number.isFinite(orderRank)) {
             const lo = Number(batch.orderMin);
             const hi = Number(batch.orderMax);
@@ -7778,6 +8004,11 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     const mesh = ensureGeomMesh(ctx, meshIndex, gtypeRaw, assets, dataId, sizeVec, { geomMeta, dynamicSizeScale: true }, state);
     if (perfEnabled) meshMs += perfNow() - tEnsureStart;
     if (!mesh) return false;
+    const scnObjType = objTypeView[si] | 0;
+    if (instancingIsOverlayObjType(scnObjType)) {
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+    }
     if (perfEnabled && mesh !== meshBefore) {
       if (meshBefore) {
         ensureRebuilt += 1;
@@ -7943,15 +8174,71 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
           if (perfEnabled) colorUpdates += 1;
         }
       }
+      const nextTransparent = a < 0.999;
       if (mat && ('opacity' in mat)) {
-        const nextTransparent = a < 0.999;
         const changedOpacity = mat.opacity !== a;
         const changedTransparent = mat.transparent !== nextTransparent;
         if (changedOpacity) mat.opacity = a;
         if (changedTransparent) mat.transparent = nextTransparent;
         if (perfEnabled && (changedOpacity || changedTransparent)) opacityUpdates += 1;
       }
+      if (mat && typeof mat.depthWrite === 'boolean') {
+        const nextDepthWrite = !nextTransparent;
+        if (mat.depthWrite !== nextDepthWrite) {
+          mat.depthWrite = nextDepthWrite;
+        }
+      }
       const userData = mesh.userData || (mesh.userData = {});
+      let transparentBinKey = -1;
+      const ignoreTransparentOrdering = !!userData.infinitePlane || !!userData.infiniteGrid;
+      if (ignoreTransparentOrdering) {
+        userData.transparentBin = -1;
+        if (userData.infinitePlane) {
+          mesh.renderOrder = RENDER_ORDER.GROUND;
+        } else if (userData.infiniteGrid && typeof userData.infiniteGrid === 'object') {
+          const ro = userData.infiniteGrid.renderOrder;
+          if (Number.isFinite(ro)) mesh.renderOrder = ro;
+        }
+      } else if (transparentOrderingEnabled && nextTransparent) {
+        let bin = 0;
+        let order = 0;
+        if (transparentCameraReady) {
+          const posBase = si * 3;
+          TRANSPARENT_BIN_WORLD_POS.set(
+            posView[posBase + 0] || 0,
+            posView[posBase + 1] || 0,
+            posView[posBase + 2] || 0,
+          );
+          if (rootMatWorld) TRANSPARENT_BIN_WORLD_POS.applyMatrix4(rootMatWorld);
+          TRANSPARENT_BIN_WORLD_POS.sub(TRANSPARENT_BIN_CAM_POS);
+          const depth = TRANSPARENT_BIN_WORLD_POS.dot(TRANSPARENT_BIN_CAM_DIR);
+          const depthNorm = transparentDepthInvSpan > 1e-12 ? ((depth - transparentDepthMin) * transparentDepthInvSpan) : 0;
+          const depthNormClamped = Math.max(0, Math.min(1, depthNorm));
+          if (transparentBinningEnabled) {
+            const k = Math.floor(depthNormClamped * transparentBins);
+            bin = Math.max(0, Math.min((transparentBins | 0) - 1, k | 0));
+          } else {
+            bin = 0;
+          }
+        }
+        transparentBinKey = bin | 0;
+        order = (transparentBins | 0) - 1 - transparentBinKey;
+        mesh.renderOrder = order | 0;
+        userData.transparentBin = transparentBinKey;
+        if (transparentBinsUsed && transparentBinKey >= 0 && transparentBinKey < transparentBinsUsed.length) {
+          transparentBinsUsed[transparentBinKey] = 1;
+        }
+      } else {
+        userData.transparentBin = -1;
+      }
+      if (transparentBinPrev && meshIndex >= 0 && meshIndex < transparentBinPrev.length) {
+        const prevBin = transparentBinPrev[meshIndex] | 0;
+        const nextBin = (!ignoreTransparentOrdering && transparentOrderingEnabled && nextTransparent) ? transparentBinKey : -1;
+        if (prevBin !== nextBin) {
+          transparentBinMigrations += 1;
+          transparentBinPrev[meshIndex] = nextBin;
+        }
+      }
       let userRgba = userData.geomRgba;
       if (!Array.isArray(userRgba) || userRgba.length < 4) {
         userRgba = [0, 0, 0, 1];
@@ -8099,6 +8386,8 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     const wireframe = !!flags?.[1];
     let instancedBatches = 0;
     let instancedInstances = 0;
+    let transparentInstancedBatches = 0;
+    let transparentInstancedInstances = 0;
     for (const batch of inst.batches.values()) {
       if (!batch?.mesh) continue;
       const used = batch.used | 0;
@@ -8106,14 +8395,28 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       batch.mesh.visible = used > 0;
       if (batch.mesh.instanceMatrix) batch.mesh.instanceMatrix.needsUpdate = used > 0;
       if (batch.mesh.instanceColor) batch.mesh.instanceColor.needsUpdate = used > 0;
-      if (Number.isFinite(batch.orderMin)) {
+      if (typeof batch.renderOrder === 'number' && Number.isFinite(batch.renderOrder)) {
+        batch.mesh.renderOrder = Number(batch.renderOrder) | 0;
+      } else if (Number.isFinite(batch.orderMin)) {
         batch.mesh.renderOrder = Number(batch.orderMin) | 0;
       }
-      if (used > 1 && batch.material?.transparent && inst) {
+      if (used > 1 && batch.material?.transparent && inst && sortTransparentInstances) {
+        const tSort0 = perfEnabled ? perfNow() : 0;
         sortInstancedBatchByOrderRank(inst, batch);
+        if (perfEnabled) {
+          transparentSortMs += perfNow() - tSort0;
+          transparentSortedInstances += used;
+        }
       }
       if (batch.material && typeof batch.material.wireframe === 'boolean') {
         batch.material.wireframe = wireframe;
+      }
+      if (typeof batch.objType === 'number') {
+        const overlay = instancingIsOverlayObjType(batch.objType);
+        const nextCastShadow = !overlay;
+        const nextReceiveShadow = !overlay;
+        if (batch.mesh.castShadow !== nextCastShadow) batch.mesh.castShadow = nextCastShadow;
+        if (batch.mesh.receiveShadow !== nextReceiveShadow) batch.mesh.receiveShadow = nextReceiveShadow;
       }
       if (batch.material && 'envMapIntensity' in batch.material) {
         const q = batch.material.userData?.reflectanceQ;
@@ -8137,11 +8440,30 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       if (used > 0) {
         instancedBatches += 1;
         instancedInstances += used;
+        if (batch.material?.transparent) {
+          transparentInstancedBatches += 1;
+          transparentInstancedInstances += used;
+        }
       }
     }
     if (perfEnabled) {
       perfSample('renderer:instancing_batches', instancedBatches);
       perfSample('renderer:instancing_instances', instancedInstances);
+      let activeBins = 0;
+      if (transparentBinsUsed) {
+        for (let i = 0; i < transparentBinsUsed.length; i += 1) {
+          if (transparentBinsUsed[i] | 0) activeBins += 1;
+        }
+      }
+      perfSample('renderer:transparent_bins', transparentBins | 0);
+      perfSample('renderer:transparent_sort_strict', sortTransparentInstances ? 1 : 0);
+      perfSample('renderer:transparent_candidate_count', transparentCandidateCount | 0);
+      perfSample('renderer:transparent_bin_count', activeBins);
+      perfSample('renderer:transparent_bin_migrations', transparentBinMigrations | 0);
+      perfSample('renderer:transparent_instanced_batches', transparentInstancedBatches);
+      perfSample('renderer:transparent_instanced_instances', transparentInstancedInstances);
+      perfSample('renderer:transparent_sort_ms', transparentSortMs);
+      perfSample('renderer:transparent_sorted_instances', transparentSortedInstances);
     }
   }
 
