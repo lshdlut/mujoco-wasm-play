@@ -3,6 +3,7 @@
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
 import { logError, logStatus, logWarn } from './debug_log.mjs';
 import { withCacheTag } from './paths.mjs';
+import { DEFAULT_VOPT_FLAGS_NUMERIC, MJ_GROUP_COUNT, MJ_GROUP_TYPES, SCENE_FLAG_DEFAULTS_NUMERIC } from './viewer_defaults.mjs';
 import { writeOptionField, readOptionStruct, detectOptionSupport } from './viewer_option_struct.mjs';
 import { writeVisualField, readVisualStruct } from './viewer_visual_struct.mjs';
 import { writeStatisticField, readStatisticStruct } from './viewer_stat_struct.mjs';
@@ -47,23 +48,11 @@ let ctrlNoiseRate = 0;
 let ctrlNoiseSpare = null;
 let gestureState = { mode: 'idle', phase: 'idle', pointer: null };
 let dragState = { dx: 0, dy: 0 };
-// Default mjvOption.flags (numeric) for backend snapshots.
-// Keep overlays off by default but enable tendon visibility (mjVIS_TENDON = 7).
-const DEFAULT_VOPT_FLAGS = (() => {
-  const flags = Array.from({ length: 32 }, () => 0);
-  for (const idx of [1, 7, 8, 13, 22, 23, 25, 27]) {
-    flags[idx] = 1;
-  }
-  return flags;
-})();
-let voptFlags = DEFAULT_VOPT_FLAGS.slice();
-const SCENE_FLAG_DEFAULTS = [1, 0, 1, 0, 1, 0, 1, 0, 0, 1];
-let sceneFlags = SCENE_FLAG_DEFAULTS.slice();
+let voptFlags = DEFAULT_VOPT_FLAGS_NUMERIC.slice();
+let sceneFlags = SCENE_FLAG_DEFAULTS_NUMERIC.slice();
 let labelMode = 0;
 let frameMode = 0;
 let cameraMode = 0;
-const GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'skin'];
-const MJ_GROUP_COUNT = 6;
 let groupState = createGroupState();
 let lastBounds = { center: [0, 0, 0], radius: 0 };
 let alignSeq = 0;
@@ -220,7 +209,7 @@ function createGroupState() {
   // Match MuJoCo mjv_defaultOption: first 3 groups enabled, remaining disabled.
   const defaultMask = Array.from({ length: MJ_GROUP_COUNT }, (_, idx) => (idx < 3 ? 1 : 0));
   const state = {};
-  for (const type of GROUP_TYPES) {
+  for (const type of MJ_GROUP_TYPES) {
     state[type] = defaultMask.slice();
   }
   return state;
@@ -228,7 +217,7 @@ function createGroupState() {
 
 function cloneGroupState(source = groupState) {
   const out = {};
-  for (const type of GROUP_TYPES) {
+  for (const type of MJ_GROUP_TYPES) {
     const values = Array.isArray(source?.[type]) ? source[type] : null;
     out[type] = Array.from({ length: MJ_GROUP_COUNT }, (_, idx) => (values && values[idx] ? 1 : 0));
   }
@@ -237,11 +226,11 @@ function cloneGroupState(source = groupState) {
 
 function cloneSceneFlags(source = sceneFlags) {
   const out = [];
-  for (let i = 0; i < SCENE_FLAG_DEFAULTS.length; i += 1) {
+  for (let i = 0; i < SCENE_FLAG_DEFAULTS_NUMERIC.length; i += 1) {
     if (source && source[i] != null) {
       out[i] = source[i] ? 1 : 0;
     } else {
-      out[i] = SCENE_FLAG_DEFAULTS[i];
+      out[i] = SCENE_FLAG_DEFAULTS_NUMERIC[i];
     }
   }
   return out;
@@ -2419,8 +2408,8 @@ onmessage = async (ev) => {
       setRunning(true, 'load');
       gestureState = { mode: 'idle', phase: 'idle', pointer: null };
       dragState = { dx: 0, dy: 0 };
-      voptFlags = DEFAULT_VOPT_FLAGS.slice();
-      sceneFlags = SCENE_FLAG_DEFAULTS.slice();
+      voptFlags = DEFAULT_VOPT_FLAGS_NUMERIC.slice();
+      sceneFlags = SCENE_FLAG_DEFAULTS_NUMERIC.slice();
       groupState = createGroupState();
       labelMode = 0;
       frameMode = 0;
@@ -2573,7 +2562,7 @@ onmessage = async (ev) => {
     } else if (msg.cmd === 'setVoptFlag') {
       const idx = Number(msg.index) | 0;
       const enabled = !!msg.enabled;
-      if (!Array.isArray(voptFlags)) voptFlags = DEFAULT_VOPT_FLAGS.slice();
+      if (!Array.isArray(voptFlags)) voptFlags = DEFAULT_VOPT_FLAGS_NUMERIC.slice();
       if (idx >= 0 && idx < voptFlags.length) {
         voptFlags[idx] = enabled ? 1 : 0;
         emitOptionState();
@@ -2581,8 +2570,8 @@ onmessage = async (ev) => {
     } else if (msg.cmd === 'setSceneFlag') {
       const idx = Number(msg.index) | 0;
       const enabled = !!msg.enabled;
-      if (!Array.isArray(sceneFlags) || sceneFlags.length !== SCENE_FLAG_DEFAULTS.length) {
-        sceneFlags = SCENE_FLAG_DEFAULTS.slice();
+      if (!Array.isArray(sceneFlags) || sceneFlags.length !== SCENE_FLAG_DEFAULTS_NUMERIC.length) {
+        sceneFlags = SCENE_FLAG_DEFAULTS_NUMERIC.slice();
       }
       if (idx >= 0 && idx < sceneFlags.length) {
         sceneFlags[idx] = enabled ? 1 : 0;
@@ -2604,7 +2593,7 @@ onmessage = async (ev) => {
       const type = typeof msg.group === 'string' ? msg.group.toLowerCase() : '';
       const idx = Number(msg.index) | 0;
       const enabled = !!msg.enabled;
-      if (GROUP_TYPES.includes(type) && idx >= 0 && idx < MJ_GROUP_COUNT) {
+      if (MJ_GROUP_TYPES.includes(type) && idx >= 0 && idx < MJ_GROUP_COUNT) {
         if (!groupState[type]) {
           groupState[type] = Array.from({ length: MJ_GROUP_COUNT }, () => 1);
         }

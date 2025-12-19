@@ -1,6 +1,7 @@
 import { prefetchBindingIndex, prepareBindingUpdate, splitBinding } from './viewer_bindings.mjs';
 import { VISUAL_FIELD_DESCRIPTORS } from './viewer_visual_struct.mjs';
 import { VISUAL_FIELD_GROUPS } from './visual_field_groups.mjs';
+import { DEFAULT_VOPT_FLAGS, MJ_GROUP_COUNT, MJ_GROUP_TYPES, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
 import { isPerfEnabled, perfMarkOnce, perfNow, perfSample } from './viewer_perf.mjs';
 import { logError, logStatus, logWarn } from './debug_log.mjs';
 
@@ -8,8 +9,6 @@ import { logError, logStatus, logWarn } from './debug_log.mjs';
 // Runtime implementation lives in JS so it can be consumed directly by the
 // buildless viewer. Type definitions are provided separately in viewer_state_types.ts.
 
-const MJ_GROUP_TYPES = ['geom', 'site', 'joint', 'tendon', 'actuator', 'flex', 'skin'];
-const MJ_GROUP_COUNT = 6;
 const VISUAL_FLOAT_TOLERANCE = 1e-4;
 
 function createDefaultHistoryState() {
@@ -88,30 +87,6 @@ function resetSelectionState(runtime) {
   if (!runtime) return;
   runtime.selection = createDefaultSelectionState();
 }
-
-const SCENE_FLAG_DEFAULTS = Object.freeze([
-  true,  // shadow
-  false, // wireframe
-  true,  // reflection
-  false, // additive
-  true,  // skybox
-  false, // fog
-  true,  // haze
-  false, // segment
-  false, // id color
-  true,  // cull face
-]);
-
-// Default mjvOption.flags state. Mirror simulate's mjVISSTRING defaults, which
-// turn on texture, tendon, range finder, perturb object, static body, skin,
-// flex edge, and flex skin when mjv_defaultOption populates mjvOption.flags.
-const DEFAULT_VOPT_FLAGS = Object.freeze((() => {
-  const flags = Array.from({ length: 32 }, () => false);
-  for (const idx of [1, 7, 8, 13, 22, 23, 25, 27]) {
-    flags[idx] = true;
-  }
-  return flags;
-})());
 
 const DISABLE_FLAG_LABELS = Object.freeze([
   'Constraint',

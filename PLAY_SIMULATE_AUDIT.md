@@ -38,12 +38,12 @@ index.html
 - Legacy contact/perturb overlays remain alongside mjvScene overlays (`dev/viewer_renderer.mjs:11721`, `dev/viewer_renderer.mjs:11733`).
 - Legacy perturb pipeline is duplicated across worker, picking, and state handling (`dev/physics.worker.mjs:70`, `dev/physics.worker.mjs:3088`, `dev/viewer_picking.mjs:388`, `dev/viewer_picking.mjs:635`, `dev/viewer_state.mjs:3373`).
 - Legacy ABI compatibility adds fallback paths that complicate bridge logic (`dev/bridge.mjs:888`, `dev/forge_abi_compat.js`).
-- UI remnants of a prior HUD remain in HTML and main code (`dev/index.html:158`, `dev/index.html:763`, `dev/main.nobuild.mjs:302`).
-- Duplicate constants and defaults defined in multiple modules (scene flags, group counts, vopt defaults) (`dev/viewer_state.mjs:91`, `dev/physics.worker.mjs:53`).
+- HUD overlay markup is the current UI; no separate legacy HUD container remains after review.
+- Shared defaults consolidated into `dev/viewer_defaults.mjs` (scene flags, group counts, vopt defaults).
 - Debug-only scene snapshot pipeline removed; worker no longer emits `scene_snapshot`.
-- Spec/docs drift from actual implementation (parity matrix lists items already implemented; web mapping describes an unused architecture) (`dev/spec/parity_matrix.csv`, `dev/spec/web_mapping.md`).
+- Stale spec docs removed (parity matrix, web mapping).
 - Visual source mode mismatch across spec and runtime (spec says Preset/Model, runtime uses preset-sun/preset-moon) (`dev/spec/ui_spec.json:79`, `dev/viewer_state.mjs:234`, `dev/viewer_controls.mjs:1272`).
-- Isolated modules appear unused in the current entrypoint (`dev/sim.ts`, `dev/loader.ts`).
+- Removed unused modules (`dev/sim.ts`, `dev/loader.ts`).
 
 ## Web-Only UI Features Detected (Candidates to Preserve)
 - HDRI + fallback environment presets (sun/moon, ground/grid tuning) (`dev/viewer_environment.mjs`).
