@@ -4044,11 +4044,12 @@ function transparentSortModeFromUrl() {
     const override = globalThis.PLAY_TRANSPARENT_SORT_MODE;
     if (override === 'strict' || override === 'bins' || override === 'nosort') return override;
   }
-  if (typeof window === 'undefined') return 'bins';
+  if (typeof window === 'undefined') return 'strict';
   const search = window.location?.search || '';
   if (search.includes('tmode=nosort') || search.includes('tmode=fast')) return 'nosort';
   if (search.includes('tmode=strict')) return 'strict';
-  return 'bins';
+  if (search.includes('tmode=bins')) return 'bins';
+  return 'strict';
 }
 
 function ensureInstancedMaterial(inst, reflectanceQ, { wireframe = false, opacityQ = 1000, objType = MJ_OBJ.UNKNOWN } = {}) {
@@ -8008,6 +8009,15 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     if (instancingIsOverlayObjType(scnObjType)) {
       mesh.castShadow = false;
       mesh.receiveShadow = false;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const mat of mats) {
+        if (!mat || typeof mat !== 'object') continue;
+        if (!('toneMapped' in mat)) continue;
+        if (mat.toneMapped !== false) {
+          mat.toneMapped = false;
+          if ('needsUpdate' in mat) mat.needsUpdate = true;
+        }
+      }
     }
     if (perfEnabled && mesh !== meshBefore) {
       if (meshBefore) {
