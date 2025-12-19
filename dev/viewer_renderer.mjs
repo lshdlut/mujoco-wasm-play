@@ -613,14 +613,7 @@ function alphaFromArray(color, fallback = 1) {
   return clampUnit(fallback);
 }
 
-function resolveGeomAppearance(index, sceneGeom, snapshot, assets) {
-  if (sceneGeom && Array.isArray(sceneGeom.rgba)) {
-    return {
-      rgba: sceneGeom.rgba.slice(),
-      color: rgbFromArray(sceneGeom.rgba),
-      opacity: alphaFromArray(sceneGeom.rgba),
-    };
-  }
+function resolveGeomAppearance(index, snapshot, assets) {
   const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
   const matIndex = matIdView && index < matIdView.length ? matIdView[index] : -1;
   const matRgbaView = assets?.materials?.rgba || snapshot.matrgba || null;
@@ -3737,21 +3730,6 @@ function disposeInstancing(ctx) {
   }
 }
 
-function sceneTypeToEnum(t) {
-  const s = String(t || '').toLowerCase();
-  switch (s) {
-    case 'plane': return MJ_GEOM.PLANE;
-    case 'hfield': return MJ_GEOM.HFIELD;
-    case 'sphere': return MJ_GEOM.SPHERE;
-    case 'capsule': return MJ_GEOM.CAPSULE;
-    case 'ellipsoid': return MJ_GEOM.ELLIPSOID;
-    case 'cylinder': return MJ_GEOM.CYLINDER;
-    case 'box': return MJ_GEOM.BOX;
-    case 'mesh': return MJ_GEOM.MESH;
-    default: return MJ_GEOM.BOX;
-  }
-}
-
 // Lightweight pooled material factory to avoid excessive material instances
 class MaterialPool {
   constructor(threeNS) {
@@ -4904,7 +4882,6 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
   }
   const flags = Array.isArray(sceneFlags) ? sceneFlags : state?.rendering?.sceneFlags || [];
   const isInfinitePlane = !!mesh.userData?.infinitePlane;
-  const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
   const segmentEnabled = !!flags[SEGMENT_FLAG_INDEX];
   if (segmentEnabled) {
     const segMat = ensureSegmentMaterial(mesh, flags);
@@ -4917,43 +4894,32 @@ function updateMeshFromSnapshot(mesh, i, snapshot, state, assets, sceneFlags = n
     restoreSegmentMaterial(mesh);
   }
   if (!isInfinitePlane) {
-    if (sceneGeom) {
-      const px = Number(sceneGeom.xpos?.[0]) || 0;
-      const py = Number(sceneGeom.xpos?.[1]) || 0;
-      const pz = Number(sceneGeom.xpos?.[2]) || 0;
-      mesh.position.set(px, py, pz);
-      const m = Array.isArray(sceneGeom.xmat) && sceneGeom.xmat.length >= 9
-        ? sceneGeom.xmat
-        : [1, 0, 0, 0, 1, 0, 0, 0, 1];
-      mesh.quaternion.copy(mat3ToQuat(m));
-    } else {
-      const xpos = snapshot.xpos;
-      const baseIndex = 3 * i;
-      const pos = [
-        xpos?.[baseIndex + 0] ?? 0,
-        xpos?.[baseIndex + 1] ?? 0,
-        xpos?.[baseIndex + 2] ?? 0,
-      ];
-      mesh.position.set(pos[0], pos[1], pos[2]);
-      const xmat = snapshot.xmat;
-      const matBase = 9 * i;
-      const rot = [
-        xmat?.[matBase + 0] ?? 1,
-        xmat?.[matBase + 1] ?? 0,
-        xmat?.[matBase + 2] ?? 0,
-        xmat?.[matBase + 3] ?? 0,
-        xmat?.[matBase + 4] ?? 1,
-        xmat?.[matBase + 5] ?? 0,
-        xmat?.[matBase + 6] ?? 0,
-        xmat?.[matBase + 7] ?? 0,
-        xmat?.[matBase + 8] ?? 1,
-      ];
-      mesh.quaternion.copy(mat3ToQuat(rot));
-    }
+    const xpos = snapshot.xpos;
+    const baseIndex = 3 * i;
+    const pos = [
+      xpos?.[baseIndex + 0] ?? 0,
+      xpos?.[baseIndex + 1] ?? 0,
+      xpos?.[baseIndex + 2] ?? 0,
+    ];
+    mesh.position.set(pos[0], pos[1], pos[2]);
+    const xmat = snapshot.xmat;
+    const matBase = 9 * i;
+    const rot = [
+      xmat?.[matBase + 0] ?? 1,
+      xmat?.[matBase + 1] ?? 0,
+      xmat?.[matBase + 2] ?? 0,
+      xmat?.[matBase + 3] ?? 0,
+      xmat?.[matBase + 4] ?? 1,
+      xmat?.[matBase + 5] ?? 0,
+      xmat?.[matBase + 6] ?? 0,
+      xmat?.[matBase + 7] ?? 0,
+      xmat?.[matBase + 8] ?? 1,
+    ];
+    mesh.quaternion.copy(mat3ToQuat(rot));
     mesh.scale.set(1, 1, 1);
   }
 
-  const baseAppearance = resolveGeomAppearance(i, sceneGeom, snapshot, assets);
+  const baseAppearance = resolveGeomAppearance(i, snapshot, assets);
   if (!baseAppearance.rgba) {
     const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
     const materials = assets?.materials || null;
@@ -5005,38 +4971,28 @@ function updateInfinitePlaneFromSnapshot(mesh, i, snapshot, assets, sceneFlags =
   const uniforms = groundData.uniforms || {};
   const segmentEnabled = Array.isArray(sceneFlags) ? !!sceneFlags[SEGMENT_FLAG_INDEX] : false;
   const userData = mesh.userData || (mesh.userData = {});
-  const sceneGeom = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms[i] : null;
   let px = 0;
   let py = 0;
   let pz = 0;
   let rot = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-  if (sceneGeom) {
-    px = Number(sceneGeom.xpos?.[0]) || 0;
-    py = Number(sceneGeom.xpos?.[1]) || 0;
-    pz = Number(sceneGeom.xpos?.[2]) || 0;
-    rot = Array.isArray(sceneGeom.xmat) && sceneGeom.xmat.length >= 9
-      ? sceneGeom.xmat
-      : rot;
-  } else {
-    const xpos = snapshot.xpos;
-    const baseIndex = 3 * i;
-    px = xpos?.[baseIndex + 0] ?? 0;
-    py = xpos?.[baseIndex + 1] ?? 0;
-    pz = xpos?.[baseIndex + 2] ?? 0;
-    const xmat = snapshot.xmat;
-    const matBase = 9 * i;
-    rot = [
-      xmat?.[matBase + 0] ?? 1,
-      xmat?.[matBase + 1] ?? 0,
-      xmat?.[matBase + 2] ?? 0,
-      xmat?.[matBase + 3] ?? 0,
-      xmat?.[matBase + 4] ?? 1,
-      xmat?.[matBase + 5] ?? 0,
-      xmat?.[matBase + 6] ?? 0,
-      xmat?.[matBase + 7] ?? 0,
-      xmat?.[matBase + 8] ?? 1,
-    ];
-  }
+  const xpos = snapshot.xpos;
+  const baseIndex = 3 * i;
+  px = xpos?.[baseIndex + 0] ?? 0;
+  py = xpos?.[baseIndex + 1] ?? 0;
+  pz = xpos?.[baseIndex + 2] ?? 0;
+  const xmat = snapshot.xmat;
+  const matBase = 9 * i;
+  rot = [
+    xmat?.[matBase + 0] ?? 1,
+    xmat?.[matBase + 1] ?? 0,
+    xmat?.[matBase + 2] ?? 0,
+    xmat?.[matBase + 3] ?? 0,
+    xmat?.[matBase + 4] ?? 1,
+    xmat?.[matBase + 5] ?? 0,
+    xmat?.[matBase + 6] ?? 0,
+    xmat?.[matBase + 7] ?? 0,
+    xmat?.[matBase + 8] ?? 1,
+  ];
   const quat = mat3ToQuat(rot);
   if (uniforms.uPlaneOrigin?.value) {
     uniforms.uPlaneOrigin.value.set(px, py, pz);
@@ -5198,12 +5154,10 @@ function buildGeomDescriptors(snapshot, state, assets) {
   const groupIdView = assets?.geoms?.group || null;
   const geomRgbaView = assets?.geoms?.rgba || null;
   const geomNameLookup = createGeomNameLookup(state?.model?.geoms);
-  const sceneGeoms = Array.isArray(snapshot.scene?.geoms) ? snapshot.scene.geoms : null;
 
   const descriptors = [];
   for (let i = 0; i < ngeom; i += 1) {
-    const sceneGeom = sceneGeoms ? sceneGeoms[i] : null;
-    const type = sceneGeom ? sceneTypeToEnum(sceneGeom.type) : (typeView?.[i] ?? MJ_GEOM.BOX);
+    const type = typeView?.[i] ?? MJ_GEOM.BOX;
     const dataId = dataIdView?.[i] ?? -1;
     const base = 3 * i;
     let sizeVec = null;
@@ -5212,12 +5166,6 @@ function buildGeomDescriptors(snapshot, state, assets) {
         sizeView[base + 0] ?? 0,
         sizeView[base + 1] ?? 0,
         sizeView[base + 2] ?? 0,
-      ];
-    } else if (sceneGeom && Array.isArray(sceneGeom.size)) {
-      sizeVec = [
-        sceneGeom.size[0] ?? 0,
-        sceneGeom.size[1] ?? 0,
-        sceneGeom.size[2] ?? 0,
       ];
     }
     if (Array.isArray(sizeVec)) {

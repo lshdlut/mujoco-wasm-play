@@ -40,7 +40,7 @@ index.html
 - Legacy ABI compatibility adds fallback paths that complicate bridge logic (`dev/bridge.mjs:888`, `dev/forge_abi_compat.js`).
 - UI remnants of a prior HUD remain in HTML and main code (`dev/index.html:158`, `dev/index.html:763`, `dev/main.nobuild.mjs:302`).
 - Duplicate constants and defaults defined in multiple modules (scene flags, group counts, vopt defaults) (`dev/viewer_state.mjs:91`, `dev/physics.worker.mjs:53`).
-- Debug-only snapshot pipeline and diff tooling are always present in worker (`dev/physics.worker.mjs:1764`, `dev/snapshots.mjs`).
+- Debug-only scene snapshot pipeline removed; worker no longer emits `scene_snapshot`.
 - Spec/docs drift from actual implementation (parity matrix lists items already implemented; web mapping describes an unused architecture) (`dev/spec/parity_matrix.csv`, `dev/spec/web_mapping.md`).
 - Visual source mode mismatch across spec and runtime (spec says Preset/Model, runtime uses preset-sun/preset-moon) (`dev/spec/ui_spec.json:79`, `dev/viewer_state.mjs:234`, `dev/viewer_controls.mjs:1272`).
 - Isolated modules appear unused in the current entrypoint (`dev/sim.ts`, `dev/loader.ts`).
@@ -61,5 +61,4 @@ index.html
 
 ## Open Questions
 - Is dropping legacy ABI support acceptable (forge 3.3.7+ only)?
-- Should scene_snapshot debug export remain, or move under a build-time/debug-only gate?
 - Confirm the must-keep web UI features from the list above.

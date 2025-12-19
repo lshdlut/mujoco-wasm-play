@@ -290,8 +290,6 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     diffs: {},
     timestamp: 0,
   },
-  // Optional scene snapshot (mjvScene-like) carried by backend
-  scene: null,
   history: createDefaultHistoryState(),
   watch: createDefaultWatchState(),
   keyframes: createDefaultKeyframeState(),
@@ -433,7 +431,6 @@ function createInitialSnapshot() {
     matrgba: null,
     contacts: null,
     renderAssets: null,
-    scene: null,
     options: null,
     ctrl: null,
     optionSupport: { supported: false, pointers: [] },
@@ -744,10 +741,6 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (snapshot.renderAssets) {
     const rendering = ensureRenderingState(draft);
     rendering.assets = snapshot.renderAssets;
-  }
-  if (snapshot.scene) {
-    // Persist scene snapshot for diagnostics / external tools
-    draft.scene = snapshot.scene;
   }
   if (snapshot.options) {
     if (!draft.model) draft.model = {};
@@ -1612,7 +1605,6 @@ function resolveSnapshot(state) {
     frameMode: Number.isFinite(state.frameMode) ? (state.frameMode | 0) : 0,
     cameraMode: Number.isFinite(state.cameraMode) ? (state.cameraMode | 0) : 0,
     actuators: Array.isArray(state.actuators) ? state.actuators.slice() : null,
-    scene: state.scene ?? null,
     options: state.options ?? null,
     ctrl: state.ctrl ? Array.from(state.ctrl) : null,
     cameras: Array.isArray(state.cameras) ? state.cameras.slice() : null,
@@ -2482,12 +2474,6 @@ async function loadDefaultXml() {
                 scn_ngeom: scnNgeomValue,
               });
             }
-            if (typeof workerPerf.createSceneSnapMs === 'number' && Number.isFinite(workerPerf.createSceneSnapMs)) {
-              perfSample('worker:createSceneSnap_ms', workerPerf.createSceneSnapMs, {
-                ngeom: ngeomValue,
-                scn_ngeom: scnNgeomValue,
-              });
-            }
           }
           const sentWallMs = typeof data?.perf?.sentWallMs === 'number' ? data.perf.sentWallMs : null;
           if (sentWallMs != null) {
@@ -2568,34 +2554,6 @@ async function loadDefaultXml() {
           }
         }
         break;
-      case 'scene_snapshot': {
-        const source = data.source || 'sim';
-        if (typeof window !== 'undefined' && data.snap) {
-          window.__sceneSnaps = window.__sceneSnaps || {};
-          window.__sceneSnaps[source] = data.snap;
-        }
-        if (data.snap) {
-          lastSnapshot.scene = data.snap;
-          notifyListeners();
-          if (perfEnabled) {
-            const recvWallMs = Date.now();
-            const sentWallMs = typeof data?.perf?.sentWallMs === 'number' ? data.perf.sentWallMs : null;
-            if (sentWallMs != null) {
-              perfSample('worker_to_main:scene_snapshot_transfer_ms', recvWallMs - sentWallMs);
-            }
-            perfMarkOnce('play:backend:first_scene_snapshot', {
-              source,
-              frame: Number.isFinite(data.frame) ? (data.frame | 0) : null,
-              sentWallMs,
-              transferMs: sentWallMs != null ? (recvWallMs - sentWallMs) : null,
-              worker: data?.perf && typeof data.perf === 'object' ? data.perf : null,
-            });
-          } else {
-            perfMarkOnce('play:backend:first_scene_snapshot', { source });
-          }
-        }
-        break;
-      }
       case 'info_debug': {
         if (typeof window !== 'undefined') {
           try {

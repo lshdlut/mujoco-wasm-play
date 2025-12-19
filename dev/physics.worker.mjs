@@ -6,7 +6,6 @@ import { withCacheTag } from './paths.mjs';
 import { writeOptionField, readOptionStruct, detectOptionSupport } from './viewer_option_struct.mjs';
 import { writeVisualField, readVisualStruct } from './viewer_visual_struct.mjs';
 import { writeStatisticField, readStatisticStruct } from './viewer_stat_struct.mjs';
-import { createSceneSnap } from './snapshots.mjs';
 
 const FORCE_EPS = 1e-9;
 const MJ_TIMER_STEP = 0;
@@ -161,8 +160,6 @@ function standardNormalNoise() {
 function applyCtrlNoise() {
   // Intentionally left blank: ctrl noise is disabled.
 }
-
-const snapshotState = { frame: 0, lastSim: null };
 
 const HISTORY_DEFAULT_CAPTURE_HZ = 30;
 const HISTORY_DEFAULT_CAPACITY = 900;
@@ -1500,7 +1497,6 @@ async function loadXmlWithFallback(xmlText) {
 function snapshot() {
   if (!sim || !(sim.h > 0)) return;
   const tSnapshotStart = perfEnabled ? perfNowMs() : 0;
-  let createSceneSnapMs = null;
   syncVoptToWasm();
   const catmask = 7; // mjCAT_ALL = mjCAT_STATIC|mjCAT_DYNAMIC|mjCAT_DECOR
   if (typeof sim.sceneUpdateAndPack === 'function') {
@@ -1594,33 +1590,6 @@ function snapshot() {
   const lightXposView = sim.lightXposView?.();
   const lightXdirView = sim.lightXdirView?.();
   const tSim = sim.time?.() || 0;
-  let scenePayload = null;
-  if (n > 0 && xposView && xmatView) {
-    try {
-      const tSceneSnapStart = perfEnabled ? perfNowMs() : 0;
-      scenePayload = createSceneSnap({
-        frame: snapshotState.frame,
-        ngeom: n,
-        gtype: gtypeView ? new Int32Array(gtypeView) : null,
-        gsize: gsizeView ? new Float64Array(gsizeView) : null,
-        gmatid: gmatidView ? new Int32Array(gmatidView) : null,
-        matrgba: matRgbaView ? new Float32Array(matRgbaView) : null,
-        gdataid: gdataidView ? new Int32Array(gdataidView) : null,
-        xpos,
-        xmat,
-        mesh: renderAssets?.meshes ?? null,
-      });
-      if (perfEnabled) {
-        createSceneSnapMs = perfNowMs() - tSceneSnapStart;
-      }
-    } catch (err) {
-      logWarn('worker: scene snapshot prep failed', String(err || ''));
-    }
-    if (snapshotState) {
-      snapshotState.lastSim = scenePayload ?? null;
-      snapshotState.frame += 1;
-    }
-  }
   lastBounds = computeBoundsFromPositions(xpos, n);
     const nq = sim.nq?.() | 0;
     const nv = sim.nv?.() | 0;
@@ -2069,13 +2038,9 @@ function snapshot() {
     logWarn('worker: contact extraction failed', String(err || ''));
   }
   msg.contacts = contacts || null;
-  if (scenePayload) {
-    msg.scene_snapshot = { source: 'sim', frame: snapshotState.frame - 1, snap: scenePayload };
-  }
   if (perfEnabled) {
     msg.perf = buildPerf({
       snapshotMs: perfNowMs() - tSnapshotStart,
-      createSceneSnapMs,
       ngeom: n | 0,
       scn_ngeom: scnNgeom | 0,
     });
@@ -2432,10 +2397,6 @@ onmessage = async (ev) => {
       const { abi, handle } = result;
       h = handle | 0;
       frameSeq = 0;
-      if (snapshotState) {
-        snapshotState.frame = 0;
-        snapshotState.lastSim = null;
-      }
       optionSupport = detectOptionSupport(mod);
       dt = sim?.timestep?.() || 0.002;
       if (Number.isFinite(dt) && dt > 0) {

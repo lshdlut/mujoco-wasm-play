@@ -42,7 +42,7 @@ For the full upstream surface and version/tag mapping, see `lshdlut/mujoco-wasm-
 - Runtime backend is worker-only (`physics.worker.mjs` plus `bridge.mjs` helpers); there is no standalone legacy UI under `local_tools/viewer_demo/`.
 - Use the Simulate-like UI at `index.html` for every workflow (worker backend).
 - The debug script `scripts/worker_debug.py` now launches the main entry (`/index.html`).
-- Shared utilities such as `snapshots.mjs` are common to both backends and do not represent a separate UI surface.
+- Shared utilities (for example `bridge.mjs`, `viewer_state.mjs`) are common to both backends and do not represent a separate UI surface.
 
 ## TODO
 - Define stable JS/TS API surface
