@@ -35,8 +35,8 @@ index.html
 
 ## Redundancy and Divergence Findings
 - Legacy rendering paths coexist with scene-first pipeline; base-layer legacy builders are disabled but still present (`dev/viewer_renderer.mjs:9262`, `dev/viewer_renderer.mjs:9296`).
-- Legacy contact/perturb overlays remain alongside mjvScene overlays (`dev/viewer_renderer.mjs:11721`, `dev/viewer_renderer.mjs:11733`).
-- Legacy perturb pipeline is duplicated across worker, picking, and state handling (`dev/physics.worker.mjs:70`, `dev/physics.worker.mjs:3088`, `dev/viewer_picking.mjs:388`, `dev/viewer_picking.mjs:635`, `dev/viewer_state.mjs:3373`).
+- Legacy JS overlay builders removed; overlays now rely on mjvScene SoA + wasm state.
+- Perturb pipeline now uses wasm mjv helpers only; JS-side perturb viz removed.
 - Legacy ABI compatibility adds fallback paths that complicate bridge logic (`dev/bridge.mjs:888`, `dev/forge_abi_compat.js`).
 - HUD overlay markup is the current UI; no separate legacy HUD container remains after review.
 - Shared defaults consolidated into `dev/viewer_defaults.mjs` (scene flags, group counts, vopt defaults).
@@ -54,8 +54,8 @@ index.html
 - Worker-backed rendering pipeline (WASM in worker, three.js in main).
 
 ## Simplification Plan (Draft)
-- Phase 0: remove dead/unused assets and stale docs (legacy HUD HTML, unused modules, outdated spec docs); consolidate shared constants into a single module used by worker + state.
-- Phase 1: remove legacy perturb pipeline and legacy overlay paths; keep only mjvScene-based overlays and wasm-driven perturbation.
+- Phase 0 (done): remove dead/unused assets and stale docs; consolidate shared constants into a single module used by worker + state.
+- Phase 1 (done): remove legacy perturb pipeline and legacy overlay paths; keep only mjvScene-based overlays and wasm-driven perturbation.
 - Phase 2: drop ABI compatibility layers if a single forge ABI is acceptable; simplify bridge and worker initialization.
 - Phase 3: align state ownership with simulate flow (backend snapshot as source of truth, UI as projection) and remove duplicated state caches.
 
