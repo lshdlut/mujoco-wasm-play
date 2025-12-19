@@ -2425,7 +2425,6 @@ async function loadDefaultXml() {
           lastFrameId = frameId;
           lastSnapshot.frameId = frameId;
         }
-        // Legacy snapshot ctrl length logging removed to avoid noisy console output.
         if (typeof data.tSim === 'number') lastSnapshot.t = data.tSim;
         if (typeof data.ngeom === 'number') lastSnapshot.ngeom = data.ngeom;
         if (typeof data.nq === 'number') lastSnapshot.nq = data.nq;
@@ -3300,43 +3299,6 @@ async function loadDefaultXml() {
     return [0, 0, 0];
   };
 
-  async function applyForceCommand(options = {}) {
-    const geomIndex = Number(options.geomIndex);
-    if (!Number.isFinite(geomIndex) || geomIndex < 0) {
-      return resolveSnapshot(lastSnapshot);
-    }
-    try {
-      client.postMessage?.({
-        cmd: 'applyForce',
-        geomIndex: geomIndex | 0,
-        force: toVec3(options.force),
-        torque: toVec3(options.torque),
-        point: toVec3(options.point),
-      });
-    } catch (err) {
-      if (debug) console.warn('[backend applyForce] failed', err);
-    }
-    return resolveSnapshot(lastSnapshot);
-  }
-
-  async function applyBodyForceCommand(options = {}) {
-    const bodyId = Number(options.bodyId);
-    if (!Number.isFinite(bodyId) || bodyId < 0) {
-      return resolveSnapshot(lastSnapshot);
-    }
-    try {
-      client.postMessage?.({
-        cmd: 'applyBodyForce',
-        bodyId: bodyId | 0,
-        force: toVec3(options.force),
-        torque: toVec3(options.torque),
-      });
-    } catch (err) {
-      if (debug) console.warn('[backend applyBodyForce] failed', err);
-    }
-    return resolveSnapshot(lastSnapshot);
-  }
-
   async function applyPerturbCommand(options = {}) {
     const phase = typeof options.phase === 'string' ? options.phase : '';
     if (!phase) return resolveSnapshot(lastSnapshot);
@@ -3370,7 +3332,6 @@ async function loadDefaultXml() {
     } else if (phase === 'end') {
       // nothing else
     } else {
-      // TODO: delete legacy applyPerturb payload format once all callers are migrated.
       return resolveSnapshot(lastSnapshot);
     }
 
@@ -3378,15 +3339,6 @@ async function loadDefaultXml() {
       client.postMessage?.(msg);
     } catch (err) {
       if (debug) console.warn('[backend applyPerturb] failed', err);
-    }
-    return resolveSnapshot(lastSnapshot);
-  }
-
-  async function clearForcesCommand() {
-    try {
-      client.postMessage?.({ cmd: 'clearForces' });
-    } catch (err) {
-      if (debug) console.warn('[backend clearForces] failed', err);
     }
     return resolveSnapshot(lastSnapshot);
   }
@@ -3407,10 +3359,7 @@ async function loadDefaultXml() {
     setCameraIndex,
     setRunState,
     setRate,
-    applyForce: applyForceCommand,
-    applyBodyForce: applyBodyForceCommand,
     applyPerturb: applyPerturbCommand,
-    clearForces: clearForcesCommand,
     setVisualState: applyVisualStatePayload,
     loadXmlText,
     getInitialModelInfo: () => initialModelInfo,

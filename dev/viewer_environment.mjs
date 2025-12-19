@@ -947,7 +947,7 @@ export function createEnvironmentManager({
     const allowHDRI = options.allowHDRI !== false;
     // Decide which preset HDRI to use based on viewer state and preset config:
     // - preset.hdri (if provided) has priority
-    // - otherwise fall back to legacy sun/moon mapping
+    // - otherwise fall back to built-in sun/moon mapping
     const state = store && typeof store.get === 'function' ? store.get() : null;
     const visualPresetKey = currentPresetKeyFromState(state);
     const defaultUrl = visualPresetKey === 'moon'

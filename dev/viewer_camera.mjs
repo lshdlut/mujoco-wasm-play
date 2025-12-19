@@ -112,7 +112,7 @@ export function createCameraController({
       const v = Number(getMinDistance(camera, target, renderCtx));
       if (Number.isFinite(v) && v > 0) return Math.max(0.01, v);
     }
-    // default fallback that does not read bounds: keep legacy feel (0.25 * 0.6)
+    // Default fallback that does not read bounds: keep previous feel (0.25 * 0.6)
     return 0.15;
   }
 
@@ -507,7 +507,7 @@ export function createCameraController({
     canvas.addEventListener('contextmenu', contextMenuHandler);
     cleanup.push(() => canvas.removeEventListener('contextmenu', contextMenuHandler));
 
-    // Pointer-only path retained; legacy Mouse handlers removed to reduce duplication
+    // Pointer-only path retained; mouse handlers removed to reduce duplication
   }
 
   function setup() {

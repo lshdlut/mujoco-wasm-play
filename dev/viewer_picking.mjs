@@ -385,124 +385,6 @@ export function createPickingController({
     return true;
   }
 
-  /* TODO: delete legacy JS-side perturb math (convert2D + alignToCamera + scale) now that mjv_movePerturb runs in wasm.
-  function computePerturbScale(referencePoint) {
-    if (!renderCtx.camera || !referencePoint) {
-      return 1;
-    }
-    const camera = renderCtx.camera;
-    const forward = tempVecA.copy(camera.getWorldDirection(new THREE_NS.Vector3()));
-    if (forward.lengthSq() === 0) {
-      forward.set(0, 0, 1);
-    } else {
-      forward.normalize();
-    }
-    const cameraPos = tempVecB.copy(camera.position);
-    const depth = Math.max(
-      1e-6,
-      tempVecC.copy(referencePoint).sub(cameraPos).dot(forward),
-    );
-    let frustumHeight = 2;
-    if (camera.isPerspectiveCamera) {
-      const fovRad = THREE_NS.MathUtils.degToRad(camera.fov || 45);
-      frustumHeight = 2 * Math.tan(fovRad / 2);
-    } else if (camera.isOrthographicCamera) {
-      frustumHeight = Math.max(1e-6, (camera.top ?? 1) - (camera.bottom ?? -1));
-    }
-    let scale = frustumHeight * depth;
-    if (camera.isOrthographicCamera) {
-      scale *= 0.15;
-    }
-    if (!Number.isFinite(scale) || scale <= 0) {
-      scale = 1;
-    }
-    return scale;
-  }
-
-  function resolvePerturbAction(mode, shiftKey) {
-    if (mode === 'translate') {
-      return shiftKey ? 'MOVE_H' : 'MOVE_V';
-    }
-    if (mode === 'rotate') {
-      return shiftKey ? 'ROTATE_H' : 'ROTATE_V';
-    }
-    return null;
-  }
-
-  function buildMouseVector(action, reldx, reldy, outVec) {
-    switch (action) {
-      case 'MOVE_V':
-        outVec.set(reldx, 0, -reldy);
-        return outVec;
-      case 'MOVE_H':
-        outVec.set(reldx, -reldy, 0);
-        return outVec;
-      case 'ROTATE_V':
-        outVec.set(reldy, 0, reldx);
-        return outVec;
-      case 'ROTATE_H':
-        outVec.set(reldy, reldx, 0);
-        return outVec;
-      default:
-        return null;
-    }
-  }
-
-  function alignVectorToCamera(vec, outVec) {
-    if (!renderCtx.camera) return null;
-    const camera = renderCtx.camera;
-    const forward = tempVecB.copy(camera.getWorldDirection(new THREE_NS.Vector3()));
-    if (forward.lengthSq() === 0) forward.set(0, 0, 1);
-    forward.normalize();
-    const planar = tempVecC.set(forward.x, forward.y, 0);
-    const planarLen = planar.length();
-    if (planarLen < 1e-12) {
-      return null; // avoid arbitrary fallback that flips direction
-    }
-    planar.multiplyScalar(1 / planarLen);
-    const yAxis = tempVecE.copy(planar); // forward-aligned y-axis
-    const xAxis = tempVecD.set(yAxis.y, -yAxis.x, 0); // perpendicular in XY
-    outVec.set(0, 0, vec.z);
-    outVec.addScaledVector(xAxis, vec.x);
-    outVec.addScaledVector(yAxis, vec.y);
-    return outVec;
-  }
-
-  function applyPointerDelta(deltaX, deltaY) {
-    if (!dragState.active || !canvas) return;
-    const rect = typeof canvas.getBoundingClientRect === 'function'
-      ? canvas.getBoundingClientRect()
-      : { width: 1, height: 1 };
-    const height = Math.max(1, rect.height || 1);
-    // Match simulate: positive mouse-up yields positive reldy (see mjv_movePerturb call site).
-    const reldx = deltaX / height;
-    const reldy = -deltaY / height;
-    if (!Number.isFinite(reldx) || !Number.isFinite(reldy)) return;
-    const action = resolvePerturbAction(dragState.mode, dragState.shiftKey);
-    if (!action) return;
-    const mouseVec = buildMouseVector(action, reldx, reldy, tempVecLocal);
-    if (!mouseVec) return;
-    const worldVec = alignVectorToCamera(mouseVec, tempVecWorld);
-    if (!worldVec) return;
-    const scale = dragState.scale || computePerturbScale(dragState.anchorPoint);
-    if (dragState.mode === 'rotate') {
-      // Keep the raw convert2D-aligned vector for rotation magnitude; do NOT scale by depth.
-      dragState.lastRotVec.copy(worldVec);
-      const scl = worldVec.length();
-      if (scl > 0) {
-        const axis = worldVec.clone().normalize();
-        const angle = scl * Math.PI * 2;
-        dragState.lastTorqueVec.copy(axis).multiplyScalar(angle);
-      } else {
-        dragState.lastTorqueVec.set(0, 0, 0);
-      }
-      // Rotate mode does not move anchor/cursor; only refquat changes.
-    } else {
-      dragState.pointerTarget.addScaledVector(worldVec, scale);
-    }
-  }
-  */
-
   function applyRotation(mat, vec, out) {
     out.set(
       mat[0] * vec.x + mat[1] * vec.y + mat[2] * vec.z,
@@ -632,19 +514,6 @@ export function createPickingController({
     backend.applyPerturb({ ...(payload || {}), phase });
   }
 
-  /* TODO: delete legacy perturb dispatch (manual xfrc_applied path).
-  function dispatchPerturbState(payload) {
-    if (!payload) return;
-    if (typeof backend.applyPerturb === 'function') {
-      backend.applyPerturb(payload);
-    } else if (Number.isFinite(payload.bodyId) && payload.bodyId >= 0 && typeof backend.applyBodyForce === 'function') {
-      backend.applyBodyForce(payload);
-    } else if (Number.isFinite(payload.geomIndex) && payload.geomIndex >= 0) {
-      backend.applyForce?.(payload);
-    }
-  }
-  */
-
   function applyPerturb(fromLoop = false) {
     const selection = currentSelection();
     if (!selection || selection.geom < 0) return false;
@@ -732,8 +601,6 @@ export function createPickingController({
       dragState.lastTorqueVec.set(0, 0, 0);
       dragState.lastRotVec.set(0, 0, 0);
     }
-    // TODO: delete legacy clearForces call; mjvPerturb end now clears its own xfrc.
-    // backend.clearForces?.();
     dispatchMjvPerturb('begin', {
       mode,
       shiftKey: dragState.shiftKey,
@@ -753,8 +620,6 @@ export function createPickingController({
   function endPerturb() {
     if (!dragState.active) return;
     dispatchMjvPerturb('end', null);
-    // TODO: delete legacy clearForces call; mjvPerturb end now clears its own xfrc.
-    // backend.clearForces?.();
     dragState.payload = null;
     dragState.lastForceVec.set(0, 0, 0);
     dragState.lastTorqueVec.set(0, 0, 0);

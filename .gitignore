@@ -62,3 +62,4 @@ Thumbs.db
 # Root markdown files (keep README tracked)
 /*.md
 !/README.md
+!/PLAY_SIMULATE_AUDIT.md

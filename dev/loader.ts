@@ -1,6 +1,5 @@
 import { fileURLToPath, pathToFileURL } from 'url';
 import path from 'path';
-import installForgeAbiCompat from '../../forge_abi_compat.js';
 
 export interface MujocoModule {
   HEAP8?: Int8Array;
@@ -89,9 +88,6 @@ export async function loadForgeVersion(ver = '3.3.7'): Promise<MujocoModule> {
   const mod: MujocoModule = await modFactory({
     locateFile: (p: string) => (p.endsWith('.wasm') ? (isNode() ? fileURLToPath(wasmUrl) : wasmUrl.href) : p),
   });
-  try {
-    installForgeAbiCompat(mod);
-  } catch {}
   return mod;
 }
 

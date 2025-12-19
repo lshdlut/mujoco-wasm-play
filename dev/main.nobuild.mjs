@@ -299,36 +299,6 @@ function updateToast(state) {
   }
 }
 
-// TODO(play): legacy header HUD updater (superseded by F2 info overlay).
-// function updateHud(state) {
-//   const displayTime = typeof state.hud?.time === 'number' ? state.hud.time : 0;
-//   if (simTimeEl) {
-//     simTimeEl.textContent = `t = ${displayTime.toFixed(3)}`;
-//   }
-//   if (simStatusEl) {
-//     const status = state.simulation.run ? 'running' : 'paused';
-//     const ngeom = state.hud?.ngeom ?? 0;
-//     const contacts = state.hud?.contacts ?? 0;
-//     const rate = Number.isFinite(state.hud?.rate) ? state.hud.rate : 1;
-//     const drawn = renderStats.drawn ?? 0;
-//     const pausedSource = state.hud?.pausedSource ?? 'backend';
-//     const rateSource = state.hud?.rateSource ?? 'backend';
-//     simStatusEl.textContent = `${status} | ngeom=${ngeom} (visible ${drawn}) | contacts=${contacts} | rate=${rate.toFixed(2)}x [${rateSource}] | pause:${pausedSource}`;
-//   }
-//   if (cameraSummaryEl) {
-//     cameraSummaryEl.textContent = `camera: ${state.runtime.cameraLabel}`;
-//   }
-//   if (gestureEl) {
-//     const action = state.runtime.perturb?.active
-//       ? (state.runtime.perturb.mode === 'translate' ? 'perturb-translate' : 'perturb-rotate')
-//       : (state.runtime.lastAction || 'idle');
-//     const selection = state.runtime.selection;
-//     const selLabel = selection && selection.geom >= 0
-//       ? (selection.name || `geom ${selection.geom}`)
-//       : 'none';
-//     gestureEl.textContent = `gesture: ${action} | sel: ${selLabel}`;
-//   }
-// }
 
 function updateInfoOverlayCard(state) {
   if (!overlayInfo) return;
@@ -483,7 +453,7 @@ function updatePanels(state) {
   for (const cls of layouts) document.body.classList.remove(cls);
   document.body.classList.add(layoutClass);
 
-  // Keep legacy fullscreen flag for other visual toggles
+  // Keep fullscreen flag for other visual toggles
   document.body.classList.toggle('fullscreen', fullscreen);
 
   panelStateCache.left = leftVisible;
@@ -800,7 +770,6 @@ store.subscribe((state) => {
   updateOverlay(overlayProfiler, state.overlays.profiler);
   updateOverlay(overlaySensor, state.overlays.sensor);
   updateRealtimeOverlay(state);
-  // updateHud(state); // legacy header HUD (kept for reference, replaced by F2 info overlay)
   updatePanels(state);
 
   const leftVisible = !!state.panels?.left;

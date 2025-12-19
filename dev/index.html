@@ -155,28 +155,6 @@ body.fullscreen {
     padding-right: 0;
   }
 }
-/* TODO(play): legacy header HUD styles (replaced by F2/F1 overlays).
-   Kept commented for now and can be deleted once the new overlays are stable.
-.app-header {
-  grid-column: 1 / -1;
-  display: none;
-}
-.app-header h1 {
-  margin: 0;
-  font-size: calc(14px * var(--viewer-font-scale));
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-#hud {
-  display: flex;
-  gap: 16px;
-  font-size: calc(12px * var(--viewer-font-scale));
-  color: var(--color-text-muted);
-}
-#hud span {
-  white-space: nowrap;
-}
-*/
   .panel {
     grid-row: 1;
     overflow-y: auto;
@@ -760,30 +738,6 @@ body.fullscreen {
   opacity: 1;
   transform: translateY(0);
 }
-/* TODO(play): legacy footer strip (hotkey summary).
-   The footer surface has been superseded by Help/Info overlays and is kept
-   commented out until we delete the HTML scaffolding entirely.
-.app-footer {
-  grid-column: 1 / -1;
-  grid-row: 3;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 12px 24px;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-border);
-  text-align: center;
-  z-index: 10;
-}
-.app-footer {
-  grid-area: footer;
-}
-.app-header {
-  grid-area: header;
-}
-*/
 /* Clean grid layout via template areas */
 .viewer {
   grid-area: main;
@@ -817,28 +771,6 @@ body.layout-main {
 </style>
  </head>
  <body class="layout-3col">
-  <!-- TODO(play): legacy header HUD scaffold (superseded by overlays).
-       Commented out for now; safe to delete once parity validation is complete.
-  <header class="app-header">
-   <h1>
-    Simulate Parity Scaffold
-   </h1>
-   <div id="hud">
-    <span data-testid="sim-time">
-     t = 0.000
-    </span>
-    <span data-testid="sim-status">
-     running
-    </span>
-    <span data-testid="camera-summary">
-     camera: Free
-    </span>
-    <span data-testid="perturb-state">
-     gesture: idle
-    </span>
-   </div>
-  </header>
-  -->
   <aside class="panel panel-left" data-testid="panel-left">
   </aside>
   <main class="viewer">
