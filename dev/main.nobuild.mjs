@@ -135,6 +135,116 @@ function splitBinding(binding) {
   return { scope, path };
 }
 
+function resolveBindingSpec(binding, control = null) {
+  if (!binding || typeof binding !== 'string') return null;
+  const raw = binding.trim();
+  if (!raw) return null;
+  switch (raw) {
+    case 'Simulate::help':
+      return { kind: 'overlay', key: 'help' };
+    case 'Simulate::info':
+      return { kind: 'overlay', key: 'info' };
+    case 'Simulate::profiler':
+      return { kind: 'overlay', key: 'profiler' };
+    case 'Simulate::sensor':
+      return { kind: 'overlay', key: 'sensor' };
+    case 'Simulate::fullscreen':
+      return { kind: 'overlay', key: 'fullscreen' };
+    case 'Simulate::vsync':
+      return { kind: 'overlay', key: 'vsync' };
+    case 'Simulate::busywait':
+      return { kind: 'overlay', key: 'busywait' };
+    case 'Simulate::pause_update':
+      return { kind: 'overlay', key: 'pauseUpdate' };
+    case 'Simulate::run':
+      return { kind: 'run' };
+    case 'Simulate::camera':
+      return { kind: 'camera' };
+    case 'Simulate::tracking_geom':
+      return { kind: 'tracking_geom' };
+    case 'Simulate::scrub_index':
+      return { kind: 'scrub_index' };
+    case 'Simulate::key':
+      return { kind: 'key_index' };
+    case 'Simulate::field':
+      return { kind: 'watch_field' };
+    case 'Simulate::index':
+      return { kind: 'watch_index' };
+    case 'Simulate::spacing':
+      return { kind: 'theme', key: 'spacing' };
+    case 'Simulate::color':
+      return { kind: 'theme', key: 'color' };
+    case 'Simulate::font':
+      return { kind: 'theme', key: 'font' };
+    case 'UpdateWatch':
+      return { kind: 'watch_summary' };
+    default:
+      break;
+  }
+
+  const groupMatch = raw.match(/^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/);
+  if (groupMatch) {
+    return { kind: 'group', group: groupMatch[1], index: Math.max(0, Math.trunc(toNumber(groupMatch[2]))) };
+  }
+
+  if (raw.startsWith('Simulate::disable[')) {
+    return {
+      kind: 'mask',
+      mask: 'disable',
+      name: control?.label ?? control?.name ?? raw,
+    };
+  }
+  if (raw.startsWith('Simulate::enable[')) {
+    return {
+      kind: 'mask',
+      mask: 'enable',
+      name: control?.label ?? control?.name ?? raw,
+    };
+  }
+  if (raw.startsWith('Simulate::enableactuator[')) {
+    return {
+      kind: 'mask',
+      mask: 'enableactuator',
+      name: control?.label ?? control?.name ?? raw,
+    };
+  }
+  if (raw.startsWith('Simulate::opt.')) {
+    const field = raw.slice('Simulate::opt.'.length);
+    if (field) return { kind: 'sim_opt', field };
+  }
+
+  const bindingParts = splitBinding(raw);
+  if (bindingParts) {
+    const { scope, path } = bindingParts;
+    if (scope === 'mjOption' || scope === 'mjVisual' || scope === 'mjStatistic') {
+      return { kind: 'struct', scope, path };
+    }
+  }
+
+  const voptMatch = raw.match(/^mjvOption::flags\[(\d+)\]$/);
+  if (voptMatch) {
+    return { kind: 'vopt_flag', index: Number(voptMatch[1]) };
+  }
+  const sceneMatch = raw.match(/^mjvScene::flags\[(\d+)\]$/);
+  if (sceneMatch) {
+    return { kind: 'scene_flag', index: Number(sceneMatch[1]) };
+  }
+  if (raw === 'mjvOption::label') return { kind: 'label_mode' };
+  if (raw === 'mjvOption::frame') return { kind: 'frame_mode' };
+
+  return { kind: 'unknown', binding: raw };
+}
+
+function getControlBindingSpec(control) {
+  if (!control || !control.binding) return null;
+  if (control.bindingSpec) return control.bindingSpec;
+  const spec = resolveBindingSpec(control.binding, control);
+  if (spec) {
+    control.bindingSpec = spec;
+  }
+  return spec;
+}
+
 function parseNumber(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
@@ -218,11 +328,6 @@ function normaliseValueByKind(kind, size, rawValue, control) {
   }
 }
 
-function toNumberOrZero(value) {
-  const num = parseNumber(value);
-  return num == null ? 0 : num;
-}
-
 function normaliseControlInput(control, rawValue) {
   if (!control) return rawValue;
   switch (control.type) {
@@ -230,16 +335,16 @@ function normaliseControlInput(control, rawValue) {
       return toBoolean(rawValue);
     case 'slider_int':
     case 'edit_int':
-      return Math.trunc(toNumberOrZero(rawValue));
+      return Math.trunc(toNumber(rawValue));
     case 'slider_float':
     case 'edit_float':
     case 'slider_num':
     case 'slidernum':
-      return toNumberOrZero(rawValue);
+      return toNumber(rawValue);
     case 'edit_vec3':
     case 'edit_vec3_string': {
       if (Array.isArray(rawValue)) {
-        return rawValue.map((value) => toNumberOrZero(value));
+        return rawValue.map((value) => toNumber(value));
       }
       if (typeof rawValue === 'string') {
         const parsed = parseVector(rawValue, 3);
@@ -1194,34 +1299,18 @@ function ensureThemeState(target) {
   }
   return target.theme;
 }
-function applyBinding(draft, binding, value, control) {
-  switch (binding) {
-    case 'Simulate::help':
-      draft.overlays.help = bool(value);
-      return true;
-    case 'Simulate::info':
-      draft.overlays.info = bool(value);
-      return true;
-    case 'Simulate::profiler':
-      draft.overlays.profiler = bool(value);
-      return true;
-    case 'Simulate::sensor':
-      draft.overlays.sensor = bool(value);
-      return true;
-    case 'Simulate::fullscreen':
-      draft.overlays.fullscreen = bool(value);
-      return true;
-    case 'Simulate::vsync':
-      draft.overlays.vsync = bool(value);
-      return true;
-    case 'Simulate::busywait':
-      draft.overlays.busywait = bool(value);
-      return true;
-    case 'Simulate::pause_update':
-      draft.overlays.pauseUpdate = bool(value);
-      return true;
-    case 'Simulate::spacing': {
-      const theme = ensureThemeState(draft);
+function applyBinding(draft, bindingOrSpec, value, control) {
+  const spec = typeof bindingOrSpec === 'string'
+    ? resolveBindingSpec(bindingOrSpec, control)
+    : bindingOrSpec;
+  if (!spec) return false;
+  if (spec.kind === 'overlay') {
+    draft.overlays[spec.key] = bool(value);
+    return true;
+  }
+  if (spec.kind === 'theme') {
+    const theme = ensureThemeState(draft);
+    if (spec.key === 'spacing') {
       let idx = 0;
       if (typeof value === 'number') {
         idx = Math.max(0, Math.trunc(value));
@@ -1238,8 +1327,7 @@ function applyBinding(draft, binding, value, control) {
       theme.spacing = idx;
       return true;
     }
-    case 'Simulate::color': {
-      const theme = ensureThemeState(draft);
+    if (spec.key === 'color') {
       let idx = 0;
       if (typeof value === 'number') {
         idx = Math.max(0, Math.trunc(value));
@@ -1258,8 +1346,7 @@ function applyBinding(draft, binding, value, control) {
       theme.color = idx;
       return true;
     }
-    case 'Simulate::font': {
-      const theme = ensureThemeState(draft);
+    if (spec.key === 'font') {
       const options = Array.isArray(control?.options) ? control.options : [];
       let idx = 0;
       if (typeof value === 'number') {
@@ -1288,13 +1375,12 @@ function applyBinding(draft, binding, value, control) {
       theme.font = idx;
       return true;
     }
-    case 'Simulate::tracking_geom': {
-      const geomIdx = Math.trunc(toNumber(value));
-      draft.runtime.trackingGeom = Number.isFinite(geomIdx) ? geomIdx : -1;
-      return true;
-    }
-    default:
-      break;
+    return false;
+  }
+  if (spec.kind === 'tracking_geom') {
+    const geomIdx = Math.trunc(toNumber(value));
+    draft.runtime.trackingGeom = Number.isFinite(geomIdx) ? geomIdx : -1;
+    return true;
   }
   return false;
 }
@@ -1365,125 +1451,86 @@ function applyControl(draft, control, value) {
   }
   const binding = control.binding;
   if (binding) {
-    return applyBinding(draft, binding, value, control);
+    const spec = getControlBindingSpec(control) || binding;
+    return applyBinding(draft, spec, value, control);
   }
   return false;
 }
 
-function readBindingValue(state, binding, control) {
-  switch (binding) {
-    case 'Simulate::help':
-      return !!state.overlays.help;
-    case 'Simulate::info':
-      return !!state.overlays.info;
-    case 'Simulate::profiler':
-      return !!state.overlays.profiler;
-    case 'Simulate::sensor':
-      return !!state.overlays.sensor;
-    case 'Simulate::fullscreen':
-      return !!state.overlays.fullscreen;
-    case 'Simulate::vsync':
-      return !!state.overlays.vsync;
-    case 'Simulate::busywait':
-      return !!state.overlays.busywait;
-    case 'Simulate::pause_update':
-      return !!state.overlays.pauseUpdate;
-    case 'Simulate::run':
+function readBindingValue(state, bindingOrSpec, control) {
+  const spec = typeof bindingOrSpec === 'string'
+    ? resolveBindingSpec(bindingOrSpec, control)
+    : bindingOrSpec;
+  if (!spec) return undefined;
+  switch (spec.kind) {
+    case 'overlay':
+      return !!state.overlays?.[spec.key];
+    case 'run':
       if (control && Array.isArray(control.options)) {
         return state.simulation.run ? control.options[1] ?? 'Run' : control.options[0] ?? 'Pause';
       }
       return state.simulation.run;
-    case 'Simulate::camera':
+    case 'camera':
       return state.runtime.cameraIndex | 0;
-    case 'Simulate::tracking_geom':
+    case 'tracking_geom':
       return Number.isFinite(state.runtime.trackingGeom) ? state.runtime.trackingGeom : -1;
-    case 'Simulate::scrub_index':
+    case 'scrub_index':
       return state.simulation.scrubIndex | 0;
-    case 'Simulate::key':
+    case 'key_index':
       return state.simulation.keyIndex | 0;
-    case 'Simulate::field':
+    case 'watch_field':
       return state.watch?.field ?? 'qpos';
-    case 'Simulate::index':
+    case 'watch_index':
       return Number.isFinite(state.watch?.index) ? state.watch.index | 0 : 0;
-    case 'Simulate::spacing':
-      return Number.isFinite(state.theme?.spacing) ? state.theme.spacing | 0 : 0;
-    case 'Simulate::color':
-      return Number.isFinite(state.theme?.color) ? state.theme.color | 0 : 0;
-    case 'Simulate::font':
-      return Number.isFinite(state.theme?.font) ? state.theme.font | 0 : 0;
-    case 'UpdateWatch': {
+    case 'theme':
+      return Number.isFinite(state.theme?.[spec.key]) ? state.theme[spec.key] | 0 : 0;
+    case 'watch_summary': {
       if (state.watch?.summary) return state.watch.summary;
       if (typeof state.watch?.value === 'number' && Number.isFinite(state.watch.value)) {
         return state.watch.value.toFixed(6);
       }
       return '—';
     }
+    case 'group': {
+      const groups = state.rendering?.groups;
+      const arr = Array.isArray(groups?.[spec.group]) ? groups[spec.group] : null;
+      if (!arr) return true;
+      if (spec.index >= 0 && spec.index < arr.length) {
+        return !!arr[spec.index];
+      }
+      return true;
+    }
+    case 'mask': {
+      const name = spec.name ?? spec.binding ?? '';
+      if (spec.mask === 'disable') return !!state.physics.disableFlags[name];
+      if (spec.mask === 'enable') return !!state.physics.enableFlags[name];
+      if (spec.mask === 'enableactuator') return !!state.physics.actuatorGroups[name];
+      return undefined;
+    }
+    case 'sim_opt':
+      return state.rendering?.[spec.field] ?? 0;
+    case 'struct': {
+      if (spec.scope === 'mjOption') {
+        return resolveStructPath(state.model?.opt, spec.path);
+      }
+      if (spec.scope === 'mjVisual') {
+        return resolveStructPath(state.model?.vis, spec.path);
+      }
+      if (spec.scope === 'mjStatistic') {
+        return resolveStructPath(state.model?.stat, spec.path);
+      }
+      return undefined;
+    }
+    case 'vopt_flag':
+      return !!state.rendering?.voptFlags?.[spec.index];
+    case 'scene_flag':
+      return !!state.rendering?.sceneFlags?.[spec.index];
+    case 'label_mode':
+      return state.rendering?.labelMode ?? 0;
+    case 'frame_mode':
+      return state.rendering?.frameMode ?? 0;
     default:
       break;
-  }
-
-  const groupMatch = binding?.match(/^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/);
-  if (groupMatch) {
-    const type = groupMatch[1];
-    const idx = Math.max(0, Math.trunc(toNumber(groupMatch[2])));
-    const groups = state.rendering?.groups;
-    const arr = Array.isArray(groups?.[type]) ? groups[type] : null;
-    if (!arr) return true;
-    if (idx >= 0 && idx < arr.length) {
-      return !!arr[idx];
-    }
-    return true;
-  }
-
-  if (binding?.startsWith('Simulate::disable[')) {
-    const name = control?.label ?? control?.name ?? binding;
-    return !!state.physics.disableFlags[name];
-  }
-  if (binding?.startsWith('Simulate::enable[')) {
-    const name = control?.label ?? control?.name ?? binding;
-    return !!state.physics.enableFlags[name];
-  }
-  if (binding?.startsWith('Simulate::enableactuator[')) {
-    const name = control?.label ?? control?.name ?? binding;
-    return !!state.physics.actuatorGroups[name];
-  }
-  if (binding?.startsWith('Simulate::opt.')) {
-    const field = binding.slice('Simulate::opt.'.length);
-    if (field) {
-      return state.rendering?.[field] ?? 0;
-    }
-  }
-  const bindingParts = splitBinding(binding);
-  if (bindingParts) {
-    const { scope, path } = bindingParts;
-    if (scope === 'mjOption') {
-      const value = resolveStructPath(state.model?.opt, path);
-      return value;
-    }
-    if (scope === 'mjVisual') {
-      const value = resolveStructPath(state.model?.vis, path);
-      return value;
-    }
-    if (scope === 'mjStatistic') {
-      const value = resolveStructPath(state.model?.stat, path);
-      return value;
-    }
-  }
-  const voptMatch = binding?.match(/^mjvOption::flags\[(\d+)\]$/);
-  if (voptMatch) {
-    const idx = Number(voptMatch[1]);
-    return !!state.rendering?.voptFlags?.[idx];
-  }
-  const sceneMatch = binding?.match(/^mjvScene::flags\[(\d+)\]$/);
-  if (sceneMatch) {
-    const idx = Number(sceneMatch[1]);
-    return !!state.rendering?.sceneFlags?.[idx];
-  }
-  if (binding === 'mjvOption::label') {
-    return state.rendering?.labelMode ?? 0;
-  }
-  if (binding === 'mjvOption::frame') {
-    return state.rendering?.frameMode ?? 0;
   }
   return undefined;
 }
@@ -1500,10 +1547,22 @@ function readControlValue(state, control) {
   }
   if (control.item_id === 'file.quit') return null;
   if (control.binding) {
-    return readBindingValue(state, control.binding, control);
+    const spec = getControlBindingSpec(control) || control.binding;
+    return readBindingValue(state, spec, control);
   }
   return undefined;
 }
+
+const LOCAL_CONTROL_IDS = new Set([
+  'simulation.reset',
+  'simulation.reload',
+  'simulation.align',
+  'simulation.copy_state',
+  'simulation.save_key',
+  'simulation.load_key',
+  'file.quit',
+  'option.help-toggle',
+]);
 
 function createViewerStore(initialState) {
   let state = deepMerge(DEFAULT_VIEWER_STATE, initialState);
@@ -1566,6 +1625,15 @@ async function applySpecAction(store, backend, control, rawValue) {
     }
     return;
   }
+  const bindingSpec = getControlBindingSpec(control);
+  const shouldApplyLocal =
+    LOCAL_CONTROL_IDS.has(control.item_id)
+    || (bindingSpec && (bindingSpec.kind === 'overlay' || bindingSpec.kind === 'theme' || bindingSpec.kind === 'tracking_geom'));
+  if (shouldApplyLocal) {
+    store.update((draft) => {
+      applyControl(draft, control, value);
+    });
+  }
   const isRunToggle = control.item_id === 'simulation.run' && typeof backend?.setRunState === 'function';
   let snapshot = null;
   if (backend) {
@@ -1580,13 +1648,11 @@ async function applySpecAction(store, backend, control, rawValue) {
       logError('[backend.apply] failed', err);
     }
   }
-
-  store.update((draft) => {
-    applyControl(draft, control, value);
-    if (snapshot) {
+  if (snapshot) {
+    store.update((draft) => {
       mergeBackendSnapshot(draft, snapshot);
-    }
-  });
+    });
+  }
 }
 
 function applyGesture(store, backend, payload) {
@@ -9698,101 +9764,6 @@ function createRendererManager({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
 
-    // Snapshot helpers: readiness + PBR export of final frame
-    if (typeof window !== 'undefined' && (!window.exportPNG || !window.whenReady)) {
-      window.whenReady = async () => {
-        try {
-          const r = renderer;
-          const scn = sceneWorld;
-          const cam = (ctx && ctx.camera) ? ctx.camera : camera;
-          if (!r || !scn || !cam) return false;
-          const texReady = () => {
-            const env = scn.environment;
-            return !!env && !!env.isTexture && env.isRenderTargetTexture !== true;
-          };
-          const drew = () => (r.info?.render?.triangles || 0) > 0 || (window.__drawnCount || 0) > 3;
-          const compiled = () => (Array.isArray(r.info?.programs) ? r.info.programs.length > 0 : true);
-          for (let i = 0; i < 120; i += 1) {
-            await new Promise((res) => requestAnimationFrame(res));
-            if (texReady() && drew() && compiled()) break;
-          }
-          return true;
-        } finally {
-          window.__ready = true;
-        }
-      };
-
-      // Export exactly the current frame as seen on screen (no state changes)
-      window.exportExactPNG = async () => {
-        await (window.whenReady ? window.whenReady() : Promise.resolve());
-        const r = renderer;
-        const scn = sceneWorld;
-        const cam = (ctx && ctx.camera) ? ctx.camera : camera;
-        if (!r || !scn || !cam) return null;
-        r.setRenderTarget?.(null);
-        renderWorldScene(ctx, r, { camera: cam });
-        const url = r.domElement && typeof r.domElement.toDataURL === 'function'
-          ? r.domElement.toDataURL('image/png')
-          : null;
-        window.__viewerCanvasDataUrlLength = url ? url.length : 0;
-        return url || null;
-      };
-
-      window.exportPNG = async () => {
-        await (window.whenReady ? window.whenReady() : Promise.resolve());
-        const r = renderer;
-        const scn = sceneWorld;
-        const cam = (ctx && ctx.camera) ? ctx.camera : camera;
-        if (!r || !scn || !cam) return null;
-
-        const gl = typeof r.getContext === 'function' ? r.getContext() : null;
-        if (gl && typeof gl.enable === 'function' && typeof gl.depthMask === 'function') {
-          gl.enable(gl.DEPTH_TEST);
-          gl.depthMask(true);
-        }
-
-        const saved = [];
-        let primaryErr = null;
-        try {
-          scn.traverse((o) => {
-            if (o && o.isMesh && o.material) {
-              saved.push([o, {
-                dt: !!o.material.depthTest,
-                dw: !!o.material.depthWrite,
-                tr: !!o.material.transparent,
-                ro: Number(o.renderOrder || 0),
-              }]);
-              if ('depthTest' in o.material) o.material.depthTest = true;
-              if ('depthWrite' in o.material) o.material.depthWrite = true;
-              if ('transparent' in o.material) o.material.transparent = false;
-              o.renderOrder = 0;
-            }
-          });
-          r.setRenderTarget?.(null);
-          renderWorldScene(ctx, r, { camera: cam });
-          const url = r.domElement?.toDataURL?.('image/png') || null;
-          window.__viewerCanvasDataUrlLength = url ? url.length : 0;
-          return url;
-        } catch (err) {
-          primaryErr = err;
-          logWarn('[render] exportPNG failed', err);
-          throw err;
-        } finally {
-          try {
-            for (const [o, m] of saved) {
-              o.material.depthTest = m.dt;
-              o.material.depthWrite = m.dw;
-              o.material.transparent = m.tr;
-              o.renderOrder = m.ro;
-            }
-          } catch (err) {
-            logWarn('[render] exportPNG restore failed', err);
-            if (!primaryErr) throw err;
-          }
-        }
-      };
-    }
-
     const sceneWorld = new THREE.Scene();
 
     const ambient = new THREE.AmbientLight(0xffffff, 0);
@@ -11941,33 +11912,6 @@ function formatNumberTrimmed(value) {
   return fixed.replace(/\.?0+$/, '');
 }
 
-function parseVectorInput(value, length) {
-  if (Array.isArray(value)) {
-    const arr = value.map((entry) => Number(entry));
-    return arr.length === length && arr.every((n) => Number.isFinite(n)) ? arr : null;
-  }
-  if (value && typeof value === 'object') {
-    const iterator = value[Symbol.iterator];
-    const hasIterator = typeof iterator === 'function';
-    const hasLength = Number.isFinite(value.length) && value.length >= 0;
-    if (hasIterator || hasLength) {
-      const arr = Array.from(value, (entry) => Number(entry));
-      return arr.length === length && arr.every((n) => Number.isFinite(n)) ? arr : null;
-    }
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    const tokens = trimmed.split(/\s+/).filter(Boolean);
-    if (tokens.length !== length) return null;
-    const arr = tokens.map((token) => Number(token));
-    return arr.every((n) => Number.isFinite(n)) ? arr : null;
-  }
-  if (typeof value === 'number' && length === 1) {
-    return Number.isFinite(value) ? [Number(value)] : null;
-  }
-  return null;
-}
 
 function attachCommitHandlers(input, binding, commit) {
   input.addEventListener('focus', () => {
@@ -12382,6 +12326,9 @@ function shortcutFromEvent(event) {
   function registerControl(control, binding) {
     controlById.set(control.item_id, control);
     controlBindings.set(control.item_id, binding);
+    if (control?.binding) {
+      getControlBindingSpec(control);
+    }
   }
 
   function createBinding(control, { getValue, applyValue }) {
@@ -13422,7 +13369,7 @@ function shortcutFromEvent(event) {
       getValue: () => lastValidText || input.value,
       applyValue: (value) => {
         if (value === undefined || value === null) return;
-        const parsed = parseVectorInput(value, targetLength);
+        const parsed = parseVector(value, targetLength);
         if (parsed) {
           lastValidText = formatVector(parsed);
           setInputText(lastValidText);
@@ -13464,7 +13411,7 @@ function shortcutFromEvent(event) {
     };
 
     const commit = guardBinding(binding, async () => {
-      const parsed = parseVectorInput(input.value, targetLength);
+      const parsed = parseVector(input.value, targetLength);
       if (parsed) {
         lastValidText = formatVector(parsed);
         setInputText(lastValidText);
@@ -15557,168 +15504,9 @@ function applySnapshot(snapshot) {
     window.__lastSnapshot = snapshot;
   }
 }
-
-function nameForObjType(objType) {
-  const t = objType | 0;
-  if (t === 5) return 'GEOM';
-  if (t === 6) return 'SITE';
-  if (t === 18) return 'TENDON';
-  if (t === 9) return 'FLEX';
-  if (t === 11) return 'SKIN';
-  if (t === 1) return 'BODY';
-  return String(t);
-}
-
-function summarizeGeomOrder(snapshot, order) {
-  const n = snapshot?.scn_ngeom | 0;
-  const objType = snapshot?.scn_objtype || null;
-  const transparent = snapshot?.scn_transparent || null;
-  if (!objType || objType.length < n) throw new Error('Missing scn_objtype');
-  if (!transparent || transparent.length < n) throw new Error('Missing scn_transparent');
-  const counts = Object.create(null);
-  let transparentCount = 0;
-  for (let i = 0; i < n; i += 1) {
-    const t = objType[i] | 0;
-    const key = nameForObjType(t);
-    counts[key] = (counts[key] || 0) + 1;
-    if ((transparent[i] | 0) !== 0) transparentCount += 1;
-  }
-  const runs = [];
-  let lastType = null;
-  let lastName = null;
-  let runLen = 0;
-  const nn = Math.min(n, order?.length | 0);
-  for (let k = 0; k < nn; k += 1) {
-    const si = order[k] | 0;
-    const t = objType[si] | 0;
-    const name = nameForObjType(t);
-    if (lastType === null) {
-      lastType = t;
-      lastName = name;
-      runLen = 1;
-      continue;
-    }
-    if (t === lastType) {
-      runLen += 1;
-      continue;
-    }
-    runs.push({ type: lastType, name: lastName, len: runLen });
-    lastType = t;
-    lastName = name;
-    runLen = 1;
-  }
-  if (lastType !== null) runs.push({ type: lastType, name: lastName, len: runLen });
-  return {
-    scn_ngeom: n,
-    transparentCount,
-    opaqueCount: n - transparentCount,
-    objTypeCounts: counts,
-    runs,
-    transitions: Math.max(0, runs.length - 1),
-  };
-}
-
-function summarizeTransparentFlags(view, n) {
-  const out = { present: false, n: 0, nonZero: 0, uniqueFirst32: null, min: null, max: null };
-  if (!view || !(n > 0) || view.length < n) return out;
-  out.present = true;
-  out.n = n | 0;
-  let nonZero = 0;
-  let min = Number.POSITIVE_INFINITY;
-  let max = Number.NEGATIVE_INFINITY;
-  const uniq = new Set();
-  const take = Math.min(32, n);
-  for (let i = 0; i < n; i += 1) {
-    const v = view[i] | 0;
-    if (v !== 0) nonZero += 1;
-    if (v < min) min = v;
-    if (v > max) max = v;
-    if (i < take) uniq.add(v);
-  }
-  out.nonZero = nonZero;
-  out.min = Number.isFinite(min) ? min : null;
-  out.max = Number.isFinite(max) ? max : null;
-  out.uniqueFirst32 = uniq.size;
-  return out;
-}
-
-function summarizeGeomOrderList(snapshot, order, { prefixLen } = {}) {
-  const n = snapshot?.scn_ngeom | 0;
-  if (!(n > 0)) throw new Error('No scene geoms (scn_ngeom <= 0)');
-  if (!order || order.length < n) throw new Error('Missing scn_geomorder');
-  const objType = snapshot?.scn_objtype || null;
-  const transparent = snapshot?.scn_transparent || null;
-  if (!objType || objType.length < n) throw new Error('Missing scn_objtype');
-
-  const take = Math.max(0, Math.min(n, Number(prefixLen) | 0 || 0));
-  const seen = new Uint8Array(n);
-  let outOfRange = 0;
-  let duplicate = 0;
-  let transparentMismatch = 0;
-  const counts = Object.create(null);
-
-  for (let k = 0; k < take; k += 1) {
-    const i = order[k] | 0;
-    if (i < 0 || i >= n) {
-      outOfRange += 1;
-      continue;
-    }
-    if (seen[i]) {
-      duplicate += 1;
-      continue;
-    }
-    seen[i] = 1;
-    const key = nameForObjType(objType[i] | 0);
-    counts[key] = (counts[key] || 0) + 1;
-    if (transparent && transparent.length >= n && (transparent[i] | 0) === 0) {
-      transparentMismatch += 1;
-    }
-  }
-
-  return {
-    prefixLen: take,
-    outOfRange,
-    duplicate,
-    transparentMismatch: (transparent && transparent.length >= n) ? transparentMismatch : null,
-    objTypeCounts: counts,
-  };
-}
-
 if (typeof window !== 'undefined') {
-  window.__PLAY_DUMP_GEOMORDER = (options = {}) => {
-    const snapshot = options.snapshot || window.__lastSnapshot || null;
-    if (!snapshot) throw new Error('No snapshot available');
-    const n = snapshot?.scn_ngeom | 0;
-    if (!(n > 0)) throw new Error('No scene geoms (scn_ngeom <= 0)');
-    const wasmOrder = snapshot?.scn_geomorder || null;
-    const transparentView = snapshot?.scn_transparent || null;
-    const transparentSummary = summarizeTransparentFlags(transparentView, n);
-    const nt = transparentSummary.present ? (transparentSummary.nonZero | 0) : null;
-    const prefixLen = (typeof nt === 'number' && nt >= 0) ? nt : 0;
-    const orderPrefixSummary = wasmOrder ? summarizeGeomOrderList(snapshot, wasmOrder, { prefixLen }) : null;
-    const prefixRuns = (wasmOrder && prefixLen > 0) ? summarizeGeomOrder(snapshot, wasmOrder.subarray(0, prefixLen)) : null;
-    const payload = {
-      scn_ngeom: n,
-      geomorder: {
-        present: !!wasmOrder,
-        len: wasmOrder?.length ?? 0,
-      },
-      transparent: transparentSummary,
-      expected: {
-        transparentCount: nt,
-        geomorderPrefixLen: prefixLen,
-      },
-      orderPrefixSummary,
-      orderPrefixRuns: prefixRuns,
-    };
-    if (options.log !== false) {
-      // eslint-disable-next-line no-console
-      logDebug('[PLAY] geomorder dump', payload);
-    }
-    return payload;
-  };
+  window.__PLAY_DUMP_GEOMORDER = () => ({ disabled: true });
 }
-
 let pendingRenderFrame = false;
 let renderSceneDirty = false;
 function scheduleRenderScene() {
