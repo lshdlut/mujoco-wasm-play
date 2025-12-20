@@ -1,6 +1,4 @@
-import { prefetchBindingIndex, prepareBindingUpdate, splitBinding } from './viewer_bindings.mjs';
 import { VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
-import { VISUAL_FIELD_GROUPS } from './visual_field_groups.mjs';
 import {
   DEFAULT_REALTIME_INDEX,
   DEFAULT_VOPT_FLAGS,
@@ -24,6 +22,301 @@ import {
 // buildless viewer. Type definitions are provided separately in viewer_state_types.ts.
 
 const VISUAL_FLOAT_TOLERANCE = 1e-4;
+
+const VISUAL_FIELD_GROUPS = [
+  {
+    id: 'headlight',
+    label: 'Headlight',
+    fields: [
+      ['headlight', 'active'],
+      ['headlight', 'ambient'],
+      ['headlight', 'diffuse'],
+      ['headlight', 'specular'],
+    ],
+    consumers: ['lighting'],
+  },
+  {
+    id: 'fog',
+    label: 'Fog',
+    fields: [
+      ['map', 'fogstart'],
+      ['map', 'fogend'],
+      ['rgba', 'fog'],
+    ],
+    sceneFlagIndex: 5,
+    consumers: ['fog'],
+  },
+  {
+    id: 'haze',
+    label: 'Haze',
+    fields: [
+      ['map', 'haze'],
+      ['rgba', 'haze'],
+    ],
+    sceneFlagIndex: 6,
+    consumers: ['haze'],
+  },
+  {
+    id: 'contact_points',
+    label: 'Contact Points',
+    fields: [
+      ['scale', 'contactwidth'],
+      ['scale', 'contactheight'],
+      ['rgba', 'contact'],
+    ],
+    voptFlagIndex: 14,
+    consumers: ['contact_points'],
+  },
+  {
+    id: 'contact_forces',
+    label: 'Contact Forces',
+    fields: [
+      ['map', 'force'],
+      ['scale', 'forcewidth'],
+      ['rgba', 'contactforce'],
+    ],
+    voptFlagIndex: 16,
+    consumers: ['contact_forces'],
+  },
+  {
+    id: 'select_point',
+    label: 'Select Point',
+    fields: [
+      ['scale', 'selectpoint'],
+      ['rgba', 'selectpoint'],
+    ],
+    consumers: ['selection'],
+  },
+];
+
+let bindingIndex = null;
+let bindingIndexPromise = null;
+
+async function ensureBindingIndex() {
+  if (bindingIndex) return bindingIndex;
+  if (!bindingIndexPromise) {
+    // Struct/binding index lives under dev/spec/; resolve relative to the
+    // viewer module so both local dev (dev/) and GitHub Pages
+    // (/mujoco-wasm-play/dev/) layouts work.
+    const url = new URL('./spec/ui_bindings_index.json', import.meta.url);
+    bindingIndexPromise = fetch(url, { cache: 'no-store' })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load ui_bindings_index.json (${res.status})`);
+        return res.json();
+      })
+      .then((json) => json)
+      .catch((err) => {
+        logError('[bindings] load failed', err);
+        throw err;
+      });
+  }
+  bindingIndex = await bindingIndexPromise;
+  return bindingIndex;
+}
+
+async function prefetchBindingIndex() {
+  return ensureBindingIndex();
+}
+
+function splitBinding(binding) {
+  if (!binding || typeof binding !== 'string') return null;
+  const [scope, rest] = binding.split('::');
+  if (!scope || !rest) return null;
+  const path = rest.split('.');
+  return { scope, path };
+}
+
+function parseNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function parseVector(value, length) {
+  if (Array.isArray(value)) {
+    const arr = value.map((v) => Number(v));
+    return arr.every((n) => Number.isFinite(n)) && (!length || arr.length === length) ? arr : null;
+  }
+  if (typeof value === 'string') {
+    const tokens = value.trim().split(/\s+/).filter(Boolean);
+    if (length && tokens.length !== length) return null;
+    const arr = tokens.map((token) => Number(token));
+    return arr.every((n) => Number.isFinite(n)) ? arr : null;
+  }
+  if (value && typeof value === 'object') {
+    try {
+      const arr = Array.from(value, (v) => Number(v));
+      if (arr.every((n) => Number.isFinite(n)) && (!length || arr.length === length)) {
+        return arr;
+      }
+    } catch {}
+  }
+  const numeric = parseNumber(value);
+  if (numeric == null) return null;
+  const arr = [numeric];
+  return length && length !== 1 ? null : arr;
+}
+
+function toBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const token = value.trim().toLowerCase();
+    return token === '1' || token === 'true' || token === 'yes' || token === 'on';
+  }
+  if (value && typeof value === 'object') {
+    if ('checked' in value) return !!value.checked;
+    if ('value' in value) return toBoolean(value.value);
+  }
+  return !!value;
+}
+
+function normaliseEnumValue(control, rawValue) {
+  if (!control) return null;
+  const options = Array.isArray(control.options)
+    ? control.options.map((opt) => String(opt))
+    : [];
+  if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+    return rawValue | 0;
+  }
+  const token = String(rawValue ?? '').trim();
+  const idx = options.findIndex((opt) => opt === token);
+  if (idx >= 0) return idx;
+  if (token) {
+    const numeric = Number(token);
+    if (Number.isFinite(numeric)) return numeric | 0;
+  }
+  return null;
+}
+
+function normaliseValueByKind(kind, size, rawValue, control) {
+  switch (kind) {
+    case 'float':
+      return parseNumber(rawValue);
+    case 'float_vec':
+      return parseVector(rawValue, size);
+    case 'int': {
+      const intVal = parseNumber(rawValue);
+      return intVal != null ? intVal | 0 : null;
+    }
+    case 'enum':
+      return normaliseEnumValue(control, rawValue);
+    case 'bool':
+      return toBoolean(rawValue);
+    case 'string':
+      return rawValue == null ? '' : String(rawValue);
+    default:
+      return null;
+  }
+}
+
+function toNumberOrZero(value) {
+  const num = parseNumber(value);
+  return num == null ? 0 : num;
+}
+
+function normaliseControlInput(control, rawValue) {
+  if (!control) return rawValue;
+  switch (control.type) {
+    case 'checkbox':
+      return toBoolean(rawValue);
+    case 'slider_int':
+    case 'edit_int':
+      return Math.trunc(toNumberOrZero(rawValue));
+    case 'slider_float':
+    case 'edit_float':
+    case 'slider_num':
+    case 'slidernum':
+      return toNumberOrZero(rawValue);
+    case 'edit_vec3':
+    case 'edit_vec3_string': {
+      if (Array.isArray(rawValue)) {
+        return rawValue.map((value) => toNumberOrZero(value));
+      }
+      if (typeof rawValue === 'string') {
+        const parsed = parseVector(rawValue, 3);
+        if (parsed) return parsed;
+        return rawValue.trim();
+      }
+      return rawValue ?? '';
+    }
+    case 'edit_rgba':
+      if (Array.isArray(rawValue)) {
+        return rawValue.map((value) => String(value ?? '')).join(' ');
+      }
+      if (rawValue === null || rawValue === undefined) return '';
+      return String(rawValue).trim();
+    case 'radio':
+      if (typeof rawValue === 'string') {
+        if (control?.item_id === 'simulation.run') {
+          return rawValue.toLowerCase() !== 'pause';
+        }
+        return rawValue;
+      }
+      if (Array.isArray(control.options) && typeof rawValue === 'number') {
+        return control.options[rawValue] ?? control.options[0];
+      }
+      if (control?.item_id === 'simulation.run') {
+        return toBoolean(rawValue);
+      }
+      return rawValue;
+    case 'select':
+      return rawValue;
+    default:
+      return rawValue;
+  }
+}
+
+async function prepareBindingUpdate(control, rawValue) {
+  const bindingRaw = control?.binding;
+  const binding = typeof bindingRaw === 'string' ? bindingRaw.trim() : bindingRaw;
+  if (!binding || typeof binding !== 'string') return null;
+  if (binding === 'Simulate::run') return null;
+  const meta = await ensureBindingIndex();
+  const entry = meta?.[binding];
+  if (!entry || !entry.value) {
+    logWarn('[bindings] no binding metadata for', binding);
+    return null;
+  }
+  const bindingParts = splitBinding(binding);
+  if (!bindingParts) return null;
+  // Simulate-level bindings are handled explicitly in the backend; do not
+  // try to treat them as struct-backed fields here.
+  if (bindingParts.scope === 'Simulate') {
+    if (
+      binding.startsWith('Simulate::disable[')
+      || binding.startsWith('Simulate::enable[')
+      || binding.startsWith('Simulate::enableactuator[')
+    ) {
+      return null;
+    }
+  }
+  if (bindingParts.scope === 'mjvOption' || bindingParts.scope === 'mjvScene') {
+    return null;
+  }
+  const { scope, path } = bindingParts;
+  const kind = entry.value.kind || 'float';
+  const size = entry.value.size || 1;
+  if (kind === 'static') return null;
+  const normalised = normaliseValueByKind(kind, size, rawValue, control);
+  if (normalised == null) {
+    logWarn('[bindings] unable to normalise value for', binding, rawValue);
+    if (control && typeof control.binding === 'string' && control.binding.startsWith('mjVisual::headlight.')) {
+      try {
+        addToast(`[${control.label || 'headlight'}] invalid vector input`);
+      } catch {}
+    }
+    return null;
+  }
+  return {
+    meta: {
+      scope,
+      path,
+      kind,
+      size,
+    },
+    value: normalised,
+  };
+}
 
 function createDefaultHistoryState() {
   return {
@@ -472,62 +765,6 @@ function toNumber(value) {
   if (typeof value === 'number') return value;
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
-}
-
-function normaliseControlValue(control, raw) {
-  if (!control) return raw;
-  switch (control.type) {
-    case 'checkbox':
-      return bool(raw);
-    case 'slider_int':
-    case 'edit_int':
-      return Math.trunc(toNumber(raw));
-    case 'slider_float':
-    case 'edit_float':
-    case 'slider_num':
-    case 'slidernum':
-      return toNumber(raw);
-    case 'edit_vec3':
-    case 'edit_vec3_string': {
-      if (Array.isArray(raw)) {
-        return raw.map((value) => toNumber(value));
-      }
-      if (typeof raw === 'string') {
-        const tokens = raw
-          .trim()
-          .split(/\s+/)
-          .map((token) => Number(token))
-          .filter((num) => Number.isFinite(num));
-        if (tokens.length === 3) return tokens;
-        return raw.trim();
-      }
-      return raw ?? '';
-    }
-    case 'edit_rgba':
-      if (Array.isArray(raw)) {
-        return raw.map((value) => String(value ?? '')).join(' ');
-      }
-      if (raw === null || raw === undefined) return '';
-      return String(raw).trim();
-    case 'radio':
-      if (typeof raw === 'string') {
-        if (control?.item_id === 'simulation.run') {
-          return raw.toLowerCase() !== 'pause';
-        }
-        return raw;
-      }
-      if (Array.isArray(control.options) && typeof raw === 'number') {
-        return control.options[raw] ?? control.options[0];
-      }
-      if (control?.item_id === 'simulation.run') {
-        return bool(raw);
-      }
-      return raw;
-    case 'select':
-      return raw;
-    default:
-      return raw;
-  }
 }
 
 function cameraLabelFromIndex(index, cameras = []) {
@@ -1305,7 +1542,7 @@ export function createViewerStore(initialState) {
 
 export async function applySpecAction(store, backend, control, rawValue) {
   if (!control) return;
-  const value = normaliseControlValue(control, rawValue);
+  const value = normaliseControlInput(control, rawValue);
   if (control.item_id === 'option.visual_source') {
     let nextMode = 'model';
     if (typeof value === 'string') {
@@ -2585,6 +2822,251 @@ async function loadDefaultXml() {
   lastXmlText = typeof initialXml === 'string' ? initialXml : String(initialXml ?? '');
   await restartWorkerWithXml(initialXml);
 
+  const uiHandlers = new Map([
+    ['simulation.history_scrubber', (value) => {
+      const offset = Math.min(0, normaliseInt(value, 0));
+      try { client.postMessage?.({ cmd: 'historyScrub', offset }); } catch (err) {
+        logWarn('[backend history] post failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['simulation.key_slider', (value) => {
+      const index = Math.max(-1, normaliseInt(value, -1));
+      try {
+        client.postMessage?.({ cmd: 'keyframeSelect', index });
+      } catch (err) {
+        logWarn('[backend keyframe select] failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['simulation.save_key', () => {
+      const index = normaliseInt(lastSnapshot.keyIndex ?? -1, -1);
+      try { client.postMessage?.({ cmd: 'keyframeSave', index }); } catch (err) {
+        logWarn('[backend keyframe save] failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['simulation.load_key', () => {
+      const index = Math.max(0, normaliseInt(lastSnapshot.keyIndex ?? 0, 0));
+      try { client.postMessage?.({ cmd: 'keyframeLoad', index }); } catch (err) {
+        logWarn('[backend keyframe load] failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['watch.field', (value) => {
+      const field = typeof value === 'string' ? value.trim() : '';
+      const nextField = field.length > 0 ? field : (lastSnapshot.watch?.field || '');
+      if (!nextField) return true;
+      try {
+        client.postMessage?.({
+          cmd: 'setWatch',
+          field: nextField,
+          index: Number.isFinite(lastSnapshot.watch?.index) ? (lastSnapshot.watch.index | 0) : 0,
+        });
+      } catch (err) {
+        logWarn('[backend watch field] failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['watch.index', (value) => {
+      const target = Math.max(0, normaliseInt(value, 0));
+      try {
+        client.postMessage?.({
+          cmd: 'setWatch',
+          field: lastSnapshot.watch?.field,
+          index: target,
+        });
+      } catch (err) {
+        logWarn('[backend watch index] failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['control.actuator', (value) => {
+      try {
+        const idx = Number(value?.index ?? value?.i ?? value?.id);
+        const v = Number(value?.value ?? value?.v ?? 0);
+        if (Number.isFinite(idx) && idx >= 0) {
+          client.postMessage?.({ cmd: 'setCtrl', index: idx | 0, value: v });
+        }
+      } catch (err) {
+        logWarn('[backend control.actuator] failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['joint.slider', (value) => {
+      try {
+        const idx = Number(value?.index ?? value?.qposIndex ?? value?.i);
+        const v = Number(value?.value ?? value?.v);
+        if (Number.isFinite(idx) && idx >= 0 && Number.isFinite(v)) {
+          const min = Number.isFinite(value?.min) ? Number(value.min) : null;
+          const max = Number.isFinite(value?.max) ? Number(value.max) : null;
+          client.postMessage?.({ cmd: 'setQpos', index: idx | 0, value: v, min, max });
+        }
+      } catch (err) {
+        logWarn('[backend joint.slider] failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['equality.toggle', (value) => {
+      try {
+        const idx = Number(value?.index ?? value?.i);
+        const active = !!(value?.active ?? value?.value ?? value?.v);
+        if (Number.isFinite(idx) && idx >= 0) {
+          client.postMessage?.({ cmd: 'setEqualityActive', index: idx | 0, active });
+        }
+      } catch (err) {
+        logWarn('[backend equality.toggle] failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['control.clear', () => {
+      try {
+        const acts = Array.isArray(lastSnapshot.actuators) ? lastSnapshot.actuators : [];
+        for (let i = 0; i < acts.length; i += 1) {
+          client.postMessage?.({ cmd: 'setCtrl', index: i, value: 0 });
+        }
+      } catch (err) {
+        logWarn('[backend control.clear] failed', err);
+        throw err;
+      }
+      return true;
+    }],
+  ]);
+
+  const bindingExactHandlers = new Map([
+    ['Simulate::camera', (value) => {
+      const totalModes = Math.max(1, 2 + (lastSnapshot.cameras?.length || 0));
+      const modeValue = Math.max(0, Math.min(totalModes - 1, Math.trunc(toNumber(value))));
+      try {
+        client.postMessage?.({ cmd: 'setCameraMode', mode: modeValue });
+      } catch (err) {
+        logWarn('[backend camera] post failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['Simulate::tracking_geom', () => true],
+    ['mjvOption::label', (value) => {
+      const mode = Math.max(0, Math.trunc(toNumber(value)));
+      try {
+        client.postMessage?.({ cmd: 'setLabelMode', mode });
+      } catch (err) {
+        logWarn('[backend label mode] post failed', err);
+        throw err;
+      }
+      return true;
+    }],
+    ['mjvOption::frame', (value) => {
+      const mode = Math.max(0, Math.trunc(toNumber(value)));
+      try {
+        client.postMessage?.({ cmd: 'setFrameMode', mode });
+      } catch (err) {
+        logWarn('[backend frame mode] post failed', err);
+        throw err;
+      }
+      return true;
+    }],
+  ]);
+
+  const bindingRegexHandlers = [
+    {
+      pattern: /^Simulate::opt\.(flex_layer|bvh_depth)$/,
+      handle: (match, value) => {
+        const field = match[1];
+        const nextValue = Math.max(0, Math.trunc(toNumber(value)));
+        try {
+          client.postMessage?.({
+            cmd: 'setVisualOption',
+            field,
+            value: nextValue,
+          });
+        } catch (err) {
+          logWarn('[backend setVisualOption] post failed', err);
+          throw err;
+        }
+        return true;
+      },
+    },
+    {
+      pattern: /^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/,
+      handle: (match, value) => {
+        const type = match[1];
+        const idx = Math.max(0, Math.trunc(toNumber(match[2])));
+        if (idx < MJ_GROUP_COUNT) {
+          try {
+            client.postMessage?.({ cmd: 'setGroupState', group: type, index: idx, enabled: bool(value) });
+          } catch (err) {
+            logWarn('[backend group] post failed', err);
+            throw err;
+          }
+        }
+        return true;
+      },
+    },
+    {
+      pattern: /^mjvOption::flags\[(\d+)\]$/,
+      handle: (match, value) => {
+        const idx = Number(match[1]);
+        const enabled = bool(value);
+        try {
+          client.postMessage?.({ cmd: 'setVoptFlag', index: idx, enabled });
+        } catch (err) {
+          logWarn('[backend vopt flag] post failed', err);
+          throw err;
+        }
+        return true;
+      },
+    },
+    {
+      pattern: /^mjvScene::flags\[(\d+)\]$/,
+      handle: (match, value) => {
+        const idx = Number(match[1]);
+        const enabled = bool(value);
+        try {
+          client.postMessage?.({ cmd: 'setSceneFlag', index: idx, enabled });
+        } catch (err) {
+          logWarn('[backend scene flag] post failed', err);
+          throw err;
+        }
+        return true;
+      },
+    },
+  ];
+
+  function dispatchBinding(binding, value) {
+    if (!binding) return false;
+    const exactHandler = bindingExactHandlers.get(binding);
+    if (exactHandler) {
+      exactHandler(value);
+      return true;
+    }
+    if (applySimulateMaskBinding(binding, value, 'Simulate::disable', 'disableflags', false, 'disableflags')) {
+      return true;
+    }
+    if (applySimulateMaskBinding(binding, value, 'Simulate::enable', 'enableflags', false, 'enableflags')) {
+      return true;
+    }
+    if (applySimulateMaskBinding(binding, value, 'Simulate::enableactuator', 'disableactuator', true, 'disableactuator')) {
+      return true;
+    }
+    for (const entry of bindingRegexHandlers) {
+      const match = binding.match(entry.pattern);
+      if (!match) continue;
+      entry.handle(match, value);
+      return true;
+    }
+    return false;
+  }
+
   async function apply(payload) {
     if (!payload) {
       return resolveSnapshot(lastSnapshot);
@@ -2632,156 +3114,12 @@ async function loadDefaultXml() {
     }
     const { id, value, control } = payload;
     const binding = typeof control?.binding === 'string' ? control.binding : null;
-    if (binding === 'Simulate::camera') {
-      const totalModes = Math.max(1, 2 + (lastSnapshot.cameras?.length || 0));
-      const modeValue = Math.max(0, Math.min(totalModes - 1, Math.trunc(toNumber(value))));
-      try { client.postMessage?.({ cmd: 'setCameraMode', mode: modeValue }); } catch (err) {
-        logWarn('[backend camera] post failed', err);
-      }
+    if (dispatchBinding(binding, value)) {
       return resolveSnapshot(lastSnapshot);
     }
-    if (binding === 'Simulate::tracking_geom') {
-      return resolveSnapshot(lastSnapshot);
-    }
-    const optMatch = binding?.match(/^Simulate::opt\.(flex_layer|bvh_depth)$/);
-    if (optMatch) {
-      const field = optMatch[1];
-      const nextValue = Math.max(0, Math.trunc(toNumber(value)));
-      try {
-        client.postMessage?.({
-          cmd: 'setVisualOption',
-          field,
-          value: nextValue,
-        });
-      } catch (err) {
-        logWarn('[backend setVisualOption] post failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (applySimulateMaskBinding(binding, value, 'Simulate::disable', 'disableflags', false, 'disableflags')) {
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (applySimulateMaskBinding(binding, value, 'Simulate::enable', 'enableflags', false, 'enableflags')) {
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (applySimulateMaskBinding(binding, value, 'Simulate::enableactuator', 'disableactuator', true, 'disableactuator')) {
-      return resolveSnapshot(lastSnapshot);
-    }
-    const groupMatch = binding?.match(/^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/);
-    if (groupMatch) {
-      const type = groupMatch[1];
-      const idx = Math.max(0, Math.trunc(toNumber(groupMatch[2])));
-      if (idx < MJ_GROUP_COUNT) {
-        try { client.postMessage?.({ cmd: 'setGroupState', group: type, index: idx, enabled: bool(value) }); } catch (err) {
-          logWarn('[backend group] post failed', err);
-        }
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (id === 'simulation.history_scrubber') {
-      const offset = Math.min(0, normaliseInt(value, 0));
-      try { client.postMessage?.({ cmd: 'historyScrub', offset }); } catch (err) {
-        logWarn('[backend history] post failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (id === 'simulation.key_slider') {
-      const index = Math.max(-1, normaliseInt(value, -1));
-      try {
-        client.postMessage?.({ cmd: 'keyframeSelect', index });
-      } catch (err) {
-        logWarn('[backend keyframe select] failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (id === 'simulation.save_key') {
-      const index = normaliseInt(lastSnapshot.keyIndex ?? -1, -1);
-      try { client.postMessage?.({ cmd: 'keyframeSave', index }); } catch (err) {
-        logWarn('[backend keyframe save] failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (id === 'simulation.load_key') {
-      const index = Math.max(0, normaliseInt(lastSnapshot.keyIndex ?? 0, 0));
-      try { client.postMessage?.({ cmd: 'keyframeLoad', index }); } catch (err) {
-        logWarn('[backend keyframe load] failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (id === 'watch.field') {
-      const field = typeof value === 'string' ? value.trim() : '';
-      const nextField = field.length > 0 ? field : (lastSnapshot.watch?.field || '');
-      if (!nextField) return resolveSnapshot(lastSnapshot);
-      try {
-        client.postMessage?.({
-          cmd: 'setWatch',
-          field: nextField,
-          index: Number.isFinite(lastSnapshot.watch?.index) ? (lastSnapshot.watch.index | 0) : 0,
-        });
-      } catch (err) {
-        logWarn('[backend watch field] failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (id === 'watch.index') {
-      const target = Math.max(0, normaliseInt(value, 0));
-      try {
-        client.postMessage?.({
-          cmd: 'setWatch',
-          field: lastSnapshot.watch?.field,
-          index: target,
-        });
-      } catch (err) {
-        logWarn('[backend watch index] failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    // Generic actuator control (dynamic UI)
-      if (id === 'control.actuator') {
-        try {
-          const idx = Number(value?.index ?? value?.i ?? value?.id);
-          const v = Number(value?.value ?? value?.v ?? 0);
-          if (Number.isFinite(idx) && idx >= 0) {
-            client.postMessage?.({ cmd: 'setCtrl', index: idx | 0, value: v });
-          }
-        } catch (err) {
-          logWarn('[backend control.actuator] failed', err);
-        }
-        return resolveSnapshot(lastSnapshot);
-      }
-      if (id === 'joint.slider') {
-        try {
-          const idx = Number(value?.index ?? value?.qposIndex ?? value?.i);
-          const v = Number(value?.value ?? value?.v);
-          if (Number.isFinite(idx) && idx >= 0 && Number.isFinite(v)) {
-            const min = Number.isFinite(value?.min) ? Number(value.min) : null;
-            const max = Number.isFinite(value?.max) ? Number(value.max) : null;
-            client.postMessage?.({ cmd: 'setQpos', index: idx | 0, value: v, min, max });
-          }
-        } catch (err) {
-          logWarn('[backend joint.slider] failed', err);
-        }
-        return resolveSnapshot(lastSnapshot);
-      }
-      if (id === 'equality.toggle') {
-        try {
-          const idx = Number(value?.index ?? value?.i);
-          const active = !!(value?.active ?? value?.value ?? value?.v);
-          if (Number.isFinite(idx) && idx >= 0) {
-            client.postMessage?.({ cmd: 'setEqualityActive', index: idx | 0, active });
-          }
-        } catch (err) {
-          logWarn('[backend equality.toggle] failed', err);
-        }
-        return resolveSnapshot(lastSnapshot);
-      }
-    if (id === 'control.clear') {
-      try {
-        const acts = Array.isArray(lastSnapshot.actuators) ? lastSnapshot.actuators : [];
-        for (let i = 0; i < acts.length; i += 1) {
-          try { client.postMessage?.({ cmd: 'setCtrl', index: i, value: 0 }); } catch {}
-        }
-      } catch {}
+    const uiHandler = uiHandlers.get(id);
+    if (uiHandler) {
+      uiHandler(value);
       return resolveSnapshot(lastSnapshot);
     }
     const prepared = await prepareBindingUpdate(control, value);
@@ -2800,38 +3138,6 @@ async function loadDefaultXml() {
         client.postMessage?.({ cmd: 'snapshot' });
       } catch (err) {
         logWarn('[backend setField] post failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    const voptMatch = binding?.match(/^mjvOption::flags\[(\d+)\]$/);
-    if (voptMatch) {
-      const idx = Number(voptMatch[1]);
-      const enabled = bool(value);
-      try { client.postMessage?.({ cmd: 'setVoptFlag', index: idx, enabled }); } catch (err) {
-        logWarn('[backend vopt flag] post failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    const sceneMatch = binding?.match(/^mjvScene::flags\[(\d+)\]$/);
-    if (sceneMatch) {
-      const idx = Number(sceneMatch[1]);
-      const enabled = bool(value);
-      try { client.postMessage?.({ cmd: 'setSceneFlag', index: idx, enabled }); } catch (err) {
-        logWarn('[backend scene flag] post failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (binding === 'mjvOption::label') {
-      const mode = Math.max(0, Math.trunc(toNumber(value)));
-      try { client.postMessage?.({ cmd: 'setLabelMode', mode }); } catch (err) {
-        logWarn('[backend label mode] post failed', err);
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (binding === 'mjvOption::frame') {
-      const mode = Math.max(0, Math.trunc(toNumber(value)));
-      try { client.postMessage?.({ cmd: 'setFrameMode', mode }); } catch (err) {
-        logWarn('[backend frame mode] post failed', err);
       }
       return resolveSnapshot(lastSnapshot);
     }
