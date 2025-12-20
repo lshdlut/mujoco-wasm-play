@@ -703,34 +703,6 @@ function shortcutFromEvent(event) {
     return { row, field };
   }
 
-  function createPillToggle(control) {
-    const wrapper = document.createElement('label');
-    wrapper.className = 'compact-pill';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = `${sanitiseName(control.item_id)}__pill`;
-    input.setAttribute('data-testid', control.item_id);
-    const text = document.createElement('span');
-    text.textContent = control.label ?? control.name ?? control.item_id;
-    wrapper.append(input, text);
-    const binding = {
-      skip: false,
-      getValue: () => input.checked,
-      setValue: (value) => {
-        binding.skip = true;
-        input.checked = !!value;
-        wrapper.classList.toggle('is-active', !!value);
-        binding.skip = false;
-      },
-    };
-    registerControl(control, binding);
-    input.addEventListener('change', async () => {
-      if (binding.skip) return;
-      await applySpecAction(store, backend, control, input.checked);
-    });
-    return wrapper;
-  }
-
   function renderFileSectionExtras(body) {
     const row = createControlRow(null);
 
@@ -911,44 +883,40 @@ function shortcutFromEvent(event) {
     };
   }
 
-    function renderDisabledCheckbox(container, control) {
+    function createBoolToggleElements(control, { disabled = false } = {}) {
       const row = createControlRow(control);
       row.classList.add('bool-row');
       const label = document.createElement('label');
-      label.className = 'bool-button bool-label is-disabled';
+      label.className = 'bool-button bool-label';
+      if (disabled) {
+        label.classList.add('is-disabled');
+      }
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.id = `${sanitiseName(control.item_id)}__checkbox`;
       input.setAttribute('role', 'switch');
       input.setAttribute('data-testid', control.item_id);
       input.setAttribute('aria-checked', 'false');
-      input.setAttribute('aria-disabled', 'true');
-      input.disabled = true;
+      if (disabled) {
+        input.setAttribute('aria-disabled', 'true');
+        input.disabled = true;
+      }
       const span = document.createElement('span');
       span.className = 'bool-text';
       span.textContent = control.label ?? control.name ?? control.item_id;
       label.append(input, span);
       row.append(label);
+      return { row, label, input, span };
+    }
+
+    function renderDisabledCheckbox(container, control) {
+      const { row } = createBoolToggleElements(control, { disabled: true });
       container.append(row);
       return row;
     }
 
   function renderCheckbox(container, control) {
-      const row = createControlRow(control);
-      row.classList.add('bool-row');
-      const label = document.createElement('label');
-      label.className = 'bool-button bool-label';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = `${sanitiseName(control.item_id)}__checkbox`;
-    input.setAttribute('role', 'switch');
-    input.setAttribute('data-testid', control.item_id);
-    input.setAttribute('aria-checked', 'false');
-    const span = document.createElement('span');
-    span.className = 'bool-text';
-    span.textContent = control.label ?? control.name ?? control.item_id;
-    label.append(input, span);
-    row.append(label);
+    const { row, label, input } = createBoolToggleElements(control);
     container.append(row);
 
     let current = false;
@@ -1097,6 +1065,208 @@ function shortcutFromEvent(event) {
     });
   }
 
+  function resolveColorLabel(value, options) {
+    const palette = options.length > 0 ? options : ['Dark', 'Light'];
+    let label;
+    if (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value))) {
+      const idx = Number(value) | 0;
+      label = idx === 1 && palette.length > 1 ? palette[1] : palette[0];
+    } else {
+      const token = String(value ?? '').toLowerCase();
+      if (token.startsWith('light')) {
+        label =
+          palette.find((opt) => String(opt).toLowerCase().startsWith('light')) ??
+          palette[1] ??
+          palette[0];
+      } else if (token.startsWith('dark')) {
+        label =
+          palette.find((opt) => String(opt).toLowerCase().startsWith('dark')) ??
+          palette[0];
+      } else {
+        label = palette[0];
+      }
+    }
+    if (!palette.includes(label)) {
+      label = palette[0];
+    }
+    return label;
+  }
+
+  function resolveSpacingLabel(value, options) {
+    const labels = options.length > 0 ? options : ['Tight', 'Wide'];
+    let label;
+    if (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value))) {
+      const idx = Number(value) | 0;
+      label = labels[idx] ?? labels[0];
+    } else if (typeof value === 'string') {
+      const token = value.trim().toLowerCase();
+      if (token.startsWith('wide')) {
+        label =
+          labels.find((opt) => String(opt).toLowerCase().startsWith('wide')) ??
+          labels[1] ??
+          labels[0];
+      } else {
+        label = labels[0];
+      }
+    } else {
+      label = labels[0];
+    }
+    if (!labels.includes(label)) {
+      label = labels[0];
+    }
+    return label;
+  }
+
+  function resolveFontLabel(value, options) {
+    const labels = options.length > 0 ? options : ['50 %', '100 %', '150 %', '200 %', '250 %', '300 %'];
+    let label;
+    if (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value))) {
+      const idx = Number(value) | 0;
+      label = labels[idx] ?? labels[1] ?? labels[0];
+    } else if (typeof value === 'string') {
+      const token = value.trim().toLowerCase();
+      const direct = labels.find((opt) => String(opt).trim().toLowerCase() === token);
+      if (direct) {
+        label = direct;
+      } else {
+        const match = token.match(/(\d+)\s*%/);
+        if (match) {
+          const pct = `${match[1]} %`;
+          const exact = labels.find((opt) => String(opt).trim().toLowerCase() === pct.toLowerCase());
+          label = exact || labels[0];
+        } else {
+          label = labels[0];
+        }
+      }
+    } else {
+      label = labels[0];
+    }
+    if (!labels.includes(label)) {
+      label = labels[0];
+    }
+    return label;
+  }
+
+  const SELECT_SPECIALS = {
+    'option.color': {
+      defaultOptions: ['Dark', 'Light'],
+      resolveLabel: resolveColorLabel,
+      apply: applyThemeFromColorControl,
+    },
+    'option.spacing': {
+      defaultOptions: ['Tight', 'Wide'],
+      resolveLabel: resolveSpacingLabel,
+      apply: applySpacingFromControl,
+    },
+    'option.font': {
+      defaultOptions: ['50 %', '100 %', '150 %', '200 %', '250 %', '300 %'],
+      resolveLabel: resolveFontLabel,
+      apply: applyFontFromControl,
+    },
+  };
+
+  function resolveSelectMeta(control, options) {
+    const isCameraModeSelect = control.item_id === 'rendering.camera_mode';
+    const isTrackingGeomSelect = control.item_id === 'rendering.tracking_geom';
+    const isLabelModeSelect = control.binding === 'mjvOption::label';
+    const isFrameModeSelect = control.binding === 'mjvOption::frame';
+    const isNumericSelect = isLabelModeSelect || isFrameModeSelect;
+    const isMjOptionEnumBinding = isOptionBinding(control);
+    const isMjOptionEnumSelect =
+      isMjOptionEnumBinding && !isNumericSelect && !isCameraModeSelect && !isTrackingGeomSelect;
+    const special = SELECT_SPECIALS[control.item_id] ?? null;
+    return {
+      options,
+      special,
+      isCameraModeSelect,
+      isTrackingGeomSelect,
+      isNumericSelect,
+      isMjOptionEnumSelect,
+    };
+  }
+
+  function syncSelectOptions(select, meta, control) {
+    if (meta.isCameraModeSelect) {
+      syncCameraSelectOptions(select, control);
+      return;
+    }
+    if (meta.isTrackingGeomSelect) {
+      syncTrackingGeomSelectOptions(select, control);
+      return;
+    }
+    meta.options.forEach((opt, idx) => {
+      const option = document.createElement('option');
+      option.value = meta.isNumericSelect ? String(idx) : opt;
+      option.textContent = opt;
+      select.appendChild(option);
+    });
+  }
+
+  function readSelectValue(select, meta, control) {
+    if (meta.isCameraModeSelect) {
+      syncCameraSelectOptions(select, control);
+      return toNumber(select.value);
+    }
+    if (meta.isTrackingGeomSelect) {
+      syncTrackingGeomSelectOptions(select, control);
+      return toNumber(select.value);
+    }
+    if (meta.isNumericSelect) {
+      return Math.max(0, Math.trunc(toNumber(select.value)));
+    }
+    return select.value;
+  }
+
+  function applySelectValue(select, meta, control, value) {
+    if (meta.special) {
+      const label = meta.special.resolveLabel(value, meta.options);
+      select.value = label;
+      meta.special.apply(select.value);
+      return;
+    }
+    if (meta.isCameraModeSelect) {
+      const entries = syncCameraSelectOptions(select, control);
+      const numericValue = Math.max(0, Math.trunc(toNumber(value)));
+      const match = entries.find((entry) => entry.value === String(numericValue));
+      const fallbackValue = entries[0]?.value ?? '0';
+      select.value = match ? match.value : fallbackValue;
+      return;
+    }
+    if (meta.isTrackingGeomSelect) {
+      const entries = syncTrackingGeomSelectOptions(select, control);
+      const numericValue = Math.trunc(toNumber(value));
+      const match = entries.find((entry) => entry.value === String(numericValue));
+      const fallbackValue = entries[0]?.value ?? '-1';
+      select.value = match ? match.value : fallbackValue;
+      return;
+    }
+    if (meta.isNumericSelect) {
+      const numericValue = Math.max(0, Math.trunc(toNumber(value)));
+      const clamped = Math.min(numericValue, Math.max(0, meta.options.length - 1));
+      select.value = String(clamped);
+      return;
+    }
+    if (meta.isMjOptionEnumSelect && (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value)))) {
+      const idx = Number(value) | 0;
+      const clamped = Math.max(0, Math.min(idx, Math.max(0, meta.options.length - 1)));
+      const label = meta.options[clamped] ?? meta.options[0] ?? '';
+      if (label) {
+        select.value = label;
+      }
+      return;
+    }
+    if (value == null) {
+      select.value = meta.options[0] ?? '';
+      return;
+    }
+    const next = String(value);
+    if (!meta.options.includes(next) && meta.options.length > 0) {
+      select.value = meta.options[0];
+    } else {
+      select.value = next;
+    }
+  }
+
   function renderSelect(container, control) {
       const { row, label, field } = createLabeledRow(control);
       const inputId = `${sanitiseName(control.item_id)}__select`;
@@ -1104,169 +1274,17 @@ function shortcutFromEvent(event) {
       const select = document.createElement('select');
       select.setAttribute('data-testid', control.item_id);
       select.id = inputId;
-      const isCameraModeSelect = control.item_id === 'rendering.camera_mode';
-      const isTrackingGeomSelect = control.item_id === 'rendering.tracking_geom';
-      const isLabelModeSelect = control.binding === 'mjvOption::label';
-      const isFrameModeSelect = control.binding === 'mjvOption::frame';
-      const isNumericSelect = isLabelModeSelect || isFrameModeSelect;
-      const isMjOptionEnumBinding = isOptionBinding(control);
-      const isMjOptionEnumSelect =
-        isMjOptionEnumBinding && !isNumericSelect && !isCameraModeSelect && !isTrackingGeomSelect;
-      const options = isCameraModeSelect || isTrackingGeomSelect ? [] : normaliseOptions(control.options);
-      if (isCameraModeSelect) {
-        syncCameraSelectOptions(select, control);
-      } else if (isTrackingGeomSelect) {
-        syncTrackingGeomSelectOptions(select, control);
-      } else {
-        options.forEach((opt, idx) => {
-          const option = document.createElement('option');
-          option.value = isNumericSelect ? String(idx) : opt;
-          option.textContent = opt;
-          select.appendChild(option);
-        });
-      }
+      const baseOptions = normaliseOptions(control.options);
+      const fallbackOptions = SELECT_SPECIALS[control.item_id]?.defaultOptions ?? baseOptions;
+      const options = baseOptions.length > 0 ? baseOptions : fallbackOptions;
+      const meta = resolveSelectMeta(control, options);
+      syncSelectOptions(select, meta, control);
       field.append(select);
       container.append(row);
 
       const binding = createBinding(control, {
-        getValue: () => {
-          if (isCameraModeSelect) {
-            syncCameraSelectOptions(select, control);
-            return toNumber(select.value);
-          }
-          if (isTrackingGeomSelect) {
-            syncTrackingGeomSelectOptions(select, control);
-            return toNumber(select.value);
-          }
-          if (isNumericSelect) {
-            return Math.max(0, Math.trunc(toNumber(select.value)));
-          }
-          return select.value;
-        },
-        applyValue: (value) => {
-          if (control?.item_id === 'option.color') {
-            const palette = options.length > 0 ? options : ['Dark', 'Light'];
-            let label;
-            const raw = value;
-            if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))) {
-              const idx = Number(raw) | 0;
-              label = idx === 1 && palette.length > 1 ? palette[1] : palette[0];
-            } else {
-              const token = String(raw ?? '').toLowerCase();
-              if (token.startsWith('light')) {
-                label =
-                  palette.find((opt) => String(opt).toLowerCase().startsWith('light')) ??
-                  palette[1] ??
-                  palette[0];
-              } else if (token.startsWith('dark')) {
-                label =
-                  palette.find((opt) => String(opt).toLowerCase().startsWith('dark')) ??
-                  palette[0];
-              } else {
-                label = palette[0];
-              }
-            }
-            if (!palette.includes(label)) {
-              label = palette[0];
-            }
-            select.value = label;
-            applyThemeFromColorControl(select.value);
-            return;
-          }
-          if (control?.item_id === 'option.spacing') {
-            const labels = options.length > 0 ? options : ['Tight', 'Wide'];
-            let label;
-            const raw = value;
-            if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))) {
-              const idx = Number(raw) | 0;
-              label = labels[idx] ?? labels[0];
-            } else if (typeof raw === 'string') {
-              const token = raw.trim().toLowerCase();
-              if (token.startsWith('wide')) {
-                label =
-                  labels.find((opt) => String(opt).toLowerCase().startsWith('wide')) ??
-                  labels[1] ??
-                  labels[0];
-              } else {
-                label = labels[0];
-              }
-            } else {
-              label = labels[0];
-            }
-            if (!labels.includes(label)) {
-              label = labels[0];
-            }
-            select.value = label;
-            applySpacingFromControl(label);
-            return;
-          }
-          if (control?.item_id === 'option.font') {
-            const labels = options.length > 0 ? options : ['50 %', '100 %', '150 %', '200 %', '250 %', '300 %'];
-            let label;
-            const raw = value;
-            if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))) {
-              const idx = Number(raw) | 0;
-              label = labels[idx] ?? labels[1] ?? labels[0];
-            } else if (typeof raw === 'string') {
-              const token = raw.trim().toLowerCase();
-              const direct = labels.find((opt) => String(opt).trim().toLowerCase() === token);
-              if (direct) {
-                label = direct;
-              } else {
-                const match = token.match(/(\d+)\s*%/);
-                if (match) {
-                  const pct = `${match[1]} %`;
-                  const exact = labels.find((opt) => String(opt).trim().toLowerCase() === pct.toLowerCase());
-                  label = exact || labels[0];
-                } else {
-                  label = labels[0];
-                }
-              }
-            } else {
-              label = labels[0];
-            }
-            if (!labels.includes(label)) {
-              label = labels[0];
-            }
-            select.value = label;
-            applyFontFromControl(label);
-            return;
-          }
-
-          if (isCameraModeSelect) {
-            const entries = syncCameraSelectOptions(select, control);
-            const numericValue = Math.max(0, Math.trunc(toNumber(value)));
-            const match = entries.find((entry) => entry.value === String(numericValue));
-            const fallbackValue = entries[0]?.value ?? '0';
-            select.value = match ? match.value : fallbackValue;
-          } else if (isTrackingGeomSelect) {
-            const entries = syncTrackingGeomSelectOptions(select, control);
-            const numericValue = Math.trunc(toNumber(value));
-            const match = entries.find((entry) => entry.value === String(numericValue));
-            const fallbackValue = entries[0]?.value ?? '-1';
-            select.value = match ? match.value : fallbackValue;
-          } else if (isNumericSelect) {
-            const numericValue = Math.max(0, Math.trunc(toNumber(value)));
-            const clamped = Math.min(numericValue, Math.max(0, options.length - 1));
-            select.value = String(clamped);
-          } else if (isMjOptionEnumSelect && (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value)))) {
-            const idx = Number(value) | 0;
-            const clamped = Math.max(0, Math.min(idx, Math.max(0, options.length - 1)));
-            const label = options[clamped] ?? options[0] ?? '';
-            if (label) {
-              select.value = label;
-            }
-          } else if (value == null) {
-            select.value = options[0] ?? '';
-          } else {
-            const next = String(value);
-            if (!options.includes(next) && options.length > 0) {
-              select.value = options[0];
-            } else {
-              select.value = next;
-            }
-          }
-        },
+        getValue: () => readSelectValue(select, meta, control),
+        applyValue: (value) => applySelectValue(select, meta, control, value),
       });
 
       attachOptionAvailability(control, select, binding);
@@ -1274,76 +1292,97 @@ function shortcutFromEvent(event) {
       select.addEventListener(
         'change',
         guardBinding(binding, async () => {
-          const value = isCameraModeSelect
-            ? Math.max(0, Math.trunc(toNumber(select.value)))
-            : isTrackingGeomSelect
-              ? Math.trunc(toNumber(select.value))
-              : isNumericSelect
-                ? Math.max(0, Math.trunc(toNumber(select.value)))
-                : select.value;
-          if (control?.item_id === 'option.color') {
-            applyThemeFromColorControl(value);
-          } else if (control?.item_id === 'option.spacing') {
-            applySpacingFromControl(value);
-          } else if (control?.item_id === 'option.font') {
-            applyFontFromControl(value);
+          const value = readSelectValue(select, meta, control);
+          if (meta.special) {
+            meta.special.apply(value);
           }
           await applySpecAction(store, backend, control, value);
         }),
       );
 
-      if (control?.item_id === 'option.color') {
-        applyThemeFromColorControl(select.value);
-      } else if (control?.item_id === 'option.spacing') {
-        applySpacingFromControl(select.value);
-      } else if (control?.item_id === 'option.font') {
-        applyFontFromControl(select.value);
+      if (meta.special) {
+        meta.special.apply(select.value);
       }
     }
 
-      function renderVisualSourceControl(container, control) {
-      const labelRow = createControlRow(control, { full: true });
-      const label = document.createElement('label');
-      label.className = 'control-label';
-      label.textContent = control.label ?? control.name ?? control.item_id;
-      labelRow.append(label);
-      container.append(labelRow);
-
-      const { row: groupRow, field } = createFullRow({ full: true });
-      groupRow.dataset.controlId = control.item_id;
-      const group = document.createElement('div');
-      group.className = 'segmented';
-      group.setAttribute('data-testid', control.item_id);
-      field.append(group);
-      container.append(groupRow);
-
-      const config = [
-        { key: 'preset-sun', label: 'Preset☀️', modeValue: 'PresetSun' },
-        { key: 'preset-moon', label: 'Preset🌙️', modeValue: 'PresetMoon' },
-        { key: 'model', label: 'Model', modeValue: 'Model' },
-      ];
-
-      const radios = config.map((entry, index) => {
-        const radioId = `${sanitiseName(control.item_id)}__${entry.key}`;
+  function buildSegmentedOptions(control, group, options) {
+    return options.map((option, index) => {
+        const key = option?.key ?? String(index);
+        const value = option?.value ?? option?.label ?? '';
+        const labelText = option?.label ?? value;
+        const radioId = `${sanitiseName(control.item_id)}__${key}`;
         const wrapper = document.createElement('label');
         wrapper.className = 'segmented-option';
         const input = document.createElement('input');
         input.type = 'radio';
         input.name = control.item_id;
-        input.value = entry.modeValue;
+        input.value = String(value);
         input.id = radioId;
-        input.dataset.key = entry.key;
+        input.dataset.key = String(key);
         input.dataset.index = String(index);
         const span = document.createElement('span');
-        span.textContent = entry.label;
+        span.textContent = String(labelText);
         wrapper.append(input, span);
         group.append(wrapper);
-        return input;
+      return input;
+    });
+  }
+
+  function createSegmentedGroup(container, control, { options, layout = 'labeled', labelText = null }) {
+    let field = null;
+    if (layout === 'stacked') {
+      const labelRow = createControlRow(control, { full: true });
+      const label = document.createElement('label');
+      label.className = 'control-label';
+      label.textContent = labelText ?? control.label ?? control.name ?? control.item_id;
+      labelRow.append(label);
+      container.append(labelRow);
+
+      const { row: groupRow, field: groupField } = createFullRow({ full: true });
+      groupRow.dataset.controlId = control.item_id;
+      field = groupField;
+      container.append(groupRow);
+    } else {
+      const { row, field: groupField } = createLabeledRow(control);
+      field = groupField;
+      container.append(row);
+    }
+
+    const group = document.createElement('div');
+    group.className = 'segmented';
+    group.setAttribute('data-testid', control.item_id);
+    field.append(group);
+    const inputs = buildSegmentedOptions(control, group, options);
+    return { group, inputs };
+  }
+
+  function attachSegmentedHandlers(control, inputs, { getValue, applyValue, onCommit }) {
+    const binding = createBinding(control, { getValue, applyValue });
+    inputs.forEach((input) => {
+      input.addEventListener(
+        'change',
+        guardBinding(binding, async () => {
+          if (!input.checked) return;
+          await onCommit(binding, input);
+        }),
+      );
+    });
+    return binding;
+  }
+
+  function renderVisualSourceControl(container, control) {
+      const { inputs } = createSegmentedGroup(container, control, {
+        layout: 'stacked',
+        options: [
+        { key: 'preset-sun', label: 'Preset☀️', value: 'PresetSun' },
+        { key: 'preset-moon', label: 'Preset🌙️', value: 'PresetMoon' },
+        { key: 'model', label: 'Model', value: 'Model' },
+        ],
       });
 
       let logicalValue = 'PresetSun';
 
-      const binding = createBinding(control, {
+      attachSegmentedHandlers(control, inputs, {
         getValue: () => logicalValue,
         applyValue: (value) => {
           const token = typeof value === 'string' ? value.toLowerCase() : '';
@@ -1358,78 +1397,47 @@ function shortcutFromEvent(event) {
             logicalValue = 'PresetSun';
             targetKey = 'preset-sun';
           }
-          radios.forEach((input) => {
+          inputs.forEach((input) => {
             const key = input.dataset.key || '';
             const active = key === targetKey;
             input.checked = active;
           });
         },
-      });
-
-      radios.forEach((input) => {
-        input.addEventListener(
-          'change',
-          guardBinding(binding, async () => {
-            if (!input.checked) return;
-            const key = input.dataset.key || '';
-            const modeValue = input.value || (key === 'model' ? 'Model' : input.value);
-            binding.setValue(modeValue);
-            try {
-              await applySpecAction(store, backend, control, modeValue);
-            } catch (err) {
-              logWarn('[ui] visual source toggle failed', err);
-            }
-          }),
-        );
+        onCommit: async (binding, input) => {
+          const key = input.dataset.key || '';
+          const modeValue = input.value || (key === 'model' ? 'Model' : input.value);
+          binding.setValue(modeValue);
+          try {
+            await applySpecAction(store, backend, control, modeValue);
+          } catch (err) {
+            logWarn('[ui] visual source toggle failed', err);
+          }
+        },
       });
     }
 
     function renderRadio(container, control) {
       const options = normaliseOptions(control.options);
-      const { row, label, field } = createLabeledRow(control);
-      const group = document.createElement('div');
-      group.className = 'segmented';
-      group.setAttribute('data-testid', control.item_id);
+      const { inputs } = createSegmentedGroup(container, control, {
+        options: options.map((opt, idx) => ({
+          key: String(idx),
+          value: String(opt),
+          label: String(opt),
+        })),
+      });
 
-    const radios = [];
-    options.forEach((opt, idx) => {
-      const radioId = `${sanitiseName(control.item_id)}__${idx}`;
-      const radioWrapper = document.createElement('label');
-      radioWrapper.className = 'segmented-option';
-      const input = document.createElement('input');
-      input.type = 'radio';
-      input.name = control.item_id;
-      input.value = String(opt);
-      input.id = radioId;
-      const span = document.createElement('span');
-      span.textContent = opt;
-      radioWrapper.append(input, span);
-      group.append(radioWrapper);
-      radios.push(input);
-    });
-
-    field.append(group);
-    container.append(row);
-
-    const binding = createBinding(control, {
-      getValue: () => radios.find((r) => r.checked)?.value ?? options[0],
+    attachSegmentedHandlers(control, inputs, {
+      getValue: () => inputs.find((r) => r.checked)?.value ?? options[0],
       applyValue: (value) => {
-        radios.forEach((radio, idx) => {
+        inputs.forEach((radio, idx) => {
           if (value === options[idx] || value === idx || value === radio.value) {
             radio.checked = true;
           }
         });
       },
-    });
-
-    radios.forEach((radio) => {
-      radio.addEventListener(
-        'change',
-        guardBinding(binding, async () => {
-          if (!radio.checked) return;
-          await applySpecAction(store, backend, control, radio.value);
-        }),
-      );
+      onCommit: async (_binding, input) => {
+        await applySpecAction(store, backend, control, input.value);
+      },
     });
   }
 
@@ -1936,44 +1944,42 @@ function shortcutFromEvent(event) {
     separator: renderSeparator,
   };
 
-    function renderControl(container, control) {
-      const type = typeof control.type === 'string' ? control.type.toLowerCase() : 'static';
-      const isDisabledOverlay =
-        control?.item_id === 'option.profiler' || control?.item_id === 'option.sensor';
-      if (control?.shortcut && !isDisabledOverlay) {
-        registerShortcutHandlers(control.shortcut, async (event) => {
-          event?.preventDefault?.();
-          if (type.startsWith('button')) {
-            await applySpecAction(store, backend, control, {
-              trigger: 'shortcut',
-              shiftKey: !!event?.shiftKey,
-              ctrlKey: !!event?.ctrlKey,
-              altKey: !!event?.altKey,
-              metaKey: !!event?.metaKey,
-            });
-            return;
-          }
-          await toggleControl(control.item_id);
-        });
-      }
-      if (control?.item_id === 'simulation.run') {
-        return renderRunToggle(container, control);
-      }
-      if (control?.item_id === 'watch.field') {
-        return renderWatchField(container, control);
-      }
-      if (control?.item_id === 'option.visual_source') {
-        return renderVisualSourceControl(container, control);
-      }
-      if (isDisabledOverlay) {
-        return renderDisabledCheckbox(container, control);
-      }
-      if (control?.item_id === 'simulation.key_slider') {
-        return renderKeyframeSelect(container, control);
-      }
-      const renderer = CONTROL_RENDERERS[type] || renderStatic;
-      return renderer(container, control);
+  const CONTROL_OVERRIDES = {
+    'simulation.run': renderRunToggle,
+    'watch.field': renderWatchField,
+    'option.visual_source': renderVisualSourceControl,
+    'simulation.key_slider': renderKeyframeSelect,
+    'option.profiler': renderDisabledCheckbox,
+    'option.sensor': renderDisabledCheckbox,
+  };
+  const DISABLED_SHORTCUT_IDS = new Set(['option.profiler', 'option.sensor']);
+
+  function renderControl(container, control) {
+    const type = typeof control.type === 'string' ? control.type.toLowerCase() : 'static';
+    const itemId = control?.item_id ?? '';
+    if (control?.shortcut && !DISABLED_SHORTCUT_IDS.has(itemId)) {
+      registerShortcutHandlers(control.shortcut, async (event) => {
+        event?.preventDefault?.();
+        if (type.startsWith('button')) {
+          await applySpecAction(store, backend, control, {
+            trigger: 'shortcut',
+            shiftKey: !!event?.shiftKey,
+            ctrlKey: !!event?.ctrlKey,
+            altKey: !!event?.altKey,
+            metaKey: !!event?.metaKey,
+          });
+          return;
+        }
+        await toggleControl(control.item_id);
+      });
     }
+    const override = CONTROL_OVERRIDES[itemId];
+    if (override) {
+      return override(container, control);
+    }
+    const renderer = CONTROL_RENDERERS[type] || renderStatic;
+    return renderer(container, control);
+  }
 
   function renderSection(container, section) {
     const sectionEl = document.createElement('section');
@@ -2012,14 +2018,13 @@ function shortcutFromEvent(event) {
       toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     };
 
-      const isLeftPanel = container === leftPanel;
-      const initialCollapsed = false;
+    const initialCollapsed = false;
     setCollapsed(initialCollapsed);
 
-      const toggleCollapsed = () => {
-        const next = !sectionEl.classList.contains('is-collapsed');
-        setCollapsed(next);
-      };
+    const toggleCollapsed = () => {
+      const next = !sectionEl.classList.contains('is-collapsed');
+      setCollapsed(next);
+    };
 
     if (section?.shortcut) {
       registerShortcutHandlers(section.shortcut, (event) => {
@@ -2028,32 +2033,32 @@ function shortcutFromEvent(event) {
       });
     }
 
-      toggle.addEventListener('click', () => {
+    toggle.addEventListener('click', () => {
+      toggleCollapsed();
+    });
+    header.addEventListener('click', (event) => {
+      if (event.target === reset) return;
+      if (event.target !== toggle) {
         toggleCollapsed();
-      });
-      header.addEventListener('click', (event) => {
-        if (event.target === reset) return;
-        if (event.target !== toggle) {
-          toggleCollapsed();
+      }
+    });
+
+    header.addEventListener('dblclick', (event) => {
+      if (event.target === reset) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const sections = Array.from(container.querySelectorAll('.ui-section'));
+      if (sections.length === 0) return;
+      const allCollapsed = sections.every((sec) => sec.classList.contains('is-collapsed'));
+      const collapseAll = !allCollapsed;
+      sections.forEach((sec) => {
+        sec.classList.toggle('is-collapsed', collapseAll);
+        const btn = sec.querySelector('.section-toggle');
+        if (btn) {
+          btn.setAttribute('aria-expanded', collapseAll ? 'false' : 'true');
         }
       });
-
-      header.addEventListener('dblclick', (event) => {
-        if (event.target === reset) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const sections = Array.from(container.querySelectorAll('.ui-section'));
-        if (sections.length === 0) return;
-        const allCollapsed = sections.every((sec) => sec.classList.contains('is-collapsed'));
-        const collapseAll = !allCollapsed;
-        sections.forEach((sec) => {
-          sec.classList.toggle('is-collapsed', collapseAll);
-          const btn = sec.querySelector('.section-toggle');
-          if (btn) {
-            btn.setAttribute('aria-expanded', collapseAll ? 'false' : 'true');
-          }
-        });
-      });
+    });
 
     sectionEl.append(header, body);
 
@@ -2098,6 +2103,132 @@ function shortcutFromEvent(event) {
     }
 
     container.append(sectionEl);
+  }
+
+  function ensureDynamicList({
+    sectionId,
+    dynamicKey,
+    items,
+    className = '',
+    marginTop = null,
+    updateExisting,
+    buildItem,
+  }) {
+    if (!rightPanel || !Array.isArray(items)) return;
+    const section = rightPanel.querySelector(`[data-section-id="${sectionId}"]`);
+    if (!section) return;
+    const body = section.querySelector('.section-body');
+    if (!body) return;
+    let container = body.querySelector(`[data-dynamic="${dynamicKey}"]`);
+    if (!container) {
+      container = document.createElement('div');
+      container.setAttribute('data-dynamic', dynamicKey);
+      if (className) container.className = className;
+      if (marginTop !== null) container.style.marginTop = marginTop;
+      body.appendChild(container);
+    }
+    if (items.length === 0) {
+      container.innerHTML = '';
+      container.setAttribute('data-count', '0');
+      return;
+    }
+    const prevCount = Number(container.getAttribute('data-count') || '0');
+    if (prevCount === items.length && container.childElementCount > 0) {
+      if (typeof updateExisting === 'function') {
+        updateExisting(container, items);
+      }
+      return;
+    }
+    container.innerHTML = '';
+    items.forEach((item, index) => {
+      buildItem(container, item, index);
+    });
+    container.setAttribute('data-count', String(items.length));
+  }
+
+  function resolveListIndex(item, fallback) {
+    const idx = Number(item?.index);
+    return Number.isFinite(idx) ? idx : fallback;
+  }
+
+  function ensureDynamicSliders({
+    sectionId,
+    dynamicKey,
+    items,
+    itemIdPrefix,
+    dataAttr,
+    getIndex,
+    getLabel,
+    getRange,
+    getValue,
+    updateRange = false,
+    onInput,
+  }) {
+    ensureDynamicList({
+      sectionId,
+      dynamicKey,
+      items,
+      marginTop: '8px',
+      updateExisting: (containerEl, entries) => {
+        for (let fallback = 0; fallback < entries.length; fallback += 1) {
+          const item = entries[fallback];
+          const index = getIndex(item, fallback);
+          const slider = containerEl.querySelector(`input[type="range"][${dataAttr}="${index}"]`);
+          if (!slider) continue;
+          if (!slider.dataset.editing) slider.dataset.editing = '0';
+          if (slider.dataset.editing === '1') continue;
+          if (updateRange) {
+            const range = getRange(item, fallback);
+            if (Number(slider.min) !== range.min) slider.min = String(range.min);
+            if (Number(slider.max) !== range.max) slider.max = String(range.max);
+          }
+          const nextValue = getValue(item, fallback);
+          if (nextValue == null) continue;
+          const numeric = Number(nextValue);
+          if (!Number.isFinite(numeric)) continue;
+          if (Number(slider.value) !== numeric) slider.value = String(numeric);
+        }
+      },
+      buildItem: (containerEl, item, fallback) => {
+        const index = getIndex(item, fallback);
+        const row = createControlRow({ item_id: `${itemIdPrefix}${index}` });
+        row.classList.add('half');
+        const label = document.createElement('label');
+        label.className = 'control-label';
+        label.textContent = getLabel(item, fallback);
+        const field = document.createElement('div');
+        field.className = 'control-field';
+        const input = document.createElement('input');
+        input.type = 'range';
+        const range = getRange(item, fallback);
+        input.min = String(range.min);
+        input.max = String(range.max);
+        input.step = String(range.step);
+        const initial = getValue(item, fallback);
+        const initialValue = Number.isFinite(Number(initial)) ? Number(initial) : 0;
+        input.value = String(initialValue);
+        input.setAttribute(dataAttr, String(index));
+        input.setAttribute('data-testid', `${itemIdPrefix}${index}`);
+        input.dataset.editing = '0';
+        input.addEventListener('focus', () => {
+          input.dataset.editing = '1';
+        });
+        const clearEditing = () => {
+          input.dataset.editing = '0';
+        };
+        input.addEventListener('blur', clearEditing);
+        input.addEventListener('pointerup', clearEditing);
+        input.addEventListener('pointerleave', clearEditing);
+        field.appendChild(input);
+        row.append(label, field);
+        containerEl.appendChild(row);
+        input.addEventListener('input', async () => {
+          const idx = Number(index) | 0;
+          const v = Number(input.value) || 0;
+          await onInput({ index: idx, value: v, item, range });
+        });
+      },
+    });
   }
 
   function renderPanels(spec) {
@@ -2245,83 +2376,36 @@ function shortcutFromEvent(event) {
       // Dynamic: ensure Actuator sliders exist under right panel 'control' section
     ensureActuatorSliders: (actuators, ctrlValues = []) => {
         try {
-          if (!rightPanel || !Array.isArray(actuators)) return;
-          const section = rightPanel.querySelector('[data-section-id="control"]');
-        if (!section) return;
-        const body = section.querySelector('.section-body');
-        if (!body) return;
-        // Create a container for actuators if not present
-        let container = body.querySelector('[data-dynamic="actuators"]');
-        if (!container) {
-          container = document.createElement('div');
-          container.setAttribute('data-dynamic', 'actuators');
-          container.style.marginTop = '8px';
-          body.appendChild(container);
-        }
-        const prevCount = Number(container.getAttribute('data-count') || '0');
-        if (prevCount === actuators.length && container.childElementCount > 0) {
-          // Update values only
-          for (let i = 0; i < actuators.length; i += 1) {
-            const slider = container.querySelector(`input[type="range"][data-act-index="${i}"]`);
-            if (slider) {
-              if (!slider.dataset.editing) slider.dataset.editing = '0';
-              if (slider.dataset.editing === '1') continue;
-              const fromCtrl = Array.isArray(ctrlValues) && Number.isFinite(Number(ctrlValues[i]))
-                ? Number(ctrlValues[i])
-                : (ctrlValues?.[i] ?? null);
-              if (fromCtrl == null || !Number.isFinite(Number(fromCtrl))) continue;
-              const v = Number(fromCtrl);
-              if (Number(slider.value) !== v) slider.value = String(v);
-            }
-          }
-          return;
-        }
-        // Rebuild all
-        container.innerHTML = '';
-        for (const a of actuators) {
-          const row = createControlRow({ item_id: `control.act.${a.index}` });
-          row.classList.add('half');
-          const label = document.createElement('label');
-          label.className = 'control-label';
-          label.textContent = a.name ?? `Act ${a.index}`;
-          const field = document.createElement('div');
-          field.className = 'control-field';
-          const input = document.createElement('input');
-          input.type = 'range';
-          input.min = String(Number.isFinite(a.min) ? a.min : -1);
-          input.max = String(Number.isFinite(a.max) ? a.max : 1);
-          input.step = String(Number.isFinite(a.step) && a.step > 0 ? a.step : 0.001);
-          const fromCtrl = Array.isArray(ctrlValues) && Number.isFinite(Number(ctrlValues[a.index]))
-            ? Number(ctrlValues[a.index])
-            : (ctrlValues?.[a.index] ?? null);
-          // Initialise from backend ctrl; fallback to 0
-          input.value = String(fromCtrl != null ? fromCtrl : 0);
-          input.setAttribute('data-act-index', String(a.index));
-          input.setAttribute('data-testid', `control.act.${a.index}`);
-          input.dataset.editing = '0';
-          field.appendChild(input);
-          row.append(label, field);
-          container.appendChild(row);
-          input.addEventListener('focus', () => {
-            input.dataset.editing = '1';
+          ensureDynamicSliders({
+            sectionId: 'control',
+            dynamicKey: 'actuators',
+            items: actuators,
+            itemIdPrefix: 'control.act.',
+            dataAttr: 'data-act-index',
+            getIndex: (item, fallback) => resolveListIndex(item, fallback),
+            getLabel: (item, fallback) => item.name ?? `Act ${resolveListIndex(item, fallback)}`,
+            getRange: (item) => ({
+              min: Number.isFinite(item.min) ? item.min : -1,
+              max: Number.isFinite(item.max) ? item.max : 1,
+              step: Number.isFinite(item.step) && item.step > 0 ? item.step : 0.001,
+            }),
+            getValue: (item, fallback) => {
+              const index = resolveListIndex(item, fallback);
+              const raw = Array.isArray(ctrlValues) && Number.isFinite(Number(ctrlValues[index]))
+                ? Number(ctrlValues[index])
+                : (ctrlValues?.[index] ?? null);
+              if (raw == null) return null;
+              const numeric = Number(raw);
+              return Number.isFinite(numeric) ? numeric : null;
+            },
+            onInput: async ({ index, value }) => {
+              try {
+                await applySpecAction(store, backend, { item_id: 'control.actuator' }, { index, value });
+              } catch (err) {
+                logWarn('[ui] set actuator failed', err);
+              }
+            },
           });
-          const clearEditing = () => {
-            input.dataset.editing = '0';
-          };
-          input.addEventListener('blur', clearEditing);
-          input.addEventListener('pointerup', clearEditing);
-          input.addEventListener('pointerleave', clearEditing);
-          input.addEventListener('input', async () => {
-            const idx = Number(a.index) | 0;
-            const v = Number(input.value) || 0;
-            try {
-              await applySpecAction(store, backend, { item_id: 'control.actuator' }, { index: idx, value: v });
-            } catch (err) {
-              logWarn('[ui] set actuator failed', err);
-            }
-          });
-        }
-        container.setAttribute('data-count', String(actuators.length));
       } catch (err) {
         logWarn('[ui] ensureActuatorSliders error', err);
         }
@@ -2329,82 +2413,36 @@ function shortcutFromEvent(event) {
     // Dynamic: ensure Joint sliders exist under right panel 'joint' section
     ensureJointSliders: (dofs = []) => {
       try {
-        if (!rightPanel) return;
-        const section = rightPanel.querySelector('[data-section-id="joint"]');
-        if (!section) return;
-        const body = section.querySelector('.section-body');
-        if (!body) return;
-        let container = body.querySelector('[data-dynamic="joints"]');
-        if (!container) {
-          container = document.createElement('div');
-          container.setAttribute('data-dynamic', 'joints');
-          container.style.marginTop = '8px';
-          body.appendChild(container);
-        }
-        if (!Array.isArray(dofs) || dofs.length === 0) {
-          container.innerHTML = '';
-          container.setAttribute('data-count', '0');
-          return;
-        }
-        const prevCount = Number(container.getAttribute('data-count') || '0');
-        if (prevCount === dofs.length && container.childElementCount > 0) {
-          for (const dof of dofs) {
-            const slider = container.querySelector(`input[type="range"][data-joint-index="${dof.index}"]`);
-            if (!slider) continue;
-            if (!slider.dataset.editing) slider.dataset.editing = '0';
-            if (slider.dataset.editing === '1') continue;
-            if (Number(slider.min) !== dof.min) slider.min = String(dof.min);
-            if (Number(slider.max) !== dof.max) slider.max = String(dof.max);
-            const val = Number.isFinite(dof.value) ? dof.value : 0;
-            if (Number(slider.value) !== val) slider.value = String(val);
-          }
-          return;
-        }
-        container.innerHTML = '';
-        for (const dof of dofs) {
-          const row = createControlRow({ item_id: `joint.${dof.index}` });
-          row.classList.add('half');
-          const label = document.createElement('label');
-          label.className = 'control-label';
-          label.textContent = dof.label || `Joint ${dof.index}`;
-          const field = document.createElement('div');
-          field.className = 'control-field';
-          const input = document.createElement('input');
-          input.type = 'range';
-          input.min = String(dof.min);
-          input.max = String(dof.max);
-          const step = Number.isFinite(dof.step) && dof.step > 0
-            ? dof.step
-            : Math.max((dof.max - dof.min) / 500, 0.0001);
-          input.step = String(step);
-          input.value = String(Number.isFinite(dof.value) ? dof.value : 0);
-          input.setAttribute('data-joint-index', String(dof.index));
-          input.setAttribute('data-testid', `joint.${dof.index}`);
-          input.dataset.editing = '0';
-          field.appendChild(input);
-          row.append(label, field);
-          container.appendChild(row);
-          input.addEventListener('focus', () => { input.dataset.editing = '1'; });
-          const clearEditing = () => { input.dataset.editing = '0'; };
-          input.addEventListener('blur', clearEditing);
-          input.addEventListener('pointerup', clearEditing);
-          input.addEventListener('pointerleave', clearEditing);
-          input.addEventListener('input', async () => {
-            const idx = Number(dof.index) | 0;
-            const v = Number(input.value) || 0;
+        ensureDynamicSliders({
+          sectionId: 'joint',
+          dynamicKey: 'joints',
+          items: dofs,
+          itemIdPrefix: 'joint.',
+          dataAttr: 'data-joint-index',
+          getIndex: (item, fallback) => resolveListIndex(item, fallback),
+          getLabel: (item, fallback) => item.label || `Joint ${resolveListIndex(item, fallback)}`,
+          getRange: (item) => ({
+            min: item.min,
+            max: item.max,
+            step: Number.isFinite(item.step) && item.step > 0
+              ? item.step
+              : Math.max((item.max - item.min) / 500, 0.0001),
+          }),
+          getValue: (item) => (Number.isFinite(item.value) ? item.value : 0),
+          updateRange: true,
+          onInput: async ({ index, value, range }) => {
             try {
               await applySpecAction(store, backend, { item_id: 'joint.slider' }, {
-                index: idx,
-                value: v,
-                min: dof.min,
-                max: dof.max,
+                index,
+                value,
+                min: range.min,
+                max: range.max,
               });
             } catch (err) {
               logWarn('[ui] set joint qpos failed', err);
             }
-          });
-        }
-        container.setAttribute('data-count', String(dofs.length));
+          },
+        });
       } catch (err) {
         logWarn('[ui] ensureJointSliders error', err);
       }
@@ -2412,82 +2450,66 @@ function shortcutFromEvent(event) {
     // Dynamic: ensure Equality toggles exist under right panel 'equality' section
     ensureEqualityToggles: (eqs = []) => {
       try {
-        if (!rightPanel) return;
-        const section = rightPanel.querySelector('[data-section-id="equality"]');
-        if (!section) return;
-        const body = section.querySelector('.section-body');
-        if (!body) return;
-          let container = body.querySelector('[data-dynamic="equality"]');
-          if (!container) {
-            container = document.createElement('div');
-            container.setAttribute('data-dynamic', 'equality');
-            container.className = 'equality-toggle-container';
-            body.appendChild(container);
-          }
-        if (!Array.isArray(eqs) || eqs.length === 0) {
-          container.innerHTML = '';
-          container.setAttribute('data-count', '0');
-          return;
-        }
-        const prevCount = Number(container.getAttribute('data-count') || '0');
-        if (prevCount === eqs.length && container.childElementCount > 0) {
-          // Stable update: only sync active state and label,不重建 DOM，避免交互时节点被移除
-          for (const eq of eqs) {
-            const checkbox = container.querySelector(
-              `input[type="checkbox"][data-eq-index="${eq.index}"]`,
-            );
-            if (!checkbox) continue;
+        ensureDynamicList({
+          sectionId: 'equality',
+          dynamicKey: 'equality',
+          items: eqs,
+          className: 'equality-toggle-container',
+          updateExisting: (container, entries) => {
+            // Stable update: only sync active state and label,不重建 DOM，避免交互时节点被移除
+            for (const eq of entries) {
+              const checkbox = container.querySelector(
+                `input[type="checkbox"][data-eq-index="${eq.index}"]`,
+              );
+              if (!checkbox) continue;
+              const active = !!eq.active;
+              checkbox.checked = active;
+              checkbox.setAttribute('aria-checked', active ? 'true' : 'false');
+              const labelEl = checkbox.closest('label.bool-button');
+              if (labelEl) {
+                labelEl.classList.toggle('is-active', active);
+              }
+              const text = checkbox.nextElementSibling;
+              if (text && text.classList.contains('bool-text')) {
+                text.textContent = eq.label || `Equality ${eq.index}`;
+              }
+            }
+          },
+          buildItem: (container, eq) => {
+            const control = { item_id: `equality.${eq.index}`, label: eq.label || `Equality ${eq.index}` };
+            const row = createControlRow(control);
+            row.classList.add('bool-row');
+            const label = document.createElement('label');
+            label.className = 'bool-button bool-label';
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.setAttribute('role', 'switch');
+            input.setAttribute('data-testid', control.item_id);
+            input.setAttribute('data-eq-index', String(eq.index));
             const active = !!eq.active;
-            checkbox.checked = active;
-            checkbox.setAttribute('aria-checked', active ? 'true' : 'false');
-            const labelEl = checkbox.closest('label.bool-button');
-            if (labelEl) {
-              labelEl.classList.toggle('is-active', active);
-            }
-            const text = checkbox.nextElementSibling;
-            if (text && text.classList.contains('bool-text')) {
-              text.textContent = eq.label || `Equality ${eq.index}`;
-            }
-          }
-          return;
-        }
-        // 重建：数量发生变化时
-        container.innerHTML = '';
-        for (const eq of eqs) {
-          const control = { item_id: `equality.${eq.index}`, label: eq.label || `Equality ${eq.index}` };
-          const row = createControlRow(control);
-          row.classList.add('bool-row');
-          const label = document.createElement('label');
-          label.className = 'bool-button bool-label';
-          const input = document.createElement('input');
-          input.type = 'checkbox';
-          input.setAttribute('role', 'switch');
-          input.setAttribute('data-testid', control.item_id);
-          input.setAttribute('data-eq-index', String(eq.index));
-          const active = !!eq.active;
-          input.checked = active;
-          input.setAttribute('aria-checked', active ? 'true' : 'false');
-          if (active) label.classList.add('is-active');
-          const span = document.createElement('span');
-          span.className = 'bool-text';
-          span.textContent = control.label;
-          label.append(input, span);
-          row.append(label);
-          container.appendChild(row);
-          input.addEventListener('change', async (event) => {
-            event.stopPropagation();
-            const next = !!input.checked;
-            label.classList.toggle('is-active', next);
-            const eqName = eq.fullLabel || eq.label || `Eq ${eq.index}`;
-            pushToast(`${next ? 'Enabled' : 'Disabled'} equality: ${eqName}`);
-            try {
-              await applySpecAction(store, backend, { item_id: 'equality.toggle' }, { index: eq.index, active: next });
-            } catch (err) {
-              logWarn('[ui] equality toggle failed', err);
-            }
-          });
-        }
-        container.setAttribute('data-count', String(eqs.length));
+            input.checked = active;
+            input.setAttribute('aria-checked', active ? 'true' : 'false');
+            if (active) label.classList.add('is-active');
+            const span = document.createElement('span');
+            span.className = 'bool-text';
+            span.textContent = control.label;
+            label.append(input, span);
+            row.append(label);
+            container.appendChild(row);
+            input.addEventListener('change', async (event) => {
+              event.stopPropagation();
+              const next = !!input.checked;
+              label.classList.toggle('is-active', next);
+              const eqName = eq.fullLabel || eq.label || `Eq ${eq.index}`;
+              pushToast(`${next ? 'Enabled' : 'Disabled'} equality: ${eqName}`);
+              try {
+                await applySpecAction(store, backend, { item_id: 'equality.toggle' }, { index: eq.index, active: next });
+              } catch (err) {
+                logWarn('[ui] equality toggle failed', err);
+              }
+            });
+          },
+        });
       } catch (err) {
         logWarn('[ui] ensureEqualityToggles error', err);
       }
