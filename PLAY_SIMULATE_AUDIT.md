@@ -25,11 +25,12 @@ index.html
 
 ## Module Size (Top-Level `dev/`)
 - `dev/viewer_renderer.mjs` 7834 LOC
-- `dev/viewer_state.mjs` 3664 LOC
-- `dev/physics.worker.mjs` 3517 LOC
-- `dev/viewer_controls.mjs` 2470 LOC
-- `dev/bridge.mjs` 1836 LOC
-- `dev/main.nobuild.mjs` 1298 LOC
+- `dev/viewer_renderer.mjs` 8202 LOC
+- `dev/viewer_state.mjs` 3646 LOC
+- `dev/physics.worker.mjs` 2810 LOC
+- `dev/viewer_controls.mjs` 2634 LOC
+- `dev/bridge.mjs` 1884 LOC
+- `dev/main.nobuild.mjs` 1146 LOC
 - Remaining files are < 1k LOC but still contribute to duplication.
 
 ## Redundancy and Divergence Findings
@@ -39,6 +40,7 @@ index.html
 - Legacy ABI compatibility removed; bridge/worker now assume forge helper exports (3.3.7+).
 - HUD overlay markup is the current UI; no separate legacy HUD container remains after review.
 - Shared defaults consolidated into `dev/viewer_defaults.mjs` (scene flags, group counts, vopt defaults).
+- Binding normalization and visual field groups now live in `dev/viewer_state.mjs` (previously `dev/viewer_bindings.mjs` and `dev/visual_field_groups.mjs`).
 - Debug-only scene snapshot pipeline removed; worker no longer emits `scene_snapshot`.
 - Stale spec docs removed (parity matrix, web mapping).
 - Visual source mode mismatch across spec and runtime (spec says Preset/Model, runtime uses preset-sun/preset-moon) (`dev/spec/ui_spec.json:79`, `dev/viewer_state.mjs:234`, `dev/viewer_controls.mjs:1272`).
