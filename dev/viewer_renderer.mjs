@@ -4,7 +4,6 @@ import {
   perfMarkOnce,
   perfNow,
   perfSample,
-  isVerboseDebug,
   logDebug,
   logWarn,
 } from './viewer_runtime.mjs';
@@ -1895,50 +1894,19 @@ function meanSizeFromState(state, context = null) {
     const fogEnabled = segmentEnabled ? false : !!sceneFlags[5];
     const hazeEnabled = segmentEnabled ? false : !!sceneFlags[6];
     const hideAllGeometry = !!state.rendering?.hideAllGeometry;
-    // ID color / additive / cullFace can be extended later; keep false by default for now.
-    const idColorEnabled = false;
-    const additiveEnabled = false;
-      const cullFaceEnabled = true;
-      return {
-        sceneFlags,
-        voptFlags,
+    return {
+      sceneFlags,
+      voptFlags,
       segmentEnabled,
       skyboxEnabled,
       shadowEnabled,
       reflectionEnabled,
       fogEnabled,
       hazeEnabled,
-      cullFaceEnabled,
-      idColorEnabled,
-      additiveEnabled,
-        presetMode,
-        hideAllGeometry,
-      };
-    }
-
-  function isSceneDebugEnabled(state = null) {
-    if (state?.debugMode === true || state?.rendering?.debugMode === true) return true;
-    if (isVerboseDebug()) return true;
-    if (typeof window !== 'undefined') {
-      if (window.__PLAY_SCENE_DEBUG === true) return true;
-    }
-    return false;
+      presetMode,
+      hideAllGeometry,
+    };
   }
-
-  function debugSceneDescriptors(ctx, payload) {
-    if (!ctx) return;
-    ctx.lastSceneDebug = payload;
-    if (typeof window === 'undefined') return;
-    try {
-      window.__sceneDescriptors = payload;
-    } catch {}
-  }
-
-function warnOnce(cache, key, message) {
-  if (!key || cache.has(key)) return;
-  cache.add(key);
-  logWarn(message);
-}
 
 function shouldDisplayGeom(index, options = {}) {
   if (!Number.isFinite(index) || index < 0) return false;
@@ -5983,25 +5951,6 @@ export function createRendererManager({
   ctx.resolveGeomWorldMatrix = (geomIndex, outMat4) => resolveGeomWorldMatrix(ctx, geomIndex, outMat4);
   ctx.resolveGeomWorldPose = (geomIndex, outPos, outQuat, outScale) => resolveGeomWorldPose(ctx, geomIndex, outPos, outQuat, outScale);
 
-  function debugHazeState(summary) {
-    const globalDebug = typeof window !== 'undefined' ? window.__PLAY_HAZE_DEBUG : undefined;
-    const verbose = isVerboseDebug();
-    const logEnabled = globalDebug === true || verbose;
-    if (!logEnabled) return;
-    const payload = summary || { mode: 'overlay', enabled: false };
-    const key = JSON.stringify(payload);
-    if (ctx._lastHazeDebugKey === key) return;
-    ctx._lastHazeDebugKey = key;
-    if (verbose) {
-      logDebug('[viewer][haze]', payload);
-    } else {
-      logWarn('[viewer][haze]', payload);
-    }
-    if (typeof window !== 'undefined') {
-      window.__viewerHazeDebug = payload;
-    }
-  }
-
   function updateRendererViewport() {
     if (!canvas || !ctx.renderer || !ctx.camera) return;
     let width = 1;
@@ -6318,7 +6267,6 @@ export function createRendererManager({
       };
     }
     const renderer = context.renderer;
-    const debugSceneEnabled = isSceneDebugEnabled(state);
     const policy = computeScenePolicy(snapshot, state, context);
     const {
       sceneFlags,
@@ -6473,7 +6421,6 @@ export function createRendererManager({
       fadeEnd: groundUniforms?.uFadeEnd?.value ?? null,
       baseRadius: groundUniforms?.uQuadDistance?.value ?? null,
     };
-    debugHazeState(hazeSummary);
     if (visStruct && !segmentEnabled) {
       const mode = state.visualSourceMode || 'model';
       const presetMode = mode === 'preset' || mode === 'preset-sun' || mode === 'preset-moon';
@@ -6662,40 +6609,6 @@ export function createRendererManager({
       frame: ctx._frameCounter | 0,
     };
     setRenderStats(stats);
-    if (debugSceneEnabled) {
-      const contacts = snapshot.contacts || null;
-      const contactCount = typeof contacts?.n === 'number' ? (contacts.n | 0) : 0;
-      const contactDebug = {
-        n: contactCount,
-        hasPos: !!contacts?.pos,
-        hasFrame: !!contacts?.frame,
-        hasForce: !!contacts?.force,
-      };
-      const sceneDebugPayload = {
-        stats: {
-          ngeom,
-          drawn,
-          hidden: Math.max(0, ngeom - drawn),
-          contacts: {
-            n: contactCount,
-          },
-        },
-        geoms: [],
-      };
-      debugSceneDescriptors(context, sceneDebugPayload);
-      try {
-        if (typeof window !== 'undefined') {
-          window.__contactDebug = contactDebug;
-        }
-      } catch {}
-    }
-    try {
-      if (typeof window !== 'undefined') {
-        window.__drawnCount = drawn;
-        window.__ngeom = ngeom;
-      }
-    } catch {}
-
     if (Array.isArray(context.meshes)) {
       for (const mesh of context.meshes) {
         if (!mesh) continue;
@@ -6826,20 +6739,12 @@ export function createRendererManager({
       context.camera.lookAt(target);
       context.cameraTarget.copy(target);
       cacheTrackingPoseFromCurrent(context, { radius, center });
-      if (debugMode) {
-      }
     }
 
     const copyState = state.runtime?.lastCopy;
     if (copyState && copyState.seq > context.copySeq) {
       context.copySeq = copyState.seq;
     }
-    const gl = renderer && typeof renderer.getContext === 'function' ? renderer.getContext() : null;
-    // Legacy magenta framebuffer test removed; keep flag to avoid re-running in old sessions.
-    if (gl && !context.__debugMagentaTested) {
-      context.__debugMagentaTested = true;
-    }
-
     if (perfEnabled) {
       perfSample('renderer:renderScene_ms', perfNow() - tRenderStart, {
         ngeom: snapshot?.ngeom | 0,

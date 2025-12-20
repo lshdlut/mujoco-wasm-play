@@ -202,6 +202,65 @@ function formatNumber(value) {
   return Number(num.toPrecision(6)).toString();
 }
 
+function formatNumberTrimmed(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '';
+  const fixed = Number(num).toPrecision(6);
+  return fixed.replace(/\.?0+$/, '');
+}
+
+function parseVectorInput(value, length) {
+  if (Array.isArray(value)) {
+    const arr = value.map((entry) => Number(entry));
+    return arr.length === length && arr.every((n) => Number.isFinite(n)) ? arr : null;
+  }
+  if (value && typeof value === 'object') {
+    const iterator = value[Symbol.iterator];
+    const hasIterator = typeof iterator === 'function';
+    const hasLength = Number.isFinite(value.length) && value.length >= 0;
+    if (hasIterator || hasLength) {
+      const arr = Array.from(value, (entry) => Number(entry));
+      return arr.length === length && arr.every((n) => Number.isFinite(n)) ? arr : null;
+    }
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const tokens = trimmed.split(/\s+/).filter(Boolean);
+    if (tokens.length !== length) return null;
+    const arr = tokens.map((token) => Number(token));
+    return arr.every((n) => Number.isFinite(n)) ? arr : null;
+  }
+  if (typeof value === 'number' && length === 1) {
+    return Number.isFinite(value) ? [Number(value)] : null;
+  }
+  return null;
+}
+
+function attachCommitHandlers(input, binding, commit) {
+  input.addEventListener('focus', () => {
+    binding.isEditing = true;
+  });
+  input.addEventListener('blur', () => {
+    binding.isEditing = false;
+    commit();
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      input.blur();
+    }
+  });
+}
+
+function attachOptionAvailability(control, element, binding) {
+  if (!element || !binding) return;
+  applyOptionAvailability(control, element);
+  binding.updateOptions = () => {
+    applyOptionAvailability(control, element);
+  };
+}
+
 function coerceBoolean(value) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value !== 0;
@@ -1210,12 +1269,7 @@ function shortcutFromEvent(event) {
         },
       });
 
-      applyOptionAvailability(control, select);
-      binding.updateOptions = () => {
-        try {
-          applyOptionAvailability(control, select);
-        } catch {}
-      };
+      attachOptionAvailability(control, select, binding);
 
       select.addEventListener(
         'change',
@@ -1227,9 +1281,6 @@ function shortcutFromEvent(event) {
               : isNumericSelect
                 ? Math.max(0, Math.trunc(toNumber(select.value)))
                 : select.value;
-          try {
-            // eslint-disable-next-line no-console
-          } catch {}
           if (control?.item_id === 'option.color') {
             applyThemeFromColorControl(value);
           } else if (control?.item_id === 'option.spacing') {
@@ -1462,18 +1513,14 @@ function shortcutFromEvent(event) {
       },
     });
 
-    applyOptionAvailability(control, input);
-    if (input.disabled) {
-      valueLabel.textContent = 'unsupported';
-    }
-    binding.updateOptions = () => {
-      try {
-        applyOptionAvailability(control, input);
-        if (input.disabled) {
-          valueLabel.textContent = 'unsupported';
-        }
-      } catch {}
+    const updateAvailability = () => {
+      applyOptionAvailability(control, input);
+      if (input.disabled) {
+        valueLabel.textContent = 'unsupported';
+      }
     };
+    updateAvailability();
+    binding.updateOptions = updateAvailability;
 
     input.addEventListener(
       'input',
@@ -1565,12 +1612,7 @@ function shortcutFromEvent(event) {
       },
     });
 
-    applyOptionAvailability(control, input);
-    binding.updateOptions = () => {
-      try {
-        applyOptionAvailability(control, input);
-      } catch {}
-    };
+    attachOptionAvailability(control, input, binding);
 
     // Seed with current state value if present; fallback to default only when the state is empty.
     const current = readControlValue(store.get(), control);
@@ -1602,59 +1644,25 @@ function shortcutFromEvent(event) {
       await applySpecAction(store, backend, control, raw);
     });
 
-    input.addEventListener('focus', () => {
-      binding.isEditing = true;
-    });
-    input.addEventListener('blur', () => {
-      binding.isEditing = false;
-      commit();
-    });
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        input.blur();
-      }
-    });
+    attachCommitHandlers(input, binding, commit);
   }
 
-  function renderVectorInput(container, control, expectedLength) {
+  function renderVectorInputBase(container, control, {
+    expectedLength,
+    idSuffix,
+    formatValue,
+    allowDefaultPlaceholder = true,
+  }) {
     const { row, input, field } = createTextInputField(container, control, {
       mode: 'text',
-      idSuffix: '__vector',
+      idSuffix,
     });
     field.append(input);
     container.append(row);
 
     const targetLength = Math.max(1, expectedLength | 0);
     let lastValidText = '';
-
-    const formatVector = (vector) => vector.map(formatNumber).join(' ');
-    const toVectorArray = (value) => {
-      if (Array.isArray(value)) {
-        const arr = value.map((v) => Number(v));
-        return arr.length === targetLength && arr.every((n) => Number.isFinite(n)) ? arr : null;
-      }
-      if (value && typeof value === 'object') {
-        try {
-          const arr = Array.from(value, (v) => Number(v));
-          return arr.length === targetLength && arr.every((n) => Number.isFinite(n)) ? arr : null;
-        } catch {
-          return null;
-        }
-      }
-      if (typeof value === 'string') {
-        const trimmed = value.trim();
-        if (!trimmed) return null;
-        const tokens = trimmed.split(/\s+/).filter(Boolean);
-        if (tokens.length !== targetLength) return null;
-        const arr = tokens.map((token) => Number(token));
-        return arr.every((n) => Number.isFinite(n)) ? arr : null;
-      }
-      if (typeof value === 'number' && targetLength === 1) {
-        return Number.isFinite(value) ? [Number(value)] : null;
-      }
-      return null;
-    };
+    const formatVector = (vector) => vector.map(formatValue).join(' ');
 
     const setInputText = (text) => {
       input.value = text;
@@ -1665,7 +1673,7 @@ function shortcutFromEvent(event) {
       getValue: () => lastValidText || input.value,
       applyValue: (value) => {
         if (value === undefined || value === null) return;
-        const parsed = toVectorArray(value);
+        const parsed = parseVectorInput(value, targetLength);
         if (parsed) {
           lastValidText = formatVector(parsed);
           setInputText(lastValidText);
@@ -1676,18 +1684,13 @@ function shortcutFromEvent(event) {
       },
     });
 
-    applyOptionAvailability(control, input);
-    binding.updateOptions = () => {
-      try {
-        applyOptionAvailability(control, input);
-      } catch {}
-    };
+    attachOptionAvailability(control, input, binding);
 
     const currentVector = readControlValue(store.get(), control);
     if (currentVector !== undefined && currentVector !== null) {
       binding.setValue(currentVector);
     } else if (control.default !== undefined) {
-      if (typeof control.default === 'string') {
+      if (typeof control.default === 'string' && allowDefaultPlaceholder) {
         input.placeholder = control.default;
       } else if (Array.isArray(control.default)) {
         binding.setValue(control.default);
@@ -1712,7 +1715,7 @@ function shortcutFromEvent(event) {
     };
 
     const commit = guardBinding(binding, async () => {
-      const parsed = toVectorArray(input.value);
+      const parsed = parseVectorInput(input.value, targetLength);
       if (parsed) {
         lastValidText = formatVector(parsed);
         setInputText(lastValidText);
@@ -1722,137 +1725,24 @@ function shortcutFromEvent(event) {
       showInvalid();
     });
 
-    input.addEventListener('focus', () => {
-      binding.isEditing = true;
-    });
-    input.addEventListener('blur', () => {
-      binding.isEditing = false;
-      commit();
-    });
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        input.blur();
-      }
+    attachCommitHandlers(input, binding, commit);
+  }
+
+  function renderVectorInput(container, control, expectedLength) {
+    renderVectorInputBase(container, control, {
+      expectedLength,
+      idSuffix: '__vector',
+      formatValue: formatNumber,
+      allowDefaultPlaceholder: true,
     });
   }
 
   function renderVec3StringInput(container, control) {
-    const { row, input, field } = createTextInputField(container, control, {
-      mode: 'text',
+    renderVectorInputBase(container, control, {
+      expectedLength: 3,
       idSuffix: '__vec3str',
-    });
-    field.append(input);
-    container.append(row);
-    const targetLength = 3;
-    let lastValidText = '';
-
-    const formatNumber = (num) => {
-      if (!Number.isFinite(num)) return '';
-      // Keep a stable, short representation similar to other vector inputs
-      const fixed = Number(num).toPrecision(6);
-      const trimmed = fixed.replace(/\.?0+$/, '');
-      return trimmed;
-    };
-    const formatVector = (vec) => vec.map(formatNumber).join(' ');
-    const parseVec3 = (value) => {
-      if (Array.isArray(value)) {
-        const arr = value.map((v) => Number(v));
-        return arr.length === targetLength && arr.every((n) => Number.isFinite(n)) ? arr : null;
-      }
-      if (value && typeof value === 'object') {
-        try {
-          const arr = Array.from(value, (v) => Number(v));
-          return arr.length === targetLength && arr.every((n) => Number.isFinite(n)) ? arr : null;
-        } catch {
-          return null;
-        }
-      }
-      if (typeof value === 'string') {
-        const trimmed = value.trim();
-        if (!trimmed) return null;
-        const tokens = trimmed.split(/\s+/).filter(Boolean);
-        if (tokens.length !== targetLength) return null;
-        const arr = tokens.map((token) => Number(token));
-        return arr.every((n) => Number.isFinite(n)) ? arr : null;
-      }
-      return null;
-    };
-
-    const setInputText = (text) => {
-      input.value = text;
-      input.classList.remove('is-invalid');
-    };
-
-    const binding = createBinding(control, {
-      getValue: () => lastValidText || input.value,
-      applyValue: (value) => {
-        if (value === undefined || value === null) return;
-        const parsed = parseVec3(value);
-        if (parsed) {
-          lastValidText = formatVector(parsed);
-          setInputText(lastValidText);
-          return;
-        }
-        const text = typeof value === 'string' ? value.trim() : String(value ?? '');
-        setInputText(text);
-      },
-    });
-
-    applyOptionAvailability(control, input);
-    binding.updateOptions = () => {
-      try {
-        applyOptionAvailability(control, input);
-      } catch {}
-    };
-
-    const current = readControlValue(store.get(), control);
-    if (current !== undefined && current !== null) {
-      binding.setValue(current);
-    } else if (control.default !== undefined && Array.isArray(control.default)) {
-      binding.setValue(control.default);
-    }
-
-    const showInvalid = () => {
-      input.classList.add('is-invalid');
-      const labelText = control?.label || control?.name || control?.item_id || 'vector';
-      pushToast(`[${labelText}] invalid vector input (expected ${targetLength})`);
-      if (input._invalidTimer) {
-        clearTimeout(input._invalidTimer);
-      }
-      input._invalidTimer = setTimeout(() => {
-        input.classList.remove('is-invalid');
-      }, 1200);
-      if (lastValidText) {
-        input.value = lastValidText;
-      } else {
-        input.value = '';
-      }
-    };
-
-    const commit = guardBinding(binding, async () => {
-      const parsed = parseVec3(input.value);
-      if (parsed) {
-        lastValidText = formatVector(parsed);
-        setInputText(lastValidText);
-        await applySpecAction(store, backend, control, parsed);
-        return;
-      }
-      showInvalid();
-    });
-
-    input.addEventListener('focus', () => {
-      binding.isEditing = true;
-    });
-    input.addEventListener('blur', () => {
-      binding.isEditing = false;
-      commit();
-    });
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        input.blur();
-      }
+      formatValue: formatNumberTrimmed,
+      allowDefaultPlaceholder: false,
     });
   }
 
@@ -1889,17 +1779,13 @@ function shortcutFromEvent(event) {
   }
 
   function renderWatchField(container, control) {
-    const { row, label, field } = createLabeledRow(control);
-    const inputId = `${sanitiseName(control.item_id)}__watch`;
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.id = inputId;
-    input.setAttribute('data-testid', control.item_id);
-    input.autocomplete = 'off';
-    input.spellcheck = false;
+    const { row, input, field } = createTextInputField(container, control, {
+      mode: 'text',
+      idSuffix: '__watch',
+    });
     input.placeholder = 'qpos';
     const datalist = document.createElement('datalist');
-    datalist.id = `${inputId}__options`;
+    datalist.id = `${input.id}__options`;
     input.setAttribute('list', datalist.id);
     field.append(input, datalist);
     container.append(row);
@@ -1924,7 +1810,7 @@ function shortcutFromEvent(event) {
       },
     });
 
-    binding.updateOptions = (state) => syncOptions(state);
+    binding.updateOptions = syncOptions;
     syncOptions(store.get());
 
     const commit = guardBinding(binding, async () => {
@@ -1932,22 +1818,7 @@ function shortcutFromEvent(event) {
       await applySpecAction(store, backend, control, token);
     });
 
-    input.addEventListener('focus', () => {
-      binding.isEditing = true;
-    });
-    input.addEventListener('input', () => {
-      binding.isEditing = true;
-    });
-    input.addEventListener('blur', () => {
-      binding.isEditing = false;
-      commit();
-    });
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        input.blur();
-      }
-    });
+    attachCommitHandlers(input, binding, commit);
   }
 
   function renderKeyframeSelect(container, control) {
