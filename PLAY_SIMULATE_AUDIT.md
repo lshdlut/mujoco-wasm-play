@@ -58,6 +58,7 @@ index.html
 - Phase 1 (done): remove legacy perturb pipeline and legacy overlay paths; keep only mjvScene-based overlays and wasm-driven perturbation.
 - Phase 2 (done): drop ABI compatibility layers; simplify bridge/worker init around forge helper exports.
 - Phase 3 (done): backend snapshots are the single source of truth; main-thread backend adapter no longer applies optimistic state updates. UI-only state is limited to overlays/panels/theme/tracking geom, and history/watch updates are driven by worker messages.
+- Phase 4 (done): remove legacy JS-side geom descriptor rendering path; scene debug now reports only SoA-derived stats, with flex/skin driven solely by mjvScene.
 
 ## Open Questions
 - Confirm the must-keep web UI features from the list above.
