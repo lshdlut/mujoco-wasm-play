@@ -29,7 +29,6 @@
    - Computes real-time HUD, renders `ui0`/`ui1` if enabled.
    - Conditionally renders Help, Info, Profiler, Sensor overlays, then user-provided figures/text/images.
 5. **Finalize**
-   - Processes screenshot requests (read pixels, flip, encode PNG).
    - Swaps buffers.
 
 ## Event Dispatch (UiEvent / Platform callbacks)

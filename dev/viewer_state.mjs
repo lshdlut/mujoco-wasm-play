@@ -1,7 +1,14 @@
 import { prefetchBindingIndex, prepareBindingUpdate, splitBinding } from './viewer_bindings.mjs';
 import { VISUAL_FIELD_DESCRIPTORS } from './viewer_visual_struct.mjs';
 import { VISUAL_FIELD_GROUPS } from './visual_field_groups.mjs';
-import { DEFAULT_VOPT_FLAGS, MJ_GROUP_COUNT, MJ_GROUP_TYPES, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
+import {
+  DEFAULT_REALTIME_INDEX,
+  DEFAULT_VOPT_FLAGS,
+  MJ_GROUP_COUNT,
+  MJ_GROUP_TYPES,
+  REALTIME_LEVELS,
+  SCENE_FLAG_DEFAULTS,
+} from './viewer_defaults.mjs';
 import { isPerfEnabled, perfMarkOnce, perfNow, perfSample } from './viewer_perf.mjs';
 import { logError, logStatus, logWarn } from './debug_log.mjs';
 
@@ -66,6 +73,22 @@ function normaliseGroupState(input) {
     );
   }
   return output;
+}
+
+function resolveRealTimeIndexFromRate(rate) {
+  const raw = Number(rate);
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  const percent = raw * 100;
+  let bestIdx = DEFAULT_REALTIME_INDEX;
+  let bestDiff = Infinity;
+  for (let i = 0; i < REALTIME_LEVELS.length; i += 1) {
+    const diff = Math.abs(REALTIME_LEVELS[i] - percent);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
 }
 
 function createDefaultSelectionState() {
@@ -153,7 +176,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     run: true,
     scrubIndex: 0,
     keyIndex: 0,
-    realTimeIndex: 5,
+    realTimeIndex: DEFAULT_REALTIME_INDEX,
   },
   runtime: {
     cameraIndex: 0,
@@ -168,7 +191,6 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
       dx: 0,
       dy: 0,
     },
-    screenshotSeq: 0,
     selection: createDefaultSelectionState(),
     perturb: {
       mode: 'idle',
@@ -528,6 +550,10 @@ function mergeBackendSnapshot(draft, snapshot) {
   }
   if (typeof snapshot.rate === 'number' && Number.isFinite(snapshot.rate)) {
     draft.hud.rate = snapshot.rate;
+    const idx = resolveRealTimeIndexFromRate(snapshot.rate);
+    if (idx !== null) {
+      draft.simulation.realTimeIndex = idx;
+    }
   }
   if (typeof snapshot.measuredSlowdown === 'number' && Number.isFinite(snapshot.measuredSlowdown)) {
     draft.hud.measuredSlowdown = snapshot.measuredSlowdown;
@@ -1014,101 +1040,13 @@ function applyBinding(draft, binding, value, control) {
       theme.font = idx;
       return true;
     }
-    case 'Simulate::run': {
-      if (typeof value === 'string') {
-        draft.simulation.run = value.toLowerCase() !== 'pause';
-      } else {
-        draft.simulation.run = bool(value);
-      }
-      return true;
-    }
-    case 'Simulate::camera': {
-      const idx = Math.max(0, Math.trunc(toNumber(value)));
-      draft.runtime.cameraIndex = idx;
-      draft.runtime.cameraLabel = cameraLabelFromIndex(idx, draft.model?.cameras);
-      return true;
-    }
     case 'Simulate::tracking_geom': {
       const geomIdx = Math.trunc(toNumber(value));
       draft.runtime.trackingGeom = Number.isFinite(geomIdx) ? geomIdx : -1;
       return true;
     }
-    case 'Simulate::scrub_index':
-      draft.simulation.scrubIndex = Math.trunc(toNumber(value));
-      {
-        const history = ensureHistoryState(draft);
-        history.scrubIndex = draft.simulation.scrubIndex;
-        history.live = history.scrubIndex === 0;
-      }
-      return true;
-    case 'Simulate::key':
-      draft.simulation.keyIndex = Math.trunc(toNumber(value));
-      return true;
-    case 'Simulate::field': {
-      const watch = ensureWatchState(draft);
-      watch.field = typeof value === 'string' ? value.trim() : String(value ?? '');
-      watch.status = 'pending';
-      return true;
-    }
-    case 'Simulate::index': {
-      const watch = ensureWatchState(draft);
-      watch.index = Math.max(0, Math.trunc(toNumber(value)));
-      watch.status = 'pending';
-      return true;
-    }
     default:
       break;
-  }
-
-  const groupMatch = binding?.match(/^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/);
-  if (groupMatch) {
-    const type = groupMatch[1];
-    const idx = Math.max(0, Math.trunc(toNumber(groupMatch[2])));
-    if (idx < MJ_GROUP_COUNT) {
-      const rendering = ensureRenderingState(draft);
-      if (!Array.isArray(rendering.groups?.[type])) {
-        rendering.groups[type] = Array.from({ length: MJ_GROUP_COUNT }, () => true);
-      }
-      rendering.groups[type][idx] = bool(value);
-    }
-    return true;
-  }
-
-  if (binding?.startsWith('Simulate::disable[')) {
-    const name = control?.label ?? control?.name ?? binding;
-    draft.physics.disableFlags[name] = bool(value);
-    return true;
-  }
-  if (binding?.startsWith('Simulate::enable[')) {
-    const name = control?.label ?? control?.name ?? binding;
-    draft.physics.enableFlags[name] = bool(value);
-    return true;
-  }
-  if (binding?.startsWith('Simulate::enableactuator[')) {
-    const name = control?.label ?? control?.name ?? binding;
-    draft.physics.actuatorGroups[name] = bool(value);
-    return true;
-  }
-  return false;
-}
-
-function applyStructBindingToModel(draft, scope, pathSegments, value) {
-  if (!scope || !Array.isArray(pathSegments)) return false;
-  if (!draft.model) draft.model = {};
-  if (scope === 'mjOption') {
-    draft.model.opt = draft.model.opt || {};
-    assignStructPath(draft.model.opt, pathSegments, value);
-    return true;
-  }
-  if (scope === 'mjVisual') {
-    draft.model.vis = draft.model.vis || {};
-    assignStructPath(draft.model.vis, pathSegments, value);
-    return true;
-  }
-  if (scope === 'mjStatistic') {
-    draft.model.stat = draft.model.stat || {};
-    assignStructPath(draft.model.stat, pathSegments, value);
-    return true;
   }
   return false;
 }
@@ -1141,11 +1079,6 @@ function formatKeyframeLabelFromState(state, index) {
 function applyControl(draft, control, value) {
   if (!control) return false;
   if (control.item_id === 'simulation.reset') {
-    latestHudTime = 0;
-    draft.simulation.run = false;
-    draft.hud.time = 0;
-    draft.hud.frames = 0;
-    draft.hud.fps = 0;
     draft.toast = { message: 'Simulation reset', ts: Date.now() };
     return true;
   }
@@ -1174,14 +1107,6 @@ function applyControl(draft, control, value) {
     draft.toast = { message: `Loaded keyframe ${label}`, ts: Date.now() };
     return true;
   }
-  if (control.item_id === 'file.screenshot') {
-    draft.toast = { message: 'Screenshot captured', ts: Date.now() };
-    if (!Number.isFinite(draft.runtime?.screenshotSeq)) {
-      draft.runtime.screenshotSeq = 0;
-    }
-    draft.runtime.screenshotSeq += 1;
-    return true;
-  }
   if (control.item_id === 'file.quit') {
     draft.toast = { message: 'Quit requested', ts: Date.now() };
     return true;
@@ -1192,30 +1117,6 @@ function applyControl(draft, control, value) {
   }
   const binding = control.binding;
   if (binding) {
-    const voptMatch = binding.match(/^mjvOption::flags\[(\d+)\]$/);
-    if (voptMatch) {
-      const idx = Number(voptMatch[1]);
-      const rendering = ensureRenderingState(draft);
-      rendering.voptFlags[idx] = bool(value);
-      return true;
-    }
-    const sceneMatch = binding.match(/^mjvScene::flags\[(\d+)\]$/);
-    if (sceneMatch) {
-      const idx = Number(sceneMatch[1]);
-      const rendering = ensureRenderingState(draft);
-      rendering.sceneFlags[idx] = bool(value);
-      return true;
-    }
-    if (binding === 'mjvOption::label') {
-      const rendering = ensureRenderingState(draft);
-      rendering.labelMode = Math.max(0, Math.trunc(toNumber(value)));
-      return true;
-    }
-    if (binding === 'mjvOption::frame') {
-      const rendering = ensureRenderingState(draft);
-      rendering.frameMode = Math.max(0, Math.trunc(toNumber(value)));
-      return true;
-    }
     return applyBinding(draft, binding, value, control);
   }
   return false;
@@ -1349,7 +1250,6 @@ function readControlValue(state, control) {
     if (mode === 'preset-moon') return 'PresetMoon';
     return 'PresetSun';
   }
-  if (control.item_id === 'file.screenshot') return null;
   if (control.item_id === 'file.quit') return null;
   if (control.binding) {
     return readBindingValue(state, control.binding, control);
@@ -1419,7 +1319,6 @@ export async function applySpecAction(store, backend, control, rawValue) {
     return;
   }
   const isRunToggle = control.item_id === 'simulation.run' && typeof backend?.setRunState === 'function';
-  const prepared = isRunToggle ? null : await prepareBindingUpdate(control, value);
   let snapshot = null;
   if (backend) {
     try {
@@ -1434,20 +1333,10 @@ export async function applySpecAction(store, backend, control, rawValue) {
     }
   }
 
-  // For struct-backed bindings (mjOption/mjVisual/mjStatistic), backend.apply
-  // posts an async setField message to the worker and returns the current
-  // snapshot (without the updated struct). In that case we rely on the local
-  // applyStructBindingToModel + subsequent backend snapshots instead of
-  // immediately merging the stale snapshot here.
-  const effectiveSnapshot = prepared ? null : snapshot;
-
   store.update((draft) => {
     applyControl(draft, control, value);
-    if (prepared) {
-      applyStructBindingToModel(draft, prepared.meta.scope, prepared.meta.path, prepared.value);
-    }
-    if (effectiveSnapshot) {
-      mergeBackendSnapshot(draft, effectiveSnapshot);
+    if (snapshot) {
+      mergeBackendSnapshot(draft, snapshot);
     }
   });
 }
@@ -1750,7 +1639,6 @@ export async function createBackend(options = {}) {
     );
   if (typeof window !== 'undefined') {
     window.PLAY_SNAPSHOT_DEBUG = snapshotDebug;
-    try { window.PLAY_PERF_DEBUG = perfEnabled; } catch (err) { throw err; }
   }
   const modelToken = typeof options.model === 'string' ? options.model.trim() : '';
   const modelKey = modelToken.toLowerCase();
@@ -1768,9 +1656,6 @@ export async function createBackend(options = {}) {
   };
   let client = null;
   const kind = 'worker';
-  let paused = false;
-  let rate = 1;
-  let historyScrubbing = false;
   let lastSnapshot = createInitialSnapshot();
   let lastFrameId = -1;
   let messageHandler = null;
@@ -1789,9 +1674,13 @@ export async function createBackend(options = {}) {
         if (forgeBase) {
           workerUrl.searchParams.set('forgeBase', forgeBase);
         }
-        const perf = params.get('perf');
-        if (perf) {
-          workerUrl.searchParams.set('perf', perf);
+        const logToken = params.get('log');
+        if (logToken) {
+          workerUrl.searchParams.set('log', logToken);
+        }
+        const verboseToken = params.get('verbose');
+        if (verboseToken) {
+          workerUrl.searchParams.set('verbose', verboseToken);
         }
       }
     } catch {
@@ -1840,8 +1729,12 @@ async function loadDefaultXml() {
 }
 
   function notifyListeners() {
-    lastSnapshot.rate = rate;
-    lastSnapshot.paused = paused;
+    if (!Number.isFinite(lastSnapshot.rate)) {
+      lastSnapshot.rate = 1;
+    }
+    if (typeof lastSnapshot.paused !== 'boolean') {
+      lastSnapshot.paused = false;
+    }
     if (!lastSnapshot.rateSource) lastSnapshot.rateSource = 'backend';
     if (!lastSnapshot.pausedSource) lastSnapshot.pausedSource = 'backend';
     const snapshot = resolveSnapshot(lastSnapshot);
@@ -1886,13 +1779,14 @@ async function loadDefaultXml() {
       messageHandler = (evt) => handleMessage(evt);
       client.onmessage = messageHandler;
     }
+    const loadRate = Number.isFinite(lastSnapshot.rate) ? lastSnapshot.rate : 1;
     // Reset local snapshot state and kick off load on the fresh worker.
     lastSnapshot = createInitialSnapshot();
     lastFrameId = -1;
     lastSnapshot.visualDefaults = null;
     notifyListeners();
     try {
-      client.postMessage({ cmd: 'load', rate, xmlText: payload });
+      client.postMessage({ cmd: 'load', rate: loadRate, xmlText: payload });
       client.postMessage({ cmd: 'snapshot' });
     } catch (err) {
       logError('[backend load] failed', err);
@@ -2011,17 +1905,6 @@ async function loadDefaultXml() {
 
   function setRunState(run, source = 'ui', notifyBackend = true) {
     const nextPaused = !run;
-    paused = nextPaused;
-    lastSnapshot.paused = nextPaused;
-    lastSnapshot.pausedSource = source;
-    if (!nextPaused && lastSnapshot.history && lastSnapshot.history.scrubIndex < 0) {
-      lastSnapshot.history.scrubIndex = 0;
-      lastSnapshot.history.live = true;
-      historyScrubbing = false;
-      try { client.postMessage?.({ cmd: 'historyScrub', offset: 0 }); } catch (err) {
-        logWarn('[backend history reset] post failed', err);
-      }
-    }
     if (notifyBackend) {
       try {
         client.postMessage?.({ cmd: 'setPaused', paused: nextPaused, source });
@@ -2029,21 +1912,18 @@ async function loadDefaultXml() {
         logWarn('[backend] setPaused post failed', err);
       }
     }
-    return notifyListeners();
+    return resolveSnapshot(lastSnapshot);
   }
 
   function setRate(nextRate, source = 'ui') {
     const raw = Number(nextRate);
     const clamped = Number.isFinite(raw) ? Math.max(0.0625, Math.min(16, raw)) : 1;
-    rate = clamped;
-    lastSnapshot.rate = rate;
-    lastSnapshot.rateSource = source;
     try {
-      client.postMessage?.({ cmd: 'setRate', rate });
+      client.postMessage?.({ cmd: 'setRate', rate: clamped, source });
     } catch (err) {
       logWarn('[backend] setRate post failed', err);
     }
-    return notifyListeners();
+    return resolveSnapshot(lastSnapshot);
   }
 
   async function loadXmlText(xmlText) {
@@ -2171,7 +2051,9 @@ async function loadDefaultXml() {
     switch (data.kind) {
       case 'run_state': {
         if (typeof data.running === 'boolean') {
-          setRunState(!!data.running, data.source || 'backend', false);
+          lastSnapshot.paused = !data.running;
+          lastSnapshot.pausedSource = data.source || 'backend';
+          notifyListeners();
         }
         break;
       }
@@ -2504,6 +2386,46 @@ async function loadDefaultXml() {
         notifyListeners();
         break;
       }
+      case 'history': {
+        const history = lastSnapshot.history || createDefaultHistoryState();
+        history.captureHz = Number(data.captureHz) || 0;
+        history.capacity = Math.max(0, Number(data.capacity) || 0);
+        history.count = Math.max(0, Number(data.count) || 0);
+        history.horizon = Number(data.horizon) || 0;
+        history.scrubIndex = Number(data.scrubIndex) || 0;
+        history.live = data.live !== false;
+        lastSnapshot.history = history;
+        notifyListeners();
+        break;
+      }
+      case 'watch': {
+        const watch = lastSnapshot.watch || createDefaultWatchState();
+        if (typeof data.field === 'string') {
+          watch.field = data.field;
+        }
+        if (typeof data.index === 'number' && Number.isFinite(data.index)) {
+          watch.index = data.index | 0;
+        }
+        if ('value' in data) {
+          const raw = Number(data.value);
+          watch.value = Number.isFinite(raw) ? raw : null;
+        }
+        const minVal = Number(data.min);
+        const maxVal = Number(data.max);
+        watch.min = Number.isFinite(minVal) ? minVal : null;
+        watch.max = Number.isFinite(maxVal) ? maxVal : null;
+        watch.samples = Math.max(0, Number(data.samples) || 0);
+        watch.status = data.status || watch.status || 'idle';
+        watch.valid = !!data.valid;
+        if (watch.valid && typeof watch.value === 'number') {
+          watch.summary = watch.value.toPrecision(6);
+        } else {
+          watch.summary = '—';
+        }
+        lastSnapshot.watch = watch;
+        notifyListeners();
+        break;
+      }
       case 'render_assets':
         if (data.assets) {
           lastSnapshot.renderAssets = data.assets;
@@ -2629,7 +2551,7 @@ async function loadDefaultXml() {
       return resolveSnapshot(lastSnapshot);
     }
     if (payload.kind === 'gesture') {
-      const mode = payload.mode ?? payload.gesture?.mode ?? lastSnapshot.gesture?.mode ?? 'idle';
+      const mode = payload.mode ?? payload.gesture?.mode ?? 'idle';
       const phase = payload.phase ?? payload.gesture?.phase ?? 'update';
       const pointerSource = payload.pointer ?? payload.gesture?.pointer ?? null;
       const pointer = pointerSource
@@ -2643,38 +2565,27 @@ async function loadDefaultXml() {
           }
         : null;
       const dragSource = payload.drag ?? (pointer ? { dx: pointer.dx, dy: pointer.dy } : null);
-      if (!lastSnapshot.gesture) {
-        lastSnapshot.gesture = { mode: 'idle', phase: 'idle' };
-      }
-      lastSnapshot.gesture = {
-        ...lastSnapshot.gesture,
+      const gesture = {
         mode: phase === 'end' ? 'idle' : mode,
         phase,
         pointer,
       };
-      if (!lastSnapshot.drag) {
-        lastSnapshot.drag = { dx: 0, dy: 0 };
-      }
-      if (dragSource) {
-        lastSnapshot.drag = {
-          dx: Number(dragSource.dx) || 0,
-          dy: Number(dragSource.dy) || 0,
-        };
-      }
-      if (phase === 'end' && !dragSource) {
-        lastSnapshot.drag = { dx: 0, dy: 0 };
-      }
+      const drag = dragSource
+        ? {
+            dx: Number(dragSource.dx) || 0,
+            dy: Number(dragSource.dy) || 0,
+          }
+        : (phase === 'end' ? { dx: 0, dy: 0 } : null);
       try {
         client.postMessage?.({
           cmd: 'gesture',
-          gesture: lastSnapshot.gesture,
+          gesture,
           pointer,
-          drag: lastSnapshot.drag,
+          drag,
         });
       } catch (err) {
         logError('[backend gesture] failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     if (payload.kind !== 'ui') {
@@ -2685,26 +2596,18 @@ async function loadDefaultXml() {
     if (binding === 'Simulate::camera') {
       const totalModes = Math.max(1, 2 + (lastSnapshot.cameras?.length || 0));
       const modeValue = Math.max(0, Math.min(totalModes - 1, Math.trunc(toNumber(value))));
-      lastSnapshot.cameraMode = modeValue;
       try { client.postMessage?.({ cmd: 'setCameraMode', mode: modeValue }); } catch (err) {
         logWarn('[backend camera] post failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     if (binding === 'Simulate::tracking_geom') {
-      lastSnapshot.trackingGeom = Math.trunc(toNumber(value));
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     const optMatch = binding?.match(/^Simulate::opt\.(flex_layer|bvh_depth)$/);
     if (optMatch) {
       const field = optMatch[1];
       const nextValue = Math.max(0, Math.trunc(toNumber(value)));
-      if (!lastSnapshot.options || typeof lastSnapshot.options !== 'object') {
-        lastSnapshot.options = {};
-      }
-      lastSnapshot.options[field] = nextValue;
       try {
         client.postMessage?.({
           cmd: 'setVisualOption',
@@ -2714,24 +2617,19 @@ async function loadDefaultXml() {
       } catch (err) {
         logWarn('[backend setVisualOption] post failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     if (binding && binding.startsWith('Simulate::disable[')) {
       const match = binding.match(/^Simulate::disable\[(\d+)\]$/);
       const bitIndex = match ? normaliseInt(match[1], -1) : -1;
       if (bitIndex >= 0 && bitIndex < 32) {
-        if (!lastSnapshot.options || typeof lastSnapshot.options !== 'object') {
-          lastSnapshot.options = {};
-        }
-        const currentMask =
-          typeof lastSnapshot.options.disableflags === 'number'
-            ? (lastSnapshot.options.disableflags | 0)
-            : 0;
         const active = bool(value);
         const bit = 1 << bitIndex;
+        const currentMask =
+          typeof lastSnapshot.options?.disableflags === 'number'
+            ? (lastSnapshot.options.disableflags | 0)
+            : 0;
         const nextMask = active ? (currentMask | bit) : (currentMask & ~bit);
-        lastSnapshot.options.disableflags = nextMask;
         try {
           client.postMessage?.({
             cmd: 'setField',
@@ -2744,7 +2642,6 @@ async function loadDefaultXml() {
         } catch (err) {
           logWarn('[backend disableflags] post failed', err);
         }
-        notifyListeners();
       }
       return resolveSnapshot(lastSnapshot);
     }
@@ -2752,17 +2649,13 @@ async function loadDefaultXml() {
       const match = binding.match(/^Simulate::enable\[(\d+)\]$/);
       const bitIndex = match ? normaliseInt(match[1], -1) : -1;
       if (bitIndex >= 0 && bitIndex < 32) {
-        if (!lastSnapshot.options || typeof lastSnapshot.options !== 'object') {
-          lastSnapshot.options = {};
-        }
-        const currentMask =
-          typeof lastSnapshot.options.enableflags === 'number'
-            ? (lastSnapshot.options.enableflags | 0)
-            : 0;
         const active = bool(value);
         const bit = 1 << bitIndex;
+        const currentMask =
+          typeof lastSnapshot.options?.enableflags === 'number'
+            ? (lastSnapshot.options.enableflags | 0)
+            : 0;
         const nextMask = active ? (currentMask | bit) : (currentMask & ~bit);
-        lastSnapshot.options.enableflags = nextMask;
         try {
           client.postMessage?.({
             cmd: 'setField',
@@ -2775,7 +2668,6 @@ async function loadDefaultXml() {
         } catch (err) {
           logWarn('[backend enableflags] post failed', err);
         }
-        notifyListeners();
       }
       return resolveSnapshot(lastSnapshot);
     }
@@ -2783,18 +2675,13 @@ async function loadDefaultXml() {
       const match = binding.match(/^Simulate::enableactuator\[(\d+)\]$/);
       const bitIndex = match ? normaliseInt(match[1], -1) : -1;
       if (bitIndex >= 0 && bitIndex < 32) {
-        if (!lastSnapshot.options || typeof lastSnapshot.options !== 'object') {
-          lastSnapshot.options = {};
-        }
-        const currentMask =
-          typeof lastSnapshot.options.disableactuator === 'number'
-            ? (lastSnapshot.options.disableactuator | 0)
-            : 0;
         const enabled = bool(value);
         const bit = 1 << bitIndex;
-        // enableactuator is the inverse of disableactuator bitmask
+        const currentMask =
+          typeof lastSnapshot.options?.disableactuator === 'number'
+            ? (lastSnapshot.options.disableactuator | 0)
+            : 0;
         const nextMask = enabled ? (currentMask & ~bit) : (currentMask | bit);
-        lastSnapshot.options.disableactuator = nextMask;
         try {
           client.postMessage?.({
             cmd: 'setField',
@@ -2807,7 +2694,6 @@ async function loadDefaultXml() {
         } catch (err) {
           logWarn('[backend disableactuator] post failed', err);
         }
-        notifyListeners();
       }
       return resolveSnapshot(lastSnapshot);
     }
@@ -2815,45 +2701,27 @@ async function loadDefaultXml() {
     if (groupMatch) {
       const type = groupMatch[1];
       const idx = Math.max(0, Math.trunc(toNumber(groupMatch[2])));
-      if (!lastSnapshot.groups) {
-        lastSnapshot.groups = createViewerGroupState(true);
-      }
-      if (!Array.isArray(lastSnapshot.groups[type])) {
-        lastSnapshot.groups[type] = Array.from({ length: MJ_GROUP_COUNT }, () => true);
-      }
       if (idx < MJ_GROUP_COUNT) {
-        lastSnapshot.groups[type][idx] = bool(value);
+        try { client.postMessage?.({ cmd: 'setGroupState', group: type, index: idx, enabled: bool(value) }); } catch (err) {
+          logWarn('[backend group] post failed', err);
+        }
       }
-      try { client.postMessage?.({ cmd: 'setGroupState', group: type, index: idx, enabled: bool(value) }); } catch (err) {
-        logWarn('[backend group] post failed', err);
-      }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     if (id === 'simulation.history_scrubber') {
       const offset = Math.min(0, normaliseInt(value, 0));
-      lastSnapshot.history = lastSnapshot.history || createDefaultHistoryState();
-      lastSnapshot.history.scrubIndex = offset;
-      lastSnapshot.history.live = offset === 0;
       try { client.postMessage?.({ cmd: 'historyScrub', offset }); } catch (err) {
         logWarn('[backend history] post failed', err);
       }
-      historyScrubbing = offset < 0;
-      if (offset < 0 && !paused) {
-        setRunState(false, 'history');
-      }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     if (id === 'simulation.key_slider') {
-      lastSnapshot.keyIndex = normaliseInt(value, -1);
-      const index = Math.max(-1, lastSnapshot.keyIndex | 0);
+      const index = Math.max(-1, normaliseInt(value, -1));
       try {
         client.postMessage?.({ cmd: 'keyframeSelect', index });
       } catch (err) {
         logWarn('[backend keyframe select] failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     if (id === 'simulation.save_key') {
@@ -2872,38 +2740,30 @@ async function loadDefaultXml() {
     }
     if (id === 'watch.field') {
       const field = typeof value === 'string' ? value.trim() : '';
-      lastSnapshot.watch = lastSnapshot.watch || createDefaultWatchState();
-      if (field.length > 0) {
-        lastSnapshot.watch.field = field;
-      }
-      lastSnapshot.watch.status = 'pending';
+      const nextField = field.length > 0 ? field : (lastSnapshot.watch?.field || '');
+      if (!nextField) return resolveSnapshot(lastSnapshot);
       try {
         client.postMessage?.({
           cmd: 'setWatch',
-          field: lastSnapshot.watch.field,
-          index: Number.isFinite(lastSnapshot.watch.index) ? (lastSnapshot.watch.index | 0) : 0,
+          field: nextField,
+          index: Number.isFinite(lastSnapshot.watch?.index) ? (lastSnapshot.watch.index | 0) : 0,
         });
       } catch (err) {
         logWarn('[backend watch field] failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     if (id === 'watch.index') {
       const target = Math.max(0, normaliseInt(value, 0));
-      lastSnapshot.watch = lastSnapshot.watch || createDefaultWatchState();
-      lastSnapshot.watch.index = target;
-      lastSnapshot.watch.status = 'pending';
       try {
         client.postMessage?.({
           cmd: 'setWatch',
-          field: lastSnapshot.watch.field,
+          field: lastSnapshot.watch?.field,
           index: target,
         });
       } catch (err) {
         logWarn('[backend watch index] failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     // Generic actuator control (dynamic UI)
@@ -2913,11 +2773,6 @@ async function loadDefaultXml() {
           const v = Number(value?.value ?? value?.v ?? 0);
           if (Number.isFinite(idx) && idx >= 0) {
             client.postMessage?.({ cmd: 'setCtrl', index: idx | 0, value: v });
-            // Optimistically update local copy if present
-            if (Array.isArray(lastSnapshot.actuators) && lastSnapshot.actuators[idx|0]) {
-              lastSnapshot.actuators[idx|0].value = v;
-            }
-            notifyListeners();
           }
         } catch (err) {
           logWarn('[backend control.actuator] failed', err);
@@ -2932,10 +2787,6 @@ async function loadDefaultXml() {
             const min = Number.isFinite(value?.min) ? Number(value.min) : null;
             const max = Number.isFinite(value?.max) ? Number(value.max) : null;
             client.postMessage?.({ cmd: 'setQpos', index: idx | 0, value: v, min, max });
-            if (lastSnapshot.qpos && idx < lastSnapshot.qpos.length) {
-              lastSnapshot.qpos[idx] = v;
-            }
-            notifyListeners();
           }
         } catch (err) {
           logWarn('[backend joint.slider] failed', err);
@@ -2948,10 +2799,6 @@ async function loadDefaultXml() {
           const active = !!(value?.active ?? value?.value ?? value?.v);
           if (Number.isFinite(idx) && idx >= 0) {
             client.postMessage?.({ cmd: 'setEqualityActive', index: idx | 0, active });
-            if (lastSnapshot.eq_active && idx < lastSnapshot.eq_active.length) {
-              lastSnapshot.eq_active[idx] = active ? 1 : 0;
-            }
-            notifyListeners();
           }
         } catch (err) {
           logWarn('[backend equality.toggle] failed', err);
@@ -2963,10 +2810,8 @@ async function loadDefaultXml() {
         const acts = Array.isArray(lastSnapshot.actuators) ? lastSnapshot.actuators : [];
         for (let i = 0; i < acts.length; i += 1) {
           try { client.postMessage?.({ cmd: 'setCtrl', index: i, value: 0 }); } catch {}
-          if (acts[i]) acts[i].value = 0;
         }
       } catch {}
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     const prepared = await prepareBindingUpdate(control, value);
@@ -2992,48 +2837,32 @@ async function loadDefaultXml() {
     if (voptMatch) {
       const idx = Number(voptMatch[1]);
       const enabled = bool(value);
-      if (!Array.isArray(lastSnapshot.voptFlags)) {
-        lastSnapshot.voptFlags = Array.from({ length: 32 }, () => 0);
-      }
-      lastSnapshot.voptFlags[idx] = enabled ? 1 : 0;
       try { client.postMessage?.({ cmd: 'setVoptFlag', index: idx, enabled }); } catch (err) {
         logWarn('[backend vopt flag] post failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     const sceneMatch = binding?.match(/^mjvScene::flags\[(\d+)\]$/);
     if (sceneMatch) {
       const idx = Number(sceneMatch[1]);
       const enabled = bool(value);
-      if (!Array.isArray(lastSnapshot.sceneFlags)) {
-        lastSnapshot.sceneFlags = SCENE_FLAG_DEFAULTS.map((flag) => (flag ? 1 : 0));
-      }
-      if (idx >= 0 && idx < SCENE_FLAG_DEFAULTS.length) {
-        lastSnapshot.sceneFlags[idx] = enabled ? 1 : 0;
-      }
       try { client.postMessage?.({ cmd: 'setSceneFlag', index: idx, enabled }); } catch (err) {
         logWarn('[backend scene flag] post failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     if (binding === 'mjvOption::label') {
       const mode = Math.max(0, Math.trunc(toNumber(value)));
-      lastSnapshot.labelMode = mode;
       try { client.postMessage?.({ cmd: 'setLabelMode', mode }); } catch (err) {
         logWarn('[backend label mode] post failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     if (binding === 'mjvOption::frame') {
       const mode = Math.max(0, Math.trunc(toNumber(value)));
-      lastSnapshot.frameMode = mode;
       try { client.postMessage?.({ cmd: 'setFrameMode', mode }); } catch (err) {
         logWarn('[backend frame mode] post failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
     switch (id) {
@@ -3043,8 +2872,6 @@ async function loadDefaultXml() {
       }
       case 'simulation.reset':
         client.postMessage?.({ cmd: 'reset' });
-        lastSnapshot.pausedSource = 'ui';
-        notifyListeners();
         break;
       case 'simulation.reload': {
         if (lastXmlText && typeof lastXmlText === 'string' && lastXmlText.trim().length > 0) {
@@ -3101,7 +2928,6 @@ async function loadDefaultXml() {
     const history = lastSnapshot.history || createDefaultHistoryState();
     const currentOffset = Number.isFinite(history.scrubIndex) ? history.scrubIndex : 0;
     const count = Number.isFinite(history.count) ? history.count : 0;
-    const cameFromHistory = currentOffset < 0;
     let nextOffset = currentOffset;
 
     if (currentOffset !== 0 || (dir < 0 && count > 0)) {
@@ -3120,23 +2946,11 @@ async function loadDefaultXml() {
         return resolveSnapshot(lastSnapshot);
       }
 
-      history.scrubIndex = nextOffset;
-      history.live = nextOffset === 0;
-      lastSnapshot.history = history;
-      historyScrubbing = nextOffset < 0;
-
-      if (nextOffset < 0) {
-        setRunState(false, 'history', false);
-      } else if (cameFromHistory && nextOffset === 0) {
-        setRunState(false, 'history');
-      }
-
       try {
         client.postMessage?.({ cmd: 'historyScrub', offset: nextOffset });
       } catch (err) {
         logWarn('[backend history step] post failed', err);
       }
-      notifyListeners();
       return resolveSnapshot(lastSnapshot);
     }
 

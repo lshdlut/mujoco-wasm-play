@@ -36,11 +36,6 @@
 - **Images**: `Simulate::user_images_` via `ShowImage` drawing raw RGBA buffers.
 - **Update cadence**: producer threads set `newfigurerequest/newtextrequest/newimagerequest`; render thread swaps buffers each frame when flag set.
 
-## Screenshot Pipeline
-- **Trigger**: file menu button or `Ctrl+P` sets `screenshotrequest` atomic.
-- **Execution**: within render loop, `mjr_readPixels` copies full framebuffer, flips vertically, and saves PNG via `lodepng`.
-- **Output path**: selected through `GetSavePath("screenshot.png")` dialog; default filename is static.
-
 ## Selection Marker HUD
 - **Camera tracking**: when `pending_.select` processed, `Simulate::cam.lookat` updated and optional tracking camera engaged; corresponding UI sections flagged for refresh.
 - **Warnings**: Passive mode increments `d_->warning[mjWARN_VGEOMFULL]`; overlay not drawn but info overlay surface includes warnings through stats.

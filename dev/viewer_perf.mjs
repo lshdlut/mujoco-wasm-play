@@ -1,46 +1,11 @@
-const GLOBAL_KEY = '__PLAY_PERF';
-const BOOL_TRUE = new Set(['1', 'true', 'yes', 'on', 'debug']);
-let cachedEnabled = null;
+import { isVerboseDebug } from './debug_log.mjs';
 
-function readPerfFlagFromLocation() {
-  try {
-    const href = typeof location !== 'undefined' && location?.href ? String(location.href) : '';
-    if (!href) return null;
-    const url = new URL(href);
-    const token = String(url.searchParams.get('perf') || '').trim().toLowerCase();
-    if (!token) return null;
-    return BOOL_TRUE.has(token);
-  } catch (err) {
-    // If query parsing fails, surface the error; perf gate should not hide it.
-    throw err;
-  }
-}
+const GLOBAL_KEY = '__PLAY_PERF';
+let cachedEnabled = null;
 
 export function isPerfEnabled() {
   if (cachedEnabled !== null) return cachedEnabled;
-  const explicit = (() => {
-    try {
-      if (typeof globalThis !== 'undefined' && globalThis.PLAY_PERF_DEBUG != null) {
-        return !!globalThis.PLAY_PERF_DEBUG;
-      }
-    } catch (err) {
-      throw err;
-    }
-    return null;
-  })();
-  if (explicit !== null) {
-    cachedEnabled = explicit;
-    return cachedEnabled;
-  }
-  const flag = readPerfFlagFromLocation();
-  cachedEnabled = flag === true;
-  try {
-    if (typeof globalThis !== 'undefined') {
-      globalThis.PLAY_PERF_DEBUG = cachedEnabled;
-    }
-  } catch (err) {
-    throw err;
-  }
+  cachedEnabled = isVerboseDebug();
   return cachedEnabled;
 }
 
@@ -185,7 +150,7 @@ export function perfSummary() {
 }
 
 // Convenience: expose summary helper for Playwright + console poking.
-if (typeof globalThis !== 'undefined') {
+if (typeof globalThis !== 'undefined' && isPerfEnabled()) {
   try {
     globalThis.__PLAY_PERF_SUMMARY = () => perfSummary();
   } catch (err) {

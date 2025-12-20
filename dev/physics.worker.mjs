@@ -1,7 +1,7 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
-import { logError, logStatus, logWarn } from './debug_log.mjs';
+import { isVerboseDebug, logError, logStatus, logWarn } from './debug_log.mjs';
 import { withCacheTag } from './paths.mjs';
 import { DEFAULT_VOPT_FLAGS_NUMERIC, MJ_GROUP_COUNT, MJ_GROUP_TYPES, SCENE_FLAG_DEFAULTS_NUMERIC } from './viewer_defaults.mjs';
 import { writeOptionField, readOptionStruct, detectOptionSupport } from './viewer_option_struct.mjs';
@@ -103,17 +103,7 @@ function perfNowMs() {
     : Date.now();
 }
 
-const perfEnabled = (() => {
-  const TRUE = new Set(['1', 'true', 'yes', 'on', 'debug']);
-  try {
-    const url = new URL(import.meta.url);
-    const token = String(url.searchParams.get('perf') || '').trim().toLowerCase();
-    return !!token && TRUE.has(token);
-  } catch (err) {
-    // If perf flag parsing fails, surface the error instead of silently disabling.
-    throw err;
-  }
-})();
+const perfEnabled = isVerboseDebug();
 
 const perfStages = {
   loadModuleMs: null,
@@ -400,7 +390,7 @@ function emitStructState(scope) {
 function collectCameraMeta() {
   const cameras = [];
   if (!sim || !mod || !(h > 0)) return cameras;
-  const count = typeof sim.ncam === 'function' ? (sim.ncam() | 0) : (typeof mod._mjwf_ncam === 'function' ? (mod._mjwf_ncam(h) | 0) : 0);
+  const count = sim?.ncam?.() | 0;
   if (!(count > 0)) return cameras;
   const readFloat = (field, stride = 1) => {
     if (typeof sim._readModelPtr !== 'function') return null;
@@ -580,152 +570,135 @@ function buildInfoStats(sim, tSim, nconLocal) {
     maxuseArena: null,
   };
 
-  try {
-    const nefcFn = typeof moduleRef.data_nefc === 'function' ? moduleRef.data_nefc : moduleRef._mjwf_data_nefc;
-    if (typeof nefcFn === 'function') {
-      out.nefc = (nefcFn.call(moduleRef, handle) | 0) || 0;
-    }
-  } catch {}
+  const nefcFn = moduleRef._mjwf_data_nefc;
+  if (typeof nefcFn === 'function') {
+    out.nefc = (nefcFn.call(moduleRef, handle) | 0) || 0;
+  }
 
-  try {
-    const durFn = moduleRef.data_timer_duration_ptr || moduleRef._mjwf_data_timer_duration_ptr;
-    const numFn = moduleRef.data_timer_number_ptr || moduleRef._mjwf_data_timer_number_ptr;
-    if (typeof durFn === 'function' && typeof numFn === 'function') {
-      const durPtr = durFn.call(moduleRef, handle) | 0;
-      const numPtr = numFn.call(moduleRef, handle) | 0;
-      if (durPtr && numPtr) {
-        const durations = heapViewF64(moduleRef, durPtr, MJ_NTIMER);
-        const numbers = heapViewI32(moduleRef, numPtr, MJ_NTIMER);
-        const stepDur = Number(durations[MJ_TIMER_STEP]) || 0;
-        const stepNum = Math.max(1, Number(numbers[MJ_TIMER_STEP]) || 0);
-        const fwdDur = Number(durations[MJ_TIMER_FORWARD]) || 0;
-        const fwdNum = Math.max(1, Number(numbers[MJ_TIMER_FORWARD]) || 0);
-        out.cpuStepMs = (stepDur / stepNum) * 1000;
-        out.cpuForwardMs = (fwdDur / fwdNum) * 1000;
-      }
+  const durFn = moduleRef._mjwf_data_timer_duration_ptr;
+  const numFn = moduleRef._mjwf_data_timer_number_ptr;
+  if (typeof durFn === 'function' && typeof numFn === 'function') {
+    const durPtr = durFn.call(moduleRef, handle) | 0;
+    const numPtr = numFn.call(moduleRef, handle) | 0;
+    if (durPtr && numPtr) {
+      const durations = heapViewF64(moduleRef, durPtr, MJ_NTIMER);
+      const numbers = heapViewI32(moduleRef, numPtr, MJ_NTIMER);
+      const stepDur = Number(durations[MJ_TIMER_STEP]) || 0;
+      const stepNum = Math.max(1, Number(numbers[MJ_TIMER_STEP]) || 0);
+      const fwdDur = Number(durations[MJ_TIMER_FORWARD]) || 0;
+      const fwdNum = Math.max(1, Number(numbers[MJ_TIMER_FORWARD]) || 0);
+      out.cpuStepMs = (stepDur / stepNum) * 1000;
+      out.cpuForwardMs = (fwdDur / fwdNum) * 1000;
     }
-  } catch {}
+  }
 
-  let nisland = 0;
-  try {
-    const nislandFn = moduleRef.data_nisland || moduleRef._mjwf_data_nisland;
-    if (typeof nislandFn === 'function') {
-      nisland = (nislandFn.call(moduleRef, handle) | 0) || 0;
-    }
-  } catch {}
+  const nislandFn = moduleRef._mjwf_data_nisland;
+  const nisland = (typeof nislandFn === 'function')
+    ? ((nislandFn.call(moduleRef, handle) | 0) || 0)
+    : 0;
   out.nisland = nisland;
 
-  try {
-    const niterPtrFn = moduleRef.data_solver_niter_ptr || moduleRef._mjwf_data_solver_niter_ptr;
-    const imprPtrFn = moduleRef.data_solver_improvement_ptr || moduleRef._mjwf_data_solver_improvement_ptr;
-    const gradPtrFn = moduleRef.data_solver_gradient_ptr || moduleRef._mjwf_data_solver_gradient_ptr;
-    const fwdinvPtrFn = moduleRef.data_solver_fwdinv_ptr || moduleRef._mjwf_data_solver_fwdinv_ptr;
+  const niterPtrFn = moduleRef._mjwf_data_solver_niter_ptr;
+  const imprPtrFn = moduleRef._mjwf_data_solver_improvement_ptr;
+  const gradPtrFn = moduleRef._mjwf_data_solver_gradient_ptr;
+  const fwdinvPtrFn = moduleRef._mjwf_data_solver_fwdinv_ptr;
 
-    if (nisland > 0 && typeof niterPtrFn === 'function') {
-      const niterPtr = niterPtrFn.call(moduleRef, handle) | 0;
-      if (niterPtr) {
-        const niterArr = heapViewI32(moduleRef, niterPtr, nisland);
-        let totalIter = 0;
-        for (let i = 0; i < nisland; i += 1) {
-          const it = Number(niterArr[i]) || 0;
-          if (it > 0) totalIter += it;
-        }
-        out.solverNiter = totalIter;
-        const imprFn = imprPtrFn;
-        const gradFn = gradPtrFn;
-        if (typeof imprFn === 'function' && typeof gradFn === 'function') {
-          const baseCount = nisland * MJ_NSOLVER;
-          const imprPtr = imprFn.call(moduleRef, handle) | 0;
-          const gradPtr = gradFn.call(moduleRef, handle) | 0;
-          if (imprPtr && gradPtr && baseCount > 0) {
-            const impr = heapViewF64(moduleRef, imprPtr, baseCount);
-            const grad = heapViewF64(moduleRef, gradPtr, baseCount);
-            let worst = 0;
-            for (let i = 0; i < nisland; i += 1) {
-              const it = Math.min(MJ_NSOLVER, Math.max(0, Number(niterArr[i]) || 0));
-              if (!(it > 0)) continue;
-              const idx = i * MJ_NSOLVER + (it - 1);
-              const a = Number(impr[idx]) || 0;
-              const b = Number(grad[idx]) || 0;
-              if (a === 0 && b === 0) continue;
-              let solerr_i = 0;
-              if (a === 0) {
-                solerr_i = b;
-              } else if (b === 0) {
-                solerr_i = a;
-              } else {
-                solerr_i = Math.min(a, b);
-                if (solerr_i === 0) solerr_i = Math.max(a, b);
-              }
-              if (solerr_i > worst) worst = solerr_i;
+  if (nisland > 0 && typeof niterPtrFn === 'function') {
+    const niterPtr = niterPtrFn.call(moduleRef, handle) | 0;
+    if (niterPtr) {
+      const niterArr = heapViewI32(moduleRef, niterPtr, nisland);
+      let totalIter = 0;
+      for (let i = 0; i < nisland; i += 1) {
+        const it = Number(niterArr[i]) || 0;
+        if (it > 0) totalIter += it;
+      }
+      out.solverNiter = totalIter;
+      if (typeof imprPtrFn === 'function' && typeof gradPtrFn === 'function') {
+        const baseCount = nisland * MJ_NSOLVER;
+        const imprPtr = imprPtrFn.call(moduleRef, handle) | 0;
+        const gradPtr = gradPtrFn.call(moduleRef, handle) | 0;
+        if (imprPtr && gradPtr && baseCount > 0) {
+          const impr = heapViewF64(moduleRef, imprPtr, baseCount);
+          const grad = heapViewF64(moduleRef, gradPtr, baseCount);
+          let worst = 0;
+          for (let i = 0; i < nisland; i += 1) {
+            const it = Math.min(MJ_NSOLVER, Math.max(0, Number(niterArr[i]) || 0));
+            if (!(it > 0)) continue;
+            const idx = i * MJ_NSOLVER + (it - 1);
+            const a = Number(impr[idx]) || 0;
+            const b = Number(grad[idx]) || 0;
+            if (a === 0 && b === 0) continue;
+            let solerr_i = 0;
+            if (a === 0) {
+              solerr_i = b;
+            } else if (b === 0) {
+              solerr_i = a;
+            } else {
+              solerr_i = Math.min(a, b);
+              if (solerr_i === 0) solerr_i = Math.max(a, b);
             }
-            if (worst > 0) {
-              out.solverSolerr = Math.log10(Math.max(SOLVER_LOG_EPS, worst));
-            }
+            if (solerr_i > worst) worst = solerr_i;
+          }
+          if (worst > 0) {
+            out.solverSolerr = Math.log10(Math.max(SOLVER_LOG_EPS, worst));
           }
         }
       }
     }
-    if (typeof fwdinvPtrFn === 'function') {
-      const fptr = fwdinvPtrFn.call(moduleRef, handle) | 0;
-      if (fptr) {
-        const fv = heapViewF64(moduleRef, fptr, 2);
-        const f0 = Number(fv[0]) || 0;
-        const f1 = Number(fv[1]) || 0;
-        out.solverFwdinv = [
-          Math.log10(Math.max(SOLVER_LOG_EPS, Math.abs(f0))),
-          Math.log10(Math.max(SOLVER_LOG_EPS, Math.abs(f1))),
-        ];
-      }
+  }
+  if (typeof fwdinvPtrFn === 'function') {
+    const fptr = fwdinvPtrFn.call(moduleRef, handle) | 0;
+    if (fptr) {
+      const fv = heapViewF64(moduleRef, fptr, 2);
+      const f0 = Number(fv[0]) || 0;
+      const f1 = Number(fv[1]) || 0;
+      out.solverFwdinv = [
+        Math.log10(Math.max(SOLVER_LOG_EPS, Math.abs(f0))),
+        Math.log10(Math.max(SOLVER_LOG_EPS, Math.abs(f1))),
+      ];
     }
-  } catch {}
+  }
 
-  try {
-    const energyPtrFn = moduleRef.data_energy_ptr || moduleRef._mjwf_data_energy_ptr;
-    if (typeof energyPtrFn === 'function') {
-      const eptr = energyPtrFn.call(moduleRef, handle) | 0;
-      if (eptr) {
-        const ev = heapViewF64(moduleRef, eptr, 2);
-        const e0 = Number(ev[0]) || 0;
-        const e1 = Number(ev[1]) || 0;
-        out.energy = e0 + e1;
-      }
+  const energyPtrFn = moduleRef._mjwf_data_energy_ptr;
+  if (typeof energyPtrFn === 'function') {
+    const eptr = energyPtrFn.call(moduleRef, handle) | 0;
+    if (eptr) {
+      const ev = heapViewF64(moduleRef, eptr, 2);
+      const e0 = Number(ev[0]) || 0;
+      const e1 = Number(ev[1]) || 0;
+      out.energy = e0 + e1;
     }
-  } catch {}
+  }
 
-  try {
-    const maxConFn = moduleRef.data_maxuse_con_ptr || moduleRef._mjwf_data_maxuse_con_ptr;
-    const maxEfcFn = moduleRef.data_maxuse_efc_ptr || moduleRef._mjwf_data_maxuse_efc_ptr;
-    if (typeof maxConFn === 'function') {
-      const p = maxConFn.call(moduleRef, handle) | 0;
-      if (p) {
-        const v = heapViewI32(moduleRef, p, 1);
-        out.maxuseCon = (v && v.length > 0 ? v[0] : 0) | 0;
-      }
+  const maxConFn = moduleRef._mjwf_data_maxuse_con_ptr;
+  const maxEfcFn = moduleRef._mjwf_data_maxuse_efc_ptr;
+  if (typeof maxConFn === 'function') {
+    const p = maxConFn.call(moduleRef, handle) | 0;
+    if (p) {
+      const v = heapViewI32(moduleRef, p, 1);
+      out.maxuseCon = (v && v.length > 0 ? v[0] : 0) | 0;
     }
-    if (typeof maxEfcFn === 'function') {
-      const p = maxEfcFn.call(moduleRef, handle) | 0;
-      if (p) {
-        const v = heapViewI32(moduleRef, p, 1);
-        out.maxuseEfc = (v && v.length > 0 ? v[0] : 0) | 0;
-      }
+  }
+  if (typeof maxEfcFn === 'function') {
+    const p = maxEfcFn.call(moduleRef, handle) | 0;
+    if (p) {
+      const v = heapViewI32(moduleRef, p, 1);
+      out.maxuseEfc = (v && v.length > 0 ? v[0] : 0) | 0;
     }
-  } catch {}
+  }
 
-  try {
-    const narenaFn = moduleRef.data_narena || moduleRef._mjwf_data_narena;
-    const maxArenaPtrFn = moduleRef.data_maxuse_arena_ptr || moduleRef._mjwf_data_maxuse_arena_ptr;
-    if (typeof narenaFn === 'function') {
-      out.narena = (narenaFn.call(moduleRef, handle) | 0) || 0;
+  const narenaFn = moduleRef._mjwf_data_narena;
+  const maxArenaPtrFn = moduleRef._mjwf_data_maxuse_arena_ptr;
+  if (typeof narenaFn === 'function') {
+    out.narena = (narenaFn.call(moduleRef, handle) | 0) || 0;
+  }
+  if (typeof maxArenaPtrFn === 'function') {
+    const p = maxArenaPtrFn.call(moduleRef, handle) | 0;
+    if (p) {
+      const v = heapViewI32(moduleRef, p, 1);
+      out.maxuseArena = (v && v.length > 0 ? v[0] : 0) | 0;
     }
-    if (typeof maxArenaPtrFn === 'function') {
-      const p = maxArenaPtrFn.call(moduleRef, handle) | 0;
-      if (p) {
-        const v = heapViewI32(moduleRef, p, 1);
-        out.maxuseArena = (v && v.length > 0 ? v[0] : 0) | 0;
-      }
-    }
-  } catch {}
+  }
 
   return out;
 }
@@ -1060,26 +1033,14 @@ function readLastErrorMeta(modRef) {
     helperErrmsg: '',
   };
   if (!m) return meta;
-  try {
-    if (typeof m._mjwf_errno_last_global === 'function') {
-      meta.errno = m._mjwf_errno_last_global() | 0;
-    }
-  } catch {}
-  try {
-    if (!meta.errno && typeof m._mjwf_helper_errno_last_global === 'function') {
-      meta.helperErrno = m._mjwf_helper_errno_last_global() | 0;
-    }
-  } catch {}
-  try {
-    if (typeof m._mjwf_errmsg_last_global === 'function') {
-      meta.errmsg = cstr(m, m._mjwf_errmsg_last_global() | 0);
-    }
-  } catch {}
-  try {
-    if (!meta.errmsg && typeof m._mjwf_helper_errmsg_last_global === 'function') {
-      meta.helperErrmsg = cstr(m, m._mjwf_helper_errmsg_last_global() | 0);
-    }
-  } catch {}
+  if (typeof m._mjwf_helper_errno_last_global === 'function') {
+    meta.helperErrno = m._mjwf_helper_errno_last_global() | 0;
+  }
+  if (typeof m._mjwf_helper_errmsg_last_global === 'function') {
+    meta.helperErrmsg = cstr(m, m._mjwf_helper_errmsg_last_global() | 0);
+  }
+  meta.errno = meta.helperErrno;
+  meta.errmsg = meta.helperErrmsg;
   return meta;
 }
 
@@ -1090,39 +1051,37 @@ function readErrno(modRef) {
 
 function readModelCount(name) {
   if (sim && typeof sim[name] === 'function') {
-    try { return sim[name]() | 0; } catch { return 0; }
+    return sim[name]() | 0;
   }
   if (!mod || !(h > 0)) return 0;
   const modern = mod[`_mjwf_model_${name}`];
   if (typeof modern === 'function') {
-    try { return modern.call(mod, h) | 0; } catch { return 0; }
+    return modern.call(mod, h) | 0;
   }
   return 0;
 }
 
 function readDataCount(name) {
   if (sim && typeof sim[name] === 'function') {
-    try { return sim[name]() | 0; } catch { return 0; }
+    return sim[name]() | 0;
   }
   if (!mod || !(h > 0)) return 0;
   const modern = mod[`_mjwf_data_${name}`];
   if (typeof modern === 'function') {
-    try { return modern.call(mod, h) | 0; } catch { return 0; }
+    return modern.call(mod, h) | 0;
   }
   return 0;
 }
 
 function readPtr(owner, name) {
   if (sim) {
-    try {
-      if (owner === 'model') return sim._readModelPtr?.(name) || 0;
-      if (owner === 'data') return sim._readDataPtr?.(name) || 0;
-    } catch {}
+    if (owner === 'model') return sim._readModelPtr?.(name) || 0;
+    if (owner === 'data') return sim._readDataPtr?.(name) || 0;
   }
   if (!mod || !(h > 0)) return 0;
   const modern = mod[`_mjwf_${owner}_${name}_ptr`];
   if (typeof modern === 'function') {
-    try { return modern.call(mod, h) | 0; } catch { return 0; }
+    return modern.call(mod, h) | 0;
   }
   return 0;
 }

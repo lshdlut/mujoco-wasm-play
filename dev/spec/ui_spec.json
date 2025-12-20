@@ -63,18 +63,6 @@
           "binding": null,
           "default": null,
           "action": "Simulate::exitrequest = 1"
-        },
-        {
-          "item_id": "file.screenshot",
-          "type": "button",
-          "label": "Screenshot",
-          "shortcut": [
-            "Ctrl",
-            "P"
-          ],
-          "binding": null,
-          "default": null,
-          "action": "Simulate::screenshotrequest = true"
         }
       ]
     },

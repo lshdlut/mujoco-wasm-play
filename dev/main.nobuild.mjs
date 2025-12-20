@@ -15,6 +15,7 @@ import {
   FALLBACK_PRESETS,
   createEnvironmentManager,
 } from './viewer_environment.mjs';
+import { DEFAULT_REALTIME_INDEX, REALTIME_LEVELS } from './viewer_defaults.mjs';
 import { createControlManager } from './viewer_controls.mjs';
 import { createCameraController } from './viewer_camera.mjs';
 import { createRendererManager } from './viewer_renderer.mjs';
@@ -36,7 +37,6 @@ const MJ_GEOM = {
   BOX: 6,
   MESH: 7,
 };
-const SCREENSHOT_PIXEL_RATIO_CAP = 2;
 
 const leftPanel = document.querySelector('[data-testid="panel-left"]');
 const rightPanel = document.querySelector('[data-testid="panel-right"]');
@@ -58,20 +58,6 @@ let lastFpsSampleTimeMs = (typeof performance !== 'undefined' && performance.now
   ? performance.now()
   : Date.now();
 
-// Mirror MuJoCo simulate's percentRealTime ladder (see simulate.h) and
-// extend with a set of fast-forward levels. Values are in percent, ordered
-// from fastest (index 0) to slowest.
-const REALTIME_LEVELS = [
-  800, 400, 200, 150, 120,
-  100, 80, 66, 50, 40, 33, 25, 20, 16, 13,
-  10, 8, 6.6, 5.0, 4, 3.3, 2.5, 2, 1.6, 1.3,
-  1, 0.8, 0.66, 0.5, 0.4, 0.33, 0.25, 0.2, 0.16, 0.13,
-  0.1,
-];
-const DEFAULT_REALTIME_INDEX = (() => {
-  const idx = REALTIME_LEVELS.indexOf(100);
-  return idx >= 0 ? idx : 0;
-})();
 
 function formatArenaBytes(bytes) {
   const n = Number(bytes) || 0;
@@ -91,9 +77,6 @@ const panelStateCache = {
   right: null,
   fullscreen: null,
 };
-let lastScreenshotSeq = 0;
-let pendingScreenshotSeq = 0;
-let screenshotInFlight = false;
 const renderCtx = {
   initialized: false,
   renderer: null,
@@ -754,11 +737,6 @@ store.subscribe((state) => {
     queueResizeCanvas();
   }
   scheduleUiUpdate(state);
-  const screenshotSeq = Number(state.runtime?.screenshotSeq) || 0;
-  if (screenshotSeq > lastScreenshotSeq) {
-    pendingScreenshotSeq = Math.max(pendingScreenshotSeq, screenshotSeq);
-  }
-  processScreenshotQueue(state);
   // Dynamic: build actuator sliders when metadata arrives
   const acts = latestSnapshot && Array.isArray(latestSnapshot.actuators)
     ? latestSnapshot.actuators
@@ -1117,16 +1095,6 @@ if (typeof registerGlobalShortcut === 'function') {
     event?.preventDefault?.();
     await adjustRealtime(-1);
   });
-
-  registerGlobalShortcut(['Ctrl', 'P'], async (event) => {
-    event?.preventDefault?.();
-    await toggleControl('file.screenshot');
-  });
-
-  registerGlobalShortcut(['Meta', 'P'], async (event) => {
-    event?.preventDefault?.();
-    await toggleControl('file.screenshot');
-  });
 }
   if (typeof window !== 'undefined') {
     window.__viewerStore = store;
@@ -1171,149 +1139,3 @@ function queueResizeCanvas() {
 
 queueResizeCanvas();
 window.addEventListener('resize', queueResizeCanvas);
-
-  function processScreenshotQueue(state) {
-    if (!pendingScreenshotSeq || screenshotInFlight) return;
-    const ctx = rendererManager.getContext ? rendererManager.getContext() : renderCtx;
-    if (!ctx || !ctx.initialized || !ctx.renderer || !ctx.scene || !ctx.camera) return;
-    const seq = pendingScreenshotSeq;
-    pendingScreenshotSeq = 0;
-    screenshotInFlight = true;
-    captureScreenshot(ctx, state)
-    .catch((err) => {
-      logWarn('[screenshot] capture failed', err);
-      if (store) {
-        store.update((draft) => {
-          draft.toast = { message: 'Screenshot failed', ts: Date.now() };
-        });
-      }
-    })
-    .finally(() => {
-      lastScreenshotSeq = Math.max(lastScreenshotSeq, seq);
-      screenshotInFlight = false;
-      if (pendingScreenshotSeq > 0) {
-        processScreenshotQueue(store.get());
-      }
-    });
-}
-
-async function captureScreenshot(ctx, state) {
-  const renderer = ctx?.renderer;
-  const scene = ctx?.scene;
-  const camera = ctx?.camera;
-  if (!renderer || !scene || !camera) {
-    throw new Error('Renderer not ready for screenshot');
-  }
-  const size = new THREE.Vector2();
-  renderer.getSize(size);
-  const pixelRatio =
-    typeof window !== 'undefined'
-      ? Math.min(Math.max(window.devicePixelRatio || 1, 1), SCREENSHOT_PIXEL_RATIO_CAP)
-      : 1;
-  const width = Math.max(1, Math.floor(size.x * pixelRatio));
-  const height = Math.max(1, Math.floor(size.y * pixelRatio));
-  const options = {};
-  if (renderer.capabilities?.isWebGL2) {
-    const maxSamples = renderer.capabilities.maxSamples || 4;
-    options.samples = Math.min(4, maxSamples);
-  }
-  const target = new THREE.WebGLRenderTarget(width, height, options);
-  target.texture.colorSpace = THREE.SRGBColorSpace;
-  const prevTarget = renderer.getRenderTarget();
-  const prevXr = renderer.xr ? renderer.xr.enabled : false;
-  renderer.setRenderTarget(target);
-  if (renderer.xr) renderer.xr.enabled = false;
-  renderer.render(scene, camera);
-  const buffer = new Uint8Array(width * height * 4);
-  renderer.readRenderTargetPixels(target, 0, 0, width, height, buffer);
-  renderer.setRenderTarget(prevTarget);
-  if (renderer.xr) renderer.xr.enabled = prevXr;
-  target.dispose();
-  const flipped = flipPixelBuffer(buffer, width, height);
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx2d = canvas.getContext('2d');
-  ctx2d.putImageData(new ImageData(flipped, width, height), 0, 0);
-  const blob = await canvasToBlob(canvas);
-  triggerDownload(blob, buildScreenshotFilename(state));
-}
-
-function flipPixelBuffer(buffer, width, height) {
-  const flipped = new Uint8ClampedArray(buffer.length);
-  const stride = width * 4;
-  for (let y = 0; y < height; y += 1) {
-    const src = (height - 1 - y) * stride;
-    const dst = y * stride;
-    flipped.set(buffer.subarray(src, src + stride), dst);
-  }
-  return flipped;
-}
-
-function canvasToBlob(canvas) {
-  return new Promise((resolve, reject) => {
-    if (!canvas) {
-      reject(new Error('Canvas unavailable'));
-      return;
-    }
-    if (canvas.toBlob) {
-      canvas.toBlob((blob) => {
-        if (blob) resolve(blob);
-        else reject(new Error('Empty screenshot blob'));
-      }, 'image/png');
-      return;
-    }
-    try {
-      const dataUrl = canvas.toDataURL('image/png');
-      const parts = dataUrl.split(',');
-      const mime = parts[0]?.match(/:(.*?);/)?.[1] || 'image/png';
-      const bytes = atob(parts[1]);
-      const buffer = new Uint8Array(bytes.length);
-      for (let i = 0; i < bytes.length; i += 1) {
-        buffer[i] = bytes.charCodeAt(i);
-      }
-      resolve(new Blob([buffer], { type: mime }));
-    } catch (err) {
-      reject(err);
-    }
-  });
-}
-
-function sanitizeToken(value, fallback = 'scene') {
-  const token = String(value || fallback)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return token || fallback;
-}
-
-function timestampTag() {
-  const now = new Date();
-  const pad = (v) => String(v).padStart(2, '0');
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(
-    now.getMinutes()
-  )}${pad(now.getSeconds())}`;
-}
-
-function buildScreenshotFilename(state) {
-  const name = sanitizeToken(state?.model?.name || 'scene');
-  return `mujoco-play-${name}-${timestampTag()}.png`;
-}
-
-function triggerDownload(blob, filename) {
-  if (typeof document === 'undefined') return;
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  if (document.body && typeof document.body.appendChild === 'function') {
-    document.body.appendChild(link);
-  }
-  link.click();
-  if (link.parentNode && typeof link.parentNode.removeChild === 'function') {
-    link.parentNode.removeChild(link);
-  } else if (typeof link.remove === 'function') {
-    link.remove();
-  }
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
