@@ -690,7 +690,9 @@ function cameraLabelFromIndex(index, cameras = []) {
 
 function mergeBackendSnapshot(draft, snapshot) {
   if (!snapshot) return;
-  const mirrorCtrl = false;
+  const model = draft.model || (draft.model = {});
+  const rendering = ensureRenderingState(draft);
+  const physics = draft.physics || (draft.physics = { disableFlags: {}, enableFlags: {}, actuatorGroups: {} });
   if (typeof snapshot.t === 'number' && Number.isFinite(snapshot.t)) {
     const t = snapshot.t;
     if (t + TIME_RESET_EPSILON < latestHudTime) {
@@ -851,17 +853,10 @@ function mergeBackendSnapshot(draft, snapshot) {
     const watch = ensureWatchState(draft);
     watch.sources = { ...snapshot.watchSources };
   }
-  if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
-    const idx = snapshot.cameraMode | 0;
-    draft.runtime.cameraIndex = idx;
-    draft.runtime.cameraLabel = cameraLabelFromIndex(idx, draft.model?.cameras);
-  }
   if (Array.isArray(snapshot.voptFlags)) {
-    const rendering = ensureRenderingState(draft);
     rendering.voptFlags = snapshot.voptFlags.map((flag) => !!flag);
   }
   if (Array.isArray(snapshot.sceneFlags)) {
-    const rendering = ensureRenderingState(draft);
     const flags = [];
     for (let i = 0; i < SCENE_FLAG_DEFAULTS.length; i += 1) {
       if (i < snapshot.sceneFlags.length && snapshot.sceneFlags[i] != null) {
@@ -880,44 +875,35 @@ function mergeBackendSnapshot(draft, snapshot) {
     }
   }
   if (snapshot.groups) {
-    const rendering = ensureRenderingState(draft);
     rendering.groups = normaliseGroupState(snapshot.groups);
   }
   if (typeof snapshot.labelMode === 'number' && Number.isFinite(snapshot.labelMode)) {
-    const rendering = ensureRenderingState(draft);
     rendering.labelMode = Math.max(0, snapshot.labelMode | 0);
   }
   if (typeof snapshot.frameMode === 'number' && Number.isFinite(snapshot.frameMode)) {
-    const rendering = ensureRenderingState(draft);
     rendering.frameMode = Math.max(0, snapshot.frameMode | 0);
   }
   if (snapshot.renderAssets) {
-    const rendering = ensureRenderingState(draft);
     rendering.assets = snapshot.renderAssets;
   }
   if (snapshot.options) {
-    if (!draft.model) draft.model = {};
-    draft.model.opt = {
-      ...(draft.model.opt || {}),
+    model.opt = {
+      ...(model.opt || {}),
       ...snapshot.options,
     };
-    if (!draft.physics) {
-      draft.physics = { disableFlags: {}, enableFlags: {}, actuatorGroups: {} };
-    }
     if (typeof snapshot.options.disableflags === 'number' && Number.isFinite(snapshot.options.disableflags)) {
-      draft.physics.disableFlags = flagsFromMask(snapshot.options.disableflags, DISABLE_FLAG_LABELS, false);
+      physics.disableFlags = flagsFromMask(snapshot.options.disableflags, DISABLE_FLAG_LABELS, false);
     }
     if (typeof snapshot.options.enableflags === 'number' && Number.isFinite(snapshot.options.enableflags)) {
-      draft.physics.enableFlags = flagsFromMask(snapshot.options.enableflags, ENABLE_FLAG_LABELS, false);
+      physics.enableFlags = flagsFromMask(snapshot.options.enableflags, ENABLE_FLAG_LABELS, false);
     }
     if (typeof snapshot.options.disableactuator === 'number' && Number.isFinite(snapshot.options.disableactuator)) {
-      draft.physics.actuatorGroups = flagsFromMask(
+      physics.actuatorGroups = flagsFromMask(
         snapshot.options.disableactuator,
         ACTUATOR_GROUP_LABELS,
         true,
       );
     }
-    const rendering = ensureRenderingState(draft);
     if (typeof snapshot.options.flex_layer === 'number' && Number.isFinite(snapshot.options.flex_layer)) {
       rendering.flexLayer = Math.max(0, snapshot.options.flex_layer | 0);
     }
@@ -926,13 +912,11 @@ function mergeBackendSnapshot(draft, snapshot) {
     }
   }
   if (snapshot.visual) {
-    if (!draft.model) draft.model = {};
-    draft.model.vis = deepMerge(draft.model.vis || {}, snapshot.visual);
+    model.vis = deepMerge(model.vis || {}, snapshot.visual);
   }
   const baselines = ensureVisualBaselines(draft);
   if (snapshot.visualDefaults) {
-    if (!draft.model) draft.model = {};
-    draft.model.visDefaults = deepMerge(draft.model.visDefaults || {}, snapshot.visualDefaults);
+    model.visDefaults = deepMerge(model.visDefaults || {}, snapshot.visualDefaults);
     baselines.model = cloneStruct(snapshot.visualDefaults);
     baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
     baselines.preset = applyPresetOverridesToStruct(baselines.model);
@@ -944,13 +928,11 @@ function mergeBackendSnapshot(draft, snapshot) {
     baselines.sceneFlagsPreset = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
   }
   if (snapshot.cameras) {
-    if (!draft.model) draft.model = {};
-    draft.model.cameras = Array.isArray(snapshot.cameras) ? snapshot.cameras.slice() : [];
+    model.cameras = Array.isArray(snapshot.cameras) ? snapshot.cameras.slice() : [];
   }
   if (snapshot.geoms) {
-    if (!draft.model) draft.model = {};
-    draft.model.geoms = Array.isArray(snapshot.geoms) ? snapshot.geoms.slice() : [];
-    const maxGeom = draft.model.geoms.length - 1;
+    model.geoms = Array.isArray(snapshot.geoms) ? snapshot.geoms.slice() : [];
+    const maxGeom = model.geoms.length - 1;
     if (typeof draft.runtime.trackingGeom === 'number' && draft.runtime.trackingGeom > maxGeom) {
       draft.runtime.trackingGeom = maxGeom >= 0 ? maxGeom : -1;
     }
@@ -959,55 +941,38 @@ function mergeBackendSnapshot(draft, snapshot) {
     }
   }
   if (snapshot.geom_bodyid) {
-    if (!draft.model) draft.model = {};
-    draft.model.geomBodyId = snapshot.geom_bodyid;
+    model.geomBodyId = snapshot.geom_bodyid;
   }
   if (snapshot.body_parentid) {
-    if (!draft.model) draft.model = {};
-    draft.model.bodyParentId = snapshot.body_parentid;
+    model.bodyParentId = snapshot.body_parentid;
   }
   if (snapshot.body_jntadr) {
-    if (!draft.model) draft.model = {};
-    draft.model.bodyJntAdr = snapshot.body_jntadr;
+    model.bodyJntAdr = snapshot.body_jntadr;
   }
   if (snapshot.body_jntnum) {
-    if (!draft.model) draft.model = {};
-    draft.model.bodyJntNum = snapshot.body_jntnum;
+    model.bodyJntNum = snapshot.body_jntnum;
   }
   if (snapshot.jtype) {
-    if (!draft.model) draft.model = {};
-    draft.model.jntType = snapshot.jtype;
+    model.jntType = snapshot.jtype;
   }
   if (typeof snapshot.nbody === 'number') {
-    if (!draft.model) draft.model = {};
-    draft.model.nbody = snapshot.nbody | 0;
+    model.nbody = snapshot.nbody | 0;
   }
   if (typeof snapshot.njnt === 'number') {
-    if (!draft.model) draft.model = {};
-    draft.model.njnt = snapshot.njnt | 0;
+    model.njnt = snapshot.njnt | 0;
   }
   if (snapshot.statistic) {
-    if (!draft.model) draft.model = {};
-    draft.model.stat = deepMerge(draft.model.stat || {}, snapshot.statistic);
-  }
-  if (snapshot.ctrl && mirrorCtrl) {
-    if (!draft.model) draft.model = {};
-    draft.model.ctrl = Array.isArray(snapshot.ctrl)
-      ? snapshot.ctrl.slice()
-      : Array.from(snapshot.ctrl);
+    model.stat = deepMerge(model.stat || {}, snapshot.statistic);
   }
   if (snapshot.optionSupport) {
-    if (!draft.model) draft.model = {};
-    draft.model.optSupport = { ...snapshot.optionSupport };
+    model.optSupport = { ...snapshot.optionSupport };
   }
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const mode = snapshot.cameraMode | 0;
     draft.runtime.cameraIndex = mode;
-    draft.runtime.cameraLabel = cameraLabelFromIndex(mode, draft.model?.cameras);
+    draft.runtime.cameraLabel = cameraLabelFromIndex(mode, model?.cameras);
   }
-}
-
-function ensureRenderingState(target) {
+}function ensureRenderingState(target) {
   if (!target.rendering) {
     target.rendering = {
       voptFlags: DEFAULT_VOPT_FLAGS.slice(),
@@ -1057,26 +1022,16 @@ function ensureRenderingState(target) {
   return target.rendering;
 }
 
-function ensureHistoryState(target) {
-  if (!target.history) {
-    target.history = createDefaultHistoryState();
+function ensureState(target, key, createFn) {
+  if (!target[key]) {
+    target[key] = createFn();
   }
-  return target.history;
+  return target[key];
 }
 
-function ensureWatchState(target) {
-  if (!target.watch) {
-    target.watch = createDefaultWatchState();
-  }
-  return target.watch;
-}
-
-function ensureKeyframeState(target) {
-  if (!target.keyframes) {
-    target.keyframes = createDefaultKeyframeState();
-  }
-  return target.keyframes;
-}
+const ensureHistoryState = (target) => ensureState(target, 'history', createDefaultHistoryState);
+const ensureWatchState = (target) => ensureState(target, 'watch', createDefaultWatchState);
+const ensureKeyframeState = (target) => ensureState(target, 'keyframes', createDefaultKeyframeState);
 
 function ensureThemeState(target) {
   if (!target.theme) {
@@ -1098,6 +1053,19 @@ function ensureThemeState(target) {
   }
   return target.theme;
 }
+
+function parseThemeBinary(value, { onTokens = [], offTokens = [] } = {}) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.trunc(value));
+  }
+  if (typeof value === 'string') {
+    const token = value.trim().toLowerCase();
+    if (/^[01]$/.test(token)) return token === '1' ? 1 : 0;
+    if (onTokens.some((t) => token.startsWith(t))) return 1;
+    if (offTokens.some((t) => token.startsWith(t))) return 0;
+  }
+  return 0;
+}
 function applyBinding(draft, bindingOrSpec, value, control) {
   const spec = typeof bindingOrSpec === 'string'
     ? resolveBindingSpec(bindingOrSpec, control)
@@ -1110,39 +1078,11 @@ function applyBinding(draft, bindingOrSpec, value, control) {
   if (spec.kind === 'theme') {
     const theme = ensureThemeState(draft);
     if (spec.key === 'spacing') {
-      let idx = 0;
-      if (typeof value === 'number') {
-        idx = Math.max(0, Math.trunc(value));
-      } else if (typeof value === 'string') {
-        const token = value.trim().toLowerCase();
-        if (/^[01]$/.test(token)) {
-          idx = token === '1' ? 1 : 0;
-        } else if (token.startsWith('wide')) {
-          idx = 1;
-        } else {
-          idx = 0;
-        }
-      }
-      theme.spacing = idx;
+      theme.spacing = parseThemeBinary(value, { onTokens: ['wide'] });
       return true;
     }
     if (spec.key === 'color') {
-      let idx = 0;
-      if (typeof value === 'number') {
-        idx = Math.max(0, Math.trunc(value));
-      } else if (typeof value === 'string') {
-        const token = value.trim().toLowerCase();
-        if (/^[01]$/.test(token)) {
-          idx = token === '1' ? 1 : 0;
-        } else if (token.startsWith('light')) {
-          idx = 1;
-        } else if (token.startsWith('dark')) {
-          idx = 0;
-        } else {
-          idx = 0;
-        }
-      }
-      theme.color = idx;
+      theme.color = parseThemeBinary(value, { onTokens: ['light'], offTokens: ['dark'] });
       return true;
     }
     if (spec.key === 'font') {
