@@ -324,6 +324,20 @@ export function consumeViewerParams(params = viewerSearchParams) {
 
 export { viewerSearchParams };
 
+export function buildWorkerUrl(baseUrl, params = viewerSearchParams) {
+  const url = baseUrl instanceof URL
+    ? new URL(baseUrl.href)
+    : new URL(String(baseUrl), typeof location !== 'undefined' ? location.href : 'http://localhost');
+  const forgeBase = params.get('forgeBase');
+  if (forgeBase) url.searchParams.set('forgeBase', forgeBase);
+  const logToken = params.get('log');
+  if (logToken) url.searchParams.set('log', logToken);
+  const verboseToken = params.get('verbose');
+  if (verboseToken) url.searchParams.set('verbose', verboseToken);
+  url.searchParams.set('cb', String(Date.now()));
+  return url;
+}
+
 export function normalizeVer(v) {
   const s = String(v || '').trim();
   return s ? s : '3.3.7';
