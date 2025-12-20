@@ -15556,7 +15556,6 @@ function applySnapshot(snapshot) {
   if (typeof window !== 'undefined') {
     window.__lastSnapshot = snapshot;
   }
-  scheduleRenderScene();
 }
 
 function nameForObjType(objType) {
@@ -15847,9 +15846,6 @@ store.subscribe((state) => {
   }
 });
 
-scheduleRenderScene();
-
-
 const cameraController = createCameraController({
   THREE_NS: THREE,
   canvas,
@@ -15974,7 +15970,7 @@ function deriveEqualityList(snapshot) {
 
 const spec = await loadUiSpec();
 renderPanels(spec);
-updateControls(store.get());
+scheduleUiUpdate(store.get());
 
 if (typeof registerGlobalShortcut === 'function') {
   registerGlobalShortcut(['Space'], async (event) => {
