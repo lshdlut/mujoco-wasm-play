@@ -20,17 +20,16 @@ index.html
            -> bridge.mjs (WASM handle + pointers, helper-only ABI)
      -> viewer_controls.mjs (UI spec -> DOM -> actions)
      -> viewer_renderer.mjs (three.js scene + overlays)
-     -> viewer_camera.mjs / viewer_picking.mjs (input + selection/perturb)
+     -> viewer_interaction.mjs (input + selection/perturb)
 ```
 
 ## Module Size (Top-Level `dev/`)
-- `dev/viewer_renderer.mjs` 11313 LOC
+- `dev/viewer_renderer.mjs` 7834 LOC
 - `dev/viewer_state.mjs` 3664 LOC
 - `dev/physics.worker.mjs` 3517 LOC
 - `dev/viewer_controls.mjs` 2470 LOC
 - `dev/bridge.mjs` 1836 LOC
 - `dev/main.nobuild.mjs` 1298 LOC
-- `dev/viewer_environment.mjs` 1279 LOC
 - Remaining files are < 1k LOC but still contribute to duplication.
 
 ## Redundancy and Divergence Findings
@@ -46,9 +45,9 @@ index.html
 - Removed unused modules (`dev/sim.ts`, `dev/loader.ts`).
 
 ## Web-Only UI Features Detected (Candidates to Preserve)
-- HDRI + fallback environment presets (sun/moon, ground/grid tuning) (`dev/viewer_environment.mjs`).
+- HDRI + fallback environment presets (sun/moon, ground/grid tuning) (`dev/viewer_renderer.mjs`).
 - Visual source presets (preset-sun / preset-moon) and diagnostics (`dev/viewer_state.mjs:234`).
-- Infinite grid / infinite ground helpers (`dev/infinite_grid_helper.mjs`).
+- Infinite grid / infinite ground helpers (`dev/viewer_renderer.mjs`).
 - Overlay cards + toast UX (help/info/profiler/sensor, download notifications) (`dev/index.html`, `dev/main.nobuild.mjs`).
 - Worker-backed rendering pipeline (WASM in worker, three.js in main).
 - Screenshot capture pipeline removed; rely on browser/OS capture tooling.

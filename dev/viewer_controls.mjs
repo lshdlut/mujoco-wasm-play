@@ -1,5 +1,5 @@
 import { resetModelFrontendState } from './viewer_state.mjs';
-import { logError, logWarn } from './debug_log.mjs';
+import { logError, logWarn } from './viewer_runtime.mjs';
 
 export function createControlManager({
   store,
@@ -2444,7 +2444,7 @@ function shortcutFromEvent(event) {
             const idx = Number(a.index) | 0;
             const v = Number(input.value) || 0;
             try {
-              await backend.apply?.({ kind: 'ui', id: 'control.actuator', value: { index: idx, value: v }, control: { item_id: `control.act.${idx}` } });
+              await applySpecAction(store, backend, { item_id: 'control.actuator' }, { index: idx, value: v });
             } catch (err) {
               logWarn('[ui] set actuator failed', err);
             }
@@ -2522,11 +2522,11 @@ function shortcutFromEvent(event) {
             const idx = Number(dof.index) | 0;
             const v = Number(input.value) || 0;
             try {
-              await backend.apply?.({
-                kind: 'ui',
-                id: 'joint.slider',
-                value: { index: idx, value: v, min: dof.min, max: dof.max },
-                control: { item_id: `joint.${idx}` },
+              await applySpecAction(store, backend, { item_id: 'joint.slider' }, {
+                index: idx,
+                value: v,
+                min: dof.min,
+                max: dof.max,
               });
             } catch (err) {
               logWarn('[ui] set joint qpos failed', err);
@@ -2610,12 +2610,7 @@ function shortcutFromEvent(event) {
             const eqName = eq.fullLabel || eq.label || `Eq ${eq.index}`;
             pushToast(`${next ? 'Enabled' : 'Disabled'} equality: ${eqName}`);
             try {
-              await backend.apply?.({
-                kind: 'ui',
-                id: 'equality.toggle',
-                value: { index: eq.index, active: next },
-                control: { item_id: control.item_id },
-              });
+              await applySpecAction(store, backend, { item_id: 'equality.toggle' }, { index: eq.index, active: next });
             } catch (err) {
               logWarn('[ui] equality toggle failed', err);
             }

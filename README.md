@@ -12,7 +12,7 @@ Glue-layer and playground for consuming MuJoCo WASM artifacts produced by 'mujoc
 ## Online Demo / Forge Dist
 
 - This repo does not ship forge `dist/` artifacts; it expects a MuJoCo WASM bundle provided by `mujoco-wasm-forge`.
-- At runtime, `paths.mjs#getForgeDistBase(ver)` resolves the dist base either as:
+- At runtime, `viewer_runtime.mjs#getForgeDistBase(ver)` resolves the dist base either as:
   - a local path `/dist/<ver>/` (same origin), or
   - an override from `window.__FORGE_DIST_BASE__` or the `forgeBase` query parameter, both treated as templates where `{ver}` is replaced by the normalized version (for example `3.3.7`).
 - A typical remote base template (for jsDelivr + forge tag) looks like:

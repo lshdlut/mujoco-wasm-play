@@ -1,5 +1,5 @@
 // Minimal browser-only bridge: heap views + MjSimLite (no Node deps)
-import { logError } from './debug_log.mjs';
+import { logError } from './viewer_runtime.mjs';
 
 let __forgeModuleSeq = 1;
 function tagForgeModule(mod) {

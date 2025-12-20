@@ -8,19 +8,24 @@ import {
   readControlValue,
   mergeBackendSnapshot,
 } from './viewer_state.mjs';
-import { consumeViewerParams } from './viewer_params.mjs';
-import { isPerfEnabled, perfMarkOnce, perfNow, perfSample } from './viewer_perf.mjs';
+import {
+  consumeViewerParams,
+  isPerfEnabled,
+  perfMarkOnce,
+  perfNow,
+  perfSample,
+  logDebug,
+  logWarn,
+} from './viewer_runtime.mjs';
 import {
   FALLBACK_PRESET_ALIASES,
   FALLBACK_PRESETS,
   createEnvironmentManager,
-} from './viewer_environment.mjs';
+} from './viewer_renderer.mjs';
 import { DEFAULT_REALTIME_INDEX, REALTIME_LEVELS } from './viewer_defaults.mjs';
 import { createControlManager } from './viewer_controls.mjs';
-import { createCameraController } from './viewer_camera.mjs';
+import { createCameraController, createPickingController } from './viewer_interaction.mjs';
 import { createRendererManager } from './viewer_renderer.mjs';
-import { createPickingController } from './viewer_picking.mjs';
-import { logDebug, logWarn } from './debug_log.mjs';
 
 perfMarkOnce('play:main:start', {
   href: (typeof window !== 'undefined' && window.location?.href) ? window.location.href : null,

@@ -1,5 +1,5 @@
 import { prefetchBindingIndex, prepareBindingUpdate, splitBinding } from './viewer_bindings.mjs';
-import { VISUAL_FIELD_DESCRIPTORS } from './viewer_visual_struct.mjs';
+import { VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
 import { VISUAL_FIELD_GROUPS } from './visual_field_groups.mjs';
 import {
   DEFAULT_REALTIME_INDEX,
@@ -9,8 +9,15 @@ import {
   REALTIME_LEVELS,
   SCENE_FLAG_DEFAULTS,
 } from './viewer_defaults.mjs';
-import { isPerfEnabled, perfMarkOnce, perfNow, perfSample } from './viewer_perf.mjs';
-import { logError, logStatus, logWarn } from './debug_log.mjs';
+import {
+  isPerfEnabled,
+  perfMarkOnce,
+  perfNow,
+  perfSample,
+  logError,
+  logStatus,
+  logWarn,
+} from './viewer_runtime.mjs';
 
 // Lightweight state container and backend helpers for the simulate parity UI.
 // Runtime implementation lives in JS so it can be consumed directly by the
@@ -1661,6 +1668,38 @@ export async function createBackend(options = {}) {
   let messageHandler = null;
   let lastXmlText = null;
 
+  function applySimulateMaskBinding(binding, value, prefix, field, invert, warnLabel) {
+    if (!binding || !binding.startsWith(`${prefix}[`)) return false;
+    const start = prefix.length + 1;
+    const end = binding.indexOf(']', start);
+    const bitIndex = end > start ? normaliseInt(binding.slice(start, end), -1) : -1;
+    if (bitIndex >= 0 && bitIndex < 32) {
+      const active = bool(value);
+      const bit = 1 << bitIndex;
+      const currentMask =
+        typeof lastSnapshot.options?.[field] === 'number'
+          ? (lastSnapshot.options[field] | 0)
+          : 0;
+      const nextMask = invert
+        ? (active ? (currentMask & ~bit) : (currentMask | bit))
+        : (active ? (currentMask | bit) : (currentMask & ~bit));
+      try {
+        client.postMessage?.({
+          cmd: 'setField',
+          target: 'mjOption',
+          path: [field],
+          kind: 'int',
+          size: 1,
+          value: [nextMask],
+        });
+      } catch (err) {
+        logWarn(`[backend ${warnLabel}] post failed`, err);
+        throw err;
+      }
+    }
+    return true;
+  }
+
   await prefetchBindingIndex();
 
   async function spawnWorkerBackend() {
@@ -2619,82 +2658,13 @@ async function loadDefaultXml() {
       }
       return resolveSnapshot(lastSnapshot);
     }
-    if (binding && binding.startsWith('Simulate::disable[')) {
-      const match = binding.match(/^Simulate::disable\[(\d+)\]$/);
-      const bitIndex = match ? normaliseInt(match[1], -1) : -1;
-      if (bitIndex >= 0 && bitIndex < 32) {
-        const active = bool(value);
-        const bit = 1 << bitIndex;
-        const currentMask =
-          typeof lastSnapshot.options?.disableflags === 'number'
-            ? (lastSnapshot.options.disableflags | 0)
-            : 0;
-        const nextMask = active ? (currentMask | bit) : (currentMask & ~bit);
-        try {
-          client.postMessage?.({
-            cmd: 'setField',
-            target: 'mjOption',
-            path: ['disableflags'],
-            kind: 'int',
-            size: 1,
-            value: [nextMask],
-          });
-        } catch (err) {
-          logWarn('[backend disableflags] post failed', err);
-        }
-      }
+    if (applySimulateMaskBinding(binding, value, 'Simulate::disable', 'disableflags', false, 'disableflags')) {
       return resolveSnapshot(lastSnapshot);
     }
-    if (binding && binding.startsWith('Simulate::enable[')) {
-      const match = binding.match(/^Simulate::enable\[(\d+)\]$/);
-      const bitIndex = match ? normaliseInt(match[1], -1) : -1;
-      if (bitIndex >= 0 && bitIndex < 32) {
-        const active = bool(value);
-        const bit = 1 << bitIndex;
-        const currentMask =
-          typeof lastSnapshot.options?.enableflags === 'number'
-            ? (lastSnapshot.options.enableflags | 0)
-            : 0;
-        const nextMask = active ? (currentMask | bit) : (currentMask & ~bit);
-        try {
-          client.postMessage?.({
-            cmd: 'setField',
-            target: 'mjOption',
-            path: ['enableflags'],
-            kind: 'int',
-            size: 1,
-            value: [nextMask],
-          });
-        } catch (err) {
-          logWarn('[backend enableflags] post failed', err);
-        }
-      }
+    if (applySimulateMaskBinding(binding, value, 'Simulate::enable', 'enableflags', false, 'enableflags')) {
       return resolveSnapshot(lastSnapshot);
     }
-    if (binding && binding.startsWith('Simulate::enableactuator[')) {
-      const match = binding.match(/^Simulate::enableactuator\[(\d+)\]$/);
-      const bitIndex = match ? normaliseInt(match[1], -1) : -1;
-      if (bitIndex >= 0 && bitIndex < 32) {
-        const enabled = bool(value);
-        const bit = 1 << bitIndex;
-        const currentMask =
-          typeof lastSnapshot.options?.disableactuator === 'number'
-            ? (lastSnapshot.options.disableactuator | 0)
-            : 0;
-        const nextMask = enabled ? (currentMask & ~bit) : (currentMask | bit);
-        try {
-          client.postMessage?.({
-            cmd: 'setField',
-            target: 'mjOption',
-            path: ['disableactuator'],
-            kind: 'int',
-            size: 1,
-            value: [nextMask],
-          });
-        } catch (err) {
-          logWarn('[backend disableactuator] post failed', err);
-        }
-      }
+    if (applySimulateMaskBinding(binding, value, 'Simulate::enableactuator', 'disableactuator', true, 'disableactuator')) {
       return resolveSnapshot(lastSnapshot);
     }
     const groupMatch = binding?.match(/^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/);

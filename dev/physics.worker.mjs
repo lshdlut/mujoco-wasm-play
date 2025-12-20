@@ -1,12 +1,17 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
-import { isVerboseDebug, logError, logStatus, logWarn } from './debug_log.mjs';
-import { withCacheTag } from './paths.mjs';
+import { isVerboseDebug, logError, logStatus, logWarn, withCacheTag } from './viewer_runtime.mjs';
 import { DEFAULT_VOPT_FLAGS_NUMERIC, MJ_GROUP_COUNT, MJ_GROUP_TYPES, SCENE_FLAG_DEFAULTS_NUMERIC } from './viewer_defaults.mjs';
-import { writeOptionField, readOptionStruct, detectOptionSupport } from './viewer_option_struct.mjs';
-import { writeVisualField, readVisualStruct } from './viewer_visual_struct.mjs';
-import { writeStatisticField, readStatisticStruct } from './viewer_stat_struct.mjs';
+import {
+  detectOptionSupport,
+  readOptionStruct,
+  readStatisticStruct,
+  readVisualStruct,
+  writeOptionField,
+  writeStatisticField,
+  writeVisualField,
+} from './viewer_structs.mjs';
 
 const FORCE_EPS = 1e-9;
 const MJ_TIMER_STEP = 0;

@@ -1,4 +1,4 @@
-import { logError, logWarn } from './debug_log.mjs';
+import { logError, logWarn } from './viewer_runtime.mjs';
 
 let bindingIndex = null;
 let bindingIndexPromise = null;
