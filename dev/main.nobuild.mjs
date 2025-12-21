@@ -649,13 +649,6 @@ const CAMERA_BASE_LABELS = ['Free', 'Tracking'];
 let latestHudTime = 0;
 const TIME_RESET_EPSILON = 1e-6;
 
-function cloneState(state) {
-  if (typeof structuredClone === 'function') {
-    return structuredClone(state);
-  }
-  return JSON.parse(JSON.stringify(state));
-}
-
 function deepMerge(target, patch) {
   const output = Array.isArray(target) ? [...target] : { ...target };
   if (!patch) return output;
@@ -1066,16 +1059,13 @@ function parseThemeBinary(value, { onTokens = [], offTokens = [] } = {}) {
   }
   return 0;
 }
-function applyBinding(draft, bindingOrSpec, value, control) {
-  const spec = typeof bindingOrSpec === 'string'
-    ? resolveBindingSpec(bindingOrSpec, control)
-    : bindingOrSpec;
-  if (!spec) return false;
-  if (spec.kind === 'overlay') {
+
+const BINDING_APPLIERS = {
+  overlay: (draft, spec, value) => {
     draft.overlays[spec.key] = bool(value);
     return true;
-  }
-  if (spec.kind === 'theme') {
+  },
+  theme: (draft, spec, value, control) => {
     const theme = ensureThemeState(draft);
     if (spec.key === 'spacing') {
       theme.spacing = parseThemeBinary(value, { onTokens: ['wide'] });
@@ -1115,13 +1105,79 @@ function applyBinding(draft, bindingOrSpec, value, control) {
       return true;
     }
     return false;
-  }
-  if (spec.kind === 'tracking_geom') {
+  },
+  tracking_geom: (draft, spec, value) => {
     const geomIdx = Math.trunc(toNumber(value));
     draft.runtime.trackingGeom = Number.isFinite(geomIdx) ? geomIdx : -1;
     return true;
-  }
-  return false;
+  },
+};
+
+const BINDING_READERS = {
+  overlay: (state, spec) => !!state.overlays?.[spec.key],
+  run: (state, spec, control) => {
+    if (control && Array.isArray(control.options)) {
+      return state.simulation.run ? control.options[1] ?? 'Run' : control.options[0] ?? 'Pause';
+    }
+    return state.simulation.run;
+  },
+  camera: (state) => state.runtime.cameraIndex | 0,
+  tracking_geom: (state) => (Number.isFinite(state.runtime.trackingGeom) ? state.runtime.trackingGeom : -1),
+  scrub_index: (state) => state.simulation.scrubIndex | 0,
+  key_index: (state) => state.simulation.keyIndex | 0,
+  watch_field: (state) => state.watch?.field ?? 'qpos',
+  watch_index: (state) => (Number.isFinite(state.watch?.index) ? state.watch.index | 0 : 0),
+  theme: (state, spec) => (Number.isFinite(state.theme?.[spec.key]) ? state.theme[spec.key] | 0 : 0),
+  watch_summary: (state) => {
+    if (state.watch?.summary) return state.watch.summary;
+    if (typeof state.watch?.value === 'number' && Number.isFinite(state.watch.value)) {
+      return state.watch.value.toFixed(6);
+    }
+    return '—';
+  },
+  group: (state, spec) => {
+    const groups = state.rendering?.groups;
+    const arr = Array.isArray(groups?.[spec.group]) ? groups[spec.group] : null;
+    if (!arr) return true;
+    if (spec.index >= 0 && spec.index < arr.length) {
+      return !!arr[spec.index];
+    }
+    return true;
+  },
+  mask: (state, spec) => {
+    const name = spec.name ?? spec.binding ?? '';
+    if (spec.mask === 'disable') return !!state.physics.disableFlags[name];
+    if (spec.mask === 'enable') return !!state.physics.enableFlags[name];
+    if (spec.mask === 'enableactuator') return !!state.physics.actuatorGroups[name];
+    return undefined;
+  },
+  sim_opt: (state, spec) => state.rendering?.[spec.field] ?? 0,
+  struct: (state, spec) => {
+    if (spec.scope === 'mjOption') {
+      return resolveStructPath(state.model?.opt, spec.path);
+    }
+    if (spec.scope === 'mjVisual') {
+      return resolveStructPath(state.model?.vis, spec.path);
+    }
+    if (spec.scope === 'mjStatistic') {
+      return resolveStructPath(state.model?.stat, spec.path);
+    }
+    return undefined;
+  },
+  vopt_flag: (state, spec) => !!state.rendering?.voptFlags?.[spec.index],
+  scene_flag: (state, spec) => !!state.rendering?.sceneFlags?.[spec.index],
+  label_mode: (state) => state.rendering?.labelMode ?? 0,
+  frame_mode: (state) => state.rendering?.frameMode ?? 0,
+};
+
+function applyBinding(draft, bindingOrSpec, value, control) {
+  const spec = typeof bindingOrSpec === 'string'
+    ? resolveBindingSpec(bindingOrSpec, control)
+    : bindingOrSpec;
+  if (!spec) return false;
+  const handler = BINDING_APPLIERS[spec.kind];
+  if (!handler) return false;
+  return handler(draft, spec, value, control);
 }
 
 function formatKeyframeLabelFromState(state, index) {
@@ -1149,18 +1205,18 @@ function formatKeyframeLabelFromState(state, index) {
   return baseLabel;
 }
 
+const CONTROL_TOASTS = {
+  'simulation.reset': 'Simulation reset',
+  'simulation.reload': 'Model reloaded',
+  'simulation.align': 'View aligned',
+  'file.quit': 'Quit requested',
+};
+
 function applyControl(draft, control, value) {
   if (!control) return false;
-  if (control.item_id === 'simulation.reset') {
-    draft.toast = { message: 'Simulation reset', ts: Date.now() };
-    return true;
-  }
-  if (control.item_id === 'simulation.reload') {
-    draft.toast = { message: 'Model reloaded', ts: Date.now() };
-    return true;
-  }
-  if (control.item_id === 'simulation.align') {
-    draft.toast = { message: 'View aligned', ts: Date.now() };
+  const toastMessage = CONTROL_TOASTS[control.item_id];
+  if (toastMessage) {
+    draft.toast = { message: toastMessage, ts: Date.now() };
     return true;
   }
   if (control.item_id === 'simulation.copy_state') {
@@ -1180,10 +1236,6 @@ function applyControl(draft, control, value) {
     draft.toast = { message: `Loaded keyframe ${label}`, ts: Date.now() };
     return true;
   }
-  if (control.item_id === 'file.quit') {
-    draft.toast = { message: 'Quit requested', ts: Date.now() };
-    return true;
-  }
   if (control.item_id === 'option.help-toggle') {
     draft.overlays.help = bool(value);
     return true;
@@ -1201,90 +1253,26 @@ function readBindingValue(state, bindingOrSpec, control) {
     ? resolveBindingSpec(bindingOrSpec, control)
     : bindingOrSpec;
   if (!spec) return undefined;
-  switch (spec.kind) {
-    case 'overlay':
-      return !!state.overlays?.[spec.key];
-    case 'run':
-      if (control && Array.isArray(control.options)) {
-        return state.simulation.run ? control.options[1] ?? 'Run' : control.options[0] ?? 'Pause';
-      }
-      return state.simulation.run;
-    case 'camera':
-      return state.runtime.cameraIndex | 0;
-    case 'tracking_geom':
-      return Number.isFinite(state.runtime.trackingGeom) ? state.runtime.trackingGeom : -1;
-    case 'scrub_index':
-      return state.simulation.scrubIndex | 0;
-    case 'key_index':
-      return state.simulation.keyIndex | 0;
-    case 'watch_field':
-      return state.watch?.field ?? 'qpos';
-    case 'watch_index':
-      return Number.isFinite(state.watch?.index) ? state.watch.index | 0 : 0;
-    case 'theme':
-      return Number.isFinite(state.theme?.[spec.key]) ? state.theme[spec.key] | 0 : 0;
-    case 'watch_summary': {
-      if (state.watch?.summary) return state.watch.summary;
-      if (typeof state.watch?.value === 'number' && Number.isFinite(state.watch.value)) {
-        return state.watch.value.toFixed(6);
-      }
-      return '—';
-    }
-    case 'group': {
-      const groups = state.rendering?.groups;
-      const arr = Array.isArray(groups?.[spec.group]) ? groups[spec.group] : null;
-      if (!arr) return true;
-      if (spec.index >= 0 && spec.index < arr.length) {
-        return !!arr[spec.index];
-      }
-      return true;
-    }
-    case 'mask': {
-      const name = spec.name ?? spec.binding ?? '';
-      if (spec.mask === 'disable') return !!state.physics.disableFlags[name];
-      if (spec.mask === 'enable') return !!state.physics.enableFlags[name];
-      if (spec.mask === 'enableactuator') return !!state.physics.actuatorGroups[name];
-      return undefined;
-    }
-    case 'sim_opt':
-      return state.rendering?.[spec.field] ?? 0;
-    case 'struct': {
-      if (spec.scope === 'mjOption') {
-        return resolveStructPath(state.model?.opt, spec.path);
-      }
-      if (spec.scope === 'mjVisual') {
-        return resolveStructPath(state.model?.vis, spec.path);
-      }
-      if (spec.scope === 'mjStatistic') {
-        return resolveStructPath(state.model?.stat, spec.path);
-      }
-      return undefined;
-    }
-    case 'vopt_flag':
-      return !!state.rendering?.voptFlags?.[spec.index];
-    case 'scene_flag':
-      return !!state.rendering?.sceneFlags?.[spec.index];
-    case 'label_mode':
-      return state.rendering?.labelMode ?? 0;
-    case 'frame_mode':
-      return state.rendering?.frameMode ?? 0;
-    default:
-      break;
-  }
-  return undefined;
+  const reader = BINDING_READERS[spec.kind];
+  if (!reader) return undefined;
+  return reader(state, spec, control);
 }
+
+const CONTROL_NULL_VALUE = new Set([
+  'simulation.reset',
+  'simulation.align',
+  'file.quit',
+]);
 
 function readControlValue(state, control) {
   if (!control) return undefined;
-  if (control.item_id === 'simulation.reset') return null;
-  if (control.item_id === 'simulation.align') return null;
+  if (CONTROL_NULL_VALUE.has(control.item_id)) return null;
   if (control.item_id === 'option.visual_source') {
     const mode = state.visualSourceMode || 'model';
     if (mode === 'model') return 'Model';
     if (mode === 'preset-moon') return 'PresetMoon';
     return 'PresetSun';
   }
-  if (control.item_id === 'file.quit') return null;
   if (control.binding) {
     const spec = getControlBindingSpec(control) || control.binding;
     return readBindingValue(state, spec, control);
@@ -1293,13 +1281,10 @@ function readControlValue(state, control) {
 }
 
 const LOCAL_CONTROL_IDS = new Set([
-  'simulation.reset',
-  'simulation.reload',
-  'simulation.align',
+  ...Object.keys(CONTROL_TOASTS),
   'simulation.copy_state',
   'simulation.save_key',
   'simulation.load_key',
-  'file.quit',
   'option.help-toggle',
 ]);
 
