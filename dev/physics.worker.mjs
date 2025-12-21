@@ -1,7 +1,17 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
-import { isVerboseDebug, logError, logStatus, logWarn, withCacheTag } from './viewer_runtime.mjs';
+import {
+  isVerboseDebug,
+  logError,
+  logStatus,
+  logWarn,
+  withCacheTag,
+  strictCatch,
+  strictFallback,
+  strictEnsure,
+  getStrictReport,
+} from './viewer_runtime.mjs';
 import { DEFAULT_VOPT_FLAGS_NUMERIC, MJ_GROUP_COUNT, MJ_GROUP_TYPES, SCENE_FLAG_DEFAULTS_NUMERIC } from './viewer_defaults.mjs';
 import {
   detectOptionSupport,
@@ -172,7 +182,9 @@ function setRunning(next, source = 'backend', notify = true) {
   if (notify && changed) {
     try {
       postMessage({ kind: 'run_state', running: target, source });
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'worker:run_state_post');
+    }
   }
 }
 
@@ -185,7 +197,8 @@ function resetTimingForCurrentSim(initialRate = null) {
     } else {
       tSim = simTimeApprox || 0;
     }
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'worker:reset_timing');
     tSim = simTimeApprox || 0;
   }
   lastSyncWallTime = nowSec;
@@ -202,7 +215,9 @@ function resetTimingForCurrentSim(initialRate = null) {
     try {
       if (scope === 'mjVisual') return readVisualStruct(mod, h);
       if (scope === 'mjStatistic') return readStatisticStruct(mod, h);
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'worker:read_struct_state');
+    }
     return null;
   }
 
@@ -252,7 +267,9 @@ function emitOptionState() {
       groups: cloneGroupState(),
       options: optionsState,
     });
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'worker:emitOptionState');
+  }
 }
 
 function syncVoptToWasm() {
@@ -329,6 +346,7 @@ function ensureMjvPerturbAbi() {
     movePerturb: mod._mjwf_mjv_movePerturb,
     applyForce: mod._mjwf_mjv_applyPerturbForce,
   };
+  strictEnsure('ensureMjvPerturbAbi', { reason: 'create' });
   return mjvPerturbFns;
 }
 
@@ -360,6 +378,7 @@ function ensureMjvCameraAbi() {
     updateCamera: mod._mjwf_mjv_updateCamera,
     moveCamera: mod._mjwf_mjv_moveCamera,
   };
+  strictEnsure('ensureMjvCameraAbi', { reason: 'create' });
   return mjvCameraFns;
 }
 
@@ -461,7 +480,9 @@ function emitStructState(scope) {
   if (!value) return;
   try {
     postMessage({ kind: 'struct_state', scope, value });
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'worker:emitStructState');
+  }
 }
 
 function collectCameraMeta() {
@@ -525,6 +546,7 @@ function emitCameraMeta() {
     postMessage({ kind: 'meta_cameras', cameras });
   } catch (err) {
     logWarn('worker: camera meta failed', String(err || ''));
+    strictCatch(err, 'worker:meta_cameras');
   }
 }
 
@@ -548,6 +570,7 @@ function emitGeomMeta() {
     postMessage({ kind: 'meta_geoms', geoms });
   } catch (err) {
     logWarn('worker: geom meta failed', String(err || ''));
+    strictCatch(err, 'worker:meta_geoms');
   }
 }
 
@@ -623,7 +646,9 @@ function serializeHistoryMeta() {
 function emitHistoryMeta() {
   try {
     postMessage({ kind: 'history', ...serializeHistoryMeta() });
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'worker:emitHistoryMeta');
+  }
 }
 
 function buildInfoStats(sim, tSim, nconLocal) {
@@ -918,7 +943,9 @@ function serializeKeyframeMeta() {
 function emitKeyframeMeta() {
   try {
     postMessage({ kind: 'keyframes', ...serializeKeyframeMeta(), keyIndex: keySliderIndex });
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'worker:emitKeyframeMeta');
+  }
 }
 
 function ensureKeySlot(index) {
@@ -929,6 +956,7 @@ function ensureKeySlot(index) {
   const slot = slots[target];
   if (slot && !slot.state && (keyframeState.stateSize | 0) > 0) {
     slot.state = new Float64Array(keyframeState.stateSize | 0);
+    strictEnsure('ensureKeySlot', { reason: 'allocate', index: target, size: keyframeState.stateSize | 0 });
   }
   return slot;
 }
@@ -1063,7 +1091,9 @@ function emitWatchState() {
   if (!payload) return;
   try {
     postMessage({ kind: 'watch', ...payload });
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'worker:emitWatchState');
+  }
 }
 
 function collectWatchSources() {
@@ -1338,7 +1368,9 @@ async function loadModule() {
     if (v) ver = v;
     const fb = urlSelf.searchParams.get('forgeBase');
     if (fb) forgeBaseOverride = fb;
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'worker:parse_worker_url');
+  }
 
   let distBase;
   if (forgeBaseOverride) {
@@ -1346,8 +1378,10 @@ async function loadModule() {
     // treat it as the canonical dist/<ver>/ base URL.
     try {
       distBase = new URL(forgeBaseOverride);
-    } catch {
+    } catch (err) {
       // Fallback to local dist layout if forgeBase is malformed.
+      strictCatch(err, 'worker:forgeBase_url', { allow: true });
+      strictFallback('forgeBase.malformed', { forgeBase: forgeBaseOverride });
       distBase = new URL(`../../dist/${ver}/`, import.meta.url);
     }
   } else {
@@ -1423,7 +1457,9 @@ async function loadModule() {
       `distBase=${distBase.href}`;
     try {
       postMessage({ kind: 'error', message, distBase: distBase.href, missing });
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'worker:abi_missing_notify');
+    }
     throw new Error(message);
   };
 
@@ -1438,7 +1474,9 @@ async function loadModule() {
       const s = String(j.sha256 || j.git_sha || j.mujoco_git_sha || '');
       vTag = s.slice(0, 8);
     }
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'worker:version_json', { allow: true });
+  }
   try {
     const jsHref = withCacheTag(jsAbs.href, vTag);
     const wasmHref = withCacheTag(wasmAbs.href, vTag);
@@ -1456,8 +1494,11 @@ async function loadModule() {
       if (typeof enableTimers === 'function') {
         enableTimers.call(mod);
       }
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'worker:enable_timers');
+    }
   } catch (e) {
+    strictCatch(e, 'worker:loadModule');
     throw e;
   }
   logStatus('worker: forge module ready');
@@ -1502,6 +1543,9 @@ async function loadXmlWithFallback(xmlText) {
         helperErrmsg: '',
       };
     } catch (err) {
+      logWarn('worker: loadXmlWithFallback failed', String(err || ''));
+      strictCatch(err, 'worker:loadXmlWithFallback', { allow: true });
+      strictFallback('loadXmlWithFallback', { stage: attempt.stage, error: String(err || '') });
       const meta = readLastErrorMeta(mod || {});
       if (attempts.length === 1) {
         return {
@@ -1579,18 +1623,22 @@ function snapshot() {
   let wrapXposView = sim.wrapXposView?.() || null;
   // Fallback: some forge builds expose wrap arrays only via raw ptr exports.
   if (!tenWrapAdrView && ntendonLocal > 0 && typeof mod?._mjwf_data_ten_wrapadr_ptr === 'function') {
+    strictFallback('wrap_arrays.ptr_export', { field: 'tenWrapAdr' });
     const ptr = mod._mjwf_data_ten_wrapadr_ptr(h | 0) | 0;
     if (ptr) tenWrapAdrView = heapViewI32(mod, ptr, ntendonLocal);
   }
   if (!tenWrapNumView && ntendonLocal > 0 && typeof mod?._mjwf_data_ten_wrapnum_ptr === 'function') {
+    strictFallback('wrap_arrays.ptr_export', { field: 'tenWrapNum' });
     const ptr = mod._mjwf_data_ten_wrapnum_ptr(h | 0) | 0;
     if (ptr) tenWrapNumView = heapViewI32(mod, ptr, ntendonLocal);
   }
   if (!wrapObjView && nwrapLocal > 0 && typeof mod?._mjwf_data_wrap_obj_ptr === 'function') {
+    strictFallback('wrap_arrays.ptr_export', { field: 'wrapObj' });
     const ptr = mod._mjwf_data_wrap_obj_ptr(h | 0) | 0;
     if (ptr) wrapObjView = heapViewI32(mod, ptr, nwrapLocal * 2);
   }
   if (!wrapXposView && nwrapLocal > 0 && typeof mod?._mjwf_data_wrap_xpos_ptr === 'function') {
+    strictFallback('wrap_arrays.ptr_export', { field: 'wrapXpos' });
     const ptr = mod._mjwf_data_wrap_xpos_ptr(h | 0) | 0;
     if (ptr) wrapXposView = heapViewF64(mod, ptr, nwrapLocal * 6);
   }
@@ -1704,7 +1752,9 @@ function snapshot() {
       if (info) {
         msg.info = info;
       }
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'worker:build_info_stats');
+    }
     const transfers = [xpos.buffer, xmat.buffer];
     if (msg.bxpos) transfers.push(msg.bxpos.buffer);
     if (msg.bxmat) transfers.push(msg.bxmat.buffer);
@@ -2061,10 +2111,12 @@ function snapshot() {
         }
       } catch (err) {
         logError('[worker] contact force compute failed', err);
+        strictCatch(err, 'worker:contact_force_compute');
       }
     }
   } catch (err) {
     logWarn('worker: contact extraction failed', String(err || ''));
+    strictCatch(err, 'worker:contact_extract');
   }
   msg.contacts = contacts || null;
   if (perfEnabled) {
@@ -2077,7 +2129,12 @@ function snapshot() {
   try {
     postMessage(msg, transfers);
   } catch (err) {
-    try { postMessage({ kind:'error', message: `snapshot postMessage failed: ${err}` }); } catch {}
+    try {
+      postMessage({ kind:'error', message: `snapshot postMessage failed: ${err}` });
+    } catch (innerErr) {
+      strictCatch(innerErr, 'worker:snapshot_post_error');
+    }
+    strictCatch(err, 'worker:snapshot_post');
   }
 }
 
@@ -2100,9 +2157,11 @@ function emitRenderAssets() {
       }, transfers);
     } catch (err) {
       logWarn('worker: render_assets post failed', String(err || ''));
+      strictCatch(err, 'worker:render_assets_post');
     }
   } catch (err) {
     logWarn('worker: collectRenderAssets failed', String(err || ''));
+    strictCatch(err, 'worker:collect_render_assets');
   }
 }
 
@@ -2307,7 +2366,9 @@ setInterval(() => {
         pendingCtrl.clear();
       }
     }
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'worker:pending_ctrl_flush');
+  }
   const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
   let wallDelta = nowSec - lastSyncWallTime;
   if (!(wallDelta > 0)) return;
@@ -2321,7 +2382,9 @@ setInterval(() => {
         const raw = sim.timestep();
         if (Number.isFinite(raw) && raw > 0) return raw;
       }
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'worker:read_timestep');
+    }
     return dt;
   })();
   if (Number.isFinite(currentDt) && currentDt > 0) {
@@ -2343,7 +2406,8 @@ setInterval(() => {
       applyCtrlNoise();
       applyMjvPerturbForceIfActive();
       sim.step(1);
-    } catch {
+    } catch (err) {
+      strictCatch(err, 'worker:step_loop');
       break;
     }
   }
@@ -2369,7 +2433,9 @@ setInterval(() => {
         }
       }
     }
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'worker:sync_timer');
+  }
 }, 8);
 
 // Snapshot timer at ~60Hz
@@ -2385,16 +2451,22 @@ setInterval(() => {
 onmessage = async (ev) => {
   const msg = ev.data || {};
   try {
+    if (msg.cmd === 'strictReport') {
+      postMessage({ kind: 'strict_report', id: msg.id || 0, report: getStrictReport() });
+      return;
+    }
     if (msg.cmd === 'load') {
       // Stop stepping during reload and clear handle so timers are gated.
       try {
         setRunning(false, 'load', false);
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'worker:setRunning_load');
+      }
       if (sim) {
-        try { sim.term(); } catch {}
+        try { sim.term(); } catch (err) { strictCatch(err, 'worker:sim_term'); }
       }
       if (mod && h && typeof mod._mjwf_helper_free === 'function') {
-        try { mod._mjwf_helper_free(h); } catch {}
+        try { mod._mjwf_helper_free(h); } catch (err) { strictCatch(err, 'worker:helper_free'); }
       }
       h = 0;
       const result = await loadXmlWithFallback(msg.xmlText || '');
@@ -2420,7 +2492,9 @@ onmessage = async (ev) => {
             helperErrno: errMeta.helperErrno,
             helperErrmsg: errMeta.helperErrmsg,
           });
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'worker:load_error_post');
+        }
         return;
       }
       const { abi, handle } = result;
@@ -2491,7 +2565,7 @@ onmessage = async (ev) => {
             if (!(nj > 0) || typeof sim?.jntNameOf !== 'function') return null;
             const names = [];
             for (let i = 0; i < nj; i += 1) {
-              try { names.push(sim.jntNameOf(i) || `jnt ${i}`); } catch { names.push(`jnt ${i}`); }
+              try { names.push(sim.jntNameOf(i) || `jnt ${i}`); } catch (err) { strictCatch(err, 'worker:jntNameOf'); names.push(`jnt ${i}`); }
             }
             return names;
           })();
@@ -2518,7 +2592,9 @@ onmessage = async (ev) => {
             jnt_range,
             jnt_names,
           }, transfers);
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'worker:meta_joints');
+      }
       // Send meta for control panel (always). If nu==0, send empty to clear UI.
       try {
         const acts = [];
@@ -2535,7 +2611,9 @@ onmessage = async (ev) => {
           }
         }
         postMessage({ kind:'meta', actuators: acts });
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'worker:meta_actuators');
+      }
       emitCameraMeta();
       emitGeomMeta();
       snapshot();
@@ -2554,11 +2632,12 @@ onmessage = async (ev) => {
         const n = Math.max(1, Math.min(10000, (msg.n | 0) || 1));
         let steps = 0;
         while (steps < n) {
-          try { captureHistorySample(true); } catch {}
+          try { captureHistorySample(true); } catch (err) { strictCatch(err, 'worker:step_history'); }
           try {
             applyMjvPerturbForceIfActive();
             sim.step(1);
-          } catch {
+          } catch (err) {
+            strictCatch(err, 'worker:step_sim');
             break;
           }
           steps += 1;
@@ -2566,7 +2645,9 @@ onmessage = async (ev) => {
         try {
           const tSim = (sim && typeof sim.time === 'function') ? (sim.time() || 0) : simTimeApprox;
           simTimeApprox = tSim;
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'worker:step_time');
+        }
         snapshot();
       }
     } else if (msg.cmd === 'gesture') {
@@ -2638,7 +2719,7 @@ onmessage = async (ev) => {
           }
         }
       }
-      try { postMessage({ kind: 'gesture', gesture: gestureState, drag: dragState }); } catch {}
+      try { postMessage({ kind: 'gesture', gesture: gestureState, drag: dragState }); } catch (err) { strictCatch(err, 'worker:gesture_post'); }
     } else if (msg.cmd === 'setVoptFlag') {
       const idx = Number(msg.index) | 0;
       const enabled = !!msg.enabled;
@@ -2743,12 +2824,15 @@ onmessage = async (ev) => {
                   historyConfig = { ...historyConfig, captureHz: targetHz };
                   resetTimingForCurrentSim(rate);
                 }
-              } catch {}
+              } catch (err) {
+                strictCatch(err, 'worker:setField_timestep');
+              }
             }
             snapshot();
           }
         } catch (err) {
           logWarn('worker: setField (mjOption) failed', String(err || ''));
+          strictCatch(err, 'worker:setField_mjOption');
         }
       } else if (target === 'mjVisual') {
         try {
@@ -2758,6 +2842,7 @@ onmessage = async (ev) => {
           }
         } catch (err) {
           logWarn('worker: setField (mjVisual) failed', String(err || ''));
+          strictCatch(err, 'worker:setField_mjVisual');
         }
       } else if (target === 'mjStatistic') {
         try {
@@ -2767,6 +2852,7 @@ onmessage = async (ev) => {
           }
         } catch (err) {
           logWarn('worker: setField (mjStatistic) failed', String(err || ''));
+          strictCatch(err, 'worker:setField_mjStatistic');
         }
       }
     } else if (msg.cmd === 'applyPerturb') {
@@ -2865,18 +2951,20 @@ onmessage = async (ev) => {
           timestamp: now,
           source: msg.source || 'backend',
         });
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'worker:align_post');
+      }
     } else if (msg.cmd === 'copyState') {
       const precision = msg.precision === 'full' ? 'full' : 'standard';
       const payload = captureCopyState(precision);
       payload.source = msg.source || 'backend';
-      try { postMessage(payload); } catch {}
+      try { postMessage(payload); } catch (err) { strictCatch(err, 'worker:copy_state_post'); }
     } else if (msg.cmd === 'setCtrlNoise') {
       ctrlNoiseStd = +msg.std || 0;
       ctrlNoiseRate = +msg.rate || 0;
     } else if (msg.cmd === 'setCtrl') {
       // Write a single actuator control value if pointers available
-      try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch {}
+      try { const i = msg.index|0; pendingCtrl.set(i, +msg.value||0); } catch (err) { strictCatch(err, 'worker:set_ctrl'); }
     } else if (msg.cmd === 'setQpos') {
       try {
         const idx = Number(msg.index) | 0;
@@ -2889,9 +2977,10 @@ onmessage = async (ev) => {
         if (Number.isFinite(msg.min)) v = Math.max(Number(msg.min), v);
         if (Number.isFinite(msg.max)) v = Math.min(Number(msg.max), v);
         qpos[idx] = v;
-        try { sim.forward?.(); } catch {}
+        try { sim.forward?.(); } catch (err) { strictCatch(err, 'worker:setQpos_forward'); }
       } catch (err) {
         logWarn('worker: setQpos failed', String(err || ''));
+        strictCatch(err, 'worker:setQpos');
       }
     } else if (msg.cmd === 'setEqualityActive') {
       try {
@@ -2901,9 +2990,10 @@ onmessage = async (ev) => {
         const eqActive = sim?.eqActiveView?.();
         if (!eqActive || idx >= eqActive.length) throw new Error('eq_active view missing');
         eqActive[idx] = active ? 1 : 0;
-        try { sim.forward?.(); } catch {}
+        try { sim.forward?.(); } catch (err) { strictCatch(err, 'worker:setEqualityActive_forward'); }
       } catch (err) {
         logWarn('worker: setEqualityActive failed', String(err || ''));
+        strictCatch(err, 'worker:setEqualityActive');
       }
     } else if (msg.cmd === 'setRate') {
       const nextRate = +msg.rate || 1;
@@ -2921,6 +3011,11 @@ onmessage = async (ev) => {
       if (sim && h) snapshot();
     }
   } catch (e) {
-    try { postMessage({ kind:'error', message: String(e) }); } catch {}
+    try {
+      postMessage({ kind:'error', message: String(e) });
+    } catch (innerErr) {
+      strictCatch(innerErr, 'worker:post_error');
+    }
+    strictCatch(e, 'worker:onmessage');
   }
 };

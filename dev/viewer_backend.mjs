@@ -1,4 +1,4 @@
-import { buildWorkerUrl, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWarn, logError, logStatus } from './viewer_runtime.mjs';
+import { buildWorkerUrl, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWarn, logError, logStatus, strictCatch, getStrictReport } from './viewer_runtime.mjs';
 import { MJ_GROUP_COUNT, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
 import { VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
 import { bool, cloneStruct, createDefaultHistoryState, createDefaultKeyframeState, createDefaultWatchState, createViewerGroupState, normaliseGroupState, resolveStructPath, toNumber } from './viewer_shared.mjs';
@@ -203,7 +203,8 @@ function resolveSnapshot(state) {
     if (Array.isArray(value) && Ctor) {
       try {
         return new Ctor(value);
-      } catch {
+      } catch (err) {
+        strictCatch(err, 'backend:view_or_null');
         return null;
       }
     }
@@ -403,6 +404,8 @@ export async function createBackend(options = {}) {
   let lastFrameId = -1;
   let messageHandler = null;
   let lastXmlText = null;
+  let strictRequestSeq = 0;
+  const strictRequests = new Map();
 
   function applySimulateMaskBinding(binding, value, prefix, field, invert, warnLabel) {
     if (!binding || !binding.startsWith(`${prefix}[`)) return false;
@@ -430,6 +433,7 @@ export async function createBackend(options = {}) {
         });
       } catch (err) {
         logWarn(`[backend ${warnLabel}] post failed`, err);
+        strictCatch(err, `backend:setField:${warnLabel}`);
         throw err;
       }
     }
@@ -439,6 +443,22 @@ export async function createBackend(options = {}) {
   function spawnWorkerBackend() {
     const workerUrl = buildWorkerUrl(WORKER_URL);
     return new Worker(workerUrl, { type: 'module' });
+  }
+
+  async function requestWorkerStrictReport() {
+    if (!client || typeof client.postMessage !== 'function') return null;
+    const id = (strictRequestSeq += 1);
+    const promise = new Promise((resolve, reject) => {
+      strictRequests.set(id, { resolve, reject });
+    });
+    try {
+      client.postMessage({ cmd: 'strictReport', id });
+    } catch (err) {
+      strictRequests.delete(id);
+      strictCatch(err, 'backend:strict_report_request');
+      throw err;
+    }
+    return promise;
   }
 
   async function loadDefaultXml() {
@@ -465,6 +485,7 @@ export async function createBackend(options = {}) {
     } catch (err) {
       errors.push(`fetch ${file} error ${String(err)}`);
       logWarn('[backend] failed to fetch xml', { file, err });
+      strictCatch(err, 'backend:fetch_xml');
     }
   }
     throw new Error(
@@ -487,6 +508,7 @@ export async function createBackend(options = {}) {
         fn(snapshot);
       } catch (err) {
         logError(err);
+        strictCatch(err, 'backend:listener');
       }
     }
     return snapshot;
@@ -494,8 +516,8 @@ export async function createBackend(options = {}) {
 
   function detachClient() {
     if (messageHandler) {
-      try { client?.removeEventListener?.('message', messageHandler); } catch {}
-      try { if (client && 'onmessage' in client) client.onmessage = null; } catch {}
+      try { client?.removeEventListener?.('message', messageHandler); } catch (err) { strictCatch(err, 'backend:detach_listener'); }
+      try { if (client && 'onmessage' in client) client.onmessage = null; } catch (err) { strictCatch(err, 'backend:detach_onmessage'); }
     }
   }
 
@@ -505,14 +527,15 @@ export async function createBackend(options = {}) {
       return resolveSnapshot(lastSnapshot);
     }
     // Tear down old worker (if any).
-    try { detachClient(); } catch {}
-    try { client?.terminate?.(); } catch {}
+    try { detachClient(); } catch (err) { strictCatch(err, 'backend:detach_client'); }
+    try { client?.terminate?.(); } catch (err) { strictCatch(err, 'backend:terminate'); }
     client = null;
     // Spawn a fresh worker (new wasm instance).
     try {
       client = await spawnWorkerBackend();
     } catch (err) {
       logError('[backend] worker init failed', err);
+      strictCatch(err, 'backend:worker_init');
       throw err;
     }
     // Attach message handler to the new worker.
@@ -534,6 +557,7 @@ export async function createBackend(options = {}) {
       client.postMessage({ cmd: 'snapshot' });
     } catch (err) {
       logError('[backend load] failed', err);
+      strictCatch(err, 'backend:load');
       throw err;
     }
     return resolveSnapshot(lastSnapshot);
@@ -610,6 +634,7 @@ export async function createBackend(options = {}) {
       await navigator.clipboard.writeText(xml);
     } catch (err) {
       logError('[backend copyState] clipboard write failed', err);
+      strictCatch(err, 'backend:clipboard_write');
       throw err;
     }
   }
@@ -654,6 +679,7 @@ export async function createBackend(options = {}) {
         client.postMessage?.({ cmd: 'setPaused', paused: nextPaused, source });
       } catch (err) {
         logWarn('[backend] setPaused post failed', err);
+        strictCatch(err, 'backend:setPaused');
       }
     }
     return resolveSnapshot(lastSnapshot);
@@ -666,6 +692,7 @@ export async function createBackend(options = {}) {
       client.postMessage?.({ cmd: 'setRate', rate: clamped, source });
     } catch (err) {
       logWarn('[backend] setRate post failed', err);
+      strictCatch(err, 'backend:setRate');
     }
     return resolveSnapshot(lastSnapshot);
   }
@@ -695,6 +722,7 @@ export async function createBackend(options = {}) {
           });
         } catch (err) {
           logWarn('[backend setField] failed', descriptor.path, err);
+          strictCatch(err, 'backend:setField_descriptor');
         }
       }
     }
@@ -705,6 +733,7 @@ export async function createBackend(options = {}) {
           client.postMessage?.({ cmd: 'setSceneFlag', index: i, enabled });
         } catch (err) {
           logWarn('[backend setSceneFlag] failed', { index: i, enabled }, err);
+          strictCatch(err, 'backend:setSceneFlag');
         }
       }
     }
@@ -719,7 +748,8 @@ export async function createBackend(options = {}) {
       if (Array.isArray(value) && Ctor) {
         try {
           return new Ctor(value);
-        } catch {
+        } catch (err) {
+          strictCatch(err, 'backend:makeView');
           return fallback;
         }
       }
@@ -742,6 +772,15 @@ export async function createBackend(options = {}) {
     const data = event?.data ?? event;
     if (!data || typeof data !== 'object') return;
     switch (data.kind) {
+      case 'strict_report': {
+        const id = Number(data.id) || 0;
+        const pending = strictRequests.get(id);
+        if (pending) {
+          strictRequests.delete(id);
+          pending.resolve(data.report || null);
+        }
+        break;
+      }
       case 'run_state': {
         if (typeof data.running === 'boolean') {
           lastSnapshot.paused = !data.running;
@@ -795,6 +834,7 @@ export async function createBackend(options = {}) {
             : Array.from(data.ctrl);
         } catch (err) {
           logWarn('[backend] ctrl decode failed', err);
+          strictCatch(err, 'backend:ctrl_decode');
           lastSnapshot.ctrl = [];
         }
       }
@@ -819,7 +859,7 @@ export async function createBackend(options = {}) {
         const mode = lastSnapshot.cameraMode | 0;
         if (mode >= totalModes) {
           lastSnapshot.cameraMode = 0;
-          try { client.postMessage?.({ cmd: 'setCameraMode', mode: 0 }); } catch {}
+          try { client.postMessage?.({ cmd: 'setCameraMode', mode: 0 }); } catch (err) { strictCatch(err, 'backend:setCameraMode'); }
         }
         notifyListeners();
         break;
@@ -833,13 +873,13 @@ export async function createBackend(options = {}) {
         const toI32 = (value) => {
           if (!value) return null;
           if (ArrayBuffer.isView(value)) {
-            try { return new Int32Array(value); } catch { return null; }
+            try { return new Int32Array(value); } catch (err) { strictCatch(err, 'backend:meta_joints_view'); return null; }
           }
           if (value instanceof ArrayBuffer) {
-            try { return new Int32Array(value); } catch { return null; }
+            try { return new Int32Array(value); } catch (err) { strictCatch(err, 'backend:meta_joints_buffer'); return null; }
           }
           if (Array.isArray(value)) {
-            try { return Int32Array.from(value); } catch { return null; }
+            try { return Int32Array.from(value); } catch (err) { strictCatch(err, 'backend:meta_joints_array'); return null; }
           }
           return null;
         };
@@ -864,7 +904,9 @@ export async function createBackend(options = {}) {
             if (ArrayBuffer.isView(source)) return new Float64Array(source);
             if (Array.isArray(source)) return Float64Array.from(source);
             if (source instanceof ArrayBuffer) return new Float64Array(source);
-          } catch {}
+          } catch (err) {
+            strictCatch(err, 'backend:meta_joints_range');
+          }
           return null;
         })();
         if (jrange) lastSnapshot.jnt_range = jrange;
@@ -888,7 +930,9 @@ export async function createBackend(options = {}) {
             }));
             notifyListeners();
           }
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'backend:meta_actuators');
+        }
         break;
       }
       case 'snapshot': {
@@ -937,7 +981,8 @@ export async function createBackend(options = {}) {
             lastSnapshot.ctrl = Array.isArray(data.ctrl)
               ? data.ctrl.slice()
               : Array.from(data.ctrl);
-          } catch {
+          } catch (err) {
+            strictCatch(err, 'backend:ctrl_convert');
             lastSnapshot.ctrl = [];
           }
         }
@@ -1162,6 +1207,7 @@ export async function createBackend(options = {}) {
       const offset = Math.min(0, normaliseInt(value, 0));
       try { client.postMessage?.({ cmd: 'historyScrub', offset }); } catch (err) {
         logWarn('[backend history] post failed', err);
+        strictCatch(err, 'backend:history_scrub');
         throw err;
       }
       return true;
@@ -1172,6 +1218,7 @@ export async function createBackend(options = {}) {
         client.postMessage?.({ cmd: 'keyframeSelect', index });
       } catch (err) {
         logWarn('[backend keyframe select] failed', err);
+        strictCatch(err, 'backend:keyframe_select');
         throw err;
       }
       return true;
@@ -1180,6 +1227,7 @@ export async function createBackend(options = {}) {
       const index = normaliseInt(lastSnapshot.keyIndex ?? -1, -1);
       try { client.postMessage?.({ cmd: 'keyframeSave', index }); } catch (err) {
         logWarn('[backend keyframe save] failed', err);
+        strictCatch(err, 'backend:keyframe_save');
         throw err;
       }
       return true;
@@ -1188,6 +1236,7 @@ export async function createBackend(options = {}) {
       const index = Math.max(0, normaliseInt(lastSnapshot.keyIndex ?? 0, 0));
       try { client.postMessage?.({ cmd: 'keyframeLoad', index }); } catch (err) {
         logWarn('[backend keyframe load] failed', err);
+        strictCatch(err, 'backend:keyframe_load');
         throw err;
       }
       return true;
@@ -1204,6 +1253,7 @@ export async function createBackend(options = {}) {
         });
       } catch (err) {
         logWarn('[backend watch field] failed', err);
+        strictCatch(err, 'backend:watch_field');
         throw err;
       }
       return true;
@@ -1218,6 +1268,7 @@ export async function createBackend(options = {}) {
         });
       } catch (err) {
         logWarn('[backend watch index] failed', err);
+        strictCatch(err, 'backend:watch_index');
         throw err;
       }
       return true;
@@ -1231,6 +1282,7 @@ export async function createBackend(options = {}) {
         }
       } catch (err) {
         logWarn('[backend control.actuator] failed', err);
+        strictCatch(err, 'backend:control_actuator');
         throw err;
       }
       return true;
@@ -1246,6 +1298,7 @@ export async function createBackend(options = {}) {
         }
       } catch (err) {
         logWarn('[backend joint.slider] failed', err);
+        strictCatch(err, 'backend:joint_slider');
         throw err;
       }
       return true;
@@ -1259,6 +1312,7 @@ export async function createBackend(options = {}) {
         }
       } catch (err) {
         logWarn('[backend equality.toggle] failed', err);
+        strictCatch(err, 'backend:equality_toggle');
         throw err;
       }
       return true;
@@ -1271,6 +1325,7 @@ export async function createBackend(options = {}) {
         }
       } catch (err) {
         logWarn('[backend control.clear] failed', err);
+        strictCatch(err, 'backend:control_clear');
         throw err;
       }
       return true;
@@ -1285,6 +1340,7 @@ export async function createBackend(options = {}) {
         client.postMessage?.({ cmd: 'setCameraMode', mode: modeValue });
       } catch (err) {
         logWarn('[backend camera] post failed', err);
+        strictCatch(err, 'backend:camera');
         throw err;
       }
       return true;
@@ -1296,6 +1352,7 @@ export async function createBackend(options = {}) {
         client.postMessage?.({ cmd: 'setLabelMode', mode });
       } catch (err) {
         logWarn('[backend label mode] post failed', err);
+        strictCatch(err, 'backend:label_mode');
         throw err;
       }
       return true;
@@ -1306,6 +1363,7 @@ export async function createBackend(options = {}) {
         client.postMessage?.({ cmd: 'setFrameMode', mode });
       } catch (err) {
         logWarn('[backend frame mode] post failed', err);
+        strictCatch(err, 'backend:frame_mode');
         throw err;
       }
       return true;
@@ -1326,6 +1384,7 @@ export async function createBackend(options = {}) {
           });
         } catch (err) {
           logWarn('[backend setVisualOption] post failed', err);
+          strictCatch(err, 'backend:set_visual_option');
           throw err;
         }
         return true;
@@ -1341,6 +1400,7 @@ export async function createBackend(options = {}) {
             client.postMessage?.({ cmd: 'setGroupState', group: type, index: idx, enabled: bool(value) });
           } catch (err) {
             logWarn('[backend group] post failed', err);
+            strictCatch(err, 'backend:group');
             throw err;
           }
         }
@@ -1356,6 +1416,7 @@ export async function createBackend(options = {}) {
           client.postMessage?.({ cmd: 'setVoptFlag', index: idx, enabled });
         } catch (err) {
           logWarn('[backend vopt flag] post failed', err);
+          strictCatch(err, 'backend:vopt_flag');
           throw err;
         }
         return true;
@@ -1370,6 +1431,7 @@ export async function createBackend(options = {}) {
           client.postMessage?.({ cmd: 'setSceneFlag', index: idx, enabled });
         } catch (err) {
           logWarn('[backend scene flag] post failed', err);
+          strictCatch(err, 'backend:scene_flag');
           throw err;
         }
         return true;
@@ -1447,6 +1509,7 @@ export async function createBackend(options = {}) {
         });
       } catch (err) {
         logError('[backend gesture] failed', err);
+        strictCatch(err, 'backend:gesture');
       }
       return resolveSnapshot(lastSnapshot);
     }
@@ -1481,6 +1544,7 @@ export async function createBackend(options = {}) {
         client.postMessage?.({ cmd: 'snapshot' });
       } catch (err) {
         logWarn('[backend setField] post failed', err);
+        strictCatch(err, 'backend:setField_post');
       }
       return resolveSnapshot(lastSnapshot);
     }
@@ -1505,6 +1569,7 @@ export async function createBackend(options = {}) {
           client.postMessage?.({ cmd: 'align', source: 'ui' });
         } catch (err) {
           logWarn('[backend align] post failed', err);
+          strictCatch(err, 'backend:align');
         }
         break;
       }
@@ -1515,6 +1580,7 @@ export async function createBackend(options = {}) {
           client.postMessage?.({ cmd: 'copyState', precision, source: 'ui' });
         } catch (err) {
           logWarn('[backend copyState] post failed', err);
+          strictCatch(err, 'backend:copy_state');
         }
         break;
       }
@@ -1569,6 +1635,7 @@ export async function createBackend(options = {}) {
         client.postMessage?.({ cmd: 'historyScrub', offset: nextOffset });
       } catch (err) {
         logWarn('[backend history step] post failed', err);
+        strictCatch(err, 'backend:history_step');
       }
       return resolveSnapshot(lastSnapshot);
     }
@@ -1579,6 +1646,7 @@ export async function createBackend(options = {}) {
       client.postMessage?.({ cmd: 'step', n });
     } catch (err) {
       logWarn('[backend step] post failed', err);
+      strictCatch(err, 'backend:step');
     }
     return resolveSnapshot(lastSnapshot);
   }
@@ -1638,13 +1706,14 @@ export async function createBackend(options = {}) {
       client.postMessage?.(msg);
     } catch (err) {
       logWarn('[backend applyPerturb] failed', err);
+      strictCatch(err, 'backend:applyPerturb');
     }
     return resolveSnapshot(lastSnapshot);
   }
 
   function dispose() {
     if (messageHandler) {
-      try { client.removeEventListener?.('message', messageHandler); } catch {}
+      try { client.removeEventListener?.('message', messageHandler); } catch (err) { strictCatch(err, 'backend:dispose_listener'); }
     }
     client?.terminate?.();
   }
@@ -1661,6 +1730,10 @@ export async function createBackend(options = {}) {
     applyPerturb: applyPerturbCommand,
     setVisualState: applyVisualStatePayload,
     loadXmlText,
+    getStrictReport: async () => ({
+      main: getStrictReport(),
+      worker: await requestWorkerStrictReport(),
+    }),
     getInitialModelInfo: () => initialModelInfo,
     dispose,
   };

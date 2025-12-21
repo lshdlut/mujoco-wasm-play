@@ -231,8 +231,15 @@ if (typeof globalThis !== 'undefined' && isPerfEnabled()) {
   }
 }
 
-const viewerSearchParams =
-  typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+const viewerSearchParams = (() => {
+  if (typeof window !== 'undefined' && window?.location?.search != null) {
+    return new URLSearchParams(window.location.search);
+  }
+  if (typeof location !== 'undefined' && typeof location.search === 'string') {
+    return new URLSearchParams(location.search);
+  }
+  return new URLSearchParams();
+})();
 
 const PARAM_BOOL_TRUE = new Set(['1', 'true', 'yes', 'on']);
 const PARAM_BOOL_FALSE = new Set(['0', 'false', 'no', 'off']);
@@ -299,6 +306,7 @@ export function consumeViewerParams(params = viewerSearchParams) {
     requestedMode,
     fallbackModeParam,
     presetParam,
+    strictMode: isStrictEnabled(params),
     debugMode: readBoolean('debug', params) === true,
     hideAllGeometryDefault: readTruthyFlag(
       ['nogeom', 'no_geom', 'no-geom', 'hideall', 'hide_all'],
@@ -330,6 +338,8 @@ export function buildWorkerUrl(baseUrl, params = viewerSearchParams) {
     : new URL(String(baseUrl), typeof location !== 'undefined' ? location.href : 'http://localhost');
   const forgeBase = params.get('forgeBase');
   if (forgeBase) url.searchParams.set('forgeBase', forgeBase);
+  const strictMode = isStrictEnabled(params);
+  if (strictMode) url.searchParams.set('strict', '1');
   const logToken = params.get('log');
   if (logToken) url.searchParams.set('log', logToken);
   const verboseToken = params.get('verbose');
@@ -370,7 +380,8 @@ export async function getVersionInfo(distBase) {
     const r = await fetch(url.href, { cache: 'no-store' });
     if (!r.ok) throw new Error('version.json fetch failed');
     return await r.json();
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'runtime:version_info', { allow: true });
     return null;
   }
 }
@@ -381,7 +392,149 @@ export function withCacheTag(u, vTag) {
     if (vTag) url.searchParams.set('v', String(vTag));
     else url.searchParams.set('cb', String(Date.now()));
     return url.href;
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'runtime:cache_tag', { allow: true });
     return u;
+  }
+}
+
+const STRICT_STATE_KEY = '__PLAY_STRICT_STATE';
+const STRICT_CATCH_ALLOWLIST = new Set([]);
+
+function resolveStrictFlag(params = viewerSearchParams) {
+  if (typeof globalThis !== 'undefined' && globalThis.PLAY_STRICT != null) {
+    return !!globalThis.PLAY_STRICT;
+  }
+  return readBoolean('strict', params) === true;
+}
+
+export function isStrictEnabled(params = viewerSearchParams) {
+  return resolveStrictFlag(params);
+}
+
+function ensureStrictState() {
+  if (typeof globalThis === 'undefined') {
+    return {
+      version: 1,
+      enabled: false,
+      createdWallMs: Date.now(),
+      seq: 0,
+      counts: Object.create(null),
+      allowlistCounts: Object.create(null),
+      events: [],
+    };
+  }
+  const existing = globalThis[STRICT_STATE_KEY];
+  if (existing && typeof existing === 'object') {
+    existing.enabled = isStrictEnabled();
+    return existing;
+  }
+  const state = {
+    version: 1,
+    enabled: isStrictEnabled(),
+    createdWallMs: Date.now(),
+    seq: 0,
+    counts: Object.create(null),
+    allowlistCounts: Object.create(null),
+    events: [],
+  };
+  globalThis[STRICT_STATE_KEY] = state;
+  return state;
+}
+
+function recordStrictEvent(kind, name, detail = null, options = {}) {
+  const state = ensureStrictState();
+  const key = `${kind}:${name}`;
+  const entry = state.counts[key] || (state.counts[key] = { kind, name, count: 0, lastDetail: null });
+  entry.count += 1;
+  entry.lastDetail = detail;
+  const record = {
+    id: (state.seq += 1),
+    kind,
+    name,
+    t: Date.now(),
+    detail,
+    allowlisted: !!options.allowlisted,
+    stack: options.stack ? new Error().stack : null,
+  };
+  state.events.push(record);
+  if (state.events.length > 500) state.events.shift();
+  if (options.allowlisted) {
+    const allowCount = state.allowlistCounts[name] || 0;
+    state.allowlistCounts[name] = allowCount + 1;
+  }
+  return record;
+}
+
+export function strictFallback(name, detail = null) {
+  recordStrictEvent('fallback', name, detail, { stack: true });
+  if (isStrictEnabled()) {
+    const err = new Error(`[strict:fallback] ${name}`);
+    err.detail = detail;
+    throw err;
+  }
+}
+
+export function strictOverride(name, detail = null) {
+  const hasSource = !!(detail && detail.source);
+  const hasDiff = detail && Object.prototype.hasOwnProperty.call(detail, 'before') &&
+    Object.prototype.hasOwnProperty.call(detail, 'after');
+  if (isStrictEnabled() && (!hasSource || !hasDiff)) {
+    recordStrictEvent('override', name, { ...detail, missing: { source: !hasSource, diff: !hasDiff } }, { stack: true });
+    throw new Error(`[strict:override] missing source/diff: ${name}`);
+  }
+  recordStrictEvent('override', name, detail, { stack: true });
+}
+
+export function strictEnsure(name, detail = null) {
+  const reason = detail && detail.reason;
+  if (isStrictEnabled() && !reason) {
+    recordStrictEvent('ensure', name, { ...detail, missing: { reason: true } }, { stack: true });
+    throw new Error(`[strict:ensure] missing reason: ${name}`);
+  }
+  recordStrictEvent('ensure', name, detail, { stack: true });
+}
+
+export function strictCatch(err, context, options = {}) {
+  const allowlisted = options.allow === true || STRICT_CATCH_ALLOWLIST.has(context);
+  recordStrictEvent('catch', context, { error: String(err || ''), allowlisted }, { stack: true, allowlisted });
+  logError(`[strict] caught error at ${context}`, err);
+  if (isStrictEnabled() && !allowlisted) {
+    throw err;
+  }
+  return err;
+}
+
+export function getStrictReport() {
+  const state = ensureStrictState();
+  return {
+    version: state.version,
+    enabled: state.enabled,
+    createdWallMs: state.createdWallMs,
+    counts: Object.values(state.counts),
+    allowlistCounts: { ...state.allowlistCounts },
+    events: state.events.slice(),
+  };
+}
+
+export function clearStrictReport() {
+  const state = ensureStrictState();
+  state.counts = Object.create(null);
+  state.allowlistCounts = Object.create(null);
+  state.events = [];
+  state.seq = 0;
+  return true;
+}
+
+if (typeof globalThis !== 'undefined') {
+  try {
+    globalThis.__PLAY_STRICT_REPORT__ = () => getStrictReport();
+  } catch (err) {
+    strictCatch(err, 'runtime:strict_report_hook', { allow: true });
+  }
+  try {
+    globalThis.__PLAY_STRICT_CLEAR__ = () => clearStrictReport();
+  } catch (err) {
+    strictCatch(err, 'runtime:strict_clear_hook', { allow: true });
   }
 }

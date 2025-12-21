@@ -1,5 +1,5 @@
 // Minimal browser-only bridge: heap views + MjSimLite (no Node deps)
-import { logError } from './viewer_runtime.mjs';
+import { logError, strictCatch, strictFallback } from './viewer_runtime.mjs';
 
 let __forgeModuleSeq = 1;
 function tagForgeModule(mod) {
@@ -11,7 +11,7 @@ function tagForgeModule(mod) {
   const stamp = Date.now().toString(16);
   const rand = Math.floor(Math.random() * 0x10000).toString(16);
   const id = `forge_mod_${stamp}_${seq}_${rand}`;
-  try { mod.__forgeModuleId = id; } catch {}
+  try { mod.__forgeModuleId = id; } catch (err) { strictCatch(err, 'bridge:tagForgeModule'); }
   return id;
 }
 
@@ -26,21 +26,27 @@ export function resolveHeapBuffer(mod) {
       mod.__heapBuffer = mem.buffer;
       return mem.buffer;
     }
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'bridge:resolveHeapBuffer');
+  }
   try {
     const heapU8 = mod.HEAPU8;
     if (heapU8?.buffer instanceof ArrayBuffer && heapU8.buffer.byteLength > 0) {
       mod.__heapBuffer = heapU8.buffer;
       return heapU8.buffer;
     }
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'bridge:resolveHeapBuffer');
+  }
   try {
     const heapF64 = mod.HEAPF64;
     if (heapF64?.buffer instanceof ArrayBuffer && heapF64.buffer.byteLength > 0) {
       mod.__heapBuffer = heapF64.buffer;
       return heapF64.buffer;
     }
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'bridge:resolveHeapBuffer');
+  }
   return null;
 }
 
@@ -63,7 +69,8 @@ function createHeapTypedArray(mod, ptr, length, Ctor) {
         const copy = new Ctor(n);
         new Uint8Array(copy.buffer).set(src);
         return copy;
-      } catch {
+      } catch (err) {
+        strictCatch(err, 'bridge:createHeapTypedArray_copy');
         // fall through to HEAP view fallback
       }
     }
@@ -78,11 +85,13 @@ function createHeapTypedArray(mod, ptr, length, Ctor) {
     const shift = Math.log2(Ctor.BYTES_PER_ELEMENT) | 0;
     const start = ptr >> shift;
     try {
+      strictFallback('bridge:heap_view_fallback', { ctor: Ctor.name, ptr, length: n });
       return heap.subarray(start, start + n);
-    } catch {
-      // ignore
+    } catch (err) {
+      strictCatch(err, 'bridge:heap_view_subarray');
     }
   }
+  strictFallback('bridge:heap_view_missing', { ctor: Ctor.name, ptr, length: n });
   return new Ctor(n);
 }
 
@@ -138,13 +147,17 @@ function cloneTyped(view, Ctor) {
     if (Ctor) return new Ctor(view);
     if (typeof view.slice === 'function') return view.slice();
     return Array.from(view);
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'bridge:cloneTyped_ctor');
     try {
       if (Ctor && typeof Ctor.from === 'function') return Ctor.from(view);
-    } catch {}
+    } catch (innerErr) {
+      strictCatch(innerErr, 'bridge:cloneTyped_from');
+    }
     try {
       return Array.from(view);
-    } catch {
+    } catch (innerErr) {
+      strictCatch(innerErr, 'bridge:cloneTyped_array');
       return null;
     }
   }
@@ -825,7 +838,9 @@ export class MjSimLite {
           window.__forgeModules.push(mod);
         }
         window.__forgeModule = mod;
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'bridge:registerModule');
+      }
     }
   }
 
@@ -840,8 +855,8 @@ export class MjSimLite {
 
   _mkdirTree(path){
     try { if (!path) return; const FS=this.mod.FS; const parts = String(path).split('/').filter(Boolean); let cur='';
-      for (const p of parts){ cur += '/' + p; try { FS.mkdir(cur); } catch {} }
-    } catch {}
+      for (const p of parts){ cur += '/' + p; try { FS.mkdir(cur); } catch (err) { strictCatch(err, 'bridge:mkdirTree'); } }
+    } catch (err) { strictCatch(err, 'bridge:mkdirTree'); }
   }
 
   _tryHelperMakeFromXml(paths){
@@ -1210,29 +1225,29 @@ export class MjSimLite {
     if (!mod) return null;
     if (typeof mod.stackSave === 'function' && typeof mod.stackAlloc === 'function' && typeof mod.stackRestore === 'function') {
       let sp = 0;
-      try { sp = mod.stackSave(); } catch { sp = 0; }
+      try { sp = mod.stackSave(); } catch (err) { strictCatch(err, 'bridge:stackSave'); sp = 0; }
       let ptr = 0;
-      try { ptr = mod.stackAlloc(bytes) | 0; } catch { ptr = 0; }
+      try { ptr = mod.stackAlloc(bytes) | 0; } catch (err) { strictCatch(err, 'bridge:stackAlloc'); ptr = 0; }
       if (!(ptr > 0)) {
         if (sp) {
-          try { mod.stackRestore(sp); } catch {}
+          try { mod.stackRestore(sp); } catch (err) { strictCatch(err, 'bridge:stackRestore'); }
         }
         return null;
       }
       try {
         return cb(ptr | 0);
       } finally {
-        try { mod.stackRestore(sp); } catch {}
+        try { mod.stackRestore(sp); } catch (err) { strictCatch(err, 'bridge:stackRestore'); }
       }
     }
     if (typeof mod._malloc === 'function' && typeof mod._free === 'function') {
       let ptr = 0;
-      try { ptr = mod._malloc(bytes) | 0; } catch { ptr = 0; }
+      try { ptr = mod._malloc(bytes) | 0; } catch (err) { strictCatch(err, 'bridge:malloc'); ptr = 0; }
       if (!(ptr > 0)) return null;
       try {
         return cb(ptr | 0);
       } finally {
-        try { mod._free(ptr); } catch {}
+        try { mod._free(ptr); } catch (err) { strictCatch(err, 'bridge:free'); }
       }
     }
     return null;
@@ -1244,7 +1259,7 @@ export class MjSimLite {
     if (!mod || typeof mod._malloc !== 'function') return null;
     const bytes = 6 * Float64Array.BYTES_PER_ELEMENT;
     let ptr = 0;
-    try { ptr = mod._malloc(bytes) | 0; } catch { ptr = 0; }
+    try { ptr = mod._malloc(bytes) | 0; } catch (err) { strictCatch(err, 'bridge:malloc'); ptr = 0; }
     if (!(ptr > 0)) return null;
     this.contactForceScratch = { ptr, bytes, view: null };
     return this.contactForceScratch;
@@ -1264,25 +1279,25 @@ export class MjSimLite {
     if (typeof mod.stackSave === 'function' && typeof mod.stackAlloc === 'function' && typeof mod.stackRestore === 'function') {
       const bytes = 6 * Float64Array.BYTES_PER_ELEMENT;
       let sp = 0;
-      try { sp = mod.stackSave(); } catch { sp = 0; }
+      try { sp = mod.stackSave(); } catch (err) { strictCatch(err, 'bridge:stackSave'); sp = 0; }
       let ptr = 0;
-      try { ptr = mod.stackAlloc(bytes) | 0; } catch { ptr = 0; }
+      try { ptr = mod.stackAlloc(bytes) | 0; } catch (err) { strictCatch(err, 'bridge:stackAlloc'); ptr = 0; }
       if (!(ptr > 0)) {
         if (sp) {
-          try { mod.stackRestore(sp); } catch {}
+          try { mod.stackRestore(sp); } catch (err) { strictCatch(err, 'bridge:stackRestore'); }
         }
         return null;
       }
       const view = heapViewF64(mod, ptr, 6);
       if (!view || view.length < 3) {
-        try { mod.stackRestore(sp); } catch {}
+        try { mod.stackRestore(sp); } catch (err) { strictCatch(err, 'bridge:stackRestore'); }
         return null;
       }
       return {
         ptr,
         view,
         release: () => {
-          try { mod.stackRestore(sp); } catch {}
+          try { mod.stackRestore(sp); } catch (err) { strictCatch(err, 'bridge:stackRestore'); }
         },
       };
     }
@@ -1294,7 +1309,7 @@ export class MjSimLite {
     const mod = this.mod;
     const ptr = this.contactForceScratch.ptr | 0;
     if (ptr && mod && typeof mod._free === 'function') {
-      try { mod._free(ptr); } catch {}
+      try { mod._free(ptr); } catch (err) { strictCatch(err, 'bridge:free'); }
     }
     this.contactForceScratch = null;
   }
@@ -1337,6 +1352,7 @@ export class MjSimLite {
       diag.dataPtr = this.dataPtr|0;
     } catch (err) {
       diag.error = String(err||'');
+      strictCatch(err, 'bridge:pointerDiagnostics');
       return diag;
     }
     const m=this.mod;
@@ -1459,7 +1475,8 @@ export class MjSimLite {
       quatView[3] = Number(q[3]) || 0;
       try {
         fn.call(m, resPtr | 0, quatPtr | 0, dtVal);
-      } catch {
+      } catch (err) {
+        strictCatch(err, 'bridge:quat2Vel');
         return null;
       }
       const resView = heapViewF64(m, resPtr, 3);
@@ -1480,7 +1497,7 @@ export class MjSimLite {
     const fn = m._mjwf_model_body_invweight0_ptr;
     if (typeof fn !== 'function') return null;
     let ptr = 0;
-    try { ptr = fn.call(m, this.h | 0) | 0; } catch { ptr = 0; }
+    try { ptr = fn.call(m, this.h | 0) | 0; } catch (err) { strictCatch(err, 'bridge:bodyInertiaScalar_ptr'); ptr = 0; }
     if (!(ptr > 0)) return null;
     const view = heapViewF64(m, ptr, 2 * nbody);
     if (!view || view.length < (2 * nbody)) return null;
@@ -1501,7 +1518,8 @@ export class MjSimLite {
     if (!(nbody > 0 && body < nbody)) return null;
     try {
       this.ensurePointers();
-    } catch {
+    } catch (err) {
+      strictCatch(err, 'bridge:bodyWorldVelocity_pointers');
       return null;
     }
     const modelPtr = this.modelPtr|0;
@@ -1517,7 +1535,8 @@ export class MjSimLite {
       if (!view || view.length < 6) return null;
       try {
         fn.call(m, modelPtr, dataPtr, 1, body, ptr | 0, 0);
-      } catch {
+      } catch (err) {
+        strictCatch(err, 'bridge:bodyWorldVelocity_call');
         return null;
       }
       for (let i = 0; i < 6; i += 1) {
@@ -1537,7 +1556,8 @@ export class MjSimLite {
     if (!(nv > 0 && nbody > 0 && body < nbody)) return null;
     try {
       this.ensurePointers();
-    } catch {
+    } catch (err) {
+      strictCatch(err, 'bridge:bodyLocalMass_pointers');
       return null;
     }
     const modelPtr = this.modelPtr|0;
@@ -1579,7 +1599,8 @@ export class MjSimLite {
       try {
         jacFn.call(m, modelPtr, dataPtr, jacPtr, 0, selPtr, body);
         solveFn.call(m, modelPtr, dataPtr, jacM2Ptr, jacPtr, sqrtPtr, 3);
-      } catch {
+      } catch (err) {
+        strictCatch(err, 'bridge:bodyLocalMass_call');
         return null;
       }
       let invmass = 0;

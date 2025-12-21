@@ -1,4 +1,5 @@
 import { MJ_GROUP_COUNT, MJ_GROUP_TYPES } from './viewer_defaults.mjs';
+import { strictCatch } from './viewer_runtime.mjs';
 
 export function toNumber(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -21,11 +22,14 @@ export function cloneStruct(value) {
   if (typeof structuredClone === 'function') {
     try {
       return structuredClone(value);
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'shared:clone_struct:structured_clone');
+    }
   }
   try {
     return JSON.parse(JSON.stringify(value));
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'shared:clone_struct:json');
     return null;
   }
 }

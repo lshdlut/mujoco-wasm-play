@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   consumeViewerParams,
   isPerfEnabled,
+  isStrictEnabled,
   perfMarkOnce,
   perfNow,
   perfSample,
@@ -9,6 +10,10 @@ import {
   logWarn,
   logStatus,
   logError,
+  strictCatch,
+  strictEnsure,
+  strictFallback,
+  strictOverride,
 } from './viewer_runtime.mjs';
 import { DEFAULT_REALTIME_INDEX, DEFAULT_VOPT_FLAGS, REALTIME_LEVELS, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
 import {
@@ -65,6 +70,7 @@ async function ensureBindingIndex() {
       .then((json) => json)
       .catch((err) => {
         logError('[bindings] load failed', err);
+        strictCatch(err, 'main:bindings_index_load');
         throw err;
       });
   }
@@ -204,7 +210,9 @@ function parseVector(value, length) {
       if (arr.every((n) => Number.isFinite(n)) && (!length || arr.length === length)) {
         return arr;
       }
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'main:parseVector');
+    }
   }
   const numeric = parseNumber(value);
   if (numeric == null) return null;
@@ -354,7 +362,9 @@ async function prepareBindingUpdate(control, rawValue) {
     if (control && typeof control.binding === 'string' && control.binding.startsWith('mjVisual::headlight.')) {
       try {
         addToast(`[${control.label || 'headlight'}] invalid vector input`);
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'main:addToast');
+      }
     }
     return null;
   }
@@ -606,6 +616,29 @@ function cameraLabelFromIndex(index, cameras = []) {
 
 function mergeBackendSnapshot(draft, snapshot) {
   if (!snapshot) return;
+  const snapshotSummary = (state) => ({
+    hud: {
+      time: state?.hud?.time ?? null,
+      rate: state?.hud?.rate ?? null,
+      measuredSlowdown: state?.hud?.measuredSlowdown ?? null,
+      ngeom: state?.hud?.ngeom ?? null,
+      contacts: state?.hud?.contacts ?? null,
+      pausedSource: state?.hud?.pausedSource ?? null,
+      rateSource: state?.hud?.rateSource ?? null,
+    },
+    simulation: {
+      run: state?.simulation?.run ?? null,
+      realTimeIndex: state?.simulation?.realTimeIndex ?? null,
+      scrubIndex: state?.simulation?.scrubIndex ?? null,
+    },
+    runtime: {
+      gesture: state?.runtime?.gesture ? { ...state.runtime.gesture } : null,
+      drag: state?.runtime?.drag ? { ...state.runtime.drag } : null,
+      cameraIndex: state?.runtime?.cameraIndex ?? null,
+    },
+  });
+  const before = snapshotSummary(draft);
+  const snapshotKeys = Object.keys(snapshot || {});
   const model = draft.model || (draft.model = {});
   const rendering = ensureRenderingState(draft);
   const physics = draft.physics || (draft.physics = { disableFlags: {}, enableFlags: {}, actuatorGroups: {} });
@@ -899,7 +932,18 @@ function mergeBackendSnapshot(draft, snapshot) {
     draft.runtime.cameraIndex = mode;
     draft.runtime.cameraLabel = cameraLabelFromIndex(mode, model?.cameras);
   }
-}function ensureRenderingState(target) {
+  const after = snapshotSummary(draft);
+  strictOverride('mergeBackendSnapshot', {
+    source: 'backend_snapshot',
+    snapshotKeys,
+    before,
+    after,
+  });
+}
+
+function ensureRenderingState(target) {
+  let created = false;
+  const repairs = [];
   if (!target.rendering) {
     target.rendering = {
       voptFlags: DEFAULT_VOPT_FLAGS.slice(),
@@ -910,12 +954,15 @@ function mergeBackendSnapshot(draft, snapshot) {
       bvhDepth: 1,
       groups: createViewerGroupState(true),
     };
+    created = true;
   } else {
     if (!Array.isArray(target.rendering.voptFlags)) {
       target.rendering.voptFlags = DEFAULT_VOPT_FLAGS.slice();
+      repairs.push('voptFlags');
     }
     if (!Array.isArray(target.rendering.sceneFlags)) {
       target.rendering.sceneFlags = SCENE_FLAG_DEFAULTS.slice();
+      repairs.push('sceneFlags');
     }
     if (target.rendering.sceneFlags.length !== SCENE_FLAG_DEFAULTS.length) {
       const normalised = [];
@@ -927,24 +974,36 @@ function mergeBackendSnapshot(draft, snapshot) {
         }
       }
       target.rendering.sceneFlags = normalised;
+      repairs.push('sceneFlagsLength');
     }
     if (typeof target.rendering.labelMode !== 'number') {
       target.rendering.labelMode = 0;
+      repairs.push('labelMode');
     }
     if (typeof target.rendering.frameMode !== 'number') {
       target.rendering.frameMode = 0;
+      repairs.push('frameMode');
     }
     if (typeof target.rendering.flexLayer !== 'number') {
       target.rendering.flexLayer = 0;
+      repairs.push('flexLayer');
     }
     if (typeof target.rendering.bvhDepth !== 'number') {
       target.rendering.bvhDepth = 1;
+      repairs.push('bvhDepth');
     }
     if (!target.rendering.groups) {
       target.rendering.groups = createViewerGroupState(true);
+      repairs.push('groups');
     } else {
       target.rendering.groups = normaliseGroupState(target.rendering.groups);
     }
+  }
+  if (created) {
+    strictEnsure('ensureRenderingState', { reason: 'create' });
+  }
+  if (repairs.length) {
+    strictEnsure('ensureRenderingState', { reason: 'repair', fields: repairs });
   }
   return target.rendering;
 }
@@ -952,6 +1011,7 @@ function mergeBackendSnapshot(draft, snapshot) {
 function ensureState(target, key, createFn) {
   if (!target[key]) {
     target[key] = createFn();
+    strictEnsure('ensureState', { reason: 'create', key });
   }
   return target[key];
 }
@@ -961,22 +1021,34 @@ const ensureWatchState = (target) => ensureState(target, 'watch', createDefaultW
 const ensureKeyframeState = (target) => ensureState(target, 'keyframes', createDefaultKeyframeState);
 
 function ensureThemeState(target) {
+  let created = false;
+  const repairs = [];
   if (!target.theme) {
     target.theme = {
       color: 0,
       spacing: 0,
       font: 0,
     };
+    created = true;
   } else {
     if (typeof target.theme.color !== 'number' || !Number.isFinite(target.theme.color)) {
       target.theme.color = 0;
+      repairs.push('color');
     }
     if (typeof target.theme.spacing !== 'number' || !Number.isFinite(target.theme.spacing)) {
       target.theme.spacing = 0;
+      repairs.push('spacing');
     }
     if (typeof target.theme.font !== 'number' || !Number.isFinite(target.theme.font)) {
       target.theme.font = 0;
+      repairs.push('font');
     }
+  }
+  if (created) {
+    strictEnsure('ensureThemeState', { reason: 'create' });
+  }
+  if (repairs.length) {
+    strictEnsure('ensureThemeState', { reason: 'repair', fields: repairs });
   }
   return target.theme;
 }
@@ -1233,6 +1305,7 @@ function createViewerStore(initialState) {
         fn(state);
       } catch (err) {
         logError(err);
+        strictCatch(err, 'main:store_listener');
       }
     }
   }
@@ -1280,6 +1353,7 @@ async function applySpecAction(store, backend, control, rawValue) {
       await switchVisualSourceMode(store, backend, nextMode);
     } catch (err) {
       logError('[option.visual_source] switch failed', err);
+      strictCatch(err, 'main:option_visual_source_switch');
     }
     return;
   }
@@ -1304,6 +1378,7 @@ async function applySpecAction(store, backend, control, rawValue) {
       }
     } catch (err) {
       logError('[backend.apply] failed', err);
+      strictCatch(err, 'main:backend_apply');
     }
   }
   if (snapshot) {
@@ -1376,6 +1451,7 @@ function applyGesture(store, backend, payload) {
       })
       .catch((err) => {
         logError('[backend.apply gesture] failed', err);
+        strictCatch(err, 'main:backend_apply_gesture');
       });
   }
 }
@@ -1430,8 +1506,18 @@ const VISUAL_OVERRIDE_PRESET = [
 function applyPresetOverridesToStruct(base) {
   const source = cloneStruct(base) || {};
   for (const entry of VISUAL_OVERRIDE_PRESET) {
+    const beforeRaw = resolveStructPath(source, entry.path);
+    const before = Array.isArray(beforeRaw) ? beforeRaw.slice() : beforeRaw;
     const overrideValue = Array.isArray(entry.value) ? entry.value.slice() : entry.value;
     assignStructPath(source, entry.path, overrideValue);
+    strictOverride('applyPresetOverridesToStruct', {
+      source: 'visual_preset',
+      path: Array.isArray(entry.path) ? entry.path.slice() : [],
+      kind: entry.kind || null,
+      size: entry.size || null,
+      before,
+      after: Array.isArray(overrideValue) ? overrideValue.slice() : overrideValue,
+    });
   }
   return source;
 }
@@ -1441,6 +1527,7 @@ function ensureVisualCache(target, key) {
   if (existing) return existing;
   const cache = { ...VISUAL_SOURCE_CACHE_TEMPLATE };
   if (target) target[key] = cache;
+  strictEnsure('ensureVisualCache', { reason: 'create', key });
   return cache;
 }
 
@@ -1458,6 +1545,7 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     snapshot = await backend.snapshot();
   } catch (err) {
     logError('[visual source switch] snapshot failed', err);
+    strictCatch(err, 'main:visual_source_snapshot');
     throw err;
   }
   if (!snapshot) {
@@ -1571,6 +1659,7 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       await backend.setVisualState({ visual: targetVisual, sceneFlags: targetSceneFlags });
     } catch (err) {
       logError('[visual source switch] apply failed', err);
+      strictCatch(err, 'main:visual_source_apply');
     }
   }
   return {
@@ -2231,7 +2320,9 @@ function parseVectorLike(value) {
     try {
       const arr = Array.from(value, (v) => Number(v));
       return arr.every((n) => Number.isFinite(n)) ? arr : null;
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'main:parseVectorLike');
+    }
   }
   return null;
 }
@@ -2721,6 +2812,13 @@ function ensureMuJoCo2DGeneratedTexcoords(mesh, geomType, geomSize, geomDataId, 
     uv[i * 2 + 1] = -0.5 * scl1 * y0 - 0.5;
   }
   mesh.geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  strictEnsure('ensureMuJoCo2DGeneratedTexcoords', {
+    reason: 'generated_texcoords',
+    geomType: geomType | 0,
+    geomDataId: geomDataId | 0,
+    matId: matId | 0,
+    vcount,
+  });
   return 2;
 }
 
@@ -2759,6 +2857,10 @@ function ensureMuJoCoCubeAlbedoHooks(material) {
   };
   material.userData.mjCubeAlbedoHooks = true;
   material.needsUpdate = true;
+  strictEnsure('ensureMuJoCoCubeAlbedoHooks', {
+    reason: 'install_hooks',
+    materialType: material.type || null,
+  });
 }
 
 function applyMuJoCoCubeAlbedo(mesh, cubeTexture, scaleVec3, enabled) {
@@ -3160,6 +3262,7 @@ function ensureCameraTarget(ctx) {
   if (!ctx) return null;
   if (!ctx.cameraTarget) {
     ctx.cameraTarget = new THREE.Vector3(0, 0, 0);
+    strictEnsure('ensureCameraTarget', { reason: 'create' });
   }
   return ctx.cameraTarget;
 }
@@ -3239,6 +3342,7 @@ function ensureFreeCameraPose(ctx) {
       valid: false,
       autoAligned: false,
     };
+    strictEnsure('ensureFreeCameraPose', { reason: 'create' });
   }
   ensureCameraTarget(ctx);
   return ctx.freeCameraPose;
@@ -3684,6 +3788,7 @@ function ensureLabelGroup(context) {
     const worldScene = getWorldScene(context);
     if (worldScene) worldScene.add(context.labelGroup);
     context.labelPool = [];
+    strictEnsure('ensureLabelGroup', { reason: 'create' });
   }
   return context.labelGroup;
 }
@@ -3910,7 +4015,9 @@ function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
             mesh.userData.fallbackBackface = backMesh;
           }
 
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'main:plane_backface');
+        }
       };
       break;
     }
@@ -3973,12 +4080,14 @@ function ensureGeomBuiltSizes(mesh, gtype) {
   const ex = Math.abs(Number(bb.max.x) - Number(bb.min.x));
   const ey = Math.abs(Number(bb.max.y) - Number(bb.min.y));
   const ez = Math.abs(Number(bb.max.z) - Number(bb.min.z));
+  let computed = false;
 
   switch (type) {
     case MJ_GEOM.LINE: {
       userData.geomBuiltSizeX = 1;
       userData.geomBuiltSizeY = Math.max(1e-6, ez);
       userData.geomBuiltSizeZ = 1;
+      computed = true;
       break;
     }
     case MJ_GEOM.CAPSULE:
@@ -3990,22 +4099,28 @@ function ensureGeomBuiltSizes(mesh, gtype) {
       userData.geomBuiltSizeX = Math.max(1e-6, radius);
       userData.geomBuiltSizeY = Math.max(1e-6, ez);
       userData.geomBuiltSizeZ = 1;
+      computed = true;
       break;
     }
     case MJ_GEOM.LINEBOX: {
       userData.geomBuiltSizeX = Math.max(1e-6, 0.5 * ex);
       userData.geomBuiltSizeY = Math.max(1e-6, 0.5 * ey);
       userData.geomBuiltSizeZ = Math.max(1e-6, 0.5 * ez);
+      computed = true;
       break;
     }
     case MJ_GEOM.TRIANGLE: {
       userData.geomBuiltSizeX = Math.max(0, ex);
       userData.geomBuiltSizeY = Math.max(0, ey);
       userData.geomBuiltSizeZ = 1;
+      computed = true;
       break;
     }
     default:
       break;
+  }
+  if (computed) {
+    strictEnsure('ensureGeomBuiltSizes', { reason: 'build_sizes', geomType: type });
   }
   return userData;
 }
@@ -4204,6 +4319,9 @@ function createMeshGeometryFromAssets(assets, dataId) {
     }
 
     // Fallback: if convex hull data is missing, render the original mesh.
+    if (hull) {
+      strictFallback('mesh.convex_hull_missing', { meshId, dataId: rawDataId });
+    }
   }
 
   const positions = vert.slice(start, end);
@@ -4265,16 +4383,22 @@ function disposeMeshObject(mesh) {
       if (back.material && typeof back.material.dispose === 'function') {
         try {
           back.material.dispose();
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'main:dispose_mesh');
+        }
       }
       if (typeof mesh.remove === 'function') {
         try {
           mesh.remove(back);
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'main:dispose_mesh');
+        }
       }
       mesh.userData.fallbackBackface = null;
     }
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'main:dispose_mesh');
+  }
 
   if (!mesh) return;
   const parent = mesh.parent;
@@ -4285,7 +4409,9 @@ function disposeMeshObject(mesh) {
   if (ownGeometry && mesh.geometry && typeof mesh.geometry.dispose === 'function') {
     try {
       mesh.geometry.dispose();
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'main:dispose_mesh');
+    }
   }
   const material = mesh.material;
   if (Array.isArray(material)) {
@@ -4293,13 +4419,17 @@ function disposeMeshObject(mesh) {
       if (mat && !mat.userData?.pooled && typeof mat.dispose === 'function') {
         try {
           mat.dispose();
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'main:dispose_mesh');
+        }
       }
     }
   } else if (material && !material.userData?.pooled && typeof material.dispose === 'function') {
     try {
       material.dispose();
-    } catch {}
+    } catch (err) {
+      strictCatch(err, 'main:dispose_mesh');
+    }
   }
 }
 
@@ -4392,7 +4522,7 @@ class MaterialPool {
   }
   disposeAll() {
     for (const m of this.cache.values()) {
-      try { m.dispose?.(); } catch {}
+      try { m.dispose?.(); } catch (err) { strictCatch(err, 'main:materialPool_dispose'); }
     }
     this.cache.clear();
   }
@@ -4418,7 +4548,9 @@ function syncRendererAssets(ctx, assets) {
       if (geometry && typeof geometry.dispose === 'function') {
         try {
           geometry.dispose();
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'main:assetCache_dispose');
+        }
       }
     }
     ctx.assetCache.meshGeometries.clear();
@@ -4432,6 +4564,7 @@ function ensureInstancingRoot(ctx) {
   if (!ctx) return null;
   const existing = ctx._instancing || null;
   if (existing?.root) return existing;
+  let created = false;
   const inst = existing || {
     root: null,
     batches: new Map(),
@@ -4446,14 +4579,19 @@ function ensureInstancingRoot(ctx) {
     tmpCamPos: new THREE.Vector3(),
     tmpCamDir: new THREE.Vector3(),
   };
+  if (!existing) created = true;
   if (!inst.root) {
     const group = new THREE.Group();
     group.name = 'MuJoCoInstancing';
     inst.root = group;
     if (ctx.root) ctx.root.add(group);
+    created = true;
   }
   ctx._instancing = inst;
   ctx.instancing = inst;
+  if (created) {
+    strictEnsure('ensureInstancingRoot', { reason: 'create' });
+  }
   return inst;
 }
 
@@ -4489,6 +4627,7 @@ function ensureInstancedGeometry(inst, gtype) {
   if (geometry?.computeBoundingBox) geometry.computeBoundingBox();
   if (geometry?.computeBoundingSphere) geometry.computeBoundingSphere();
   inst.geometries.set(key, geometry);
+  strictEnsure('ensureInstancedGeometry', { reason: 'create', geomType: key });
   return geometry;
 }
 
@@ -4594,6 +4733,7 @@ function ensureInstancedMaterial(inst, reflectanceQ, { wireframe = false, opacit
   material.userData.instanced = true;
   material.userData.reflectanceQ = reflectanceQ | 0;
   inst.materials.set(key, material);
+  strictEnsure('ensureInstancedMaterial', { reason: 'create', key, reflectanceQ: reflectanceQ | 0, opacityQ: oq });
   return material;
 }
 
@@ -4670,6 +4810,7 @@ function ensureInstancedBatch(ctx, inst, batchKey, geometry, material, capacity)
     orderMax: Number.NEGATIVE_INFINITY,
   };
   inst.batches.set(key, batch);
+  strictEnsure('ensureInstancedBatch', { reason: 'create', key, capacity: cap });
   return batch;
 }
 
@@ -4981,6 +5122,7 @@ function ensureSegmentMaterial(mesh, sceneFlags) {
       toneMapped: false,
     });
     userData.segmentMaterial = material;
+    strictEnsure('ensureSegmentMaterial', { reason: 'create' });
   }
   material.wireframe = false;
   return material;
@@ -5076,6 +5218,15 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
     (sizeChanged && !dynamicSizeScale);
 
   if (needsRebuild) {
+    strictEnsure('ensureGeomMesh', {
+      reason: 'rebuild',
+      geomType: gtype | 0,
+      geomIndex: index | 0,
+      infinitePlane,
+      dataId: Number.isFinite(dataId) ? (dataId | 0) : -1,
+      sizeChanged: !!sizeChanged,
+      dynamicSizeScale: !!dynamicSizeScale,
+    });
     if (mesh) {
       disposeMeshObject(mesh);
     }
@@ -5286,6 +5437,11 @@ function ensureGeomState(context, index, geomMeta = null) {
   };
   const state = { mj, view };
   context.geomState[index] = state;
+  strictEnsure('ensureGeomState', {
+    reason: 'create',
+    geomIndex: index,
+    hasMeta: !!geomMeta,
+  });
   return state;
 }
 
@@ -5318,6 +5474,10 @@ function setGeomViewProps(context, geomIndex, props = {}) {
       bodyId: -1,
       rgba: null,
     };
+    strictEnsure('setGeomViewProps', {
+      reason: 'fallback_meta',
+      geomIndex,
+    });
     state = ensureGeomState(context, geomIndex, fallbackMeta);
   }
   const view = state.view || (state.view = {});
@@ -5460,6 +5620,7 @@ function ensureFlexGroup(ctx) {
     if (ctx.root) ctx.root.add(group);
     ctx.flexGroup = group;
     ctx.flexPool = [];
+    strictEnsure('ensureFlexGroup', { reason: 'create' });
   }
   return ctx.flexGroup;
 }
@@ -5491,7 +5652,7 @@ function ensureFlexEntry(ctx, index, assets, state) {
   const needsRebuild = !entry || entry.vertnum !== vertnum || entry.edgenum !== edgenum || entry.dim !== dim;
   if (needsRebuild) {
     if (entry?.group) {
-      try { group.remove(entry.group); } catch {}
+      try { group.remove(entry.group); } catch (err) { strictCatch(err, 'main:flex_group_remove'); }
     }
     const entryGroup = new THREE.Group();
     entryGroup.name = `flex:${index}`;
@@ -5567,6 +5728,13 @@ function ensureFlexEntry(ctx, index, assets, state) {
       _vertnorm: null,
     };
     pool[index] = entry;
+    strictEnsure('ensureFlexEntry', {
+      reason: 'rebuild',
+      flexIndex: index | 0,
+      vertnum,
+      edgenum,
+      dim,
+    });
   }
 
   const sceneFlags = state?.rendering?.sceneFlags || [];
@@ -6038,6 +6206,7 @@ function ensureSkinGroup(ctx) {
     if (ctx.root) ctx.root.add(group);
     ctx.skinGroup = group;
     ctx.skinPool = [];
+    strictEnsure('ensureSkinGroup', { reason: 'create' });
   }
   return ctx.skinGroup;
 }
@@ -6068,7 +6237,7 @@ function ensureSkinEntry(ctx, index, assets, state) {
   const needsRebuild = !entry || entry.vertnum !== vertnum || entry.facenum !== facenum;
   if (needsRebuild) {
     if (entry?.mesh) {
-      try { group.remove(entry.mesh); } catch {}
+      try { group.remove(entry.mesh); } catch (err) { strictCatch(err, 'main:skin_group_remove'); }
     }
     const geometry = new THREE.BufferGeometry();
     const positions = vertnum > 0 ? new Float32Array(vertnum * 3) : new Float32Array(0);
@@ -6129,6 +6298,12 @@ function ensureSkinEntry(ctx, index, assets, state) {
       uvs: uvArray,
     };
     pool[index] = entry;
+    strictEnsure('ensureSkinEntry', {
+      reason: 'rebuild',
+      skinIndex: index | 0,
+      vertnum,
+      facenum,
+    });
   }
 
   const sceneFlags = state?.rendering?.sceneFlags || [];
@@ -7673,6 +7848,7 @@ function createRendererManager({
     if (typeof window === 'undefined' || !window.requestAnimationFrame) return;
     if (ctx.loopActive) return;
     ctx.loopActive = true;
+    strictEnsure('ensureRenderLoop', { reason: 'start' });
     const perfEnabled = isPerfEnabled();
     const step = () => {
       if (!ctx.loopActive) return;
@@ -7702,7 +7878,9 @@ function createRendererManager({
         if (typeof window !== 'undefined') {
           window.__frameCounter = ctx._frameCounter;
         }
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'main:render_loop_frame_counter');
+      }
     };
     ctx.frameId = window.requestAnimationFrame(step);
     if (!ctx.loopCleanup) {
@@ -7724,7 +7902,9 @@ function createRendererManager({
           } else {
             ensureRenderLoop();
           }
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'main:visibility_handler');
+        }
       };
       document.addEventListener('visibilitychange', visHandler, { capture: true });
       cleanup.push(() => document.removeEventListener('visibilitychange', visHandler, { capture: true }));
@@ -8064,7 +8244,9 @@ function createRendererManager({
         const sz = sizeView ? Number(sizeView[base + 2]) : sx;
         const gType = typeView ? (typeView[trackingGeomSelection] ?? MJ_GEOM.BOX) : MJ_GEOM.BOX;
         radius = computeGeomRadius(gType, sx, sy, sz);
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'main:tracking_override_radius');
+      }
       return {
         index: trackingGeomSelection,
         position: [px, py, pz],
@@ -8372,11 +8554,11 @@ function createRendererManager({
     if (!ctx) return;
     ctx.loopActive = false;
     if (ctx.frameId != null && typeof window !== 'undefined' && window.cancelAnimationFrame) {
-      try { window.cancelAnimationFrame(ctx.frameId); } catch {}
+      try { window.cancelAnimationFrame(ctx.frameId); } catch (err) { strictCatch(err, 'main:renderer_cancel'); }
       ctx.frameId = null;
     }
     if (ctx.renderer && typeof ctx.renderer.dispose === 'function') {
-      try { ctx.renderer.dispose(); } catch {}
+      try { ctx.renderer.dispose(); } catch (err) { strictCatch(err, 'main:renderer_dispose'); }
     }
   }
 
@@ -8505,6 +8687,7 @@ function ensureSkyCache(ctx) {
       model: null,
       none: null,
     };
+    strictEnsure('ensureSkyCache', { reason: 'create' });
   }
   return ctx.skyCache;
 }
@@ -8536,7 +8719,9 @@ function pushSkyDebug(ctx, payload) {
     if (typeof window !== 'undefined') {
       window.__skyDebug = log;
     }
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'main:sky_debug');
+  }
 }
 
 function detachEnvironment(ctx) {
@@ -8593,6 +8778,7 @@ function ensureModelGradientEnv(ctx, THREE_NS) {
       kind: 'gradient',
     };
   }
+  strictEnsure('ensureModelGradientEnv', { reason: 'create_gradient' });
   return cache?.model || null;
 }
 
@@ -8845,6 +9031,11 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
         stats: classification.stats || null,
       };
     }
+    strictEnsure('ensureModelSkyFromAssets', {
+      reason: 'create_sky_shader',
+      kind: classification.kind || null,
+      forced: skyDebugMode || null,
+    });
     pushSkyDebug(ctx, {
       mode: 'model-sky-shader',
       forced: skyDebugMode || null,
@@ -8877,6 +9068,11 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
       stats: classification.stats || null,
     };
   }
+  strictEnsure('ensureModelSkyFromAssets', {
+    reason: 'create_sky_cube',
+    kind: classification.kind || null,
+    forced: skyDebugMode || null,
+  });
   pushSkyDebug(ctx, {
     mode: 'model-sky-cube',
     forced: skyDebugMode || null,
@@ -8893,8 +9089,8 @@ function disposeEnvResources(ctx, { resetFlags = true } = {}) {
   if (worldScene && ctx.hdriBackground && worldScene.background === ctx.hdriBackground) {
     worldScene.background = null;
   }
-  try { ctx.envRT?.dispose?.(); } catch {}
-  try { ctx.hdriBackground?.dispose?.(); } catch {}
+  try { ctx.envRT?.dispose?.(); } catch (err) { strictCatch(err, 'main:env_dispose'); }
+  try { ctx.hdriBackground?.dispose?.(); } catch (err) { strictCatch(err, 'main:env_dispose'); }
   ctx.envRT = null;
   ctx.hdriBackground = null;
   if (resetFlags) {
@@ -9193,6 +9389,7 @@ function ensureSkyDome(ctx, THREE_NS) {
   dome.renderOrder = -100;
   worldScene.add(dome);
   ctx.skyShader = dome;
+  strictEnsure('ensureSkyDome', { reason: 'create' });
   return dome;
 }
 
@@ -9227,7 +9424,7 @@ function updateSkyDome(ctx, palette, THREE_NS) {
   const worldScene = getWorldScene(ctx);
   const far = ctx?.camera && Number.isFinite(ctx.camera.far) && ctx.camera.far > 0 ? ctx.camera.far : 1000;
   const radius = Math.max(50, Math.min(far * 0.9, 120000));
-  try { ctx.skyShader.scale.setScalar(radius); } catch {}
+  try { ctx.skyShader.scale.setScalar(radius); } catch (err) { strictCatch(err, 'main:sky_shader_scale'); }
   if (worldScene && !ctx.skyShader.parent) {
     worldScene.add(ctx.skyShader);
   }
@@ -9270,6 +9467,7 @@ function ensureBaseLightingCache(ctx) {
       fillColor: ctx.fill ? ctx.fill.color.clone() : null,
       fillPosition: ctx.fill ? ctx.fill.position.clone() : null,
     };
+    strictEnsure('ensureBaseLightingCache', { reason: 'capture' });
   }
 }
 
@@ -9324,6 +9522,7 @@ function createEnvironmentManager({
     const hdriGen = typeof generation === 'number' ? generation : (ctx.hdriLoadGen ?? 0);
     if (!ctx.pmrem) {
       ctx.pmrem = new THREE_NS.PMREMGenerator(ctx.renderer);
+      strictEnsure('ensureOutdoorSkyEnv', { reason: 'init_pmrem' });
     }
     const allowHDRI = options.allowHDRI !== false;
     // Decide which preset HDRI to use based on viewer state and preset config:
@@ -9373,6 +9572,10 @@ function createEnvironmentManager({
         allowHDRI: true,
         key: cachedPreset.key || 'cache',
       });
+      strictEnsure('ensureOutdoorSkyEnv', {
+        reason: 'apply_cached_preset',
+        key: cachedPreset.key || null,
+      });
       return;
     }
     if (
@@ -9417,8 +9620,8 @@ function createEnvironmentManager({
             envTexture.colorSpace = THREE_NS.LinearSRGBColorSpace;
           }
           if (ctx.hdriLoadGen !== token || !isPresetMode(store.get())) {
-            try { envRT?.dispose?.(); } catch {}
-            try { hdr?.dispose?.(); } catch {}
+            try { envRT?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_dispose'); }
+            try { hdr?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_dispose'); }
             ctx.hdriLoading = false;
             return false;
           }
@@ -9453,11 +9656,17 @@ function createEnvironmentManager({
           };
           ctx.hdriActiveKey = hdriUrl;
           ctx.hdriLoading = false;
+          strictEnsure('ensureOutdoorSkyEnv', {
+            reason: 'apply_hdr',
+            key: hdriUrl || null,
+            presetKey: visualPresetKey || null,
+          });
           return true;
         } catch (error) {
           ctx.hdriLoading = false;
           ctx.hdriReady = false;
           logWarn('[env] HDRI load failed', { url: hdriUrl, error: String(error) });
+          strictCatch(error, 'main:env_hdri_load');
           return false;
         }
       };
@@ -9478,6 +9687,7 @@ function createEnvironmentManager({
       })()
         .catch((err) => {
           logWarn('[env] HDRI queue failed', err);
+          strictCatch(err, 'main:env_hdri_queue');
           ctx.hdriLoading = false;
           if (!ctx.envFromHDRI) {
             ctx.hdriReady = false;
@@ -9493,6 +9703,10 @@ function createEnvironmentManager({
     }
     // Fallback: if HDRI is not ready, reuse the model cache first, otherwise generate a gradient environment.
     if (!ctx.envFromHDRI && !ctx.hdriLoading && !ctx.hdriReady) {
+      strictFallback('environment.hdri_fallback', {
+        allowHDRI: !!allowHDRI,
+        presetKey: preset?.key || null,
+      });
       let envRT = null;
       let background = null;
       const modelCached = cache?.model || null;
@@ -9524,6 +9738,11 @@ function createEnvironmentManager({
       pushSkyDebug(ctx, {
         mode: 'preset-gradient-fallback',
         allowHDRI,
+        generation: generation || 0,
+      });
+      strictEnsure('ensureOutdoorSkyEnv', {
+        reason: 'apply_gradient_fallback',
+        allowHDRI: !!allowHDRI,
         generation: generation || 0,
       });
     }
@@ -9610,7 +9829,8 @@ function createEnvironmentManager({
     const skyMode = !skyboxEnabled
       ? SKY_MODE_NONE
       : (presetMode ? SKY_MODE_PRESET : SKY_MODE_MODEL);
-    const modeChanged = ctx._skyMode !== skyMode;
+    const prevMode = ctx._skyMode;
+    const modeChanged = prevMode !== skyMode;
     ctx._skyMode = skyMode;
     ctx._lastPresetMode = presetMode;
     const stateSnapshot = store && typeof store.get === 'function' ? store.get() : null;
@@ -9618,6 +9838,14 @@ function createEnvironmentManager({
     const presetKey = visualPresetKey === 'moon' ? 'moon' : 'sun';
     const preset = FALLBACK_PRESETS[presetKey] || FALLBACK_PRESETS.sun;
     const cache = ensureSkyCache(ctx);
+    if (modeChanged) {
+      strictEnsure('ensureEnvIfNeeded', {
+        reason: 'mode_change',
+        prevMode: prevMode || null,
+        nextMode: skyMode,
+        presetMode: !!presetMode,
+      });
+    }
     if (skyMode === SKY_MODE_PRESET && modeChanged) {
       ctx.hdriFailed = false;
       ctx.hdriLoadGen = (ctx.hdriLoadGen || 0) + 1;
@@ -9966,7 +10194,9 @@ function pushToast(message) {
     store.update((draft) => {
       draft.toast = { message, ts: Date.now() };
     });
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'main:pushToast');
+  }
 }
 
   function elementIsEditable(node) {
@@ -10166,7 +10396,9 @@ function resolveTrackingGeomEntries() {
         entries.push({ value, label });
       });
     }
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'main:tracking_geom_entries');
+  }
   return entries;
 }
 
@@ -10445,6 +10677,7 @@ function shortcutFromEvent(event) {
       } catch (err) {
         logError('[ui] load xml from file failed', err);
         pushToast?.('Failed to load xml from file');
+        strictCatch(err, 'main:ui_load_xml_file');
         throw err;
       } finally {
         loadInput.value = '';
@@ -10484,6 +10717,7 @@ function shortcutFromEvent(event) {
       } catch (err) {
         logError('[ui] model select reload failed', err);
         pushToast?.('Failed to load selected model');
+        strictCatch(err, 'main:ui_model_select_reload');
         throw err;
       }
     });
@@ -10627,7 +10861,9 @@ function shortcutFromEvent(event) {
       binding.setValue(active);
       try {
         // eslint-disable-next-line no-console
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'main:checkbox_toggle_debug');
+      }
       await applySpecAction(store, backend, control, active);
       // UX hint: if enabling Contact Point but there are no contacts yet, show a brief tip
       try {
@@ -10640,7 +10876,9 @@ function shortcutFromEvent(event) {
             });
           }
         }
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'main:checkbox_contact_toast');
+      }
     });
 
     input.addEventListener(
@@ -11110,6 +11348,7 @@ function shortcutFromEvent(event) {
             await applySpecAction(store, backend, control, modeValue);
           } catch (err) {
             logWarn('[ui] visual source toggle failed', err);
+            strictCatch(err, 'main:ui_visual_source_toggle');
           }
         },
       });
@@ -11174,7 +11413,9 @@ function shortcutFromEvent(event) {
             }
             Object.assign(range, dyn);
           }
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'main:dynamic_range_resolver');
+        }
       }
       if (!(range.max > range.min)) {
         range.max = range.min + 1;
@@ -11794,6 +12035,7 @@ function shortcutFromEvent(event) {
             await applySpecAction(store, backend, control, value);
           } catch (error) {
             logWarn('[ui] reset failed', target.id, error);
+            strictCatch(error, 'main:ui_reset');
           }
         }
       });
@@ -11825,6 +12067,11 @@ function shortcutFromEvent(event) {
       if (className) container.className = className;
       if (marginTop !== null) container.style.marginTop = marginTop;
       body.appendChild(container);
+      strictEnsure('ensureDynamicList', {
+        reason: 'create_container',
+        sectionId,
+        dynamicKey,
+      });
     }
     if (items.length === 0) {
       container.innerHTML = '';
@@ -11843,6 +12090,13 @@ function shortcutFromEvent(event) {
       buildItem(container, item, index);
     });
     container.setAttribute('data-count', String(items.length));
+    strictEnsure('ensureDynamicList', {
+      reason: 'rebuild',
+      sectionId,
+      dynamicKey,
+      prevCount,
+      count: items.length,
+    });
   }
 
   function resolveListIndex(item, fallback) {
@@ -11954,7 +12208,9 @@ function shortcutFromEvent(event) {
       if (typeof binding.updateOptions === 'function') {
         try {
           binding.updateOptions(state);
-        } catch {}
+        } catch (err) {
+          strictCatch(err, 'main:update_options');
+        }
       }
       if (binding.isEditing) continue;
       const control = controlById.get(id);
@@ -12020,6 +12276,7 @@ function shortcutFromEvent(event) {
           }
         } catch (error) {
           logWarn('[ui] shortcut handler error', error);
+          strictCatch(error, 'main:ui_shortcut_handler');
         }
       }
     };
@@ -12027,7 +12284,9 @@ function shortcutFromEvent(event) {
     eventCleanup.push(() => {
       try {
         root.removeEventListener('keydown', handler, { capture: true });
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'main:shortcut_cleanup');
+      }
       shortcutsInstalled = false;
     });
     shortcutsInstalled = true;
@@ -12038,7 +12297,9 @@ function shortcutFromEvent(event) {
         const fn = eventCleanup.pop();
         try {
           fn();
-      } catch {}
+        } catch (err) {
+          strictCatch(err, 'main:event_cleanup');
+        }
     }
     controlById.clear();
     controlBindings.clear();
@@ -12091,11 +12352,13 @@ function shortcutFromEvent(event) {
                 await applySpecAction(store, backend, { item_id: 'control.actuator' }, { index, value });
               } catch (err) {
                 logWarn('[ui] set actuator failed', err);
+                strictCatch(err, 'main:ui_set_actuator');
               }
             },
           });
       } catch (err) {
         logWarn('[ui] ensureActuatorSliders error', err);
+        strictCatch(err, 'main:ui_ensure_actuator_sliders');
         }
       },
     // Dynamic: ensure Joint sliders exist under right panel 'joint' section
@@ -12128,11 +12391,13 @@ function shortcutFromEvent(event) {
               });
             } catch (err) {
               logWarn('[ui] set joint qpos failed', err);
+              strictCatch(err, 'main:ui_set_joint_qpos');
             }
           },
         });
       } catch (err) {
         logWarn('[ui] ensureJointSliders error', err);
+        strictCatch(err, 'main:ui_ensure_joint_sliders');
       }
     },
     // Dynamic: ensure Equality toggles exist under right panel 'equality' section
@@ -12194,12 +12459,14 @@ function shortcutFromEvent(event) {
                 await applySpecAction(store, backend, { item_id: 'equality.toggle' }, { index: eq.index, active: next });
               } catch (err) {
                 logWarn('[ui] equality toggle failed', err);
+                strictCatch(err, 'main:ui_equality_toggle');
               }
             });
           },
         });
       } catch (err) {
         logWarn('[ui] ensureEqualityToggles error', err);
+        strictCatch(err, 'main:ui_ensure_equality_toggles');
       }
     },
     dispose,
@@ -12207,7 +12474,8 @@ function shortcutFromEvent(event) {
   const getCameraModeCount = () => {
     try {
       return Math.max(1, 2 + (store.get()?.model?.cameras?.length || 0));
-    } catch {
+    } catch (err) {
+      strictCatch(err, 'main:getCameraModeCount');
       return Math.max(1, cameraPresets.length || 1);
     }
   };
@@ -12267,7 +12535,8 @@ function createCameraController({
   const cameraModeIndex = () => {
     try {
       return store.get()?.runtime?.cameraIndex ?? 0;
-    } catch {
+    } catch (err) {
+      strictCatch(err, 'main:cameraModeIndex');
       return 0;
     }
   };
@@ -12363,7 +12632,9 @@ function createCameraController({
         if (dot < 0.999) {
           renderCtx.camera.up.copy(upNormalised);
         }
-      } catch {}
+      } catch (err) {
+        strictCatch(err, 'main:camera_up_adjust');
+      }
     }
 
     const elementWidth = canvas?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 1) || 1;
@@ -12457,7 +12728,7 @@ function createCameraController({
     pointerState.lastX = event.clientX;
     pointerState.lastY = event.clientY;
     if (canvas && typeof canvas.setPointerCapture === 'function' && event.pointerId != null) {
-      try { canvas.setPointerCapture(event.pointerId); } catch {}
+      try { canvas.setPointerCapture(event.pointerId); } catch (err) { strictCatch(err, 'main:pointer_capture'); }
     }
     if (typeof onGesture === 'function') {
       const camPayload = buildCameraPayloadIfNeeded();
@@ -12522,7 +12793,7 @@ function createCameraController({
     pointerState.lastX = null;
     pointerState.lastY = null;
     if (canvas && typeof canvas.releasePointerCapture === 'function' && event.pointerId != null) {
-      try { canvas.releasePointerCapture(event.pointerId); } catch {}
+      try { canvas.releasePointerCapture(event.pointerId); } catch (err) { strictCatch(err, 'main:pointer_release'); }
     }
   }
 
@@ -12601,7 +12872,7 @@ function createCameraController({
   function dispose() {
     while (cleanup.length) {
       const fn = cleanup.pop();
-      try { fn(); } catch {}
+      try { fn(); } catch (err) { strictCatch(err, 'main:camera_cleanup'); }
     }
   }
 
@@ -12803,7 +13074,8 @@ function createPickingController({
     if (!arr) return -1;
     try {
       return arr[index] ?? -1;
-    } catch {
+    } catch (err) {
+      strictCatch(err, 'main:bodyIdFor');
       return -1;
     }
   }
@@ -12837,7 +13109,9 @@ function createPickingController({
         applySpecAction(store, backend, trackingCtrl, pick.geomIndex),
       )
         .then(() => applySpecAction(store, backend, cameraCtrl, 1))
-        .catch(() => {});
+        .catch((err) => {
+          strictCatch(err, 'main:applySelectionFromPick');
+        });
     }
   }
 
@@ -13066,7 +13340,7 @@ function createPickingController({
     dragState.shiftKey = !!event.shiftKey;
     updateAnchorFromSelection();
     if (dragState.pointerId != null && canvas?.setPointerCapture) {
-      try { canvas.setPointerCapture(dragState.pointerId); } catch {}
+      try { canvas.setPointerCapture(dragState.pointerId); } catch (err) { strictCatch(err, 'main:drag_pointer_capture'); }
     }
   }
 
@@ -13074,7 +13348,7 @@ function createPickingController({
     if (!dragState.active) return;
     dragState.active = false;
     if (dragState.pointerId != null && canvas?.releasePointerCapture) {
-      try { canvas.releasePointerCapture(dragState.pointerId); } catch {}
+      try { canvas.releasePointerCapture(dragState.pointerId); } catch (err) { strictCatch(err, 'main:drag_pointer_release'); }
     }
     dragState.pointerId = null;
     store.update((draft) => {
@@ -13115,7 +13389,7 @@ function createPickingController({
   function dispose() {
     while (cleanup.length) {
       const fn = cleanup.pop();
-      try { fn(); } catch {}
+      try { fn(); } catch (err) { strictCatch(err, 'main:picking_cleanup'); }
     }
   }
 
@@ -13228,6 +13502,7 @@ const store = createViewerStore({});
 viewerStoreRef = store;
 if (typeof window !== 'undefined') {
   window.__viewerStore = store;
+  window.__PLAY_STRICT_REPORT__ = () => backend.getStrictReport();
 }
 
 const fallbackEnabledDefault = fallbackModeParam !== 'off';
@@ -13905,7 +14180,8 @@ if (typeof registerGlobalShortcut === 'function') {
     let parentId = -1;
     try {
       parentId = bodyArr[bodyId] ?? -1;
-    } catch {
+    } catch (err) {
+      strictCatch(err, 'main:parentId_lookup');
       parentId = -1;
     }
     if (!(parentId >= 0) || parentId === bodyId) return;
@@ -14014,6 +14290,7 @@ if (typeof registerGlobalShortcut === 'function') {
       }
     } catch (err) {
       logWarn('[ui] setRate failed', err);
+      strictCatch(err, 'main:ui_set_rate');
     }
   };
 

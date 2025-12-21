@@ -44,6 +44,9 @@ export async function loadForge337(options: LoadForgeOptions = {}): Promise<Mujo
     throw new Error(`Forge 3.3.7 artifacts not found under ${forgeDir}`);
   }
 
+  const strictMode =
+    (typeof process !== 'undefined' && (process.env.PLAY_STRICT === '1' || process.env.PLAY_STRICT === 'true')) ||
+    (globalThis as any)?.PLAY_STRICT === true;
   let loaderMod: any;
   const fileUrl = pathToFileURL(jsPath).href;
   try {
@@ -51,6 +54,9 @@ export async function loadForge337(options: LoadForgeOptions = {}): Promise<Mujo
     // @ts-ignore
     loaderMod = await import(/* @vite-ignore */ fileUrl);
   } catch (e) {
+    if (strictMode) {
+      throw e;
+    }
     // Fallback to native dynamic import
     loaderMod = await import(fileUrl);
   }

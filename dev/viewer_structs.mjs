@@ -1,4 +1,5 @@
 import { resolveHeapBuffer as resolveSharedHeapBuffer } from './bridge.mjs';
+import { strictCatch } from './viewer_runtime.mjs';
 
 // General helpers for reading/writing MuJoCo struct fields (mjOption/mjVisual/mjStatistic, etc.)
 
@@ -16,7 +17,8 @@ function getFieldPtr(mod, handle, prefix, pathSegments) {
   if (!fn) return 0;
   try {
     return fn.call(mod, handle) | 0;
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'structs:get_field_ptr');
     return 0;
   }
 }
@@ -36,7 +38,9 @@ function resolveHeapBuffer(mod) {
       mod.__heapBuffer = mem.buffer;
       return mem.buffer;
     }
-  } catch {}
+  } catch (err) {
+    strictCatch(err, 'structs:resolve_heap_buffer:memory');
+  }
   const heaps = [mod.HEAPF64, mod.HEAPF32, mod.HEAP32, mod.HEAPU8];
   for (const view of heaps) {
     if (view?.buffer instanceof ArrayBuffer) {
@@ -67,7 +71,8 @@ function writeTyped(mod, ptr, ArrayType, count, rawValues, { coerceInt = false }
       }
     }
     return true;
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'structs:write_typed');
     return false;
   }
 }
@@ -82,7 +87,8 @@ function readTyped(mod, ptr, ArrayType, count, { coerceInt = false } = {}) {
       return coerceInt ? (value | 0) : Number(value);
     }
     return Array.from(view, (value) => (coerceInt ? (value | 0) : Number(value)));
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'structs:read_typed');
     return null;
   }
 }
@@ -318,7 +324,8 @@ function getOptionFieldPtr(mod, handle, field) {
   if (typeof fn !== 'function') return 0;
   try {
     return fn.call(mod, handle) | 0;
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'structs:get_option_field_ptr');
     return 0;
   }
 }
@@ -347,7 +354,8 @@ function writeArray(mod, ptr, ArrayType, count, rawValues, coerceInt) {
       view[i] = num;
     }
     return true;
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'structs:write_array');
     return false;
   }
 }
@@ -364,7 +372,8 @@ export function writeOptionField(mod, handle, path, _kind, value) {
   let ptr = 0;
   try {
     ptr = fn.call(mod, handle) | 0;
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'structs:write_option_field:ptr');
     ptr = 0;
   }
   if (!(ptr > 0)) return false;
@@ -393,7 +402,8 @@ export function writeOptionField(mod, handle, path, _kind, value) {
       return false;
     }
     return true;
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'structs:write_option_field:write');
     return false;
   }
 }
@@ -413,7 +423,8 @@ function readFloatValues(mod, ptr, info) {
       return Number(view[0]);
     }
     return Array.from(view, (v) => Number(v));
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'structs:read_float_values');
     return null;
   }
 }
@@ -427,7 +438,8 @@ function readIntValues(mod, ptr, info) {
       return view[0] | 0;
     }
     return Array.from(view, (v) => v | 0);
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'structs:read_int_values');
     return null;
   }
 }
@@ -444,7 +456,8 @@ export function readOptionStruct(mod, handle) {
     let ptr = 0;
     try {
       ptr = fn.call(mod, handle) | 0;
-    } catch {
+    } catch (err) {
+      strictCatch(err, 'structs:read_option_struct:ptr');
       ptr = 0;
     }
     if (!(ptr > 0)) continue;
@@ -464,7 +477,8 @@ export function readOptionStruct(mod, handle) {
           result[key] = Array.from(view, (v) => v | 0);
         }
       }
-    } catch {
+    } catch (err) {
+      strictCatch(err, 'structs:read_option_struct:read');
       // ignore read failure for this field
     }
   }
@@ -490,7 +504,8 @@ function readArray(mod, ptr, ArrayType, count, coerceInt) {
       return coerceInt ? (view[0] | 0) : Number(view[0]);
     }
     return Array.from(view, (v) => (coerceInt ? (v | 0) : Number(v)));
-  } catch {
+  } catch (err) {
+    strictCatch(err, 'structs:read_array');
     return null;
   }
 }
