@@ -1,5 +1,6 @@
 import { buildWorkerUrl, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWarn, logError, logStatus } from './viewer_runtime.mjs';
-import { SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
+import { MJ_GROUP_COUNT, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
+import { VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
 import { bool, cloneStruct, createDefaultHistoryState, createDefaultKeyframeState, createDefaultWatchState, createViewerGroupState, normaliseGroupState, resolveStructPath, toNumber } from './viewer_shared.mjs';
 
 const WORKER_URL = new URL('./physics.worker.mjs', import.meta.url);
@@ -10,6 +11,116 @@ const MODEL_ALIASES = {
 const MODEL_POOL = [
   'mujoco_Rajagopal2015_simple.xml',
 ];
+
+const SNAPSHOT_VIEW_FIELDS = [
+  [Float64Array, ['xpos', 'xmat', 'gsize', 'jnt_range', 'qpos', 'bxpos', 'bxmat', 'xipos', 'ximat', 'xanchor', 'bvh_aabb_dyn', 'cam_xpos', 'cam_xmat', 'light_xpos', 'light_xdir', 'jpos', 'jaxis', 'act_cranklength', 'site_xpos', 'site_xmat', 'wrap_xpos', 'eq_data']],
+  [Float32Array, ['scn_pos', 'scn_mat', 'scn_size', 'scn_rgba', 'matrgba', 'flexvert_xpos']],
+  [Int32Array, ['scn_type', 'scn_matid', 'scn_dataid', 'scn_objtype', 'scn_objid', 'scn_category', 'scn_segid', 'scn_geomorder', 'gtype', 'gmatid', 'geom_bodyid', 'body_parentid', 'body_jntadr', 'body_jntnum', 'jtype', 'jnt_qposadr', 'dof_island', 'jbody', 'act_trnid', 'act_trntype', 'ten_wrapadr', 'ten_wrapnum', 'wrap_obj', 'sensor_type', 'sensor_objid', 'eq_type', 'eq_obj1id', 'eq_obj2id', 'eq_objtype']],
+  [Uint8Array, ['scn_transparent', 'scn_label', 'bvh_active', 'eq_active0', 'eq_active']],
+];
+
+const GEOM_VIEW_FIELDS_OPTIONAL = [
+  [Float64Array, ['bxpos', 'bxmat', 'xipos', 'ximat', 'xanchor', 'bvh_aabb_dyn', 'jpos', 'jaxis', 'act_cranklength', 'site_xpos', 'site_xmat', 'wrap_xpos', 'eq_data', 'qpos', 'cam_xpos', 'cam_xmat', 'light_xpos', 'light_xdir']],
+  [Float32Array, ['scn_pos', 'scn_mat', 'scn_size', 'scn_rgba', 'flexvert_xpos']],
+  [Int32Array, ['scn_type', 'scn_matid', 'scn_dataid', 'scn_objtype', 'scn_objid', 'scn_category', 'scn_segid', 'scn_geomorder', 'dof_island', 'jtype', 'jbody', 'act_trnid', 'act_trntype', 'ten_wrapadr', 'ten_wrapnum', 'wrap_obj', 'sensor_type', 'sensor_objid', 'eq_type', 'eq_obj1id', 'eq_obj2id', 'eq_objtype']],
+  [Uint8Array, ['scn_transparent', 'scn_label', 'bvh_active', 'eq_active0', 'eq_active']],
+];
+
+const GEOM_VIEW_FIELDS_ALWAYS = [
+  [Float64Array, ['gsize']],
+  [Int32Array, ['gtype', 'gmatid']],
+  [Float32Array, ['matrgba']],
+];
+
+function applyViewFields(target, source, fields, viewFn, options = {}) {
+  const skipMissing = !!options.skipMissing;
+  for (const [Ctor, keys] of fields) {
+    for (const key of keys) {
+      const value = source[key];
+      if (skipMissing && value == null) continue;
+      target[key] = viewFn(value, Ctor);
+    }
+  }
+}
+
+function applyHistoryPayload(target, payload) {
+  const history = target.history || createDefaultHistoryState();
+  history.captureHz = Number(payload.captureHz) || 0;
+  history.capacity = Math.max(0, Number(payload.capacity) || 0);
+  history.count = Math.max(0, Number(payload.count) || 0);
+  history.horizon = Number(payload.horizon) || 0;
+  history.scrubIndex = Number(payload.scrubIndex) || 0;
+  history.live = payload.live !== false;
+  target.history = history;
+}
+
+function applyKeyframesPayload(target, payload, keyIndexOverride = null) {
+  const keyframes = target.keyframes || createDefaultKeyframeState();
+  if (typeof payload.capacity === 'number') {
+    keyframes.capacity = payload.capacity | 0;
+  }
+  if (typeof payload.count === 'number') {
+    keyframes.count = Math.max(0, payload.count | 0);
+  }
+  if (Array.isArray(payload.labels)) {
+    keyframes.labels = payload.labels.slice();
+  }
+  if (Array.isArray(payload.slots)) {
+    keyframes.slots = payload.slots.map((slot) => ({
+      index: Number(slot.index) || 0,
+      label: typeof slot.label === 'string' ? slot.label : `Key ${slot.index | 0}`,
+      kind: slot.kind || 'user',
+      available: !!slot.available,
+    }));
+  }
+  if (typeof payload.lastSaved === 'number') {
+    keyframes.lastSaved = payload.lastSaved | 0;
+  }
+  if (typeof payload.lastLoaded === 'number') {
+    keyframes.lastLoaded = payload.lastLoaded | 0;
+  }
+  target.keyframes = keyframes;
+  const keyIndex = Number.isFinite(keyIndexOverride)
+    ? keyIndexOverride
+    : (Number.isFinite(payload.keyIndex) ? payload.keyIndex : null);
+  if (keyIndex != null) {
+    target.keyIndex = keyIndex | 0;
+  }
+}
+
+function applyWatchPayload(target, payload, options = {}) {
+  const watch = target.watch || createDefaultWatchState();
+  if (typeof payload.field === 'string') {
+    watch.field = payload.field;
+  }
+  const indexIsFinite = Number.isFinite(payload.index);
+  if (typeof payload.index === 'number' && (!options.requireFiniteIndex || indexIsFinite)) {
+    watch.index = payload.index | 0;
+  }
+  if ('value' in payload) {
+    const raw = Number(payload.value);
+    watch.value = Number.isFinite(raw) ? raw : null;
+  }
+  const minVal = Number(payload.min);
+  const maxVal = Number(payload.max);
+  watch.min = Number.isFinite(minVal) ? minVal : null;
+  watch.max = Number.isFinite(maxVal) ? maxVal : null;
+  const samples = Number(payload.samples) || 0;
+  watch.samples = options.clampSamples ? Math.max(0, samples) : samples;
+  watch.status = payload.status || watch.status || 'idle';
+  watch.valid = !!payload.valid;
+  if (options.computeSummary) {
+    if (watch.valid && typeof watch.value === 'number') {
+      watch.summary = watch.value.toPrecision(6);
+    } else {
+      watch.summary = '—';
+    }
+  } else {
+    const summary = typeof payload.summary === 'string' ? payload.summary : '';
+    watch.summary = summary || watch.summary || '';
+  }
+  target.watch = watch;
+}
 
 function resolveModelFileName(raw) {
   if (raw === null || raw === undefined) return null;
@@ -60,6 +171,7 @@ function createInitialSnapshot() {
     labelMode: 0,
     frameMode: 0,
     cameraMode: 0,
+    viewerCamera: null,
     groups: createViewerGroupState(true),
     align: null,
     copyState: null,
@@ -98,7 +210,7 @@ function resolveSnapshot(state) {
     return null;
   };
 
-  return {
+  const snapshot = {
     t: state.t ?? 0,
     rate: state.rate ?? 1,
     measuredSlowdown: state.measuredSlowdown ?? 1,
@@ -148,6 +260,19 @@ function resolveSnapshot(state) {
     labelMode: Number.isFinite(state.labelMode) ? (state.labelMode | 0) : 0,
     frameMode: Number.isFinite(state.frameMode) ? (state.frameMode | 0) : 0,
     cameraMode: Number.isFinite(state.cameraMode) ? (state.cameraMode | 0) : 0,
+    viewerCamera:
+      state.viewerCamera && typeof state.viewerCamera === 'object'
+        ? {
+            type: Number.isFinite(state.viewerCamera.type) ? (state.viewerCamera.type | 0) : 0,
+            lookat: Array.isArray(state.viewerCamera.lookat)
+              ? state.viewerCamera.lookat.slice(0, 3).map((n) => Number(n) || 0)
+              : [0, 0, 0],
+            distance: Number(state.viewerCamera.distance) || 0,
+            azimuth: Number(state.viewerCamera.azimuth) || 0,
+            elevation: Number(state.viewerCamera.elevation) || 0,
+            orthographic: !!state.viewerCamera.orthographic,
+          }
+        : null,
     actuators: Array.isArray(state.actuators) ? state.actuators.slice() : null,
     options: state.options ?? null,
     ctrl: state.ctrl ? Array.from(state.ctrl) : null,
@@ -159,73 +284,10 @@ function resolveSnapshot(state) {
     visual: cloneStruct(state.visual),
     statistic: cloneStruct(state.statistic),
     visualDefaults: cloneStruct(state.visualDefaults),
-    xpos: viewOrNull(state.xpos, Float64Array),
-      xmat: viewOrNull(state.xmat, Float64Array),
-      scn_ngeom: Number.isFinite(state.scn_ngeom) ? (state.scn_ngeom | 0) : 0,
-      scn_type: viewOrNull(state.scn_type, Int32Array),
-      scn_pos: viewOrNull(state.scn_pos, Float32Array),
-      scn_mat: viewOrNull(state.scn_mat, Float32Array),
-      scn_size: viewOrNull(state.scn_size, Float32Array),
-      scn_rgba: viewOrNull(state.scn_rgba, Float32Array),
-      scn_matid: viewOrNull(state.scn_matid, Int32Array),
-      scn_dataid: viewOrNull(state.scn_dataid, Int32Array),
-      scn_objtype: viewOrNull(state.scn_objtype, Int32Array),
-      scn_objid: viewOrNull(state.scn_objid, Int32Array),
-      scn_category: viewOrNull(state.scn_category, Int32Array),
-      scn_segid: viewOrNull(state.scn_segid, Int32Array),
-      scn_geomorder: viewOrNull(state.scn_geomorder, Int32Array),
-      scn_transparent: viewOrNull(state.scn_transparent, Uint8Array),
-      scn_label: viewOrNull(state.scn_label, Uint8Array),
-      gsize: viewOrNull(state.gsize, Float64Array),
-      gtype: viewOrNull(state.gtype, Int32Array),
-      gmatid: viewOrNull(state.gmatid, Int32Array),
-      geom_bodyid: viewOrNull(state.geom_bodyid, Int32Array),
-      body_parentid: viewOrNull(state.body_parentid, Int32Array),
-      body_jntadr: viewOrNull(state.body_jntadr, Int32Array),
-      body_jntnum: viewOrNull(state.body_jntnum, Int32Array),
-      jtype: viewOrNull(state.jtype, Int32Array),
-      jnt_qposadr: viewOrNull(state.jnt_qposadr, Int32Array),
-      jnt_range: viewOrNull(state.jnt_range, Float64Array),
-      jnt_names: Array.isArray(state.jnt_names) ? state.jnt_names.slice() : null,
-      qpos: viewOrNull(state.qpos, Float64Array),
-      bxpos: viewOrNull(state.bxpos, Float64Array),
-      bxmat: viewOrNull(state.bxmat, Float64Array),
-      xipos: viewOrNull(state.xipos, Float64Array),
-      ximat: viewOrNull(state.ximat, Float64Array),
-      xanchor: viewOrNull(state.xanchor, Float64Array),
-      dof_island: viewOrNull(state.dof_island, Int32Array),
-      nisland: typeof state.nisland === 'number' ? (state.nisland | 0) : 0,
-      bvh_active: viewOrNull(state.bvh_active, Uint8Array),
-      bvh_aabb_dyn: viewOrNull(state.bvh_aabb_dyn, Float64Array),
-      cam_xpos: viewOrNull(state.cam_xpos, Float64Array),
-      cam_xmat: viewOrNull(state.cam_xmat, Float64Array),
-    light_xpos: viewOrNull(state.light_xpos, Float64Array),
-    light_xdir: viewOrNull(state.light_xdir, Float64Array),
-    jpos: viewOrNull(state.jpos, Float64Array),
-    jaxis: viewOrNull(state.jaxis, Float64Array),
-    jbody: viewOrNull(state.jbody, Int32Array),
-    jtype: viewOrNull(state.jtype, Int32Array),
-    act_trnid: viewOrNull(state.act_trnid, Int32Array),
-    act_trntype: viewOrNull(state.act_trntype, Int32Array),
-    act_cranklength: viewOrNull(state.act_cranklength, Float64Array),
-    site_xpos: viewOrNull(state.site_xpos, Float64Array),
-    site_xmat: viewOrNull(state.site_xmat, Float64Array),
-    ten_wrapadr: viewOrNull(state.ten_wrapadr, Int32Array),
-    ten_wrapnum: viewOrNull(state.ten_wrapnum, Int32Array),
-    wrap_obj: viewOrNull(state.wrap_obj, Int32Array),
-    wrap_xpos: viewOrNull(state.wrap_xpos, Float64Array),
-    flexvert_xpos: viewOrNull(state.flexvert_xpos, Float32Array),
-    sensor_type: viewOrNull(state.sensor_type, Int32Array),
-    sensor_objid: viewOrNull(state.sensor_objid, Int32Array),
-    eq_type: viewOrNull(state.eq_type, Int32Array),
-    eq_obj1id: viewOrNull(state.eq_obj1id, Int32Array),
-    eq_obj2id: viewOrNull(state.eq_obj2id, Int32Array),
-    eq_objtype: viewOrNull(state.eq_objtype, Int32Array),
-    eq_active0: viewOrNull(state.eq_active0, Uint8Array),
-    eq_active: viewOrNull(state.eq_active, Uint8Array),
+    scn_ngeom: Number.isFinite(state.scn_ngeom) ? (state.scn_ngeom | 0) : 0,
+    nisland: typeof state.nisland === 'number' ? (state.nisland | 0) : 0,
+    jnt_names: Array.isArray(state.jnt_names) ? state.jnt_names.slice() : null,
     eq_names: Array.isArray(state.eq_names) ? state.eq_names.slice() : null,
-    eq_data: viewOrNull(state.eq_data, Float64Array),
-    matrgba: viewOrNull(state.matrgba, Float32Array),
     contacts:
       state.contacts && typeof state.contacts === 'object'
         ? {
@@ -266,7 +328,6 @@ function resolveSnapshot(state) {
             : [],
         }
       : null,
-    options: state.options ?? null,
     renderAssets: state.renderAssets ?? null,
     groups: state.groups ? normaliseGroupState(state.groups) : null,
     nbody: Number.isFinite(state.nbody) ? (state.nbody | 0) : null,
@@ -306,6 +367,8 @@ function resolveSnapshot(state) {
         }
       : null,
   };
+  applyViewFields(snapshot, state, SNAPSHOT_VIEW_FIELDS, viewOrNull);
+  return snapshot;
 }
 
 
@@ -662,67 +725,16 @@ export async function createBackend(options = {}) {
       }
       return fallback;
     };
+    const makeViewOrNull = (value, Ctor) => makeView(value, null, Ctor);
     lastSnapshot.xpos = makeView(data.xpos, new Float64Array(0), Float64Array);
     lastSnapshot.xmat = makeView(data.xmat, new Float64Array(0), Float64Array);
     if (typeof data.scn_ngeom === 'number' && Number.isFinite(data.scn_ngeom)) {
       lastSnapshot.scn_ngeom = data.scn_ngeom | 0;
     }
-    if (data.scn_type) lastSnapshot.scn_type = makeView(data.scn_type, null, Int32Array);
-    if (data.scn_pos) lastSnapshot.scn_pos = makeView(data.scn_pos, null, Float32Array);
-    if (data.scn_mat) lastSnapshot.scn_mat = makeView(data.scn_mat, null, Float32Array);
-    if (data.scn_size) lastSnapshot.scn_size = makeView(data.scn_size, null, Float32Array);
-    if (data.scn_rgba) lastSnapshot.scn_rgba = makeView(data.scn_rgba, null, Float32Array);
-    if (data.scn_matid) lastSnapshot.scn_matid = makeView(data.scn_matid, null, Int32Array);
-    if (data.scn_dataid) lastSnapshot.scn_dataid = makeView(data.scn_dataid, null, Int32Array);
-    if (data.scn_objtype) lastSnapshot.scn_objtype = makeView(data.scn_objtype, null, Int32Array);
-    if (data.scn_objid) lastSnapshot.scn_objid = makeView(data.scn_objid, null, Int32Array);
-    if (data.scn_category) lastSnapshot.scn_category = makeView(data.scn_category, null, Int32Array);
-    if (data.scn_segid) lastSnapshot.scn_segid = makeView(data.scn_segid, null, Int32Array);
-    if (data.scn_geomorder) lastSnapshot.scn_geomorder = makeView(data.scn_geomorder, null, Int32Array);
-    if (data.scn_transparent) lastSnapshot.scn_transparent = makeView(data.scn_transparent, null, Uint8Array);
-    if (data.scn_label) lastSnapshot.scn_label = makeView(data.scn_label, null, Uint8Array);
-    if (data.bxpos) lastSnapshot.bxpos = makeView(data.bxpos, null, Float64Array);
-    if (data.bxmat) lastSnapshot.bxmat = makeView(data.bxmat, null, Float64Array);
-    if (data.xipos) lastSnapshot.xipos = makeView(data.xipos, null, Float64Array);
-    if (data.ximat) lastSnapshot.ximat = makeView(data.ximat, null, Float64Array);
-    if (data.xanchor) lastSnapshot.xanchor = makeView(data.xanchor, null, Float64Array);
-    if (data.dof_island) lastSnapshot.dof_island = makeView(data.dof_island, null, Int32Array);
+    applyViewFields(lastSnapshot, data, GEOM_VIEW_FIELDS_OPTIONAL, makeViewOrNull, { skipMissing: true });
     if (typeof data.nisland === 'number' && Number.isFinite(data.nisland)) lastSnapshot.nisland = data.nisland | 0;
-    if (data.bvh_active) lastSnapshot.bvh_active = makeView(data.bvh_active, null, Uint8Array);
-    if (data.bvh_aabb_dyn) lastSnapshot.bvh_aabb_dyn = makeView(data.bvh_aabb_dyn, null, Float64Array);
-    if (data.jtype) lastSnapshot.jtype = makeView(data.jtype, null, Int32Array);
-    if (data.jpos) lastSnapshot.jpos = makeView(data.jpos, null, Float64Array);
-    if (data.jaxis) lastSnapshot.jaxis = makeView(data.jaxis, null, Float64Array);
-    if (data.jbody) lastSnapshot.jbody = makeView(data.jbody, null, Int32Array);
-    if (data.act_trnid) lastSnapshot.act_trnid = makeView(data.act_trnid, null, Int32Array);
-    if (data.act_trntype) lastSnapshot.act_trntype = makeView(data.act_trntype, null, Int32Array);
-    if (data.act_cranklength) lastSnapshot.act_cranklength = makeView(data.act_cranklength, null, Float64Array);
-    if (data.site_xpos) lastSnapshot.site_xpos = makeView(data.site_xpos, null, Float64Array);
-    if (data.site_xmat) lastSnapshot.site_xmat = makeView(data.site_xmat, null, Float64Array);
-    if (data.ten_wrapadr) lastSnapshot.ten_wrapadr = makeView(data.ten_wrapadr, null, Int32Array);
-    if (data.ten_wrapnum) lastSnapshot.ten_wrapnum = makeView(data.ten_wrapnum, null, Int32Array);
-    if (data.wrap_obj) lastSnapshot.wrap_obj = makeView(data.wrap_obj, null, Int32Array);
-    if (data.wrap_xpos) lastSnapshot.wrap_xpos = makeView(data.wrap_xpos, null, Float64Array);
-    if (data.flexvert_xpos) lastSnapshot.flexvert_xpos = makeView(data.flexvert_xpos, null, Float32Array);
-    if (data.sensor_type) lastSnapshot.sensor_type = makeView(data.sensor_type, null, Int32Array);
-    if (data.sensor_objid) lastSnapshot.sensor_objid = makeView(data.sensor_objid, null, Int32Array);
-    if (data.eq_type) lastSnapshot.eq_type = makeView(data.eq_type, null, Int32Array);
-    if (data.eq_obj1id) lastSnapshot.eq_obj1id = makeView(data.eq_obj1id, null, Int32Array);
-      if (data.eq_obj2id) lastSnapshot.eq_obj2id = makeView(data.eq_obj2id, null, Int32Array);
-      if (data.eq_objtype) lastSnapshot.eq_objtype = makeView(data.eq_objtype, null, Int32Array);
-      if (data.eq_data) lastSnapshot.eq_data = makeView(data.eq_data, null, Float64Array);
-      if (data.eq_active0) lastSnapshot.eq_active0 = makeView(data.eq_active0, null, Uint8Array);
-      if (data.eq_active) lastSnapshot.eq_active = makeView(data.eq_active, null, Uint8Array);
-      if (Array.isArray(data.eq_names)) lastSnapshot.eq_names = data.eq_names.slice();
-      if (data.qpos) lastSnapshot.qpos = makeView(data.qpos, null, Float64Array);
-      if (data.cam_xpos) lastSnapshot.cam_xpos = makeView(data.cam_xpos, null, Float64Array);
-      if (data.cam_xmat) lastSnapshot.cam_xmat = makeView(data.cam_xmat, null, Float64Array);
-      if (data.light_xpos) lastSnapshot.light_xpos = makeView(data.light_xpos, null, Float64Array);
-      if (data.light_xdir) lastSnapshot.light_xdir = makeView(data.light_xdir, null, Float64Array);
-      lastSnapshot.gsize = makeView(data.gsize, null, Float64Array);
-    lastSnapshot.gtype = makeView(data.gtype, null, Int32Array);
-    lastSnapshot.gmatid = makeView(data.gmatid, null, Int32Array);
-    lastSnapshot.matrgba = makeView(data.matrgba, null, Float32Array);
+    if (Array.isArray(data.eq_names)) lastSnapshot.eq_names = data.eq_names.slice();
+    applyViewFields(lastSnapshot, data, GEOM_VIEW_FIELDS_ALWAYS, makeViewOrNull);
     lastSnapshot.contacts = data.contacts && typeof data.contacts === 'object' ? data.contacts : null;
   }
 
@@ -901,8 +913,20 @@ export async function createBackend(options = {}) {
         if (typeof data.ngeom === 'number') lastSnapshot.ngeom = data.ngeom;
         if (typeof data.nq === 'number') lastSnapshot.nq = data.nq;
         if (typeof data.nv === 'number') lastSnapshot.nv = data.nv;
+        if (typeof data.rate === 'number' && Number.isFinite(data.rate)) {
+          lastSnapshot.rate = data.rate;
+        }
         if (typeof data.measuredSlowdown === 'number' && Number.isFinite(data.measuredSlowdown)) {
           lastSnapshot.measuredSlowdown = data.measuredSlowdown;
+        }
+        if (typeof data.paused === 'boolean') {
+          lastSnapshot.paused = data.paused;
+        }
+        if (typeof data.pausedSource === 'string') {
+          lastSnapshot.pausedSource = data.pausedSource;
+        }
+        if (typeof data.rateSource === 'string') {
+          lastSnapshot.rateSource = data.rateSource;
         }
         if (data.info && typeof data.info === 'object') {
           lastSnapshot.info = { ...data.info };
@@ -921,63 +945,20 @@ export async function createBackend(options = {}) {
           lastSnapshot.optionSupport = data.optionSupport;
         }
         if (data.history) {
-          lastSnapshot.history = lastSnapshot.history || createDefaultHistoryState();
-          lastSnapshot.history.captureHz = Number(data.history.captureHz) || 0;
-          lastSnapshot.history.capacity = Number(data.history.capacity) || 0;
-          lastSnapshot.history.count = Number(data.history.count) || 0;
-          lastSnapshot.history.horizon = Number(data.history.horizon) || 0;
-          lastSnapshot.history.scrubIndex = Number(data.history.scrubIndex) || 0;
-          lastSnapshot.history.live = data.history.live !== false;
+          applyHistoryPayload(lastSnapshot, data.history);
         }
+        const keyIndexValue = Number.isFinite(data.keyIndex) ? data.keyIndex : null;
         if (data.keyframes) {
-          lastSnapshot.keyframes = lastSnapshot.keyframes || createDefaultKeyframeState();
-          if (typeof data.keyframes.capacity === 'number') {
-            lastSnapshot.keyframes.capacity = data.keyframes.capacity | 0;
-          }
-          if (typeof data.keyframes.count === 'number') {
-            lastSnapshot.keyframes.count = Math.max(0, data.keyframes.count | 0);
-          }
-      if (Array.isArray(data.keyframes.labels)) {
-        lastSnapshot.keyframes.labels = data.keyframes.labels.slice();
-      }
-      if (Array.isArray(data.keyframes.slots)) {
-        lastSnapshot.keyframes.slots = data.keyframes.slots.map((slot) => ({
-          index: Number(slot.index) || 0,
-          label: typeof slot.label === 'string' ? slot.label : `Key ${slot.index | 0}`,
-          kind: slot.kind || 'user',
-          available: !!slot.available,
-        }));
-      }
-          if (typeof data.keyframes.lastSaved === 'number') {
-            lastSnapshot.keyframes.lastSaved = data.keyframes.lastSaved | 0;
-          }
-          if (typeof data.keyframes.lastLoaded === 'number') {
-            lastSnapshot.keyframes.lastLoaded = data.keyframes.lastLoaded | 0;
-          }
+          applyKeyframesPayload(lastSnapshot, data.keyframes, keyIndexValue);
+        } else if (keyIndexValue != null) {
+          lastSnapshot.keyIndex = keyIndexValue | 0;
         }
         if (data.watch) {
-          lastSnapshot.watch = lastSnapshot.watch || createDefaultWatchState();
-          if (typeof data.watch.field === 'string') {
-            lastSnapshot.watch.field = data.watch.field;
-          }
-          if (typeof data.watch.index === 'number') {
-            lastSnapshot.watch.index = data.watch.index | 0;
-          }
-          if ('value' in data.watch) {
-            const raw = Number(data.watch.value);
-            lastSnapshot.watch.value = Number.isFinite(raw) ? raw : null;
-          }
-          const minVal = Number(data.watch.min);
-          const maxVal = Number(data.watch.max);
-          lastSnapshot.watch.min = Number.isFinite(minVal) ? minVal : null;
-          lastSnapshot.watch.max = Number.isFinite(maxVal) ? maxVal : null;
-          lastSnapshot.watch.samples = Number(data.watch.samples) || 0;
-          lastSnapshot.watch.status = data.watch.status || lastSnapshot.watch.status || 'idle';
-          lastSnapshot.watch.summary = data.watch.summary || lastSnapshot.watch.summary || '';
-          lastSnapshot.watch.valid = !!data.watch.valid;
-        }
-        if (typeof data.keyIndex === 'number' && Number.isFinite(data.keyIndex)) {
-          lastSnapshot.keyIndex = data.keyIndex | 0;
+          applyWatchPayload(lastSnapshot, data.watch, {
+            clampSamples: false,
+            computeSummary: false,
+            requireFiniteIndex: false,
+          });
         }
         if (data.gesture) {
           lastSnapshot.gesture = {
@@ -989,6 +970,18 @@ export async function createBackend(options = {}) {
           lastSnapshot.drag = {
             ...(lastSnapshot.drag || {}),
             ...data.drag,
+          };
+        }
+        if (data.viewerCamera && typeof data.viewerCamera === 'object') {
+          lastSnapshot.viewerCamera = {
+            type: Number.isFinite(data.viewerCamera.type) ? (data.viewerCamera.type | 0) : 0,
+            lookat: Array.isArray(data.viewerCamera.lookat)
+              ? data.viewerCamera.lookat.slice(0, 3).map((n) => Number(n) || 0)
+              : [0, 0, 0],
+            distance: Number(data.viewerCamera.distance) || 0,
+            azimuth: Number(data.viewerCamera.azimuth) || 0,
+            elevation: Number(data.viewerCamera.elevation) || 0,
+            orthographic: !!data.viewerCamera.orthographic,
           };
         }
         if (data.options) {
@@ -1036,74 +1029,21 @@ export async function createBackend(options = {}) {
         break;
       }
       case 'keyframes': {
-        lastSnapshot.keyframes = lastSnapshot.keyframes || createDefaultKeyframeState();
-        const meta = data;
-        if (typeof meta.capacity === 'number') {
-          lastSnapshot.keyframes.capacity = meta.capacity | 0;
-        }
-        if (typeof meta.count === 'number') {
-          lastSnapshot.keyframes.count = Math.max(0, meta.count | 0);
-        }
-        if (Array.isArray(meta.labels)) {
-          lastSnapshot.keyframes.labels = meta.labels.slice();
-        }
-        if (Array.isArray(meta.slots)) {
-          lastSnapshot.keyframes.slots = meta.slots.map((slot) => ({
-            index: Number(slot.index) || 0,
-            label: typeof slot.label === 'string' ? slot.label : `Key ${slot.index | 0}`,
-            kind: slot.kind || 'user',
-            available: !!slot.available,
-          }));
-        }
-        if (typeof meta.lastSaved === 'number') {
-          lastSnapshot.keyframes.lastSaved = meta.lastSaved | 0;
-        }
-        if (typeof meta.lastLoaded === 'number') {
-          lastSnapshot.keyframes.lastLoaded = meta.lastLoaded | 0;
-        }
-        if (typeof meta.keyIndex === 'number' && Number.isFinite(meta.keyIndex)) {
-          lastSnapshot.keyIndex = meta.keyIndex | 0;
-        }
+        applyKeyframesPayload(lastSnapshot, data);
         notifyListeners();
         break;
       }
       case 'history': {
-        const history = lastSnapshot.history || createDefaultHistoryState();
-        history.captureHz = Number(data.captureHz) || 0;
-        history.capacity = Math.max(0, Number(data.capacity) || 0);
-        history.count = Math.max(0, Number(data.count) || 0);
-        history.horizon = Number(data.horizon) || 0;
-        history.scrubIndex = Number(data.scrubIndex) || 0;
-        history.live = data.live !== false;
-        lastSnapshot.history = history;
+        applyHistoryPayload(lastSnapshot, data);
         notifyListeners();
         break;
       }
       case 'watch': {
-        const watch = lastSnapshot.watch || createDefaultWatchState();
-        if (typeof data.field === 'string') {
-          watch.field = data.field;
-        }
-        if (typeof data.index === 'number' && Number.isFinite(data.index)) {
-          watch.index = data.index | 0;
-        }
-        if ('value' in data) {
-          const raw = Number(data.value);
-          watch.value = Number.isFinite(raw) ? raw : null;
-        }
-        const minVal = Number(data.min);
-        const maxVal = Number(data.max);
-        watch.min = Number.isFinite(minVal) ? minVal : null;
-        watch.max = Number.isFinite(maxVal) ? maxVal : null;
-        watch.samples = Math.max(0, Number(data.samples) || 0);
-        watch.status = data.status || watch.status || 'idle';
-        watch.valid = !!data.valid;
-        if (watch.valid && typeof watch.value === 'number') {
-          watch.summary = watch.value.toPrecision(6);
-        } else {
-          watch.summary = '—';
-        }
-        lastSnapshot.watch = watch;
+        applyWatchPayload(lastSnapshot, data, {
+          clampSamples: true,
+          computeSummary: true,
+          requireFiniteIndex: true,
+        });
         notifyListeners();
         break;
       }
@@ -1130,14 +1070,6 @@ export async function createBackend(options = {}) {
           }
         }
         break;
-      case 'info_debug': {
-        if (typeof window !== 'undefined') {
-          try {
-            window.__infoDebug = data.info || null;
-          } catch {}
-        }
-        break;
-      }
       case 'gesture':
         if (data.gesture) {
           lastSnapshot.gesture = {
@@ -1477,6 +1409,7 @@ export async function createBackend(options = {}) {
     if (payload.kind === 'gesture') {
       const mode = payload.mode ?? payload.gesture?.mode ?? 'idle';
       const phase = payload.phase ?? payload.gesture?.phase ?? 'update';
+      const gestureType = typeof payload.gestureType === 'string' ? payload.gestureType : null;
       const pointerSource = payload.pointer ?? payload.gesture?.pointer ?? null;
       const pointer = pointerSource
         ? {
@@ -1506,6 +1439,11 @@ export async function createBackend(options = {}) {
           gesture,
           pointer,
           drag,
+          gestureType,
+          reldx: Number(payload.reldx),
+          reldy: Number(payload.reldy),
+          shiftKey: !!payload.shiftKey,
+          cam: payload.cam || null,
         });
       } catch (err) {
         logError('[backend gesture] failed', err);

@@ -38,73 +38,14 @@ function clamp01(value) {
 // Runtime implementation lives in JS so it can be consumed directly by the
 // buildless viewer. Type definitions are provided separately in viewer_state_types.ts.
 
-const VISUAL_FLOAT_TOLERANCE = 1e-4;
-
-const VISUAL_FIELD_GROUPS = [
-  {
-    id: 'headlight',
-    label: 'Headlight',
-    fields: [
-      ['headlight', 'active'],
-      ['headlight', 'ambient'],
-      ['headlight', 'diffuse'],
-      ['headlight', 'specular'],
-    ],
-    consumers: ['lighting'],
-  },
-  {
-    id: 'fog',
-    label: 'Fog',
-    fields: [
-      ['map', 'fogstart'],
-      ['map', 'fogend'],
-      ['rgba', 'fog'],
-    ],
-    sceneFlagIndex: 5,
-    consumers: ['fog'],
-  },
-  {
-    id: 'haze',
-    label: 'Haze',
-    fields: [
-      ['map', 'haze'],
-      ['rgba', 'haze'],
-    ],
-    sceneFlagIndex: 6,
-    consumers: ['haze'],
-  },
-  {
-    id: 'contact_points',
-    label: 'Contact Points',
-    fields: [
-      ['scale', 'contactwidth'],
-      ['scale', 'contactheight'],
-      ['rgba', 'contact'],
-    ],
-    voptFlagIndex: 14,
-    consumers: ['contact_points'],
-  },
-  {
-    id: 'contact_forces',
-    label: 'Contact Forces',
-    fields: [
-      ['map', 'force'],
-      ['scale', 'forcewidth'],
-      ['rgba', 'contactforce'],
-    ],
-    voptFlagIndex: 16,
-    consumers: ['contact_forces'],
-  },
-  {
-    id: 'select_point',
-    label: 'Select Point',
-    fields: [
-      ['scale', 'selectpoint'],
-      ['rgba', 'selectpoint'],
-    ],
-    consumers: ['selection'],
-  },
-];
+const VISUAL_SOURCE_CACHE_TEMPLATE = {
+  model: null,
+  presetSun: null,
+  presetMoon: null,
+  sceneFlagsModel: null,
+  sceneFlagsPresetSun: null,
+  sceneFlagsPresetMoon: null,
+};
 
 let bindingIndex = null;
 let bindingIndexPromise = null;
@@ -587,22 +528,8 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   // - 'preset-sun'  : daytime HDRI preset.
   // - 'preset-moon' : nighttime HDRI preset.
   visualSourceMode: 'model',
-  visualBackups: {
-    model: null,
-    presetSun: null,
-    presetMoon: null,
-    sceneFlagsModel: null,
-    sceneFlagsPresetSun: null,
-    sceneFlagsPresetMoon: null,
-  },
-  visualBaselines: {
-    model: null,
-    presetSun: null,
-    presetMoon: null,
-    sceneFlagsModel: null,
-    sceneFlagsPresetSun: null,
-    sceneFlagsPresetMoon: null,
-  },
+  visualBackups: { ...VISUAL_SOURCE_CACHE_TEMPLATE },
+  visualBaselines: { ...VISUAL_SOURCE_CACHE_TEMPLATE },
   panels: {
     left: true,
     right: true,
@@ -636,10 +563,6 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     info: null,
   },
   toast: null,
-  visualDiagnostics: {
-    diffs: {},
-    timestamp: 0,
-  },
   history: createDefaultHistoryState(),
   watch: createDefaultWatchState(),
   keyframes: createDefaultKeyframeState(),
@@ -859,12 +782,15 @@ function mergeBackendSnapshot(draft, snapshot) {
       }
     }
     rendering.sceneFlags = flags;
-    const backups = ensureVisualBackups(draft);
+    const backups = ensureVisualCache(draft, 'visualBackups');
     if (!backups.sceneFlagsModel) {
       backups.sceneFlagsModel = [...flags];
     }
-    if (!backups.sceneFlagsPreset) {
-      backups.sceneFlagsPreset = [...flags];
+    if (!backups.sceneFlagsPresetSun) {
+      backups.sceneFlagsPresetSun = [...flags];
+    }
+    if (!backups.sceneFlagsPresetMoon) {
+      backups.sceneFlagsPresetMoon = [...flags];
     }
   }
   if (snapshot.groups) {
@@ -907,18 +833,26 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (snapshot.visual) {
     model.vis = deepMerge(model.vis || {}, snapshot.visual);
   }
-  const baselines = ensureVisualBaselines(draft);
+  const baselines = ensureVisualCache(draft, 'visualBaselines');
   if (snapshot.visualDefaults) {
     model.visDefaults = deepMerge(model.visDefaults || {}, snapshot.visualDefaults);
     baselines.model = cloneStruct(snapshot.visualDefaults);
     baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
-    baselines.preset = applyPresetOverridesToStruct(baselines.model);
-    baselines.sceneFlagsPreset = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
+    baselines.presetSun = applyPresetOverridesToStruct(baselines.model);
+    baselines.sceneFlagsPresetSun = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
+    baselines.presetMoon = cloneStruct(baselines.presetSun);
+    baselines.sceneFlagsPresetMoon = baselines.sceneFlagsPresetSun
+      ? [...baselines.sceneFlagsPresetSun]
+      : (baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null);
   } else if (!baselines.model && snapshot.visual) {
     baselines.model = cloneStruct(snapshot.visual);
     baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
-    baselines.preset = applyPresetOverridesToStruct(baselines.model);
-    baselines.sceneFlagsPreset = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
+    baselines.presetSun = applyPresetOverridesToStruct(baselines.model);
+    baselines.sceneFlagsPresetSun = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
+    baselines.presetMoon = cloneStruct(baselines.presetSun);
+    baselines.sceneFlagsPresetMoon = baselines.sceneFlagsPresetSun
+      ? [...baselines.sceneFlagsPresetSun]
+      : (baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null);
   }
   if (snapshot.cameras) {
     model.cameras = Array.isArray(snapshot.cameras) ? snapshot.cameras.slice() : [];
@@ -1426,6 +1360,11 @@ function applyGesture(store, backend, payload) {
         phase,
         pointer,
         drag,
+        gestureType: payload.gestureType,
+        reldx: payload.reldx,
+        reldy: payload.reldy,
+        shiftKey: payload.shiftKey,
+        cam: payload.cam,
       }),
     )
       .then((snapshot) => {
@@ -1497,104 +1436,12 @@ function applyPresetOverridesToStruct(base) {
   return source;
 }
 
-function cloneVisualValue(value) {
-  if (value == null) return null;
-  if (ArrayBuffer.isView(value)) {
-    return Array.from(value);
-  }
-  if (Array.isArray(value)) {
-    return value.slice();
-  }
-  if (typeof value === 'object') {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
-    }
-  }
-  return value;
-}
-
-function visualValuesEqual(a, b) {
-  if (a == null && b == null) return true;
-  if (a == null || b == null) return false;
-  const aIsArray = Array.isArray(a) || ArrayBuffer.isView(a);
-  const bIsArray = Array.isArray(b) || ArrayBuffer.isView(b);
-  if (aIsArray || bIsArray) {
-    const arrA = aIsArray ? Array.from(a) : [a];
-    const arrB = bIsArray ? Array.from(b) : [b];
-    if (arrA.length !== arrB.length) return false;
-    for (let i = 0; i < arrA.length; i += 1) {
-      if (!visualValuesEqual(arrA[i], arrB[i])) {
-        return false;
-      }
-    }
-    return true;
-  }
-  if (typeof a === 'number' || typeof b === 'number') {
-    const numA = Number(a) || 0;
-    const numB = Number(b) || 0;
-    return Math.abs(numA - numB) < VISUAL_FLOAT_TOLERANCE;
-  }
-  if (typeof a === 'boolean' || typeof b === 'boolean') {
-    return !!a === !!b;
-  }
-  return String(a) === String(b);
-}
-
-function computeVisualGroupDiffs(modelVisual, presetVisual) {
-  const diagnostics = {};
-  for (const group of VISUAL_FIELD_GROUPS) {
-    const fields = [];
-    let changed = false;
-    for (const path of group.fields) {
-      const modelValue = cloneVisualValue(resolveStructPath(modelVisual, path));
-      const presetValue = cloneVisualValue(resolveStructPath(presetVisual, path));
-      const equal = visualValuesEqual(modelValue, presetValue);
-      if (!equal) changed = true;
-      fields.push({
-        path,
-        modelValue,
-        presetValue,
-        equal,
-      });
-    }
-    diagnostics[group.id] = {
-      id: group.id,
-      label: group.label,
-      changed,
-      fields,
-    };
-  }
-  return diagnostics;
-}
-
-function ensureVisualBackups(target) {
-  if (!target.visualBackups) {
-    target.visualBackups = {
-      model: null,
-      sceneFlagsModel: null,
-      presetSun: null,
-      presetMoon: null,
-      sceneFlagsPresetSun: null,
-      sceneFlagsPresetMoon: null,
-    };
-  }
-  return target.visualBackups;
-}
-
-function ensureVisualBaselines(target) {
-  if (!target.visualBaselines) {
-    target.visualBaselines = {
-      model: null,
-      sceneFlagsModel: null,
-      presetSun: null,
-      presetMoon: null,
-      sceneFlagsPresetSun: null,
-      sceneFlagsPresetMoon: null,
-    };
-  }
-  return target.visualBaselines;
+function ensureVisualCache(target, key) {
+  const existing = target?.[key];
+  if (existing) return existing;
+  const cache = { ...VISUAL_SOURCE_CACHE_TEMPLATE };
+  if (target) target[key] = cache;
+  return cache;
 }
 
 async function switchVisualSourceMode(store, backend, requestedMode) {
@@ -1628,8 +1475,8 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     : null;
   const currentSceneFlags = normaliseSceneFlagArray(snapshot.sceneFlags);
   store.update((draft) => {
-    const backups = ensureVisualBackups(draft);
-    const baselines = ensureVisualBaselines(draft);
+    const backups = ensureVisualCache(draft, 'visualBackups');
+    const baselines = ensureVisualCache(draft, 'visualBaselines');
     if (!baselines.model && baselineVisual) {
       baselines.model = cloneStruct(baselineVisual);
       baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
@@ -1672,8 +1519,8 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     }
   });
   const updatedState = store.get();
-  const backups = ensureVisualBackups(updatedState);
-  const baselines = ensureVisualBaselines(updatedState);
+  const backups = ensureVisualCache(updatedState, 'visualBackups');
+  const baselines = ensureVisualCache(updatedState, 'visualBaselines');
   let targetVisual = {};
   let targetSceneFlags = normaliseSceneFlagArray(null);
   if (targetMode === 'preset-sun') {
@@ -1710,12 +1557,6 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       targetSceneFlags = [...baselines.sceneFlagsModel];
     }
   }
-  const diagnostics = computeVisualGroupDiffs(
-    backups.model || baselines.model || {},
-    backups.presetSun ||
-      baselines.presetSun ||
-      applyPresetOverridesToStruct(baselines.model || {}),
-  );
   store.update((draft) => {
     draft.visualSourceMode = targetMode;
     if (!draft.model) draft.model = {};
@@ -1724,10 +1565,6 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     rendering.sceneFlags = Array.isArray(targetSceneFlags)
       ? targetSceneFlags.slice()
       : SCENE_FLAG_DEFAULTS.slice();
-    draft.visualDiagnostics = {
-      diffs: diagnostics,
-      timestamp: Date.now(),
-    };
   });
   if (typeof backend.setVisualState === 'function') {
     try {
@@ -3327,6 +3164,70 @@ function ensureCameraTarget(ctx) {
   return ctx.cameraTarget;
 }
 
+const CAMERA_RAD_PER_DEG = Math.PI / 180;
+const CAMERA_DEG_PER_RAD = 180 / Math.PI;
+
+function resolveTrackingBodyId(state) {
+  const selectionBody = Number(state?.runtime?.selection?.body);
+  if (Number.isFinite(selectionBody) && selectionBody >= 0) return selectionBody | 0;
+  const geomIndex = Number(state?.runtime?.trackingGeom);
+  const geomBodyIds = state?.model?.geomBodyId;
+  if (
+    Number.isFinite(geomIndex)
+    && geomIndex >= 0
+    && ArrayBuffer.isView(geomBodyIds)
+    && geomIndex < geomBodyIds.length
+  ) {
+    const bodyId = geomBodyIds[geomIndex] | 0;
+    if (bodyId >= 0) return bodyId;
+  }
+  return 0;
+}
+
+function buildViewerCameraPayload(ctx, state, scratchVec = null) {
+  if (!ctx?.camera) return null;
+  const target = ensureCameraTarget(ctx);
+  if (!target) return null;
+  const camera = ctx.camera;
+  const forward = scratchVec || new THREE.Vector3();
+  forward.copy(target).sub(camera.position);
+  const distance = forward.length();
+  if (!Number.isFinite(distance) || distance <= 1e-9) return null;
+  forward.multiplyScalar(1 / distance);
+  const azimuth = Math.atan2(forward.y, forward.x) * CAMERA_DEG_PER_RAD;
+  const elevation = Math.asin(Math.max(-1, Math.min(1, forward.z))) * CAMERA_DEG_PER_RAD;
+  const payload = {
+    lookat: [target.x, target.y, target.z],
+    distance,
+    azimuth,
+    elevation,
+    orthographic: !!camera.isOrthographicCamera,
+  };
+  const mode = Number(state?.runtime?.cameraIndex ?? 0) | 0;
+  if (mode === 1) {
+    payload.type = 1;
+    payload.trackbodyid = resolveTrackingBodyId(state);
+  } else if (mode === 0) {
+    payload.type = 0;
+    payload.trackbodyid = -1;
+  }
+  return payload;
+}
+
+function sendViewerCameraSync(ctx, state, scratchVec = null) {
+  if (!ctx || !backend || typeof backend.apply !== 'function') return;
+  const payload = buildViewerCameraPayload(ctx, state, scratchVec);
+  if (!payload) return;
+  ctx.viewerCameraSynced = true;
+  ctx.viewerCameraTrackId = Number.isFinite(payload.trackbodyid) ? (payload.trackbodyid | 0) : null;
+  backend.apply({
+    kind: 'gesture',
+    gestureType: 'camera',
+    phase: 'sync',
+    cam: payload,
+  });
+}
+
 function ensureFreeCameraPose(ctx) {
   if (!ctx) return null;
   if (!ctx.freeCameraPose) {
@@ -3454,6 +3355,11 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
         restoreFreeCameraPose(ctx);
       }
       ctx.currentCameraMode = desired;
+      ctx.viewerCameraSynced = false;
+      ctx.viewerCameraTrackId = null;
+      if (desired <= 1) {
+        sendViewerCameraSync(ctx, state, helpers.tempVecA);
+      }
     }
   if (desired >= FIXED_CAMERA_OFFSET) {
     if (!applyFixedCameraPreset(ctx, state, helpers)) {
@@ -3462,6 +3368,11 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
     return;
   }
   if (desired === 1) {
+    const trackingBodyId = resolveTrackingBodyId(state);
+    if (Number.isFinite(trackingBodyId) && trackingBodyId !== ctx.viewerCameraTrackId) {
+      ctx.viewerCameraSynced = false;
+      sendViewerCameraSync(ctx, state, helpers.tempVecA);
+    }
     applyTrackingCamera(ctx, trackingCtx.trackingBounds || bounds, helpers, trackingCtx.trackingOverride || null);
     return;
   }
@@ -3539,6 +3450,43 @@ function applyFixedCameraPreset(ctx, state, { tempVecA, tempVecB, tempVecC, temp
     ctx.camera.updateProjectionMatrix();
   }
   ctx.fixedCameraActive = true;
+  return true;
+}
+
+function applyViewerCameraSnapshot(ctx, snapshot, state, bounds, { tempVecA, tempVecB }) {
+  if (!ctx?.camera || !ctx.viewerCameraSynced) return false;
+  const mode = state?.runtime?.cameraIndex | 0;
+  if (mode > 1) return false;
+  const cam = snapshot?.viewerCamera;
+  if (!cam || !Array.isArray(cam.lookat) || cam.lookat.length < 3) return false;
+  const dist = Number(cam.distance);
+  const az = Number(cam.azimuth);
+  const el = Number(cam.elevation);
+  if (!Number.isFinite(dist) || dist <= 0) return false;
+  if (!Number.isFinite(az) || !Number.isFinite(el)) return false;
+  const azRad = az * CAMERA_RAD_PER_DEG;
+  const elRad = el * CAMERA_RAD_PER_DEG;
+  const ca = Math.cos(azRad);
+  const sa = Math.sin(azRad);
+  const ce = Math.cos(elRad);
+  const se = Math.sin(elRad);
+  const lookat = tempVecA.set(
+    Number(cam.lookat[0]) || 0,
+    Number(cam.lookat[1]) || 0,
+    Number(cam.lookat[2]) || 0,
+  );
+  const forward = tempVecB.set(ce * ca, ce * sa, se);
+  ctx.camera.position.copy(forward).multiplyScalar(-dist).add(lookat);
+  ctx.camera.up.set(-se * ca, -se * sa, ce);
+  ctx.camera.lookAt(lookat);
+  ensureCameraTarget(ctx)?.copy(lookat);
+  ctx.fixedCameraActive = false;
+  ctx.autoAligned = true;
+  if (mode === 0) {
+    rememberFreeCameraPose(ctx, bounds || ctx.bounds || null);
+  } else {
+    cacheTrackingPoseFromCurrent(ctx, bounds || ctx.bounds || null);
+  }
   return true;
 }
 
@@ -7684,6 +7632,8 @@ function createRendererManager({
   ctx.boundsEvery = typeof ctx.boundsEvery === 'number' && ctx.boundsEvery > 0 ? ctx.boundsEvery : 2;
   ctx.currentCameraMode = typeof ctx.currentCameraMode === 'number' ? ctx.currentCameraMode : 0;
   ctx.fixedCameraActive = !!ctx.fixedCameraActive;
+  ctx.viewerCameraSynced = !!ctx.viewerCameraSynced;
+  ctx.viewerCameraTrackId = Number.isFinite(ctx.viewerCameraTrackId) ? (ctx.viewerCameraTrackId | 0) : null;
 
   const cleanup = [];
   const tempVecA = new THREE.Vector3();
@@ -8128,6 +8078,7 @@ function createRendererManager({
       { tempVecA, tempVecB, tempVecC, tempVecD },
       { trackingBounds, trackingOverride },
     );
+    applyViewerCameraSnapshot(context, snapshot, state, nextBounds, { tempVecA, tempVecB });
     let drawn = 0;
 
     const hasSceneSoA =
@@ -8391,6 +8342,7 @@ function createRendererManager({
       context.camera.lookAt(target);
       context.cameraTarget.copy(target);
       cacheTrackingPoseFromCurrent(context, { radius, center });
+      sendViewerCameraSync(context, state, tempVecA);
     }
 
     const copyState = state.runtime?.lastCopy;
@@ -10346,13 +10298,24 @@ function shortcutFromEvent(event) {
   if (event.target?.isContentEditable) return null;
   const mods = [];
   if (event.ctrlKey) mods.push('ctrl');
-  if (event.shiftKey) mods.push('shift');
   if (event.altKey) mods.push('alt');
   if (event.metaKey) mods.push('meta');
   let key = event.key;
+  const code = event.code;
+  if (typeof code === 'string') {
+    if (code.startsWith('Key') && code.length === 4) {
+      key = code.slice(3);
+    } else if (code.startsWith('Digit') && code.length === 6) {
+      key = code.slice(5);
+    }
+  }
   if (!key) return null;
-  key = key.toLowerCase();
-  if (key === ' ') key = 'space';
+  key = normaliseKeyToken(String(key).toLowerCase());
+  if (!key) return null;
+  const isSingleChar = key.length === 1;
+  const isAlphaNum = isSingleChar && /[a-z0-9]/.test(key);
+  const includeShift = !!event.shiftKey && (!isSingleChar || isAlphaNum);
+  if (includeShift) mods.push('shift');
   mods.sort();
   return [...mods, key].join('+');
 }
@@ -12259,6 +12222,7 @@ function createCameraController({
   onGesture,
   renderCtx,
   debugMode = false,
+  useWasmCamera = false,
   globalUp = new THREE_NS.Vector3(0, 0, 1),
   // new options (high‑leverage changes)
   minDistance,
@@ -12292,6 +12256,7 @@ function createCameraController({
   const tempVecB = new THREE_NS.Vector3();
   const tempVecC = new THREE_NS.Vector3();
   const tempVecD = new THREE_NS.Vector3();
+  const tempVecE = new THREE_NS.Vector3();
   const tempSpherical = new THREE_NS.Spherical();
 
   const cleanup = [];
@@ -12319,11 +12284,9 @@ function createCameraController({
 
   function resolveGestureMode(event) {
     const btn = typeof event.button === 'number' ? event.button : 0;
-    if (currentCtrl(event)) return 'rotate';
-    if (currentShift(event)) return 'translate';
     if (btn === 2) return 'translate';
     if (btn === 1) return 'zoom';
-    return 'orbit';
+    return 'rotate';
   }
 
   function pointerButtons(event) {
@@ -12352,6 +12315,37 @@ function createCameraController({
     return 0.15;
   }
 
+  const ZOOM_INCREMENT = 0.02;
+
+  function computeGestureRels(dx, dy) {
+    const elementHeight = canvas?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 1) || 1;
+    const dyEff = invertY ? -dy : dy;
+    const heightDen = Math.max(1, elementHeight);
+    return { reldx: dx / heightDen, reldy: dyEff / heightDen };
+  }
+
+  function computeWheelReldy(dy) {
+    const dyLines = dy / wheelLineFactor;
+    return ZOOM_INCREMENT * dyLines;
+  }
+
+  function buildCameraPayloadIfNeeded() {
+    if (!useWasmCamera || !renderCtx) return null;
+    const state = typeof store?.get === 'function' ? store.get() : null;
+    const mode = Number(state?.runtime?.cameraIndex ?? 0) | 0;
+    const trackingBodyId = mode === 1 ? resolveTrackingBodyId(state) : null;
+    const needsSync =
+      !renderCtx.viewerCameraSynced ||
+      (mode === 1 && Number.isFinite(trackingBodyId) && trackingBodyId !== renderCtx.viewerCameraTrackId);
+    if (!needsSync) return null;
+    const payload = buildViewerCameraPayload(renderCtx, state, tempVecE);
+    if (payload) {
+      renderCtx.viewerCameraSynced = true;
+      renderCtx.viewerCameraTrackId = Number.isFinite(payload.trackbodyid) ? (payload.trackbodyid | 0) : null;
+    }
+    return payload;
+  }
+
   function applyCameraGesture(mode, dx, dy) {
     const ctx = renderCtx;
     const camera = ctx.camera;
@@ -12373,26 +12367,24 @@ function createCameraController({
     }
 
     const elementWidth = canvas?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 1) || 1;
-    const elementHeight = canvas?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 1) || 1;
-    const shortEdge = Math.max(1, Math.min(elementWidth, elementHeight));
+    const { reldx: relDx, reldy: relDy } = computeGestureRels(dx, dy);
     const fovRad = THREE_NS.MathUtils.degToRad(typeof camera.fov === 'number' ? camera.fov : 45);
     const isOrtho = !!camera.isOrthographicCamera;
 
     switch (mode) {
       case 'translate': {
-        const dyEff = invertY ? -dy : dy;
         let moveX = 0;
         let moveY = 0;
         if (isOrtho && typeof camera.zoom === 'number') {
           const zoom = Math.max(1e-6, camera.zoom || 1);
           const widthWorld = Math.abs((camera.right ?? 1) - (camera.left ?? -1)) / zoom;
           const heightWorld = Math.abs((camera.top ?? 1) - (camera.bottom ?? -1)) / zoom;
-          moveX = -dx * (widthWorld / elementWidth);
-          moveY = dyEff * (heightWorld / elementHeight);
+          moveX = -relDx * widthWorld;
+          moveY = relDy * heightWorld;
         } else {
           const panScale = distance * Math.tan(fovRad / 2);
-          moveX = (-2 * dx * panScale) / shortEdge;
-          moveY = (2 * dyEff * panScale) / shortEdge;
+          moveX = -2 * relDx * panScale;
+          moveY = 2 * relDy * panScale;
         }
         const forward = tempVecB;
         camera.getWorldDirection(forward).normalize();
@@ -12422,8 +12414,8 @@ function createCameraController({
         break;
       }
       case 'rotate': {
-        let yaw = (1.6 * Math.PI * dx) / elementWidth;
-        let pitch = (1.6 * Math.PI * (invertY ? -dy : dy)) / elementHeight;
+        let yaw = -relDx * Math.PI;
+        let pitch = -relDy * Math.PI;
         if (distance <= minDist * 1.05) {
           yaw *= 0.35;
           pitch *= 0.35;
@@ -12441,10 +12433,8 @@ function createCameraController({
       }
       case 'orbit':
       default: {
-        const dyEff = invertY ? -dy : dy;
-        const radiansPerPixel = Math.PI / shortEdge;
-        const thetaDelta = -dx * radiansPerPixel;
-        const phiDelta = -dyEff * radiansPerPixel;
+        const thetaDelta = -relDx * Math.PI;
+        const phiDelta = -relDy * Math.PI;
         tempSpherical.setFromVector3(offset);
         tempSpherical.theta += thetaDelta;
         tempSpherical.phi += phiDelta;
@@ -12470,7 +12460,17 @@ function createCameraController({
       try { canvas.setPointerCapture(event.pointerId); } catch {}
     }
     if (typeof onGesture === 'function') {
-      onGesture({ mode, phase: 'start', pointer: event });
+      const camPayload = buildCameraPayloadIfNeeded();
+      onGesture({
+        mode,
+        phase: 'start',
+        pointer: event,
+        gestureType: 'camera',
+        shiftKey: currentShift(event),
+        reldx: 0,
+        reldy: 0,
+        cam: camPayload,
+      });
     }
   }
 
@@ -12482,9 +12482,23 @@ function createCameraController({
     pointerState.lastX = event.clientX;
     pointerState.lastY = event.clientY;
     if (!dx && !dy) return;
-    applyCameraGesture(pointerState.mode, dx, dy);
+    const { reldx, reldy } = computeGestureRels(dx, dy);
+    if (!useWasmCamera) {
+      applyCameraGesture(pointerState.mode, dx, dy);
+    }
     if (typeof onGesture === 'function') {
-      onGesture({ mode: pointerState.mode, phase: 'update', pointer: event, drag: { dx, dy } });
+      const camPayload = buildCameraPayloadIfNeeded();
+      onGesture({
+        mode: pointerState.mode,
+        phase: 'update',
+        pointer: event,
+        drag: { dx, dy },
+        gestureType: 'camera',
+        shiftKey: currentShift(event),
+        reldx,
+        reldy,
+        cam: camPayload,
+      });
     }
   }
 
@@ -12492,7 +12506,15 @@ function createCameraController({
     if (!event || !pointerState.active) return;
     if (pointerState.id !== (event.pointerId ?? pointerState.id)) return;
     if (typeof onGesture === 'function') {
-      onGesture({ mode: pointerState.mode, phase: 'end', pointer: event });
+      onGesture({
+        mode: pointerState.mode,
+        phase: 'end',
+        pointer: event,
+        gestureType: 'camera',
+        shiftKey: currentShift(event),
+        reldx: 0,
+        reldy: 0,
+      });
     }
     pointerState.active = false;
     pointerState.id = null;
@@ -12513,9 +12535,23 @@ function createCameraController({
     if (Number.isFinite(maxWheelStep)) {
       dy = Math.max(-maxWheelStep, Math.min(maxWheelStep, dy));
     }
-    applyCameraGesture('zoom', 0, dy);
+    const reldy = computeWheelReldy(dy);
+    if (!useWasmCamera) {
+      applyCameraGesture('zoom', 0, dy);
+    }
     if (typeof onGesture === 'function') {
-      onGesture({ mode: 'zoom', phase: 'update', pointer: event, drag: { dx: 0, dy } });
+      const camPayload = buildCameraPayloadIfNeeded();
+      onGesture({
+        mode: 'zoom',
+        phase: 'update',
+        pointer: event,
+        drag: { dx: 0, dy },
+        gestureType: 'camera',
+        shiftKey: currentShift(event),
+        reldx: 0,
+        reldy,
+        cam: camPayload,
+      });
     }
   }
 
@@ -12994,12 +13030,6 @@ function createPickingController({
   function onClick(event) {
     if (!event) return;
     if (event.button !== 0) return;
-    const pick = resolvePick(event);
-    if (pick === STATIC_PICK_BLOCK) {
-      showToast('Selection blocked (static geom)');
-      return;
-    }
-    selectionFromPick(pick, event);
   }
 
   function onDoubleClick(event) {
@@ -13164,6 +13194,8 @@ const renderCtx = {
   copySeq: 0,
   cameraTarget: new THREE.Vector3(0, 0, 0),
   autoAligned: false,
+  viewerCameraSynced: false,
+  viewerCameraTrackId: null,
   bounds: null,
   snapshotLogState: null,
   frameId: null,
@@ -13690,6 +13722,8 @@ const cameraController = createCameraController({
   renderCtx,
   debugMode,
   globalUp: new THREE.Vector3(0, 0, 1),
+  invertY: false,
+  useWasmCamera: true,
 });
 cameraController.setup();
 

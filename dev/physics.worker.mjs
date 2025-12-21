@@ -70,12 +70,17 @@ let bvhDepth = 1;
 
 // mjv perturb pipeline (forge exports): JS only sends begin/move/end + normalized deltas,
 // wasm handles mjv_movePerturb + mjv_applyPerturbForce.
-const MJ_CAMERA = { FREE: 0 };
+const MJ_CAMERA = {
+  FREE: 0,
+  TRACKING: 1,
+  FIXED: 2,
+};
 const MJ_MOUSE = {
   ROTATE_V: 1,
   ROTATE_H: 2,
   MOVE_V: 3,
   MOVE_H: 4,
+  ZOOM: 5,
 };
 const MJ_PERT = {
   TRANSLATE: 1,
@@ -85,6 +90,7 @@ let mjvPerturbActive = false;
 let mjvPerturbBodyId = -1;
 let mjvPerturbPtrs = { modelPtr: 0, dataPtr: 0, camPtr: 0, scnPtr: 0, pertPtr: 0 };
 let mjvPerturbFns = null;
+let mjvCameraFns = null;
 let lastSyncWallTime = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
 let lastSyncSimTime = 0;
 let simTimeApprox = 0;
@@ -326,6 +332,37 @@ function ensureMjvPerturbAbi() {
   return mjvPerturbFns;
 }
 
+function ensureMjvCameraAbi() {
+  if (mjvCameraFns) return mjvCameraFns;
+  const requiredFns = [
+    '_mjwf_mjv_updateCamera',
+    '_mjwf_mjv_moveCamera',
+  ];
+  const requiredPtrs = [
+    '_mjwf_cam_type_ptr',
+    '_mjwf_cam_trackbodyid_ptr',
+    '_mjwf_cam_fixedcamid_ptr',
+    '_mjwf_cam_lookat_ptr',
+    '_mjwf_cam_distance_ptr',
+    '_mjwf_cam_azimuth_ptr',
+    '_mjwf_cam_elevation_ptr',
+    '_mjwf_cam_orthographic_ptr',
+    '_mjwf_scene_maxgeom_ptr',
+  ];
+  const missing = [
+    ...requiredFns.filter((name) => typeof mod?.[name] !== 'function'),
+    ...requiredPtrs.filter((name) => typeof mod?.[name] !== 'function'),
+  ];
+  if (missing.length) {
+    throw new Error(`[forge] Missing mjv camera ABI exports: ${missing.join(', ')}`);
+  }
+  mjvCameraFns = {
+    updateCamera: mod._mjwf_mjv_updateCamera,
+    moveCamera: mod._mjwf_mjv_moveCamera,
+  };
+  return mjvCameraFns;
+}
+
 function mjvMouseActionFor(mode, shiftKey) {
   const m = mode === 'rotate' ? 'rotate' : 'translate';
   if (m === 'translate') {
@@ -337,7 +374,7 @@ function mjvMouseActionFor(mode, shiftKey) {
   return null;
 }
 
-function writeViewerFreeCameraFromPayload(payload) {
+function writeViewerCameraFromPayload(payload) {
   if (!payload || !sim) return;
   const lookat = Array.isArray(payload.lookat) ? payload.lookat : null;
   const lookatView = sim.camLookatPtrView?.();
@@ -348,9 +385,24 @@ function writeViewerFreeCameraFromPayload(payload) {
   const orthoView = sim.camOrthographicPtrView?.();
   const fixedView = sim.camFixedcamidPtrView?.();
   const trackView = sim.camTrackbodyidPtrView?.();
-  if (typeView && typeView.length) typeView[0] = MJ_CAMERA.FREE;
-  if (fixedView && fixedView.length) fixedView[0] = -1;
-  if (trackView && trackView.length) trackView[0] = -1;
+  const payloadType = Number.isFinite(payload.type) ? (payload.type | 0) : MJ_CAMERA.FREE;
+  const nextType =
+    payloadType === MJ_CAMERA.TRACKING || payloadType === MJ_CAMERA.FIXED
+      ? payloadType
+      : MJ_CAMERA.FREE;
+  if (typeView && typeView.length) typeView[0] = nextType;
+  if (fixedView && fixedView.length) {
+    fixedView[0] =
+      nextType === MJ_CAMERA.FIXED && Number.isFinite(payload.fixedcamid)
+        ? (payload.fixedcamid | 0)
+        : -1;
+  }
+  if (trackView && trackView.length) {
+    trackView[0] =
+      nextType === MJ_CAMERA.TRACKING && Number.isFinite(payload.trackbodyid)
+        ? (payload.trackbodyid | 0)
+        : -1;
+  }
   if (lookatView && lookatView.length >= 3 && lookat) {
     lookatView[0] = Number(lookat[0]) || 0;
     lookatView[1] = Number(lookat[1]) || 0;
@@ -360,6 +412,26 @@ function writeViewerFreeCameraFromPayload(payload) {
   if (azView && azView.length) azView[0] = Number(payload.azimuth) || 0;
   if (elView && elView.length) elView[0] = Number(payload.elevation) || 0;
   if (orthoView && orthoView.length) orthoView[0] = payload.orthographic ? 1 : 0;
+}
+
+function readViewerFreeCameraState() {
+  if (!sim) return null;
+  const lookatView = sim.camLookatPtrView?.();
+  const typeView = sim.camTypePtrView?.();
+  const distView = sim.camDistancePtrView?.();
+  const azView = sim.camAzimuthPtrView?.();
+  const elView = sim.camElevationPtrView?.();
+  const orthoView = sim.camOrthographicPtrView?.();
+  if (!lookatView || lookatView.length < 3) return null;
+  if (!distView || !azView || !elView) return null;
+  return {
+    type: typeView && typeView.length ? (typeView[0] | 0) : 0,
+    lookat: [Number(lookatView[0]) || 0, Number(lookatView[1]) || 0, Number(lookatView[2]) || 0],
+    distance: Number(distView[0]) || 0,
+    azimuth: Number(azView[0]) || 0,
+    elevation: Number(elView[0]) || 0,
+    orthographic: !!(orthoView && orthoView.length && orthoView[0]),
+  };
 }
 
 function clearPerturbXfrcIfNeeded() {
@@ -1334,12 +1406,14 @@ async function loadModule() {
         '_mjwf_pert_scale_ptr',
         '_mjwf_pert_flexselect_ptr',
         '_mjwf_pert_skinselect_ptr',
-        // mjv helpers for perturb pipeline
-        '_mjwf_mjv_updateCamera',
-        '_mjwf_mjv_initPerturb',
-        '_mjwf_mjv_movePerturb',
-        '_mjwf_mjv_applyPerturbForce',
-      ];
+      // mjv helpers for perturb pipeline
+      '_mjwf_mjv_updateCamera',
+      '_mjwf_mjv_initPerturb',
+      '_mjwf_mjv_movePerturb',
+      '_mjwf_mjv_applyPerturbForce',
+      // mjv helpers for camera gestures
+      '_mjwf_mjv_moveCamera',
+    ];
     const missing = required.filter((name) => typeof moduleRef?.[name] !== 'function');
     if (missing.length === 0) return;
 
@@ -1579,6 +1653,7 @@ function snapshot() {
   const drag = dragState
     ? { dx: Number(dragState.dx) || 0, dy: Number(dragState.dy) || 0 }
     : { dx: 0, dy: 0 };
+  const viewerCamera = readViewerFreeCameraState();
   const frameId = frameSeq++;
   const slowdownSafe = (() => {
     if (!Number.isFinite(measuredSlowdown) || measuredSlowdown <= 0) return 1;
@@ -1609,6 +1684,7 @@ function snapshot() {
     light_xdir: lightXdirView ? new Float64Array(lightXdirView) : null,
     gesture,
     drag,
+    viewerCamera,
     voptFlags: Array.isArray(voptFlags) ? [...voptFlags] : [],
     sceneFlags: cloneSceneFlags(),
     labelMode,
@@ -2497,6 +2573,7 @@ onmessage = async (ev) => {
       const sourceGesture = msg.gesture || {};
       const mode = typeof msg.mode === 'string' ? msg.mode : sourceGesture.mode;
       const phase = typeof msg.phase === 'string' ? msg.phase : sourceGesture.phase;
+      const gestureType = typeof msg.gestureType === 'string' ? msg.gestureType : null;
       const pointerSource = msg.pointer ?? sourceGesture.pointer ?? null;
       const pointer = pointerSource
         ? {
@@ -2521,6 +2598,45 @@ onmessage = async (ev) => {
         };
       } else if (gestureState.phase === 'end') {
         dragState = { dx: 0, dy: 0 };
+      }
+      if (gestureType === 'camera' && sim && mod && (h > 0)) {
+        const reldx = Number(msg.reldx);
+        const reldy = Number(msg.reldy);
+        const shiftKey = !!msg.shiftKey;
+        const camPayload = msg.cam || null;
+        const cameraModeIndex = Number(cameraMode) | 0;
+        const canApply = cameraModeIndex <= 1;
+        if (canApply) {
+          if (camPayload) {
+            writeViewerCameraFromPayload(camPayload);
+          }
+          if (phase === 'sync') {
+            const fns = ensureMjvCameraAbi();
+            const { modelPtr, dataPtr } = sim.ensurePointers();
+            const scnPtr = sim.scenePtr() | 0;
+            const camPtr = mod._mjwf_cam_type_ptr(h) | 0;
+            if ((modelPtr > 0) && (dataPtr > 0) && (scnPtr > 0) && (camPtr > 0)) {
+              fns.updateCamera.call(mod, modelPtr | 0, dataPtr | 0, camPtr | 0, scnPtr | 0);
+            }
+          } else if (phase !== 'end' && Number.isFinite(reldx) && Number.isFinite(reldy)) {
+            const effectiveMode = mode === 'translate' ? 'translate' : (mode === 'zoom' ? 'zoom' : 'rotate');
+            const action =
+              effectiveMode === 'zoom'
+                ? MJ_MOUSE.ZOOM
+                : mjvMouseActionFor(effectiveMode, shiftKey);
+            if (action != null) {
+              const fns = ensureMjvCameraAbi();
+              const { modelPtr, dataPtr } = sim.ensurePointers();
+              const scnPtr = sim.scenePtr() | 0;
+              const camPtr = mod._mjwf_cam_type_ptr(h) | 0;
+              if ((modelPtr > 0) && (dataPtr > 0) && (scnPtr > 0) && (camPtr > 0)) {
+                fns.updateCamera.call(mod, modelPtr | 0, dataPtr | 0, camPtr | 0, scnPtr | 0);
+                fns.moveCamera.call(mod, modelPtr | 0, action | 0, reldx, reldy, scnPtr | 0, camPtr | 0);
+                fns.updateCamera.call(mod, modelPtr | 0, dataPtr | 0, camPtr | 0, scnPtr | 0);
+              }
+            }
+          }
+        }
       }
       try { postMessage({ kind: 'gesture', gesture: gestureState, drag: dragState }); } catch {}
     } else if (msg.cmd === 'setVoptFlag') {
@@ -2676,7 +2792,7 @@ onmessage = async (ev) => {
         }
         mjvPerturbPtrs = { modelPtr: modelPtr | 0, dataPtr: dataPtr | 0, camPtr, scnPtr, pertPtr };
 
-        writeViewerFreeCameraFromPayload(msg.cam || null);
+        writeViewerCameraFromPayload(msg.cam || null);
         mjvPerturbFns = ensureMjvPerturbAbi();
         mjvPerturbFns.updateCamera.call(mod, modelPtr | 0, dataPtr | 0, camPtr | 0, scnPtr | 0);
 
@@ -2713,7 +2829,7 @@ onmessage = async (ev) => {
         const action = mjvMouseActionFor(mode, !!msg.shiftKey);
         const reldx = Number(msg.reldx) || 0;
         const reldy = Number(msg.reldy) || 0;
-        writeViewerFreeCameraFromPayload(msg.cam || null);
+        writeViewerCameraFromPayload(msg.cam || null);
         mjvPerturbFns = ensureMjvPerturbAbi();
         mjvPerturbFns.updateCamera.call(mod, mjvPerturbPtrs.modelPtr | 0, mjvPerturbPtrs.dataPtr | 0, mjvPerturbPtrs.camPtr | 0, mjvPerturbPtrs.scnPtr | 0);
         const activeView = sim.pertActivePtrView?.();
