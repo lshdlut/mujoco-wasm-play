@@ -214,7 +214,7 @@ export function readStructSnapshot(mod, handle, prefix, descriptors) {
 }
 
 
-const OPTION_LAYOUT = {
+export const OPTION_LAYOUT = {
   timestep: { offset: 0, type: 'f64', count: 1 },
   impratio: { offset: 8, type: 'f64', count: 1 },
   tolerance: { offset: 16, type: 'f64', count: 1 },

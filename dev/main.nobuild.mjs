@@ -29,7 +29,7 @@ import {
   splitBinding,
   toNumber,
 } from './viewer_shared.mjs';
-import { VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
+import { STAT_FIELD_DESCRIPTORS, VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
 import { createBackend } from './viewer_backend.mjs';
 
 function clamp01(value) {
@@ -479,7 +479,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
   simulation: {
     run: true,
     scrubIndex: 0,
-    keyIndex: 0,
+    keyIndex: -1,
     realTimeIndex: DEFAULT_REALTIME_INDEX,
   },
   runtime: {
@@ -581,22 +581,64 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
 const CAMERA_BASE_LABELS = ['Free', 'Tracking'];
 let latestHudTime = 0;
 const TIME_RESET_EPSILON = 1e-6;
+const STRUCT_DIFF_SAMPLE_LIMIT = 12;
+const VIEWER_STATE_KEYS = Object.keys(DEFAULT_VIEWER_STATE);
 
-function deepMerge(target, patch) {
-  const output = Array.isArray(target) ? [...target] : { ...target };
-  if (!patch) return output;
-  for (const [key, value] of Object.entries(patch)) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      output[key] = deepMerge(target ? target[key] : undefined, value);
-    } else {
-      output[key] = value;
+let lastVisualVersion = null;
+let lastVisualDefaultsVersion = null;
+let lastStatisticVersion = null;
+
+function cloneViewerState(source) {
+  return cloneStruct(source);
+}
+
+function applyViewerStateOverrides(base, overrides) {
+  if (!overrides) return base;
+  for (const key of VIEWER_STATE_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(overrides, key)) continue;
+    base[key] = cloneStruct(overrides[key]);
+  }
+  return base;
+}
+
+function formatStructPath(pathSegments) {
+  return pathSegments.join('.');
+}
+
+function valuesEqual(a, b) {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!valuesEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  return Object.is(a, b);
+}
+
+function diffStruct(prev, next, descriptors) {
+  const sample = [];
+  let count = 0;
+  for (const descriptor of descriptors) {
+    const path = descriptor.path;
+    const before = resolveStructPath(prev, path);
+    const after = resolveStructPath(next, path);
+    if (!valuesEqual(before, after)) {
+      count += 1;
+      if (sample.length < STRUCT_DIFF_SAMPLE_LIMIT) {
+        sample.push(formatStructPath(path));
+      }
     }
   }
-  return output;
+  return { count, sample };
 }
 
 function resetModelFrontendState(store) {
   latestHudTime = 0;
+  lastVisualVersion = null;
+  lastVisualDefaultsVersion = null;
+  lastStatisticVersion = null;
   if (!store || typeof store.replace !== 'function') return;
   store.replace(DEFAULT_VIEWER_STATE);
 }
@@ -639,6 +681,11 @@ function mergeBackendSnapshot(draft, snapshot) {
   });
   const before = snapshotSummary(draft);
   const snapshotKeys = Object.keys(snapshot || {});
+  const applied = [];
+  const structDiffs = {};
+  const visualVersion = Number.isFinite(snapshot.visualVersion) ? snapshot.visualVersion : null;
+  const visualDefaultsVersion = Number.isFinite(snapshot.visualDefaultsVersion) ? snapshot.visualDefaultsVersion : null;
+  const statisticVersion = Number.isFinite(snapshot.statisticVersion) ? snapshot.statisticVersion : null;
   const model = draft.model || (draft.model = {});
   const rendering = ensureRenderingState(draft);
   const physics = draft.physics || (draft.physics = { disableFlags: {}, enableFlags: {}, actuatorGroups: {} });
@@ -864,19 +911,34 @@ function mergeBackendSnapshot(draft, snapshot) {
     }
   }
   if (snapshot.visual) {
-    model.vis = deepMerge(model.vis || {}, snapshot.visual);
+    const shouldApplyVisual = visualVersion == null || visualVersion !== lastVisualVersion;
+    if (shouldApplyVisual) {
+      const nextVisual = cloneStruct(snapshot.visual) || {};
+      structDiffs.visual = diffStruct(model.vis, nextVisual, VISUAL_FIELD_DESCRIPTORS);
+      model.vis = nextVisual;
+      lastVisualVersion = visualVersion;
+      applied.push('visual');
+    }
   }
   const baselines = ensureVisualCache(draft, 'visualBaselines');
   if (snapshot.visualDefaults) {
-    model.visDefaults = deepMerge(model.visDefaults || {}, snapshot.visualDefaults);
-    baselines.model = cloneStruct(snapshot.visualDefaults);
-    baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
-    baselines.presetSun = applyPresetOverridesToStruct(baselines.model);
-    baselines.sceneFlagsPresetSun = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
-    baselines.presetMoon = cloneStruct(baselines.presetSun);
-    baselines.sceneFlagsPresetMoon = baselines.sceneFlagsPresetSun
-      ? [...baselines.sceneFlagsPresetSun]
-      : (baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null);
+    const shouldApplyDefaults =
+      !baselines.model || (visualDefaultsVersion != null && visualDefaultsVersion !== lastVisualDefaultsVersion);
+    if (shouldApplyDefaults) {
+      const nextDefaults = cloneStruct(snapshot.visualDefaults) || {};
+      structDiffs.visualDefaults = diffStruct(model.visDefaults, nextDefaults, VISUAL_FIELD_DESCRIPTORS);
+      model.visDefaults = nextDefaults;
+      baselines.model = cloneStruct(nextDefaults);
+      baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
+      baselines.presetSun = applyPresetOverridesToStruct(baselines.model);
+      baselines.sceneFlagsPresetSun = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
+      baselines.presetMoon = cloneStruct(baselines.presetSun);
+      baselines.sceneFlagsPresetMoon = baselines.sceneFlagsPresetSun
+        ? [...baselines.sceneFlagsPresetSun]
+        : (baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null);
+      lastVisualDefaultsVersion = visualDefaultsVersion;
+      applied.push('visualDefaults');
+    }
   } else if (!baselines.model && snapshot.visual) {
     baselines.model = cloneStruct(snapshot.visual);
     baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
@@ -922,7 +984,14 @@ function mergeBackendSnapshot(draft, snapshot) {
     model.njnt = snapshot.njnt | 0;
   }
   if (snapshot.statistic) {
-    model.stat = deepMerge(model.stat || {}, snapshot.statistic);
+    const shouldApplyStatistic = statisticVersion == null || statisticVersion !== lastStatisticVersion;
+    if (shouldApplyStatistic) {
+      const nextStat = cloneStruct(snapshot.statistic) || {};
+      structDiffs.statistic = diffStruct(model.stat, nextStat, STAT_FIELD_DESCRIPTORS);
+      model.stat = nextStat;
+      lastStatisticVersion = statisticVersion;
+      applied.push('statistic');
+    }
   }
   if (snapshot.optionSupport) {
     model.optSupport = { ...snapshot.optionSupport };
@@ -938,6 +1007,8 @@ function mergeBackendSnapshot(draft, snapshot) {
     snapshotKeys,
     before,
     after,
+    applied,
+    structDiffs,
   });
 }
 
@@ -1295,7 +1366,7 @@ const LOCAL_CONTROL_IDS = new Set([
 ]);
 
 function createViewerStore(initialState) {
-  let state = deepMerge(DEFAULT_VIEWER_STATE, initialState);
+  let state = applyViewerStateOverrides(cloneViewerState(DEFAULT_VIEWER_STATE), initialState);
   latestHudTime = Math.max(0, Number(state?.hud?.time) || 0);
   const listeners = new Set();
 
@@ -1316,7 +1387,7 @@ function createViewerStore(initialState) {
     },
     replace(next) {
       if (!next) return;
-      state = deepMerge(DEFAULT_VIEWER_STATE, next);
+      state = applyViewerStateOverrides(cloneViewerState(DEFAULT_VIEWER_STATE), next);
       notify();
     },
     update(mutator) {
@@ -11308,51 +11379,65 @@ function shortcutFromEvent(event) {
   }
 
   function renderVisualSourceControl(container, control) {
-      const { inputs } = createSegmentedGroup(container, control, {
-        layout: 'stacked',
-        options: [
-        { key: 'preset-sun', label: 'Preset☀️', value: 'PresetSun' },
-        { key: 'preset-moon', label: 'Preset🌙️', value: 'PresetMoon' },
-        { key: 'model', label: 'Model', value: 'Model' },
-        ],
-      });
+    const rawOptions = normaliseOptions(control.options);
+    const entries = rawOptions.map((opt) => {
+      const token = String(opt ?? '').trim();
+      const lower = token.toLowerCase();
+      let key = 'model';
+      let label = token || 'Model';
+      if (lower.startsWith('preset')) {
+        if (lower.includes('moon')) {
+          key = 'preset-moon';
+          label = 'Preset🌙️';
+        } else {
+          key = 'preset-sun';
+          label = 'Preset☀️';
+        }
+      } else if (lower.startsWith('model')) {
+        key = 'model';
+        label = 'Model';
+      }
+      return { key, label, value: token || label };
+    });
+    const fallbackEntry = entries[0] || { key: 'model', label: 'Model', value: 'Model' };
+    const entriesByKey = new Map(entries.map((entry) => [entry.key, entry]));
 
-      let logicalValue = 'PresetSun';
+    const { inputs } = createSegmentedGroup(container, control, {
+      layout: 'stacked',
+      options: entries.length ? entries : [fallbackEntry],
+    });
 
-      attachSegmentedHandlers(control, inputs, {
-        getValue: () => logicalValue,
-        applyValue: (value) => {
-          const token = typeof value === 'string' ? value.toLowerCase() : '';
-          let targetKey;
-          if (token.startsWith('model')) {
-            logicalValue = 'Model';
-            targetKey = 'model';
-          } else if (token.includes('moon')) {
-            logicalValue = 'PresetMoon';
-            targetKey = 'preset-moon';
-          } else {
-            logicalValue = 'PresetSun';
-            targetKey = 'preset-sun';
-          }
-          inputs.forEach((input) => {
-            const key = input.dataset.key || '';
-            const active = key === targetKey;
-            input.checked = active;
-          });
-        },
-        onCommit: async (binding, input) => {
-          const key = input.dataset.key || '';
-          const modeValue = input.value || (key === 'model' ? 'Model' : input.value);
-          binding.setValue(modeValue);
-          try {
-            await applySpecAction(store, backend, control, modeValue);
-          } catch (err) {
-            logWarn('[ui] visual source toggle failed', err);
-            strictCatch(err, 'main:ui_visual_source_toggle');
-          }
-        },
-      });
-    }
+    let logicalValue = fallbackEntry.value;
+    const resolveKey = (value) => {
+      const token = String(value ?? '').toLowerCase();
+      if (token.startsWith('model')) return 'model';
+      if (token.includes('moon')) return 'preset-moon';
+      if (token.startsWith('preset')) return 'preset-sun';
+      return fallbackEntry.key;
+    };
+
+    attachSegmentedHandlers(control, inputs, {
+      getValue: () => logicalValue,
+      applyValue: (value) => {
+        const key = resolveKey(value);
+        const entry = entriesByKey.get(key) || fallbackEntry;
+        logicalValue = entry.value;
+        inputs.forEach((input) => {
+          input.checked = (input.dataset.key || '') === key;
+        });
+      },
+      onCommit: async (binding, input) => {
+        const modeValue = input.value || fallbackEntry.value;
+        binding.setValue(modeValue);
+        try {
+          await applySpecAction(store, backend, control, modeValue);
+        } catch (err) {
+          logWarn('[ui] visual source toggle failed', err);
+          strictCatch(err, 'main:ui_visual_source_toggle');
+        }
+      },
+    });
+  }
 
     function renderRadio(container, control) {
       const options = normaliseOptions(control.options);

@@ -189,6 +189,9 @@ function createInitialSnapshot() {
     visual: null,
     statistic: null,
     visualDefaults: null,
+    visualVersion: 0,
+    visualDefaultsVersion: 0,
+    statisticVersion: 0,
     cameras: [],
     history: createDefaultHistoryState(),
     keyframes: createDefaultKeyframeState(),
@@ -285,6 +288,9 @@ function resolveSnapshot(state) {
     visual: cloneStruct(state.visual),
     statistic: cloneStruct(state.statistic),
     visualDefaults: cloneStruct(state.visualDefaults),
+    visualVersion: Number.isFinite(state.visualVersion) ? (state.visualVersion | 0) : 0,
+    visualDefaultsVersion: Number.isFinite(state.visualDefaultsVersion) ? (state.visualDefaultsVersion | 0) : 0,
+    statisticVersion: Number.isFinite(state.statisticVersion) ? (state.statisticVersion | 0) : 0,
     scn_ngeom: Number.isFinite(state.scn_ngeom) ? (state.scn_ngeom | 0) : 0,
     nisland: typeof state.nisland === 'number' ? (state.nisland | 0) : 0,
     jnt_names: Array.isArray(state.jnt_names) ? state.jnt_names.slice() : null,
@@ -810,9 +816,12 @@ export async function createBackend(options = {}) {
         if (data.visual) {
           lastSnapshot.visual = cloneStruct(data.visual);
           lastSnapshot.visualDefaults = cloneStruct(data.visual);
+          lastSnapshot.visualVersion = (lastSnapshot.visualVersion | 0) + 1;
+          lastSnapshot.visualDefaultsVersion = (lastSnapshot.visualDefaultsVersion | 0) + 1;
         }
         if (data.statistic) {
           lastSnapshot.statistic = cloneStruct(data.statistic);
+          lastSnapshot.statisticVersion = (lastSnapshot.statisticVersion | 0) + 1;
         }
         updateGeometryCaches(data);
         if (data.gesture) {
@@ -847,8 +856,10 @@ export async function createBackend(options = {}) {
       case 'struct_state': {
         if (data.scope === 'mjVisual') {
           lastSnapshot.visual = data.value || null;
+          lastSnapshot.visualVersion = (lastSnapshot.visualVersion | 0) + 1;
         } else if (data.scope === 'mjStatistic') {
           lastSnapshot.statistic = data.value || null;
+          lastSnapshot.statisticVersion = (lastSnapshot.statisticVersion | 0) + 1;
         }
         notifyListeners();
         break;

@@ -81,10 +81,11 @@
           "label": "Visual source",
           "shortcut": null,
           "options": [
-            "Preset",
+            "PresetSun",
+            "PresetMoon",
             "Model"
           ],
-          "default": "Preset"
+          "default": "Model"
         },
         {
           "item_id": "option.help",
@@ -788,7 +789,7 @@
           "type": "select",
           "label": "Label",
           "binding": "mjvOption::label",
-          "default": "opt.label",
+          "default": 0,
           "options": [
             "None",
             "Body",
@@ -814,7 +815,7 @@
           "type": "select",
           "label": "Frame",
           "binding": "mjvOption::frame",
-          "default": "opt.frame",
+          "default": 0,
           "options": [
             "None",
             "Body",
@@ -1040,7 +1041,7 @@
           "type": "slider_int",
           "label": "Tree depth",
           "binding": "Simulate::opt.bvh_depth",
-          "default": "model.opt.bvh_depth",
+          "default": 1,
           "range": "[0,20]"
         },
         {
@@ -1048,7 +1049,7 @@
           "type": "slider_int",
           "label": "Flex layer",
           "binding": "Simulate::opt.flex_layer",
-          "default": "model.opt.flex_layer",
+          "default": 0,
           "range": "[0,10]"
         },
         {

@@ -20,12 +20,33 @@ export interface SimulationState {
   realTimeIndex: number;
 }
 
+export interface SelectionState {
+  geom: number;
+  body: number;
+  joint: number;
+  name: string;
+  kind: string;
+  point: [number, number, number];
+  localPoint: [number, number, number];
+  normal: [number, number, number];
+  seq: number;
+  timestamp: number;
+}
+
+export interface PerturbState {
+  mode: string;
+  active: boolean;
+}
+
 export interface RuntimeState {
   cameraIndex: number;
   cameraLabel: string;
+  trackingGeom: number;
   lastAction: string;
   gesture: GestureState;
   drag: DragState;
+  selection: SelectionState;
+  perturb: PerturbState;
   lastAlign: AlignRuntimeState;
   lastCopy: CopyRuntimeState;
 }
@@ -41,11 +62,31 @@ export interface PhysicsState {
   actuatorGroups: Record<string, boolean>;
 }
 
+export interface ThemeState {
+  color: number;
+  spacing: number;
+  font: number;
+}
+
+export interface ViewerGroupState {
+  geom: boolean[];
+  site: boolean[];
+  joint: boolean[];
+  tendon: boolean[];
+  actuator: boolean[];
+  flex: boolean[];
+  skin: boolean[];
+}
+
 export interface RenderingState {
   voptFlags: boolean[];
   sceneFlags: boolean[];
   labelMode: number;
   frameMode: number;
+  flexLayer: number;
+  bvhDepth: number;
+  assets: unknown | null;
+  groups: ViewerGroupState;
 }
 
 export interface HudState {
@@ -55,8 +96,11 @@ export interface HudState {
   rate: number;
   measuredSlowdown: number;
   ngeom: number;
+  contacts: number;
   pausedSource: string;
   rateSource: string;
+  modelLabel: string;
+  info: Record<string, unknown> | null;
 }
 
 export interface HistoryState {
@@ -88,6 +132,18 @@ export interface KeyframeState {
   slots: Array<{ index: number; label: string; kind: string; available: boolean }>;
   lastSaved: number;
   lastLoaded: number;
+}
+
+export interface ModelState {
+  opt: Record<string, unknown>;
+  vis: Record<string, unknown>;
+  stat: Record<string, unknown>;
+  visDefaults: Record<string, unknown>;
+  cameras: Array<Record<string, unknown>>;
+  geoms: Array<Record<string, unknown>>;
+  ctrl: number[];
+  optSupport: { supported: boolean; pointers: string[] };
+  [key: string]: unknown;
 }
 
 export interface ToastState {
@@ -135,42 +191,29 @@ export interface CopyRuntimeState {
 }
 
 export interface VisualBackupsState {
-  preset: Record<string, unknown> | null;
   model: Record<string, unknown> | null;
-  sceneFlagsPreset: boolean[] | null;
+  presetSun: Record<string, unknown> | null;
+  presetMoon: Record<string, unknown> | null;
   sceneFlagsModel: boolean[] | null;
+  sceneFlagsPresetSun: boolean[] | null;
+  sceneFlagsPresetMoon: boolean[] | null;
 }
 
 export interface VisualBaselinesState {
   model: Record<string, unknown> | null;
-  preset: Record<string, unknown> | null;
   sceneFlagsModel: boolean[] | null;
-  sceneFlagsPreset: boolean[] | null;
-}
-
-export interface VisualDiagnosticsField {
-  path: (string | number)[];
-  modelValue: unknown;
-  presetValue: unknown;
-  equal: boolean;
-}
-
-export interface VisualDiagnosticsGroup {
-  id: string;
-  label: string;
-  changed: boolean;
-  fields: VisualDiagnosticsField[];
-}
-
-export interface VisualDiagnosticsState {
-  diffs: Record<string, VisualDiagnosticsGroup>;
-  timestamp: number;
+  presetSun: Record<string, unknown> | null;
+  presetMoon: Record<string, unknown> | null;
+  sceneFlagsPresetSun: boolean[] | null;
+  sceneFlagsPresetMoon: boolean[] | null;
 }
 
 export interface ViewerState {
   overlays: OverlayState;
   simulation: SimulationState;
   runtime: RuntimeState;
+  model: ModelState;
+  theme: ThemeState;
   panels: PanelState;
   physics: PhysicsState;
   rendering: RenderingState;
@@ -182,7 +225,6 @@ export interface ViewerState {
   visualSourceMode: 'model' | 'preset-sun' | 'preset-moon';
   visualBackups: VisualBackupsState;
   visualBaselines: VisualBaselinesState;
-  visualDiagnostics: VisualDiagnosticsState;
 }
 
 export interface UiControl {
@@ -192,6 +234,8 @@ export interface UiControl {
   name?: string;
   binding?: string;
   options?: string[] | string;
+  default?: unknown;
+  shortcut?: string[] | null;
 }
 
 export interface ViewerStore {
@@ -235,6 +279,29 @@ export interface BackendSnapshot {
   labelMode?: number;
   frameMode?: number;
   cameraMode?: number;
+  frameId?: number | null;
+  visual?: Record<string, unknown> | null;
+  visualDefaults?: Record<string, unknown> | null;
+  statistic?: Record<string, unknown> | null;
+  visualVersion?: number;
+  visualDefaultsVersion?: number;
+  statisticVersion?: number;
+  optionSupport?: { supported: boolean; pointers: string[] } | null;
+  renderAssets?: unknown | null;
+  groups?: ViewerGroupState | null;
+  cameras?: Array<Record<string, unknown>> | null;
+  geoms?: Array<Record<string, unknown>> | null;
+  geom_bodyid?: Int32Array | number[] | null;
+  body_parentid?: Int32Array | number[] | null;
+  body_jntadr?: Int32Array | number[] | null;
+  body_jntnum?: Int32Array | number[] | null;
+  jtype?: Int32Array | number[] | null;
+  nbody?: number;
+  njnt?: number;
+  scn_ngeom?: number;
+  nisland?: number;
+  info?: Record<string, unknown> | null;
+  contacts?: { n?: number; [key: string]: unknown } | null;
   align?: AlignRuntimeState | null;
   copyState?: CopyRuntimeState | null;
   history?: {

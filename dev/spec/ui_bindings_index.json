@@ -1756,7 +1756,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Convex_Hull",
         "control_type": "checkbox",
         "label": "Convex Hull",
         "shortcut": "H"
@@ -1774,7 +1774,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Texture",
         "control_type": "checkbox",
         "label": "Texture",
         "shortcut": "X"
@@ -1792,7 +1792,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Inertia",
         "control_type": "checkbox",
         "label": "Inertia",
         "shortcut": "I"
@@ -1810,7 +1810,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Scale_Inertia",
         "control_type": "checkbox",
         "label": "Scale Inertia",
         "shortcut": "'"
@@ -1828,7 +1828,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Perturb_Force",
         "control_type": "checkbox",
         "label": "Perturb Force",
         "shortcut": "B"
@@ -1846,7 +1846,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Perturb_Object",
         "control_type": "checkbox",
         "label": "Perturb Object",
         "shortcut": "O"
@@ -1864,7 +1864,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Contact_Point",
         "control_type": "checkbox",
         "label": "Contact Point",
         "shortcut": "C"
@@ -1882,7 +1882,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Island",
         "control_type": "checkbox",
         "label": "Island",
         "shortcut": "N"
@@ -1900,7 +1900,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Contact_Force",
         "control_type": "checkbox",
         "label": "Contact Force",
         "shortcut": "F"
@@ -1918,7 +1918,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Contact_Split",
         "control_type": "checkbox",
         "label": "Contact Split",
         "shortcut": "P"
@@ -1936,7 +1936,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Transparent",
         "control_type": "checkbox",
         "label": "Transparent",
         "shortcut": "T"
@@ -1954,7 +1954,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Auto_Connect",
         "control_type": "checkbox",
         "label": "Auto Connect",
         "shortcut": "A"
@@ -1972,7 +1972,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Joint",
         "control_type": "checkbox",
         "label": "Joint",
         "shortcut": "J"
@@ -1990,7 +1990,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Center_of_Mass",
         "control_type": "checkbox",
         "label": "Center of Mass",
         "shortcut": "M"
@@ -2008,7 +2008,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Select_Point",
         "control_type": "checkbox",
         "label": "Select Point",
         "shortcut": null
@@ -2026,7 +2026,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Static_Body",
         "control_type": "checkbox",
         "label": "Static Body",
         "shortcut": "D"
@@ -2044,7 +2044,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Skin",
         "control_type": "checkbox",
         "label": "Skin",
         "shortcut": ";"
@@ -2062,7 +2062,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Flex_Vert",
         "control_type": "checkbox",
         "label": "Flex Vert",
         "shortcut": null
@@ -2080,7 +2080,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Flex_Edge",
         "control_type": "checkbox",
         "label": "Flex Edge",
         "shortcut": null
@@ -2098,7 +2098,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Flex_Face",
         "control_type": "checkbox",
         "label": "Flex Face",
         "shortcut": null
@@ -2116,7 +2116,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Flex_Skin",
         "control_type": "checkbox",
         "label": "Flex Skin",
         "shortcut": null
@@ -2134,7 +2134,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Body_Tree",
         "control_type": "checkbox",
         "label": "Body Tree",
         "shortcut": "`"
@@ -2152,7 +2152,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Mesh_Tree",
         "control_type": "checkbox",
         "label": "Mesh Tree",
         "shortcut": "\\"
@@ -2170,7 +2170,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Camera",
         "control_type": "checkbox",
         "label": "Camera",
         "shortcut": "Q"
@@ -2188,7 +2188,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.SDF_iters",
         "control_type": "checkbox",
         "label": "SDF iters",
         "shortcut": null
@@ -2206,7 +2206,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Actuator",
         "control_type": "checkbox",
         "label": "Actuator",
         "shortcut": "U"
@@ -2224,7 +2224,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Activation",
         "control_type": "checkbox",
         "label": "Activation",
         "shortcut": ","
@@ -2242,7 +2242,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Light",
         "control_type": "checkbox",
         "label": "Light",
         "shortcut": "Z"
@@ -2260,7 +2260,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Tendon",
         "control_type": "checkbox",
         "label": "Tendon",
         "shortcut": "V"
@@ -2278,7 +2278,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Range_Finder",
         "control_type": "checkbox",
         "label": "Range Finder",
         "shortcut": "Y"
@@ -2296,7 +2296,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.model_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.model_flags.Equality",
         "control_type": "checkbox",
         "label": "Equality",
         "shortcut": "E"
@@ -3028,7 +3028,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.opengl_flags.Shadow",
         "control_type": "checkbox",
         "label": "Shadow",
         "shortcut": "S"
@@ -3046,7 +3046,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.opengl_flags.Wireframe",
         "control_type": "checkbox",
         "label": "Wireframe",
         "shortcut": "W"
@@ -3064,7 +3064,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.opengl_flags.Reflection",
         "control_type": "checkbox",
         "label": "Reflection",
         "shortcut": "R"
@@ -3082,7 +3082,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.opengl_flags.Additive",
         "control_type": "checkbox",
         "label": "Additive",
         "shortcut": "L"
@@ -3100,7 +3100,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.opengl_flags.Skybox",
         "control_type": "checkbox",
         "label": "Skybox",
         "shortcut": "K"
@@ -3118,7 +3118,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.opengl_flags.Fog",
         "control_type": "checkbox",
         "label": "Fog",
         "shortcut": "G"
@@ -3136,7 +3136,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.opengl_flags.Haze",
         "control_type": "checkbox",
         "label": "Haze",
         "shortcut": "/"
@@ -3154,7 +3154,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.opengl_flags.Segment",
         "control_type": "checkbox",
         "label": "Segment",
         "shortcut": ","
@@ -3172,7 +3172,7 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.opengl_flags.Id_Color",
         "control_type": "checkbox",
         "label": "Id Color",
         "shortcut": null
@@ -3190,27 +3190,9 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "rendering.opengl_flags.Cull_Face",
         "control_type": "checkbox",
         "label": "Cull Face",
-        "shortcut": null
-      }
-    ]
-  },
-  "Simulate::busywait": {
-    "value": {
-      "kind": "bool",
-      "size": 1
-    },
-    "occurrences": [
-      {
-        "section_id": "option",
-        "section_title": "Option",
-        "group_id": null,
-        "group_type": null,
-        "item_id": "option.busywait",
-        "control_type": "checkbox",
-        "label": "Busy Wait",
         "shortcut": null
       }
     ]
@@ -3246,79 +3228,7 @@
         "group_type": null,
         "item_id": "option.color",
         "control_type": "select",
-        "label": "Color",
-        "shortcut": null
-      }
-    ]
-  },
-  "Simulate::ctrl_noise_rate": {
-    "value": {
-      "kind": "float",
-      "size": 1
-    },
-    "occurrences": [
-      {
-        "section_id": "simulation",
-        "section_title": "Simulation",
-        "group_id": null,
-        "group_type": null,
-        "item_id": "simulation.noise_rate",
-        "control_type": "slider_float",
-        "label": "Noise rate",
-        "shortcut": null
-      }
-    ]
-  },
-  "Simulate::ctrl_noise_std": {
-    "value": {
-      "kind": "float",
-      "size": 1
-    },
-    "occurrences": [
-      {
-        "section_id": "simulation",
-        "section_title": "Simulation",
-        "group_id": null,
-        "group_type": null,
-        "item_id": "simulation.noise_scale",
-        "control_type": "slider_float",
-        "label": "Noise scale",
-        "shortcut": null
-      }
-    ]
-  },
-  "Simulate::d_->ctrl": {
-    "value": {
-      "kind": "float",
-      "size": 1
-    },
-    "occurrences": [
-      {
-        "section_id": "control",
-        "section_title": "Control",
-        "group_id": null,
-        "group_type": null,
-        "item_id": null,
-        "control_type": "slider_float",
-        "label": "Actuator control",
-        "shortcut": null
-      }
-    ]
-  },
-  "Simulate::d_->eq_active": {
-    "value": {
-      "kind": "bool",
-      "size": 1
-    },
-    "occurrences": [
-      {
-        "section_id": "equality",
-        "section_title": "Equality",
-        "group_id": null,
-        "group_type": null,
-        "item_id": null,
-        "control_type": "checkbox",
-        "label": "Equality constraint",
+        "label": "Color theme",
         "shortcut": null
       }
     ]
@@ -3334,7 +3244,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Constraint",
         "control_type": "checkbox",
         "label": "Constraint",
         "shortcut": null
@@ -3352,7 +3262,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Equality",
         "control_type": "checkbox",
         "label": "Equality",
         "shortcut": null
@@ -3370,7 +3280,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Filterparent",
         "control_type": "checkbox",
         "label": "Filterparent",
         "shortcut": null
@@ -3388,7 +3298,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Actuation",
         "control_type": "checkbox",
         "label": "Actuation",
         "shortcut": null
@@ -3406,7 +3316,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Refsafe",
         "control_type": "checkbox",
         "label": "Refsafe",
         "shortcut": null
@@ -3424,7 +3334,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Sensor",
         "control_type": "checkbox",
         "label": "Sensor",
         "shortcut": null
@@ -3442,7 +3352,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Midphase",
         "control_type": "checkbox",
         "label": "Midphase",
         "shortcut": null
@@ -3460,7 +3370,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Eulerdamp",
         "control_type": "checkbox",
         "label": "Eulerdamp",
         "shortcut": null
@@ -3478,7 +3388,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.AutoReset",
         "control_type": "checkbox",
         "label": "AutoReset",
         "shortcut": null
@@ -3496,7 +3406,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.NativeCCD",
         "control_type": "checkbox",
         "label": "NativeCCD",
         "shortcut": null
@@ -3514,7 +3424,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Island",
         "control_type": "checkbox",
         "label": "Island",
         "shortcut": null
@@ -3532,7 +3442,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Frictionloss",
         "control_type": "checkbox",
         "label": "Frictionloss",
         "shortcut": null
@@ -3550,7 +3460,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Limit",
         "control_type": "checkbox",
         "label": "Limit",
         "shortcut": null
@@ -3568,7 +3478,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Contact",
         "control_type": "checkbox",
         "label": "Contact",
         "shortcut": null
@@ -3586,7 +3496,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Spring",
         "control_type": "checkbox",
         "label": "Spring",
         "shortcut": null
@@ -3604,7 +3514,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Damper",
         "control_type": "checkbox",
         "label": "Damper",
         "shortcut": null
@@ -3622,7 +3532,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Gravity",
         "control_type": "checkbox",
         "label": "Gravity",
         "shortcut": null
@@ -3640,7 +3550,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Clampctrl",
         "control_type": "checkbox",
         "label": "Clampctrl",
         "shortcut": null
@@ -3658,7 +3568,7 @@
         "section_title": "Physics",
         "group_id": "physics.disable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.disable_flags.Warmstart",
         "control_type": "checkbox",
         "label": "Warmstart",
         "shortcut": null
@@ -3676,7 +3586,7 @@
         "section_title": "Physics",
         "group_id": "physics.enable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.enable_flags.Override",
         "control_type": "checkbox",
         "label": "Override",
         "shortcut": null
@@ -3694,7 +3604,7 @@
         "section_title": "Physics",
         "group_id": "physics.enable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.enable_flags.Energy",
         "control_type": "checkbox",
         "label": "Energy",
         "shortcut": null
@@ -3712,7 +3622,7 @@
         "section_title": "Physics",
         "group_id": "physics.enable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.enable_flags.Fwdinv",
         "control_type": "checkbox",
         "label": "Fwdinv",
         "shortcut": null
@@ -3730,7 +3640,7 @@
         "section_title": "Physics",
         "group_id": "physics.enable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.enable_flags.InvDiscrete",
         "control_type": "checkbox",
         "label": "InvDiscrete",
         "shortcut": null
@@ -3748,7 +3658,7 @@
         "section_title": "Physics",
         "group_id": "physics.enable_flags",
         "group_type": "checkbox_list",
-        "item_id": null,
+        "item_id": "physics.enable_flags.MultiCCD",
         "control_type": "checkbox",
         "label": "MultiCCD",
         "shortcut": null
@@ -3866,7 +3776,7 @@
   "Simulate::field": {
     "value": {
       "kind": "string",
-      "size": 0
+      "size": 1
     },
     "occurrences": [
       {
@@ -3896,26 +3806,6 @@
         "control_type": "select",
         "label": "Font",
         "shortcut": null
-      }
-    ]
-  },
-  "Simulate::fullscreen": {
-    "value": {
-      "kind": "bool",
-      "size": 1
-    },
-    "occurrences": [
-      {
-        "section_id": "option",
-        "section_title": "Option",
-        "group_id": null,
-        "group_type": null,
-        "item_id": "option.fullscreen",
-        "control_type": "checkbox",
-        "label": "Fullscreen",
-        "shortcut": [
-          "F5"
-        ]
       }
     ]
   },
@@ -3977,24 +3867,6 @@
       }
     ]
   },
-  "Simulate::joint slider": {
-    "value": {
-      "kind": "float",
-      "size": 1
-    },
-    "occurrences": [
-      {
-        "section_id": "joint",
-        "section_title": "Joint",
-        "group_id": null,
-        "group_type": null,
-        "item_id": null,
-        "control_type": "slider_float",
-        "label": "Joint DOF",
-        "shortcut": null
-      }
-    ]
-  },
   "Simulate::key": {
     "value": {
       "kind": "int",
@@ -4045,24 +3917,6 @@
         "item_id": "rendering.flex_layer",
         "control_type": "slider_int",
         "label": "Flex layer",
-        "shortcut": null
-      }
-    ]
-  },
-  "Simulate::pause_update": {
-    "value": {
-      "kind": "bool",
-      "size": 1
-    },
-    "occurrences": [
-      {
-        "section_id": "option",
-        "section_title": "Option",
-        "group_id": null,
-        "group_type": null,
-        "item_id": "option.pause_update",
-        "control_type": "checkbox",
-        "label": "Pause update",
         "shortcut": null
       }
     ]
@@ -4161,20 +4015,20 @@
       }
     ]
   },
-  "Simulate::vsync": {
+  "Simulate::tracking_geom": {
     "value": {
-      "kind": "bool",
+      "kind": "enum",
       "size": 1
     },
     "occurrences": [
       {
-        "section_id": "option",
-        "section_title": "Option",
+        "section_id": "rendering",
+        "section_title": "Rendering",
         "group_id": null,
         "group_type": null,
-        "item_id": "option.vsync",
-        "control_type": "checkbox",
-        "label": "Vertical Sync",
+        "item_id": "rendering.tracking_geom",
+        "control_type": "select",
+        "label": "Tracking geom",
         "shortcut": null
       }
     ]
