@@ -9689,11 +9689,17 @@ function createEnvironmentManager({
           let loader = null;
           if (isEXR) {
             const mod = await import('three/addons/loaders/EXRLoader.js');
-            if (!mod || !mod.EXRLoader) return false;
+            if (!mod || !mod.EXRLoader) {
+              ctx.hdriLoading = false;
+              return false;
+            }
             loader = new mod.EXRLoader().setDataType(THREE_NS.FloatType);
           } else {
             const mod = await import('three/addons/loaders/RGBELoader.js');
-            if (!mod || !mod.RGBELoader) return false;
+            if (!mod || !mod.RGBELoader) {
+              ctx.hdriLoading = false;
+              return false;
+            }
             loader = new mod.RGBELoader().setDataType(THREE_NS.FloatType);
           }
           ctx.hdriLoading = true;
@@ -9768,6 +9774,8 @@ function createEnvironmentManager({
         }
       };
       const token = hdriGen;
+      // Mark HDRI as loading immediately so we don't treat expected async latency as a fallback.
+      ctx.hdriLoading = true;
       ctx.hdriLoadPromise = (async () => {
         // Single preset: choose hausdorf or NightSkyHDRI008_4K based on visualPresetKey.
         // eslint-disable-next-line no-await-in-loop
