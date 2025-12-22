@@ -53,19 +53,10 @@ Thumbs.db
 .vite/
 .parcel-cache/
 
-# Generated UI artifacts (build-time)
-dev/spec/ui_bindings_index.json
-dev/spec/ui_spec.schema.json
-dev/viewer_structs.mjs
-dev/viewer_state_types.ts
-dev/viewer_shared.mjs
-dev/viewer_defaults.mjs
-
-# Generated protocol artifacts (build-time)
-dev/protocol.gen.mjs
-dev/dispatch.gen.mjs
-dev/physics.worker.mjs
-dev/viewer_backend.mjs
+# Generated UI/protocol artifacts are committed for GitHub Pages runtime.
+# Re-generate via:
+#   node tools/generate_ui_artifacts.mjs
+#   node tools/generate_worker_protocol.mjs
 
 # Root markdown files (keep README tracked)
 /*.md
