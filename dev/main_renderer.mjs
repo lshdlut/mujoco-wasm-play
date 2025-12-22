@@ -18,18 +18,20 @@ import {
   strictOverride,
 } from './viewer_runtime.mjs';
 import { compatFallback } from './fallbacks.mjs';
-import { DEFAULT_VOPT_FLAGS, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
-import {
-  assignStructPath,
-  bool,
-  cloneStruct,
-  resolveStructPath,
-  toNumber,
-} from './viewer_shared.mjs';
-import { STAT_FIELD_DESCRIPTORS, VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
+// TODO: delete unused viewer defaults and shared helpers once confirmed not needed.
+// import { DEFAULT_VOPT_FLAGS, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
+// import {
+//   assignStructPath,
+//   bool,
+//   cloneStruct,
+//   resolveStructPath,
+//   toNumber,
+// } from './viewer_shared.mjs';
+// import { STAT_FIELD_DESCRIPTORS, VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
 import { pushSkyDebug } from './main_environment.mjs';
 import { applySpecAction } from './main_ui.mjs';
 
+/* TODO delete unused helper once confirmed not needed.
 function createInfiniteGridHelper({
   size1 = 1.0,
   size2 = 10.0,
@@ -100,6 +102,7 @@ function createInfiniteGridHelper({
   };
   return mesh;
 }
+*/
 
 function createInfiniteGroundHelper({
   color = 0xffffff,
@@ -362,30 +365,34 @@ const __TMP_VEC3_D = new THREE.Vector3();
 const __TMP_COLOR = new THREE.Color();
 const LABEL_DPR_CAP = 2;
 const LABEL_GEOM_LIMIT = 120;
-const TEMP_MAT4 = new THREE.Matrix4();
+// TODO delete unused temporary matrix after confirming no haze helper use.
+// const TEMP_MAT4 = new THREE.Matrix4();
 const DEFAULT_CLEAR_HEX = 0xd6dce4;
 const GROUND_DISTANCE = 2000;
 const PLANE_SIZE_EPS = 1e-9;
 const RENDER_ORDER = Object.freeze({
   GROUND: -50,
 });
-const HAZE_TMP_HEAD = new THREE.Vector3();
-const HAZE_TMP_PLANE_POS = new THREE.Vector3();
-const HAZE_TMP_NORMAL = new THREE.Vector3();
-const HAZE_TMP_DELTA = new THREE.Vector3();
-const HAZE_TMP_MAT_HEAD = new THREE.Matrix4();
-const HAZE_TMP_MAT_SCALE = new THREE.Matrix4();
-const HAZE_TMP_MAT_ROT = new THREE.Matrix4();
-const HAZE_TMP_MAT_LOCAL_T = new THREE.Matrix4();
-const HAZE_TMP_MAT_LOCAL_S = new THREE.Matrix4();
-const HAZE_TMP_MAT_FINAL = new THREE.Matrix4();
+// TODO delete these haze temporaries when haze support is removed.
+// const HAZE_TMP_HEAD = new THREE.Vector3();
+// const HAZE_TMP_PLANE_POS = new THREE.Vector3();
+// const HAZE_TMP_NORMAL = new THREE.Vector3();
+// const HAZE_TMP_DELTA = new THREE.Vector3();
+// const HAZE_TMP_MAT_HEAD = new THREE.Matrix4();
+// const HAZE_TMP_MAT_SCALE = new THREE.Matrix4();
+// const HAZE_TMP_MAT_ROT = new THREE.Matrix4();
+// const HAZE_TMP_MAT_LOCAL_T = new THREE.Matrix4();
+// const HAZE_TMP_MAT_LOCAL_S = new THREE.Matrix4();
+// const HAZE_TMP_MAT_FINAL = new THREE.Matrix4();
 const TRANSPARENT_BIN_CAM_POS = new THREE.Vector3();
 const TRANSPARENT_BIN_CAM_DIR = new THREE.Vector3();
 const TRANSPARENT_BIN_WORLD_POS = new THREE.Vector3();
 
+/* TODO delete unused helper once camera controller cleanup finishes.
 function isMatrixLike(value) {
   return value && typeof value.copy === 'function';
 }
+*/
 
 function getWorldScene(ctx, override = null) {
   if (override) return override;
