@@ -9,7 +9,7 @@ Dev HTTP server for mujoco-wasm-play.
   Cache-Control: public, max-age=0, must-revalidate
 
 Usage:
-  python scripts/dev_server.py --root . --port 8080
+  python dev_server.py --root . --port 8080
 """
 from __future__ import annotations
 import argparse
@@ -107,6 +107,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 

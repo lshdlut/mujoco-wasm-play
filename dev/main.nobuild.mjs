@@ -14,7 +14,7 @@ import {
   strictEnsure,
   strictOverride,
 } from './viewer_runtime.mjs';
-import { compatFallback } from './compat/fallbacks.mjs';
+import { compatFallback } from './fallbacks.mjs';
 import { DEFAULT_REALTIME_INDEX, DEFAULT_VOPT_FLAGS, REALTIME_LEVELS, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
 import {
   assignStructPath,

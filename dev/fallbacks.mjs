@@ -1,4 +1,4 @@
-import { isCompatEnabled, strictFallback } from '../viewer_runtime.mjs';
+import { isCompatEnabled, strictFallback } from './viewer_runtime.mjs';
 
 // Compat fallbacks are centralized here so fallback behavior is explicit and auditable.
 // Keeping the allowlist in one module avoids scattered ad-hoc decisions across main/worker code paths.
