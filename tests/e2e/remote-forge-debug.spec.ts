@@ -41,6 +41,7 @@ test('remote forge worker debug', async ({ page }) => {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[forge-import-fail]', String(err));
+      throw err;
     }
   }, `${forgeBase}mujoco.js`);
 
@@ -53,6 +54,7 @@ test('remote forge worker debug', async ({ page }) => {
     } catch (err: any) {
       // eslint-disable-next-line no-console
       console.error('[worker-module-import-fail]', String(err?.message || err));
+      throw err;
     }
   });
 

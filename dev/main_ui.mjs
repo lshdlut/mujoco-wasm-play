@@ -64,6 +64,8 @@ async function ensureBindingIndex() {
       })
       .then((json) => json)
       .catch((err) => {
+        bindingIndex = null;
+        bindingIndexPromise = null;
         logError('[bindings] load failed', err);
         strictCatch(err, 'main:bindings_index_load');
         throw err;
@@ -170,6 +172,14 @@ function resolveBindingSpec(binding, control = null) {
   if (raw === 'mjvOption::label') return { kind: 'label_mode' };
   if (raw === 'mjvOption::frame') return { kind: 'frame_mode' };
 
+  if (isStrictEnabled()) {
+    const id = control?.item_id ?? control?.name ?? control?.label ?? null;
+    const err = new Error(`[bindings] unknown binding: ${raw}${id ? ` (control=${id})` : ''}`);
+    err.detail = { binding: raw, controlId: id };
+    strictCatch(err, 'main:bindings_unknown');
+  } else {
+    logWarn('[bindings] unknown binding', raw);
+  }
   return { kind: 'unknown', binding: raw };
 }
 
@@ -220,7 +230,7 @@ function toBoolean(value) {
   if (typeof value === 'number') return value !== 0;
   if (typeof value === 'string') {
     const token = value.trim().toLowerCase();
-    return token === '1' || token === 'true' || token === 'yes' || token === 'on';
+    return token === '1' || token === 'true' || token === 'yes' || token === 'on' || token === 'run';
   }
   if (value && typeof value === 'object') {
     if ('checked' in value) return !!value.checked;
@@ -328,6 +338,12 @@ async function prepareBindingUpdate(control, rawValue) {
   const meta = await ensureBindingIndex();
   const entry = meta?.[binding];
   if (!entry || !entry.value) {
+    if (isStrictEnabled()) {
+      const id = control?.item_id ?? control?.name ?? control?.label ?? null;
+      const err = new Error(`[bindings] missing metadata for ${binding}${id ? ` (control=${id})` : ''}`);
+      err.detail = { binding, controlId: id };
+      strictCatch(err, 'main:bindings_missing_metadata');
+    }
     logWarn('[bindings] no binding metadata for', binding);
     return null;
   }
@@ -354,13 +370,6 @@ async function prepareBindingUpdate(control, rawValue) {
   const normalised = normaliseValueByKind(kind, size, rawValue, control);
   if (normalised == null) {
     logWarn('[bindings] unable to normalise value for', binding, rawValue);
-    if (control && typeof control.binding === 'string' && control.binding.startsWith('mjVisual::headlight.')) {
-      try {
-        addToast(`[${control.label || 'headlight'}] invalid vector input`);
-      } catch (err) {
-        strictCatch(err, 'main:addToast');
-      }
-    }
     return null;
   }
   return {
@@ -2020,16 +2029,6 @@ function appendUpdateOptions(binding, updater) {
   }
 }
 
-function coerceBoolean(value) {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value !== 0;
-  if (typeof value === 'string') {
-    const lowered = value.toLowerCase();
-    return lowered === '1' || lowered === 'true' || lowered === 'run' || lowered === 'on' || lowered === 'yes';
-  }
-  return !!value;
-}
-
 function pushToast(message) {
   if (!message) return;
   try {
@@ -2187,6 +2186,16 @@ function resolveCameraModeEntries() {
     });
   }
   return entries;
+}
+
+function getCameraModeCount() {
+  try {
+    const entries = resolveCameraModeEntries();
+    return Math.max(1, Array.isArray(entries) ? entries.length : 1);
+  } catch (err) {
+    strictCatch(err, 'main:getCameraModeCount');
+    return Math.max(1, Array.isArray(cameraPresets) ? cameraPresets.length : 1);
+  }
 }
 
 function syncCameraSelectOptions(select, control) {
@@ -2687,25 +2696,20 @@ function shortcutFromEvent(event) {
     container.append(row);
 
     let current = false;
-    const binding = createBinding(control, {
-      getValue: () => current,
-      applyValue: (value) => {
-        const active = coerceBoolean(value);
-        current = active;
-        input.checked = !!active;
-        input.setAttribute('aria-checked', active ? 'true' : 'false');
-        label.classList.toggle('is-active', !!active);
-      },
+      const binding = createBinding(control, {
+        getValue: () => current,
+        applyValue: (value) => {
+          const active = toBoolean(value);
+          current = active;
+          input.checked = !!active;
+          input.setAttribute('aria-checked', active ? 'true' : 'false');
+          label.classList.toggle('is-active', !!active);
+        },
     });
 
     const commitToggle = guardBinding(binding, async (nextValue) => {
       const active = !!nextValue;
       binding.setValue(active);
-      try {
-        // eslint-disable-next-line no-console
-      } catch (err) {
-        strictCatch(err, 'main:checkbox_toggle_debug');
-      }
       await applySpecAction(store, backend, control, active);
       // UX hint: if enabling Contact Point but there are no contacts yet, show a brief tip
       try {
@@ -2756,7 +2760,7 @@ function shortcutFromEvent(event) {
     button.setAttribute('aria-pressed', 'false');
 
     const sync = (running) => {
-      const active = coerceBoolean(running);
+      const active = toBoolean(running);
       button.textContent = active ? 'Run' : 'Pause';
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -2765,10 +2769,10 @@ function shortcutFromEvent(event) {
     const binding = createBinding(control, {
       getValue: () => {
         const current = readControlValue(store.get(), control);
-        return coerceBoolean(current);
+        return toBoolean(current);
       },
       applyValue: (value) => {
-        const active = coerceBoolean(value);
+        const active = toBoolean(value);
         sync(active);
       },
     });
@@ -3886,7 +3890,7 @@ function shortcutFromEvent(event) {
             const type = typeof control.type === 'string' ? control.type.toLowerCase() : '';
             let value = target.value;
             if (type === 'checkbox' || type === 'toggle') {
-              value = coerceBoolean(value);
+              value = toBoolean(value);
             }
             await applySpecAction(store, backend, control, value);
           } catch (error) {
@@ -4096,7 +4100,7 @@ function shortcutFromEvent(event) {
         const nextIndex = (currentIndex + 1) % (options.length || 1);
         next = options[nextIndex] ?? options[0];
       } else {
-        next = !coerceBoolean(current);
+        next = !toBoolean(current);
       }
     }
 
@@ -4265,7 +4269,7 @@ function shortcutFromEvent(event) {
           items: eqs,
           className: 'equality-toggle-container',
           updateExisting: (container, entries) => {
-            // Stable update: only sync active state and label,不重建 DOM，避免交互时节点被移除
+            // Stable update: only sync active state + label; do not rebuild DOM to avoid removing nodes mid-interaction.
             for (const eq of entries) {
               const checkbox = container.querySelector(
                 `input[type="checkbox"][data-eq-index="${eq.index}"]`,
@@ -4327,15 +4331,6 @@ function shortcutFromEvent(event) {
     },
     dispose,
   };
-  const getCameraModeCount = () => {
-    try {
-      return Math.max(1, 2 + (store.get()?.model?.cameras?.length || 0));
-    } catch (err) {
-      strictCatch(err, 'main:getCameraModeCount');
-      return Math.max(1, cameraPresets.length || 1);
-    }
-  };
-
 }
 
 

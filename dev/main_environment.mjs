@@ -6,7 +6,6 @@ import {
   strictCatch,
   strictEnsure,
 } from './viewer_runtime.mjs';
-import { compatFallback } from './fallbacks.mjs';
 
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
@@ -1160,10 +1159,6 @@ function createEnvironmentManager({
     }
     // Fallback: if HDRI is not ready, reuse the model cache first, otherwise generate a gradient environment.
     if (!ctx.envFromHDRI && !ctx.hdriLoading && !ctx.hdriReady) {
-      compatFallback('environment.hdri_fallback', {
-        allowHDRI: !!allowHDRI,
-        presetKey: preset?.key || null,
-      });
       let envRT = null;
       let background = null;
       const modelCached = cache?.model || null;

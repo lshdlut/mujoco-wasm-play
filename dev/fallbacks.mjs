@@ -8,7 +8,6 @@ const COMPAT_FALLBACK_ALLOWLIST = new Set([
   'forgeBase.malformed',
   'loadXmlWithFallback',
   'mesh.convex_hull_missing',
-  'environment.hdri_fallback',
 ]);
 
 export function compatFallback(name, detail = null, fallbackFn = null) {
