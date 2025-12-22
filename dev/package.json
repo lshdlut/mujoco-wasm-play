@@ -9,10 +9,18 @@
     "lint": "echo TBA",
     "test": "echo TBA",
     "build": "echo TBA",
+    "dev": "python ./dev_server.py --root . --port 8080",
+    "generate": "npm run generate:ui && npm run generate:protocol",
+    "generate:protocol": "node ./tools/generate_worker_protocol.mjs",
+    "generate:ui": "node ./tools/generate_ui_artifacts.mjs",
+    "loc": "node ./tools/loc_report.mjs",
+    "prebuild": "npm run generate",
+    "predev": "npm run generate",
     "smoke": "node ./local_tools/scripts/tmp_smoke.mjs",
     "spec:lint": "node ./local_tools/scripts/ci/validate_spec.mjs",
     "test:e2e": "playwright test",
-    "ci": "npm run spec:lint && playwright test --reporter=list --timeout=90000"
+    "ci:guard": "node ./tools/forbid_patterns.mjs",
+    "ci": "npm run spec:lint && npm run ci:guard && playwright test --reporter=list --timeout=90000"
   },
   "devDependencies": {
     "@playwright/test": "^1.45.0",

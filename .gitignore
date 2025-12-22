@@ -59,6 +59,17 @@ Thumbs.db
 .vite/
 .parcel-cache/
 
+# Generated UI artifacts (build-time)
+dev/spec/ui_bindings_index.json
+dev/spec/ui_spec.schema.json
+dev/viewer_structs.mjs
+dev/viewer_state_types.ts
+dev/viewer_shared.mjs
+dev/viewer_defaults.mjs
+
+# Generated protocol artifacts (build-time)
+dev/generated/
+
 # Root markdown files (keep README tracked)
 /*.md
 !/README.md

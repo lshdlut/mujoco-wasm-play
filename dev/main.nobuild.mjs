@@ -12,9 +12,9 @@ import {
   logError,
   strictCatch,
   strictEnsure,
-  strictFallback,
   strictOverride,
 } from './viewer_runtime.mjs';
+import { compatFallback } from './compat/fallbacks.mjs';
 import { DEFAULT_REALTIME_INDEX, DEFAULT_VOPT_FLAGS, REALTIME_LEVELS, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
 import {
   assignStructPath,
@@ -722,8 +722,8 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (typeof snapshot.rateSource === 'string') {
     draft.hud.rateSource = snapshot.rateSource;
   }
-  if (snapshot.info) {
-    draft.hud.info = { ...snapshot.info };
+  if (snapshot.info && typeof snapshot.info === 'object') {
+    draft.hud.info = cloneStruct(snapshot.info) || {};
   }
   if (typeof snapshot.paused === 'boolean') {
     draft.simulation.run = !snapshot.paused;
@@ -731,52 +731,69 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (snapshot.gesture) {
     const gesture = snapshot.gesture;
     const current = draft.runtime.gesture ?? {};
-    draft.runtime.gesture = {
-      ...current,
-      ...gesture,
-    };
+    const pointerSource = gesture.pointer ?? current.pointer ?? null;
+    const pointer = pointerSource && typeof pointerSource === 'object'
+      ? {
+          x: Number(pointerSource.x) || 0,
+          y: Number(pointerSource.y) || 0,
+          dx: Number(pointerSource.dx) || 0,
+          dy: Number(pointerSource.dy) || 0,
+          buttons: Number(pointerSource.buttons ?? 0),
+          pressure: Number(pointerSource.pressure ?? 0),
+        }
+      : null;
+    const modeValue = typeof gesture.mode === 'string'
+      ? gesture.mode
+      : (typeof current.mode === 'string' ? current.mode : 'idle');
+    const phase = typeof gesture.phase === 'string'
+      ? gesture.phase
+      : (typeof current.phase === 'string' ? current.phase : 'idle');
+    draft.runtime.gesture = { mode: modeValue, phase, pointer };
     if (!draft.runtime?.perturb?.active) {
-      const mode = typeof gesture.mode === 'string' ? gesture.mode : 'idle';
-      draft.runtime.lastAction = mode !== 'idle' ? mode : (draft.runtime.lastAction || 'idle');
+      draft.runtime.lastAction = modeValue !== 'idle' ? modeValue : (draft.runtime.lastAction || 'idle');
     }
   }
   if (snapshot.drag) {
+    const current = draft.runtime.drag ?? {};
+    const source = snapshot.drag;
     draft.runtime.drag = {
-      ...(draft.runtime.drag || {}),
-      ...snapshot.drag,
+      dx: Number(source.dx ?? current.dx) || 0,
+      dy: Number(source.dy ?? current.dy) || 0,
     };
   }
   if (snapshot.align) {
     const current = draft.runtime.lastAlign || {};
+    const centerSource = Array.isArray(snapshot.align.center)
+      ? snapshot.align.center
+      : (Array.isArray(current.center) ? current.center : null);
+    const center = Array.isArray(centerSource)
+      ? centerSource.slice(0, 3).map((n) => Number(n) || 0)
+      : [0, 0, 0];
     draft.runtime.lastAlign = {
-      ...current,
-      ...snapshot.align,
-      center: Array.isArray(snapshot.align.center)
-        ? snapshot.align.center.slice(0, 3).map((n) => Number(n) || 0)
-        : current.center ?? [0, 0, 0],
-      radius: Number(snapshot.align.radius) || 0,
       seq: Number(snapshot.align.seq) || current.seq || 0,
+      center,
+      radius: Number(snapshot.align.radius) || current.radius || 0,
       timestamp: Number(snapshot.align.timestamp) || Date.now(),
       source: snapshot.align.source || current.source || 'backend',
     };
   }
   if (snapshot.copyState) {
     const current = draft.runtime.lastCopy || {};
+    const qposPreview = Array.isArray(snapshot.copyState.qposPreview)
+      ? snapshot.copyState.qposPreview.map((n) => Number(n) || 0)
+      : (Array.isArray(current.qposPreview) ? current.qposPreview.slice() : []);
+    const qvelPreview = Array.isArray(snapshot.copyState.qvelPreview)
+      ? snapshot.copyState.qvelPreview.map((n) => Number(n) || 0)
+      : (Array.isArray(current.qvelPreview) ? current.qvelPreview.slice() : []);
     draft.runtime.lastCopy = {
-      ...current,
-      ...snapshot.copyState,
       seq: Number(snapshot.copyState.seq) || current.seq || 0,
       precision: snapshot.copyState.precision || current.precision || 'standard',
       nq: Number(snapshot.copyState.nq) || 0,
       nv: Number(snapshot.copyState.nv) || 0,
       timestamp: Number(snapshot.copyState.timestamp) || Date.now(),
       complete: !!snapshot.copyState.complete,
-      qposPreview: Array.isArray(snapshot.copyState.qposPreview)
-        ? snapshot.copyState.qposPreview.map((n) => Number(n) || 0)
-        : current.qposPreview ?? [],
-      qvelPreview: Array.isArray(snapshot.copyState.qvelPreview)
-        ? snapshot.copyState.qvelPreview.map((n) => Number(n) || 0)
-        : current.qvelPreview ?? [],
+      qposPreview,
+      qvelPreview,
     };
   }
   if (snapshot.history) {
@@ -847,7 +864,10 @@ function mergeBackendSnapshot(draft, snapshot) {
   }
   if (snapshot.watchSources) {
     const watch = ensureWatchState(draft);
-    watch.sources = { ...snapshot.watchSources };
+    watch.sources = {};
+    for (const [key, value] of Object.entries(snapshot.watchSources)) {
+      watch.sources[key] = value;
+    }
   }
   if (Array.isArray(snapshot.voptFlags)) {
     rendering.voptFlags = snapshot.voptFlags.map((flag) => !!flag);
@@ -885,11 +905,11 @@ function mergeBackendSnapshot(draft, snapshot) {
   if (snapshot.renderAssets) {
     rendering.assets = snapshot.renderAssets;
   }
-  if (snapshot.options) {
-    model.opt = {
-      ...(model.opt || {}),
-      ...snapshot.options,
-    };
+  if (snapshot.options && typeof snapshot.options === 'object') {
+    const opt = model.opt || (model.opt = {});
+    for (const [key, value] of Object.entries(snapshot.options)) {
+      opt[key] = value;
+    }
     if (typeof snapshot.options.disableflags === 'number' && Number.isFinite(snapshot.options.disableflags)) {
       physics.disableFlags = flagsFromMask(snapshot.options.disableflags, DISABLE_FLAG_LABELS, false);
     }
@@ -930,24 +950,20 @@ function mergeBackendSnapshot(draft, snapshot) {
       model.visDefaults = nextDefaults;
       baselines.model = cloneStruct(nextDefaults);
       baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
-      baselines.presetSun = applyPresetOverridesToStruct(baselines.model);
-      baselines.sceneFlagsPresetSun = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
-      baselines.presetMoon = cloneStruct(baselines.presetSun);
-      baselines.sceneFlagsPresetMoon = baselines.sceneFlagsPresetSun
-        ? [...baselines.sceneFlagsPresetSun]
-        : (baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null);
+      baselines.presetSun = null;
+      baselines.sceneFlagsPresetSun = null;
+      baselines.presetMoon = null;
+      baselines.sceneFlagsPresetMoon = null;
       lastVisualDefaultsVersion = visualDefaultsVersion;
       applied.push('visualDefaults');
     }
   } else if (!baselines.model && snapshot.visual) {
     baselines.model = cloneStruct(snapshot.visual);
     baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
-    baselines.presetSun = applyPresetOverridesToStruct(baselines.model);
-    baselines.sceneFlagsPresetSun = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
-    baselines.presetMoon = cloneStruct(baselines.presetSun);
-    baselines.sceneFlagsPresetMoon = baselines.sceneFlagsPresetSun
-      ? [...baselines.sceneFlagsPresetSun]
-      : (baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null);
+    baselines.presetSun = null;
+    baselines.sceneFlagsPresetSun = null;
+    baselines.presetMoon = null;
+    baselines.sceneFlagsPresetMoon = null;
   }
   if (snapshot.cameras) {
     model.cameras = Array.isArray(snapshot.cameras) ? snapshot.cameras.slice() : [];
@@ -993,8 +1009,14 @@ function mergeBackendSnapshot(draft, snapshot) {
       applied.push('statistic');
     }
   }
-  if (snapshot.optionSupport) {
-    model.optSupport = { ...snapshot.optionSupport };
+  if (snapshot.optionSupport && typeof snapshot.optionSupport === 'object') {
+    const pointers = Array.isArray(snapshot.optionSupport.pointers)
+      ? snapshot.optionSupport.pointers.slice()
+      : [];
+    model.optSupport = {
+      supported: !!snapshot.optionSupport.supported,
+      pointers,
+    };
   }
   if (typeof snapshot.cameraMode === 'number' && Number.isFinite(snapshot.cameraMode)) {
     const mode = snapshot.cameraMode | 0;
@@ -1574,8 +1596,9 @@ const VISUAL_OVERRIDE_PRESET = [
   { path: ['rgba', 'selectpoint'], kind: 'float_vec', size: 4, value: [0.9, 0.9, 0.1, 1] },
 ];
 
-function applyPresetOverridesToStruct(base) {
+function applyPresetOverridesToStruct(base, presetLabel) {
   const source = cloneStruct(base) || {};
+  const preset = typeof presetLabel === 'string' && presetLabel ? presetLabel : 'preset';
   for (const entry of VISUAL_OVERRIDE_PRESET) {
     const beforeRaw = resolveStructPath(source, entry.path);
     const before = Array.isArray(beforeRaw) ? beforeRaw.slice() : beforeRaw;
@@ -1583,6 +1606,7 @@ function applyPresetOverridesToStruct(base) {
     assignStructPath(source, entry.path, overrideValue);
     strictOverride('applyPresetOverridesToStruct', {
       source: 'visual_preset',
+      preset,
       path: Array.isArray(entry.path) ? entry.path.slice() : [],
       kind: entry.kind || null,
       size: entry.size || null,
@@ -1640,14 +1664,16 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       baselines.model = cloneStruct(baselineVisual);
       baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
     }
-    if (!baselines.presetSun && baselines.model) {
-      const presetBase = applyPresetOverridesToStruct(baselines.model);
+    const wantsPreset = targetMode === 'preset-sun' || targetMode === 'preset-moon';
+    if (wantsPreset && !baselines.presetSun && baselines.model) {
+      const presetBase = applyPresetOverridesToStruct(baselines.model, 'preset-sun');
       baselines.presetSun = cloneStruct(presetBase);
       baselines.sceneFlagsPresetSun = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
     }
-    if (!baselines.presetMoon && baselines.presetSun) {
+    if (targetMode === 'preset-moon' && !baselines.presetMoon) {
       // Start moon from sun baseline; can diverge over time via backups.
-      baselines.presetMoon = cloneStruct(baselines.presetSun);
+      const moonBase = baselines.presetSun || baselines.model;
+      baselines.presetMoon = cloneStruct(moonBase);
       baselines.sceneFlagsPresetMoon = baselines.sceneFlagsPresetSun
         ? [...baselines.sceneFlagsPresetSun]
         : baselines.sceneFlagsModel
@@ -4391,7 +4417,7 @@ function createMeshGeometryFromAssets(assets, dataId) {
 
     // Fallback: if convex hull data is missing, render the original mesh.
     if (hull) {
-      strictFallback('mesh.convex_hull_missing', { meshId, dataId: rawDataId });
+      compatFallback('mesh.convex_hull_missing', { meshId, dataId: rawDataId });
     }
   }
 
@@ -9774,7 +9800,7 @@ function createEnvironmentManager({
     }
     // Fallback: if HDRI is not ready, reuse the model cache first, otherwise generate a gradient environment.
     if (!ctx.envFromHDRI && !ctx.hdriLoading && !ctx.hdriReady) {
-      strictFallback('environment.hdri_fallback', {
+      compatFallback('environment.hdri_fallback', {
         allowHDRI: !!allowHDRI,
         presetKey: preset?.key || null,
       });

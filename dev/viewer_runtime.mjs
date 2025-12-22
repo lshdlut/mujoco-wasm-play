@@ -340,6 +340,8 @@ export function buildWorkerUrl(baseUrl, params = viewerSearchParams) {
   if (forgeBase) url.searchParams.set('forgeBase', forgeBase);
   const strictMode = isStrictEnabled(params);
   if (strictMode) url.searchParams.set('strict', '1');
+  const compatMode = isCompatEnabled(params);
+  if (compatMode) url.searchParams.set('compat', '1');
   const logToken = params.get('log');
   if (logToken) url.searchParams.set('log', logToken);
   const verboseToken = params.get('verbose');
@@ -410,6 +412,17 @@ function resolveStrictFlag(params = viewerSearchParams) {
 
 export function isStrictEnabled(params = viewerSearchParams) {
   return resolveStrictFlag(params);
+}
+
+function resolveCompatFlag(params = viewerSearchParams) {
+  if (typeof globalThis !== 'undefined' && globalThis.PLAY_COMPAT != null) {
+    return !!globalThis.PLAY_COMPAT;
+  }
+  return readBoolean('compat', params) === true;
+}
+
+export function isCompatEnabled(params = viewerSearchParams) {
+  return resolveCompatFlag(params);
 }
 
 function ensureStrictState() {

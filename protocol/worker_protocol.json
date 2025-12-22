@@ -1,0 +1,197 @@
+{
+  "version": 1,
+  "commands": [
+    { "name": "strictReport", "required": ["id"] },
+    { "name": "load", "required": ["xmlText"] },
+    { "name": "snapshot" },
+    { "name": "setPaused", "required": ["paused"] },
+    { "name": "setRate", "required": ["rate"] },
+    { "name": "setCameraMode", "required": ["mode"] },
+    { "name": "setField", "required": ["target", "path", "kind", "value"] },
+    { "name": "setLabelMode", "required": ["mode"] },
+    { "name": "setFrameMode", "required": ["mode"] },
+    { "name": "setVisualOption", "required": ["field", "value"] },
+    { "name": "setVoptFlag", "required": ["index", "enabled"] },
+    { "name": "setSceneFlag", "required": ["index", "enabled"] },
+    { "name": "setGroupState", "required": ["group", "index", "enabled"] },
+    { "name": "setCtrl", "required": ["index", "value"] },
+    { "name": "setQpos", "required": ["index", "value"] },
+    { "name": "setEqualityActive", "required": ["index", "active"] },
+    { "name": "historyScrub", "required": ["offset"] },
+    { "name": "historyConfig", "required": ["captureHz", "capacity"] },
+    { "name": "keyframeSelect", "required": ["index"] },
+    { "name": "keyframeSave", "required": ["index"] },
+    { "name": "keyframeLoad", "required": ["index"] },
+    { "name": "setWatch", "required": ["field", "index"] },
+    { "name": "step", "required": ["n"] },
+    { "name": "reset" },
+    { "name": "gesture", "required": ["gesture"] },
+    { "name": "align" },
+    { "name": "copyState" },
+    { "name": "applyPerturb", "required": ["phase"] },
+    { "name": "setCtrlNoise", "required": ["std", "rate"] }
+  ],
+  "events": [
+    { "name": "strict_report", "required": ["id", "report"] },
+    { "name": "run_state", "required": ["running"] },
+    { "name": "ready", "required": ["abi", "dt", "ngeom", "optionSupport", "visual", "statistic"] },
+    { "name": "struct_state", "required": ["scope", "value"] },
+    { "name": "meta_cameras", "required": ["cameras"] },
+    { "name": "meta_geoms", "required": ["geoms"] },
+    { "name": "meta_joints", "required": ["ngeom", "nbody", "njnt", "geom_bodyid", "body_jntadr", "body_jntnum", "body_parentid", "jtype", "jnt_qposadr", "jnt_range", "jnt_names"] },
+    { "name": "meta", "required": ["actuators"] },
+    { "name": "snapshot", "required": ["tSim", "ngeom", "scn_ngeom", "nq", "nv", "nbody", "xpos", "xmat", "bxpos", "bxmat", "gesture", "drag", "viewerCamera", "voptFlags", "sceneFlags", "labelMode", "frameMode", "cameraMode", "frameId", "optionSupport", "paused", "pausedSource", "rate", "measuredSlowdown", "qpos", "options", "history", "keyframes", "watchSources"] },
+    { "name": "keyframes", "required": ["capacity", "count", "labels", "slots", "lastSaved", "lastLoaded", "keyIndex"] },
+    { "name": "history", "required": ["captureHz", "capacity", "count", "horizon", "scrubIndex", "live"] },
+    { "name": "watch", "required": ["field", "index", "status", "valid", "summary"] },
+    { "name": "render_assets", "required": ["assets"] },
+    { "name": "gesture", "required": ["gesture", "drag"] },
+    { "name": "align", "required": ["seq", "center", "radius", "timestamp"] },
+    { "name": "copyState", "required": ["seq", "precision", "nq", "nv", "timestamp", "complete"] },
+    { "name": "options", "required": ["voptFlags", "sceneFlags", "labelMode", "frameMode", "cameraMode", "groups", "options"] },
+    { "name": "log", "required": ["message"] },
+    { "name": "error", "required": ["message"] }
+  ],
+  "snapshot_view_fields": [
+    {
+      "ctor": "Float64Array",
+      "keys": [
+        "xpos",
+        "xmat",
+        "gsize",
+        "qpos",
+        "bxpos",
+        "bxmat",
+        "jnt_range"
+      ]
+    },
+    {
+      "ctor": "Float32Array",
+      "keys": [
+        "scn_pos",
+        "scn_mat",
+        "scn_size",
+        "scn_rgba",
+        "flexvert_xpos"
+      ]
+    },
+    {
+      "ctor": "Int32Array",
+      "keys": [
+        "scn_type",
+        "scn_matid",
+        "scn_dataid",
+        "scn_objtype",
+        "scn_objid",
+        "scn_category",
+        "scn_geomorder",
+        "gtype",
+        "geom_bodyid",
+        "body_parentid",
+        "body_jntadr",
+        "body_jntnum",
+        "jtype",
+        "jnt_qposadr",
+        "eq_type",
+        "eq_obj1id",
+        "eq_obj2id",
+        "eq_objtype"
+      ]
+    },
+    {
+      "ctor": "Uint8Array",
+      "keys": [
+        "scn_label",
+        "eq_active"
+      ]
+    }
+  ],
+  "geom_view_fields_optional": [
+    {
+      "ctor": "Float64Array",
+      "keys": [
+        "bxpos",
+        "bxmat",
+        "qpos"
+      ]
+    },
+    {
+      "ctor": "Float32Array",
+      "keys": [
+        "scn_pos",
+        "scn_mat",
+        "scn_size",
+        "scn_rgba",
+        "flexvert_xpos"
+      ]
+    },
+    {
+      "ctor": "Int32Array",
+      "keys": [
+        "scn_type",
+        "scn_matid",
+        "scn_dataid",
+        "scn_objtype",
+        "scn_objid",
+        "scn_category",
+        "scn_geomorder",
+        "eq_type",
+        "eq_obj1id",
+        "eq_obj2id",
+        "eq_objtype"
+      ]
+    },
+    {
+      "ctor": "Uint8Array",
+      "keys": [
+        "scn_label",
+        "eq_active"
+      ]
+    }
+  ],
+  "geom_view_fields_always": [
+    {
+      "ctor": "Float64Array",
+      "keys": [
+        "gsize"
+      ]
+    },
+    {
+      "ctor": "Int32Array",
+      "keys": [
+        "gtype"
+      ]
+    }
+  ],
+  "transfer_fields": {
+    "snapshot": [
+      "xpos",
+      "xmat",
+      "gsize",
+      "gtype",
+      "bxpos",
+      "bxmat",
+      "qpos",
+      "scn_type",
+      "scn_pos",
+      "scn_mat",
+      "scn_size",
+      "scn_rgba",
+      "scn_matid",
+      "scn_dataid",
+      "scn_objtype",
+      "scn_objid",
+      "scn_category",
+      "scn_geomorder",
+      "scn_label",
+      "flexvert_xpos",
+      "eq_type",
+      "eq_obj1id",
+      "eq_obj2id",
+      "eq_objtype",
+      "eq_active",
+      "ctrl"
+    ],
+    "contacts": []
+  }
+}
