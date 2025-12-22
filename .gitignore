@@ -64,8 +64,8 @@ dev/viewer_defaults.mjs
 # Generated protocol artifacts (build-time)
 dev/protocol.gen.mjs
 dev/dispatch.gen.mjs
-dev/physics.worker.gen.mjs
-dev/viewer_backend.gen.mjs
+dev/physics.worker.mjs
+dev/viewer_backend.mjs
 
 # Root markdown files (keep README tracked)
 /*.md
