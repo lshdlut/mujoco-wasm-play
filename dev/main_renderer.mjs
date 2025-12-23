@@ -6742,7 +6742,7 @@ function createRendererManager({
       }
     }
 
-    // Selection visuals now rely on mjvScene; JS-side overlays removed.
+    // Selection visuals rely on mjvScene output (selectpoint/perturb geoms).
 
     const stats = {
       drawn,
@@ -7295,6 +7295,9 @@ function createCameraController({
     const onPointerMove = (event) => handlePointerMove(event);
     const onPointerUp = (event) => handlePointerUp(event);
     const onWheel = (event) => handleWheel(event);
+    const onContextMenu = (event) => {
+      if (typeof event?.preventDefault === 'function') event.preventDefault();
+    };
     const onKeyDown = (event) => handleKey(event, true);
     const onKeyUp = (event) => handleKey(event, false);
     canvas.addEventListener('pointerdown', onPointerDown);
@@ -7302,6 +7305,7 @@ function createCameraController({
     canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
     canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('contextmenu', onContextMenu);
     if (root) {
       root.addEventListener('keydown', onKeyDown);
       root.addEventListener('keyup', onKeyUp);
@@ -7312,6 +7316,7 @@ function createCameraController({
       canvas.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('pointercancel', onPointerUp);
       canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('contextmenu', onContextMenu);
       if (root) {
         root.removeEventListener('keydown', onKeyDown);
         root.removeEventListener('keyup', onKeyUp);
@@ -7345,6 +7350,7 @@ function defaultSelection() {
     kind: 'geom',
     point: [0, 0, 0],
     localPoint: [0, 0, 0],
+    anchorLocal: null,
     normal: [0, 0, 1],
     seq: 0,
     timestamp: 0,
@@ -7376,7 +7382,6 @@ function createPickingController({
   const normalMatrix = new THREE_NS.Matrix3();
   const tempQuat = new THREE_NS.Quaternion();
   const tempMat4 = new THREE_NS.Matrix4();
-  const tempMat4B = new THREE_NS.Matrix4();
   const tempVecA = new THREE_NS.Vector3();
   const dragState = {
     active: false,
@@ -7385,22 +7390,19 @@ function createPickingController({
     lastX: 0,
     lastY: 0,
     shiftKey: false,
+    startButton: 0,
+    perturbBegun: false,
     anchorLocal: new THREE_NS.Vector3(),
     bodyId: -1,
   };
   const cleanup = [];
   const tempBodyPos = new THREE_NS.Vector3();
-  const tempBodyCom = new THREE_NS.Vector3();
   const tempBodyRot = new Float64Array(9);
   const tempVecLocal = new THREE_NS.Vector3();
-  const tempVecWorld = new THREE_NS.Vector3();
-  const tempCameraOffset = new THREE_NS.Vector3();
-  let lastRightDownTime = 0;
-  let lastRightDownCtrl = false;
 
   function hasSelection() {
     const sel = store.get()?.runtime?.selection;
-    return !!sel && Number.isInteger(sel.geom) && sel.geom >= 0;
+    return !!sel && Number.isInteger(sel.body) && sel.body > 0;
   }
 
   function currentSelection() {
@@ -7414,14 +7416,14 @@ function createPickingController({
   function clearSelection({ toast = false } = {}) {
     store.update((draft) => {
       if (!draft.runtime) draft.runtime = {};
-      const prevSeq = (draft.runtime.selection?.seq || 0) + 1;
-      draft.runtime.selection = { ...defaultSelection(), seq: prevSeq, timestamp: Date.now() };
+      draft.runtime.selection = { ...defaultSelection(), seq: 0, timestamp: Date.now() };
       draft.runtime.lastAction = 'select-none';
       if (toast) {
         draft.toast = { message: 'Selection cleared', ts: Date.now() };
       }
     });
     dragState.bodyId = -1;
+    backend.setSelection?.({ bodyId: 0 });
   }
 
   function showToast(message) {
@@ -7435,6 +7437,12 @@ function createPickingController({
   function updateSelection(pick) {
     if (!pick) return;
     const ts = Date.now();
+    let anchor = null;
+    dragState.bodyId = -1;
+    if (pick.bodyId > 0 && setAnchorLocalFromWorld(pick.bodyId, pick.worldPoint)) {
+      dragState.bodyId = pick.bodyId;
+      anchor = [dragState.anchorLocal.x, dragState.anchorLocal.y, dragState.anchorLocal.z];
+    }
     store.update((draft) => {
       if (!draft.runtime) draft.runtime = {};
       const seq = (draft.runtime.selection?.seq || 0) + 1;
@@ -7446,6 +7454,7 @@ function createPickingController({
         kind: 'geom',
         point: [pick.worldPoint.x, pick.worldPoint.y, pick.worldPoint.z],
         localPoint: [pick.localPoint.x, pick.localPoint.y, pick.localPoint.z],
+        anchorLocal: anchor,
         normal: [pick.worldNormal.x, pick.worldNormal.y, pick.worldNormal.z],
         seq,
         timestamp: ts,
@@ -7453,9 +7462,10 @@ function createPickingController({
       draft.runtime.lastAction = 'select';
       draft.toast = { message: `Selected ${pick.geomName}`, ts };
     });
-    if (pick.bodyId >= 0) {
-      dragState.bodyId = pick.bodyId;
-      setAnchorLocalFromWorld(pick.bodyId, pick.worldPoint);
+    if (anchor) {
+      backend.setSelection?.({ bodyId: pick.bodyId, localpos: anchor });
+    } else {
+      backend.setSelection?.({ bodyId: 0 });
     }
   }
 
@@ -7566,9 +7576,8 @@ function createPickingController({
   }
 
   function resolveDragMode(event) {
-    if (event.ctrlKey) return 'rotate';
-    if (event.shiftKey) return 'translate';
-    if (event.button === 2) return 'translate';
+    const buttons = typeof event.buttons === 'number' ? event.buttons : 0;
+    if ((buttons & 2) !== 0 || event.button === 2) return 'translate';
     return 'rotate';
   }
 
@@ -7580,32 +7589,44 @@ function createPickingController({
 
   function updateAnchorFromSelection() {
     const sel = currentSelection();
-    if (!sel || sel.body < 0 || !sel.point) return;
+    if (!sel || sel.body < 1) return false;
+    dragState.bodyId = sel.body | 0;
+    if (Array.isArray(sel.anchorLocal) && sel.anchorLocal.length >= 3) {
+      dragState.anchorLocal.set(
+        Number(sel.anchorLocal[0]) || 0,
+        Number(sel.anchorLocal[1]) || 0,
+        Number(sel.anchorLocal[2]) || 0,
+      );
+      return true;
+    }
+    if (!sel.point) return false;
     tempVecA.set(sel.point[0], sel.point[1], sel.point[2]);
-    setAnchorLocalFromWorld(sel.body, tempVecA);
+    return setAnchorLocalFromWorld(sel.body, tempVecA);
   }
 
   function setAnchorLocalFromWorld(bodyId, worldPoint) {
     const snapshot = typeof getSnapshot === 'function' ? getSnapshot() : null;
-    if (!snapshot || !snapshot.body_xpos || !snapshot.body_xmat) return;
+    const bxpos = snapshot?.bxpos || null;
+    const bxmat = snapshot?.bxmat || null;
+    if (!bxpos || !bxmat) return false;
     const base = bodyId * 3;
     const baseMat = bodyId * 9;
-    if (!snapshot.body_xpos || !snapshot.body_xmat) return;
+    if (base + 2 >= bxpos.length || baseMat + 8 >= bxmat.length) return false;
     tempBodyPos.set(
-      snapshot.body_xpos[base + 0] ?? 0,
-      snapshot.body_xpos[base + 1] ?? 0,
-      snapshot.body_xpos[base + 2] ?? 0,
+      Number(bxpos[base + 0]) || 0,
+      Number(bxpos[base + 1]) || 0,
+      Number(bxpos[base + 2]) || 0,
     );
     tempBodyRot.set([
-      snapshot.body_xmat[baseMat + 0] ?? 1,
-      snapshot.body_xmat[baseMat + 1] ?? 0,
-      snapshot.body_xmat[baseMat + 2] ?? 0,
-      snapshot.body_xmat[baseMat + 3] ?? 0,
-      snapshot.body_xmat[baseMat + 4] ?? 1,
-      snapshot.body_xmat[baseMat + 5] ?? 0,
-      snapshot.body_xmat[baseMat + 6] ?? 0,
-      snapshot.body_xmat[baseMat + 7] ?? 0,
-      snapshot.body_xmat[baseMat + 8] ?? 1,
+      Number(bxmat[baseMat + 0]) || 1,
+      Number(bxmat[baseMat + 1]) || 0,
+      Number(bxmat[baseMat + 2]) || 0,
+      Number(bxmat[baseMat + 3]) || 0,
+      Number(bxmat[baseMat + 4]) || 1,
+      Number(bxmat[baseMat + 5]) || 0,
+      Number(bxmat[baseMat + 6]) || 0,
+      Number(bxmat[baseMat + 7]) || 0,
+      Number(bxmat[baseMat + 8]) || 1,
     ]);
     tempQuat.setFromRotationMatrix(tempMat4.set(
       tempBodyRot[0], tempBodyRot[1], tempBodyRot[2], 0,
@@ -7616,29 +7637,6 @@ function createPickingController({
     tempVecLocal.copy(worldPoint).sub(tempBodyPos);
     tempVecLocal.applyQuaternion(tempQuat.invert());
     dragState.anchorLocal.copy(tempVecLocal);
-  }
-
-  function readBodyPose(bodyId, outPos, outRot) {
-    const snapshot = typeof getSnapshot === 'function' ? getSnapshot() : null;
-    if (!snapshot || !snapshot.body_xpos || !snapshot.body_xmat) return false;
-    const base = bodyId * 3;
-    const baseMat = bodyId * 9;
-    outPos.set(
-      snapshot.body_xpos[base + 0] ?? 0,
-      snapshot.body_xpos[base + 1] ?? 0,
-      snapshot.body_xpos[base + 2] ?? 0,
-    );
-    outRot.set([
-      snapshot.body_xmat[baseMat + 0] ?? 1,
-      snapshot.body_xmat[baseMat + 1] ?? 0,
-      snapshot.body_xmat[baseMat + 2] ?? 0,
-      snapshot.body_xmat[baseMat + 3] ?? 0,
-      snapshot.body_xmat[baseMat + 4] ?? 1,
-      snapshot.body_xmat[baseMat + 5] ?? 0,
-      snapshot.body_xmat[baseMat + 6] ?? 0,
-      snapshot.body_xmat[baseMat + 7] ?? 0,
-      snapshot.body_xmat[baseMat + 8] ?? 1,
-    ]);
     return true;
   }
 
@@ -7687,68 +7685,60 @@ function createPickingController({
     return pick;
   }
 
-  function updatePerturb(pointWorld, mode) {
+  function computePerturbRels(dx, dy) {
+    const elementHeight = canvas?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 1) || 1;
+    const heightDen = Math.max(1, elementHeight);
+    // MuJoCo/simulate normalizes by viewport height, using the UI "y-down" convention:
+    // dy > 0 means pointer moved down (browser `clientY` increases).
+    return { reldx: dx / heightDen, reldy: dy / heightDen };
+  }
+
+  function beginPerturb(event) {
     const bodyId = dragState.bodyId;
-    if (!(bodyId >= 0)) return;
-    const outPos = tempBodyPos;
-    if (!readBodyPose(bodyId, outPos, tempBodyRot)) return;
-    tempQuat.setFromRotationMatrix(tempMat4.set(
-      tempBodyRot[0], tempBodyRot[1], tempBodyRot[2], 0,
-      tempBodyRot[3], tempBodyRot[4], tempBodyRot[5], 0,
-      tempBodyRot[6], tempBodyRot[7], tempBodyRot[8], 0,
-      0, 0, 0, 1,
-    ));
-    const anchorWorld = dragState.anchorLocal.clone().applyQuaternion(tempQuat).add(outPos);
-    const action = mode === 'translate' ? 'translate' : 'rotate';
-    const payload = {
-      kind: 'gesture',
-      mode: action,
-      phase: 'update',
-      pointer: {
-        x: 0,
-        y: 0,
-        dx: 0,
-        dy: 0,
-      },
-      drag: {
-        dx: pointWorld.x - anchorWorld.x,
-        dy: pointWorld.y - anchorWorld.y,
-        dz: pointWorld.z - anchorWorld.z,
-      },
-      target: {
-        body: bodyId,
-        anchor: [anchorWorld.x, anchorWorld.y, anchorWorld.z],
-      },
-    };
-    backend.apply?.(payload);
+    if (!(bodyId > 0)) return;
+    backend.applyPerturb?.({
+      phase: 'begin',
+      mode: dragState.mode,
+      shiftKey: !!event?.shiftKey,
+      bodyId,
+      localpos: [dragState.anchorLocal.x, dragState.anchorLocal.y, dragState.anchorLocal.z],
+    });
     store.update((draft) => {
       if (!draft.runtime) draft.runtime = {};
       if (!draft.runtime.perturb) {
         draft.runtime.perturb = { mode: 'idle', active: false };
       }
-      draft.runtime.perturb.mode = mode;
+      draft.runtime.perturb.mode = dragState.mode;
       draft.runtime.perturb.active = true;
-      draft.runtime.lastAction = action;
+      draft.runtime.lastAction = dragState.mode === 'translate' ? 'translate' : 'rotate';
     });
   }
 
-  function onPointerDown(event) {
-    if (!event) return;
-    if (event.button === 2) {
-      lastRightDownTime = Date.now();
-      lastRightDownCtrl = !!event.ctrlKey;
-    }
+  function movePerturb(event) {
+    if (!dragState.active || dragState.pointerId !== event.pointerId) return;
+    const dx = event.clientX - dragState.lastX;
+    const dy = event.clientY - dragState.lastY;
+    dragState.lastX = event.clientX;
+    dragState.lastY = event.clientY;
+    if (!dragState.perturbBegun) return;
+    const { reldx, reldy } = computePerturbRels(dx, dy);
+    backend.applyPerturb?.({
+      phase: 'move',
+      mode: dragState.mode,
+      shiftKey: !!event.shiftKey,
+      reldx,
+      reldy,
+    });
   }
 
-  function onPointerUp(event) {
-    if (!event) return;
-    if (event.button === 2) {
-      const dt = Date.now() - lastRightDownTime;
-      if (dt < 260 && lastRightDownCtrl && hasSelection()) {
-        clearSelection({ toast: true });
-        return;
+  function endPerturb() {
+    backend.applyPerturb?.({ phase: 'end' });
+    store.update((draft) => {
+      if (draft.runtime?.perturb) {
+        draft.runtime.perturb.active = false;
+        draft.runtime.perturb.mode = 'idle';
       }
-    }
+    });
   }
 
   function onClick(event) {
@@ -7758,40 +7748,46 @@ function createPickingController({
 
   function onDoubleClick(event) {
     if (!event) return;
-    const pick = resolvePick(event);
-    if (pick === STATIC_PICK_BLOCK) {
-      showToast('Selection blocked (static geom)');
-      return;
-    }
-    const result = selectionFromPick(pick, event);
-    if (!result || !result.geomIndex) return;
-    updateAnchorFromSelection();
+    endPerturb();
+    const rect = canvas?.getBoundingClientRect?.() || null;
+    const width = rect ? rect.width : (canvas?.clientWidth || 1);
+    const height = rect ? rect.height : (canvas?.clientHeight || 1);
+    if (!(width > 0) || !(height > 0)) return;
+    const relx = rect ? ((event.clientX - rect.left) / width) : 0;
+    // NOTE: MuJoCo's `mjv_select` expects `rely` in a bottom-origin convention:
+    // rely=0 at the viewport bottom, rely=1 at the viewport top (see `engine_vis_interact.c`).
+    // Browser `clientY` is top-origin, so we flip it here to match MuJoCo/simulate semantics.
+    const rely = rect ? ((rect.bottom - event.clientY) / height) : 0;
+    backend.selectAt?.({
+      relx: THREE_NS.MathUtils.clamp(relx, 0, 1),
+      rely: THREE_NS.MathUtils.clamp(rely, 0, 1),
+      aspect: width / height,
+    });
   }
 
   function onPointerMove(event) {
     if (!dragState.active || dragState.pointerId !== event.pointerId) return;
-    const pick = resolvePick(event);
-    if (!pick || pick.blocked) return;
-    const point = pick.worldPoint;
-    dragState.lastX = event.clientX;
-    dragState.lastY = event.clientY;
-    const mode = dragState.mode;
-    updatePerturb(point, mode);
+    movePerturb(event);
   }
 
   function onPointerDragStart(event) {
     if (!event) return;
     if (!hasSelection()) return;
+    if (!event.ctrlKey) return;
     dragState.active = true;
     dragState.pointerId = event.pointerId ?? null;
     dragState.mode = resolveDragMode(event);
     dragState.lastX = event.clientX;
     dragState.lastY = event.clientY;
     dragState.shiftKey = !!event.shiftKey;
+    dragState.startButton = typeof event.button === 'number' ? event.button : 0;
+    dragState.perturbBegun = true;
     updateAnchorFromSelection();
+    beginPerturb(event);
     if (dragState.pointerId != null && canvas?.setPointerCapture) {
       try { canvas.setPointerCapture(dragState.pointerId); } catch (err) { strictCatch(err, 'main:drag_pointer_capture'); }
     }
+    return true;
   }
 
   function onPointerDragEnd(event) {
@@ -7801,36 +7797,57 @@ function createPickingController({
       try { canvas.releasePointerCapture(dragState.pointerId); } catch (err) { strictCatch(err, 'main:drag_pointer_release'); }
     }
     dragState.pointerId = null;
-    store.update((draft) => {
-      if (draft.runtime?.perturb) {
-        draft.runtime.perturb.active = false;
-        draft.runtime.perturb.mode = 'idle';
-      }
-    });
+    if (dragState.perturbBegun) {
+      endPerturb();
+    }
+    dragState.perturbBegun = false;
   }
 
   function install() {
     const onPointerDownEvt = (event) => {
-      if (event.button === 0) {
-        onPointerDragStart(event);
+      if (event.ctrlKey && (event.button === 0 || event.button === 2)) {
+        const started = onPointerDragStart(event);
+        if (started) {
+          if (typeof event?.preventDefault === 'function') event.preventDefault();
+          if (typeof event?.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        }
       }
-      onPointerDown(event);
     };
     const onPointerUpEvt = (event) => {
       if (dragState.active) {
         onPointerDragEnd(event);
+        if (typeof event?.preventDefault === 'function') event.preventDefault();
+        if (typeof event?.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
       }
-      onPointerUp(event);
     };
-    canvas.addEventListener('pointerdown', onPointerDownEvt);
-    canvas.addEventListener('pointerup', onPointerUpEvt);
-    canvas.addEventListener('pointermove', onPointerMove);
+    const onPointerMoveEvt = (event) => {
+      if (dragState.active) {
+        onPointerMove(event);
+        if (typeof event?.preventDefault === 'function') event.preventDefault();
+        if (typeof event?.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+      }
+    };
+    const onContextMenu = (event) => {
+      if (typeof event?.preventDefault === 'function') event.preventDefault();
+    };
+    canvas.addEventListener('pointerdown', onPointerDownEvt, true);
+    canvas.addEventListener('pointerup', onPointerUpEvt, true);
+    canvas.addEventListener('pointercancel', onPointerUpEvt, true);
+    canvas.addEventListener('pointermove', onPointerMoveEvt, true);
+    const contextTargets = [canvas, canvas?.parentElement].filter(Boolean);
+    for (const target of contextTargets) {
+      target.addEventListener('contextmenu', onContextMenu, true);
+    }
     canvas.addEventListener('click', onClick);
     canvas.addEventListener('dblclick', onDoubleClick);
     cleanup.push(() => {
-      canvas.removeEventListener('pointerdown', onPointerDownEvt);
-      canvas.removeEventListener('pointerup', onPointerUpEvt);
-      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerdown', onPointerDownEvt, true);
+      canvas.removeEventListener('pointerup', onPointerUpEvt, true);
+      canvas.removeEventListener('pointercancel', onPointerUpEvt, true);
+      canvas.removeEventListener('pointermove', onPointerMoveEvt, true);
+      for (const target of contextTargets) {
+        target.removeEventListener('contextmenu', onContextMenu, true);
+      }
       canvas.removeEventListener('click', onClick);
       canvas.removeEventListener('dblclick', onDoubleClick);
     });

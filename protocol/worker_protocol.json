@@ -29,6 +29,8 @@
     { "name": "align" },
     { "name": "copyState" },
     { "name": "applyPerturb", "required": ["phase"] },
+    { "name": "setSelection", "required": ["bodyId"], "optional": ["localpos"] },
+    { "name": "selectAt", "required": ["relx", "rely", "aspect"] },
     { "name": "setCtrlNoise", "required": ["std", "rate"] }
   ],
   "events": [
@@ -49,6 +51,7 @@
     { "name": "align", "required": ["seq", "center", "radius", "timestamp"] },
     { "name": "copyState", "required": ["seq", "precision", "nq", "nv", "timestamp", "complete"] },
     { "name": "options", "required": ["voptFlags", "sceneFlags", "labelMode", "frameMode", "cameraMode", "groups", "options"] },
+    { "name": "selection", "required": ["seq", "bodyId", "geomId", "flexId", "skinId", "point", "localpos", "timestamp"] },
     { "name": "log", "required": ["message"] },
     { "name": "error", "required": ["message"] }
   ],

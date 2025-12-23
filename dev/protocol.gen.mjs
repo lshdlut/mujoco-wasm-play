@@ -48,6 +48,8 @@ export const WORKER_COMMANDS = [
   "align",
   "copyState",
   "applyPerturb",
+  "setSelection",
+  "selectAt",
   "setCtrlNoise"
 ];
 
@@ -69,6 +71,7 @@ export const WORKER_EVENTS = [
   "align",
   "copyState",
   "options",
+  "selection",
   "log",
   "error"
 ];
@@ -102,6 +105,8 @@ export const COMMAND_FIELDS = {
   "align": { required: [], optional: [] },
   "copyState": { required: [], optional: [] },
   "applyPerturb": { required: ["phase"], optional: [] },
+  "setSelection": { required: ["bodyId"], optional: ["localpos"] },
+  "selectAt": { required: ["relx","rely","aspect"], optional: [] },
   "setCtrlNoise": { required: ["std","rate"], optional: [] },
 };
 
@@ -123,6 +128,7 @@ export const EVENT_FIELDS = {
   "align": { required: ["seq","center","radius","timestamp"], optional: [] },
   "copyState": { required: ["seq","precision","nq","nv","timestamp","complete"], optional: [] },
   "options": { required: ["voptFlags","sceneFlags","labelMode","frameMode","cameraMode","groups","options"], optional: [] },
+  "selection": { required: ["seq","bodyId","geomId","flexId","skinId","point","localpos","timestamp"], optional: [] },
   "log": { required: ["message"], optional: [] },
   "error": { required: ["message"], optional: [] },
 };

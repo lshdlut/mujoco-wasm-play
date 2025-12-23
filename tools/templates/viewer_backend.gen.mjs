@@ -158,6 +158,7 @@ function createInitialSnapshot() {
     groups: createViewerGroupState(true),
     align: null,
     copyState: null,
+    selection: null,
     xpos: new Float64Array(0),
     xmat: new Float64Array(0),
     gsize: null,
@@ -227,6 +228,22 @@ function resolveSnapshot(state) {
           dy: Number(state.drag.dy) || 0,
         }
       : { dx: 0, dy: 0 },
+    selection: state.selection && typeof state.selection === 'object'
+      ? {
+          seq: Number(state.selection.seq) || 0,
+          bodyId: Number(state.selection.bodyId) | 0,
+          geomId: Number(state.selection.geomId) | 0,
+          flexId: Number(state.selection.flexId) | 0,
+          skinId: Number(state.selection.skinId) | 0,
+          point: Array.isArray(state.selection.point)
+            ? [Number(state.selection.point[0]) || 0, Number(state.selection.point[1]) || 0, Number(state.selection.point[2]) || 0]
+            : [0, 0, 0],
+          localpos: Array.isArray(state.selection.localpos)
+            ? [Number(state.selection.localpos[0]) || 0, Number(state.selection.localpos[1]) || 0, Number(state.selection.localpos[2]) || 0]
+            : [0, 0, 0],
+          timestamp: Number(state.selection.timestamp) || 0,
+        }
+      : null,
     voptFlags: Array.isArray(state.voptFlags)
       ? state.voptFlags.map((flag) => (flag ? 1 : 0))
       : Array.from({ length: 32 }, () => 0),
@@ -851,6 +868,23 @@ export async function createBackend(options = {}) {
     },
     meta_geoms: (payload) => {
       lastSnapshot.geoms = Array.isArray(payload.geoms) ? payload.geoms : [];
+      notifyListeners();
+    },
+    selection: (payload) => {
+      lastSnapshot.selection = {
+        seq: Number(payload.seq) || 0,
+        bodyId: Number(payload.bodyId) | 0,
+        geomId: Number(payload.geomId) | 0,
+        flexId: Number(payload.flexId) | 0,
+        skinId: Number(payload.skinId) | 0,
+        point: Array.isArray(payload.point)
+          ? [Number(payload.point[0]) || 0, Number(payload.point[1]) || 0, Number(payload.point[2]) || 0]
+          : [0, 0, 0],
+        localpos: Array.isArray(payload.localpos)
+          ? [Number(payload.localpos[0]) || 0, Number(payload.localpos[1]) || 0, Number(payload.localpos[2]) || 0]
+          : [0, 0, 0],
+        timestamp: Number(payload.timestamp) || 0,
+      };
       notifyListeners();
     },
     meta_joints: (payload) => {
@@ -1668,9 +1702,17 @@ export async function createBackend(options = {}) {
     if (phase === 'begin') {
       msg.mode = mode;
       msg.shiftKey = !!options.shiftKey;
-      msg.bodyId = Number(options.bodyId) | 0;
-      msg.localpos = toVec3(options.localpos);
-      msg.scale = Number(options.scale) || 0;
+      const bodyIdRaw = Number(options.bodyId);
+      if (Number.isFinite(bodyIdRaw) && (bodyIdRaw | 0) > 0) {
+        msg.bodyId = bodyIdRaw | 0;
+        if (Array.isArray(options.localpos)) {
+          msg.localpos = toVec3(options.localpos);
+        }
+      }
+      const scaleRaw = Number(options.scale);
+      if (Number.isFinite(scaleRaw) && scaleRaw > 0) {
+        msg.scale = scaleRaw;
+      }
       if (camPayload) msg.cam = camPayload;
     } else if (phase === 'move') {
       msg.mode = mode;
@@ -1693,6 +1735,40 @@ export async function createBackend(options = {}) {
     return resolveSnapshot(lastSnapshot);
   }
 
+  async function setSelectionCommand(options = {}) {
+    const bodyId = Number(options.bodyId) | 0;
+    const msg = { cmd: 'setSelection', bodyId };
+    if (Array.isArray(options.localpos)) {
+      msg.localpos = toVec3(options.localpos);
+    }
+    try {
+      client.postMessage?.(msg);
+    } catch (err) {
+      logWarn('[backend setSelection] failed', err);
+      strictCatch(err, 'backend:setSelection');
+    }
+    return resolveSnapshot(lastSnapshot);
+  }
+
+  async function selectAtCommand(options = {}) {
+    const relxRaw = Number(options.relx);
+    const relyRaw = Number(options.rely);
+    const aspectRaw = Number(options.aspect);
+    const msg = {
+      cmd: 'selectAt',
+      relx: Number.isFinite(relxRaw) ? relxRaw : 0,
+      rely: Number.isFinite(relyRaw) ? relyRaw : 0,
+      aspect: Number.isFinite(aspectRaw) && aspectRaw > 0 ? aspectRaw : 1,
+    };
+    try {
+      client.postMessage?.(msg);
+    } catch (err) {
+      logWarn('[backend selectAt] failed', err);
+      strictCatch(err, 'backend:selectAt');
+    }
+    return resolveSnapshot(lastSnapshot);
+  }
+
   function dispose() {
     if (messageHandler) {
       try { client.removeEventListener?.('message', messageHandler); } catch (err) { strictCatch(err, 'backend:dispose_listener'); }
@@ -1710,6 +1786,8 @@ export async function createBackend(options = {}) {
     setRunState,
     setRate,
     applyPerturb: applyPerturbCommand,
+    setSelection: setSelectionCommand,
+    selectAt: selectAtCommand,
     setVisualState: applyVisualStatePayload,
     loadXmlText,
     getStrictReport: async () => ({

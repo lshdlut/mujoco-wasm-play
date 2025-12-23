@@ -765,6 +765,71 @@ function mergeBackendSnapshot(draft, snapshot) {
       dy: Number(source.dy ?? current.dy) || 0,
     };
   }
+  if (snapshot.selection && typeof snapshot.selection === 'object') {
+    const incomingSeq = Number(snapshot.selection.seq) || 0;
+    const currentSeq = Number(draft.runtime?.selection?.seq) || 0;
+    if (incomingSeq && incomingSeq !== currentSeq) {
+      const bodyId = Number(snapshot.selection.bodyId) | 0;
+      const geomId = Number(snapshot.selection.geomId) | 0;
+      const pointSource = Array.isArray(snapshot.selection.point) ? snapshot.selection.point : null;
+      const point = pointSource
+        ? [Number(pointSource[0]) || 0, Number(pointSource[1]) || 0, Number(pointSource[2]) || 0]
+        : [0, 0, 0];
+      const localposSource = Array.isArray(snapshot.selection.localpos) ? snapshot.selection.localpos : null;
+      const anchorLocal = localposSource
+        ? [Number(localposSource[0]) || 0, Number(localposSource[1]) || 0, Number(localposSource[2]) || 0]
+        : [0, 0, 0];
+      const ts = Number(snapshot.selection.timestamp) || Date.now();
+
+      if (bodyId > 0) {
+        const geoms = Array.isArray(model.geoms) ? model.geoms : [];
+        const geomMeta = geomId >= 0
+          ? geoms.find((geom) => geom && (geom.index | 0) === geomId)
+          : null;
+        const name = geomMeta && typeof geomMeta.name === 'string'
+          ? geomMeta.name
+          : (geomId >= 0 ? `Geom ${geomId}` : `Body ${bodyId}`);
+
+        let joint = -1;
+        const bodyAdr = model.bodyJntAdr;
+        const bodyNum = model.bodyJntNum;
+        const jtype = model.jntType;
+        if (bodyAdr && bodyNum && jtype) {
+          const base = bodyAdr[bodyId] ?? -1;
+          const num = bodyNum[bodyId] ?? 0;
+          if ((num | 0) > 0) {
+            const j = base >= 0 ? (base | 0) : -1;
+            if (j >= 0 && j < jtype.length) {
+              joint = j;
+            }
+          }
+        }
+
+        draft.runtime.selection = {
+          geom: geomId,
+          body: bodyId,
+          joint,
+          name,
+          kind: 'geom',
+          point,
+          localPoint: [0, 0, 0],
+          anchorLocal,
+          normal: [0, 0, 1],
+          seq: incomingSeq,
+          timestamp: ts,
+        };
+        draft.runtime.lastAction = 'select';
+        draft.toast = { message: `Selected ${name}`, ts };
+      } else {
+        draft.runtime.selection = {
+          ...createDefaultSelectionState(),
+          seq: incomingSeq,
+          timestamp: ts,
+        };
+        draft.runtime.lastAction = 'select-none';
+      }
+    }
+  }
   if (snapshot.align) {
     const current = draft.runtime.lastAlign || {};
     const centerSource = Array.isArray(snapshot.align.center)
