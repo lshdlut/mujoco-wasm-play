@@ -109,8 +109,10 @@ let simTimeApprox = 0;
 let stepDebt = 0;
 let hasLoggedNoSim = false;
 let measuredSlowdown = 1;
-let lastSnapshotSentMs = 0;
-let lastScnNgeomForRate = 0;
+let snapshotHz = 60;
+let snapshotIntervalMs = 1000 / snapshotHz;
+let snapshotAccumulatorMs = 0;
+let snapshotLastTickMs = 0;
 
 const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
 
@@ -1582,14 +1584,13 @@ async function loadXmlWithFallback(xmlText) {
 
 function snapshot() {
   if (!sim || !(sim.h > 0)) return;
-  const tSnapshotStart = perfEnabled ? perfNowMs() : 0;
+  const tSnapshotStart = perfNowMs();
   syncVoptToWasm();
   const catmask = 7; // mjCAT_ALL = mjCAT_STATIC|mjCAT_DYNAMIC|mjCAT_DECOR
   if (typeof sim.sceneUpdateAndPack === 'function') {
     sim.sceneUpdateAndPack(catmask);
   }
   const scnNgeom = (typeof sim.sceneNgeom === 'function') ? (sim.sceneNgeom() | 0) : 0;
-  lastScnNgeomForRate = scnNgeom;
   const scnTypeView = scnNgeom > 0 ? (sim.sceneGeomTypeView?.() || null) : null;
   const scnPosView = scnNgeom > 0 ? (sim.sceneGeomPosView?.() || null) : null;
   const scnMatView = scnNgeom > 0 ? (sim.sceneGeomMatView?.() || null) : null;
@@ -1805,9 +1806,14 @@ function snapshot() {
     msg.ctrl = ctrl;
   }
   msg.contacts = nconLocal > 0 ? { n: nconLocal } : null;
+  const snapshotMs = perfNowMs() - tSnapshotStart;
+  const sentWallMs = Date.now();
+  msg.snapshotMs = snapshotMs;
+  msg.sentWallMs = sentWallMs;
   if (perfEnabled) {
     msg.perf = buildPerf({
-      snapshotMs: perfNowMs() - tSnapshotStart,
+      snapshotMs,
+      sentWallMs,
       ngeom: n | 0,
       scn_ngeom: scnNgeom | 0,
     });
@@ -2125,18 +2131,34 @@ setInterval(() => {
   }
 }, 8);
 
-// Snapshot timer at ~60Hz
+// Snapshot timer (adaptive 120/60/30Hz via setSnapshotHz)
 setInterval(() => {
   if (!sim || !h) return;
-  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-  const intervalMs = (lastScnNgeomForRate | 0) > 2000 ? 33 : 16;
-  if ((now - lastSnapshotSentMs) < intervalMs) return;
-  lastSnapshotSentMs = now;
+  const intervalMs = (Number.isFinite(snapshotIntervalMs) && snapshotIntervalMs > 0)
+    ? snapshotIntervalMs
+    : 16;
+  const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now()
+    : Date.now();
+  if (!(snapshotLastTickMs > 0)) {
+    snapshotLastTickMs = now;
+    return;
+  }
+  let tickDt = now - snapshotLastTickMs;
+  snapshotLastTickMs = now;
+  if (!(tickDt > 0)) return;
+  // Clamp to avoid huge bursts after tab suspension; keep best-effort (max 1 snapshot per tick).
+  const tickClampMs = MAX_WALL_DELTA * 1000;
+  if (tickDt > tickClampMs) tickDt = tickClampMs;
+  snapshotAccumulatorMs += tickDt;
+  if (snapshotAccumulatorMs < intervalMs) return;
+  snapshotAccumulatorMs -= intervalMs;
+  if (snapshotAccumulatorMs > intervalMs) snapshotAccumulatorMs = intervalMs;
   if (!running) {
     applySimulatePerturbPipeline({ paused: true });
   }
   snapshot();
-}, 16);
+}, 8);
 
 const commandHandlers = {
   strictReport: (payload) => {
@@ -2912,6 +2934,24 @@ const commandHandlers = {
   setRate: (payload) => {
     const nextRate = +payload.rate || 1;
     resetTimingForCurrentSim(nextRate);
+  },
+  setSnapshotHz: (payload) => {
+    const hz = Number(payload.hz);
+    if (!Number.isFinite(hz) || hz <= 0) return;
+    const tiers = [30, 60, 120];
+    let best = tiers[0];
+    let bestDist = Math.abs(hz - best);
+    for (const t of tiers) {
+      const dist = Math.abs(hz - t);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = t;
+      }
+    }
+    snapshotHz = best;
+    snapshotIntervalMs = 1000 / best;
+    snapshotAccumulatorMs = 0;
+    snapshotLastTickMs = 0;
   },
   setPaused: (payload) => {
     const nextRunning = !payload.paused;

@@ -6,6 +6,7 @@
     { "name": "snapshot" },
     { "name": "setPaused", "required": ["paused"] },
     { "name": "setRate", "required": ["rate"] },
+    { "name": "setSnapshotHz", "required": ["hz"] },
     { "name": "setCameraMode", "required": ["mode"] },
     { "name": "setField", "required": ["target", "path", "kind", "value"] },
     { "name": "setLabelMode", "required": ["mode"] },

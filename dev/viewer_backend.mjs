@@ -412,6 +412,107 @@ export async function createBackend(options = {}) {
   let lastXmlText = null;
   let strictRequestSeq = 0;
   const strictRequests = new Map();
+  const SNAPSHOT_ADAPT_DEFAULT_HZ = 60;
+  const SNAPSHOT_ADAPT_ALPHA = 0.2;
+  const SNAPSHOT_ADAPT_UPGRADE_HOLD_MS = 180;
+  const SNAPSHOT_ADAPT_MIN_CHANGE_MS = 200;
+  let adaptiveSnapshotHz = SNAPSHOT_ADAPT_DEFAULT_HZ;
+  let adaptiveSnapshotEwmaMs = null;
+  let adaptiveTransferEwmaMs = null;
+  let adaptiveGoodSinceWallMs = null;
+  let adaptiveBadStreak = 0;
+  let adaptiveLastChangeWallMs = 0;
+
+  function resetAdaptiveSnapshotState() {
+    adaptiveSnapshotHz = SNAPSHOT_ADAPT_DEFAULT_HZ;
+    adaptiveSnapshotEwmaMs = null;
+    adaptiveTransferEwmaMs = null;
+    adaptiveGoodSinceWallMs = null;
+    adaptiveBadStreak = 0;
+    adaptiveLastChangeWallMs = Date.now();
+  }
+
+  function ewma(prev, value, alpha) {
+    if (!Number.isFinite(value)) return prev;
+    if (!Number.isFinite(prev)) return value;
+    return prev * (1 - alpha) + value * alpha;
+  }
+
+  function postSnapshotHzIfChanged(nextHz) {
+    if (!client || typeof client.postMessage !== 'function') return false;
+    const hz = Number(nextHz);
+    if (!Number.isFinite(hz) || hz <= 0) return false;
+    if (hz === adaptiveSnapshotHz) return false;
+    adaptiveSnapshotHz = hz;
+    adaptiveLastChangeWallMs = Date.now();
+    adaptiveGoodSinceWallMs = null;
+    adaptiveBadStreak = 0;
+    try {
+      client.postMessage({ cmd: 'setSnapshotHz', hz });
+    } catch (err) {
+      strictCatch(err, 'backend:setSnapshotHz');
+    }
+    return true;
+  }
+
+  function maybeUpdateAdaptiveSnapshotHz(snapshotMsRaw, transferMsRaw) {
+    const snapshotMs = Number(snapshotMsRaw);
+    const transferMs = Number(transferMsRaw);
+    if (!Number.isFinite(snapshotMs) || snapshotMs < 0) return;
+    if (!Number.isFinite(transferMs) || transferMs < 0) return;
+    const now = Date.now();
+    adaptiveSnapshotEwmaMs = ewma(adaptiveSnapshotEwmaMs, snapshotMs, SNAPSHOT_ADAPT_ALPHA);
+    adaptiveTransferEwmaMs = ewma(adaptiveTransferEwmaMs, transferMs, SNAPSHOT_ADAPT_ALPHA);
+    const currentHz = adaptiveSnapshotHz;
+    const currentIntervalMs = 1000 / Math.max(1, currentHz);
+    const sinceChangeMs = now - adaptiveLastChangeWallMs;
+    const canChange = sinceChangeMs >= SNAPSHOT_ADAPT_MIN_CHANGE_MS;
+    const lowerHz = currentHz === 120 ? 60 : (currentHz === 60 ? 30 : null);
+    const higherHz = currentHz === 30 ? 60 : (currentHz === 60 ? 120 : null);
+    const ewmaSnap = Number(adaptiveSnapshotEwmaMs);
+    const ewmaXfer = Number(adaptiveTransferEwmaMs);
+
+    // Downgrade aggressively to avoid backlog.
+    const hardBad =
+      transferMs > 4.0 * currentIntervalMs
+      || snapshotMs > 0.9 * currentIntervalMs;
+    const softBad =
+      ewmaXfer > 2.0 * currentIntervalMs
+      || ewmaSnap > 0.6 * currentIntervalMs;
+    if (lowerHz && canChange) {
+      if (hardBad) {
+        postSnapshotHzIfChanged(lowerHz);
+        return;
+      }
+      if (softBad) {
+        adaptiveBadStreak += 1;
+        if (adaptiveBadStreak >= 2) {
+          postSnapshotHzIfChanged(lowerHz);
+          return;
+        }
+      } else {
+        adaptiveBadStreak = 0;
+      }
+    }
+
+    // Upgrade quickly when both worker cost and delivery latency are comfortably below
+    // the next tier's interval.
+    if (higherHz && canChange) {
+      const nextIntervalMs = 1000 / higherHz;
+      const good =
+        ewmaXfer < 0.8 * nextIntervalMs
+        && ewmaSnap < 0.25 * nextIntervalMs;
+      if (good) {
+        if (!Number.isFinite(adaptiveGoodSinceWallMs)) adaptiveGoodSinceWallMs = now;
+        if ((now - adaptiveGoodSinceWallMs) >= SNAPSHOT_ADAPT_UPGRADE_HOLD_MS) {
+          postSnapshotHzIfChanged(higherHz);
+          return;
+        }
+      } else {
+        adaptiveGoodSinceWallMs = null;
+      }
+    }
+  }
 
   function applySimulateMaskBinding(binding, value, prefix, field, invert, warnLabel) {
     if (!binding || !binding.startsWith(`${prefix}[`)) return false;
@@ -557,9 +658,11 @@ export async function createBackend(options = {}) {
     lastSnapshot = createInitialSnapshot();
     lastFrameId = -1;
     lastSnapshot.visualDefaults = null;
+    resetAdaptiveSnapshotState();
     notifyListeners();
     try {
       client.postMessage({ cmd: 'load', rate: loadRate, xmlText: payload });
+      client.postMessage({ cmd: 'setSnapshotHz', hz: SNAPSHOT_ADAPT_DEFAULT_HZ });
       client.postMessage({ cmd: 'snapshot' });
     } catch (err) {
       logError('[backend load] failed', err);
@@ -955,7 +1058,7 @@ export async function createBackend(options = {}) {
     },
     snapshot: (payload) => {
       const tDecodeStart = perfEnabled ? perfNow() : 0;
-      const recvWallMs = perfEnabled ? Date.now() : 0;
+      const recvWallMs = Date.now();
       if (perfEnabled) {
         perfMarkOnce('play:backend:first_snapshot', {
           sentWallMs: (typeof payload?.perf?.sentWallMs === 'number') ? payload.perf.sentWallMs : null,
@@ -1079,6 +1182,19 @@ export async function createBackend(options = {}) {
             scn_ngeom: payload?.scn_ngeom | 0,
           });
         }
+      }
+      const snapshotMs = (typeof payload.snapshotMs === 'number' && Number.isFinite(payload.snapshotMs))
+        ? payload.snapshotMs
+        : (typeof payload?.perf?.snapshotMs === 'number' && Number.isFinite(payload.perf.snapshotMs))
+          ? payload.perf.snapshotMs
+          : null;
+      const sentWallMs = (typeof payload.sentWallMs === 'number' && Number.isFinite(payload.sentWallMs))
+        ? payload.sentWallMs
+        : (typeof payload?.perf?.sentWallMs === 'number' && Number.isFinite(payload.perf.sentWallMs))
+          ? payload.perf.sentWallMs
+          : null;
+      if (snapshotMs != null && sentWallMs != null) {
+        maybeUpdateAdaptiveSnapshotHz(snapshotMs, recvWallMs - sentWallMs);
       }
       const tNotifyStart = perfEnabled ? perfNow() : 0;
       notifyListeners();
