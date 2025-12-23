@@ -1619,6 +1619,7 @@ function applyGesture(store, backend, payload) {
 }
 
 const VISUAL_OVERRIDE_PRESET = [
+  { path: ['global', 'fovy'], kind: 'float', size: 1, value: 70 },
   { path: ['headlight', 'active'], kind: 'enum', size: 1, value: 1 },
   { path: ['headlight', 'ambient'], kind: 'float_vec', size: 3, value: [0.1, 0.1, 0.1] },
   { path: ['headlight', 'diffuse'], kind: 'float_vec', size: 3, value: [0.4, 0.4, 0.4] },

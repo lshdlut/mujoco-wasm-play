@@ -1694,7 +1694,6 @@ function ensureFreeCameraPose(ctx) {
       position: new THREE.Vector3(),
       target: new THREE.Vector3(),
       up: new THREE.Vector3(0, 0, 1),
-      fov: 75,
       valid: false,
       autoAligned: false,
     };
@@ -1726,7 +1725,6 @@ function rememberFreeCameraPose(ctx, bounds) {
   pose.position.copy(ctx.camera.position);
   pose.target.copy(target);
   pose.up.copy(ctx.camera.up);
-  pose.fov = Number.isFinite(ctx.camera.fov) ? ctx.camera.fov : pose.fov;
   pose.valid = true;
   pose.autoAligned = !!ctx.autoAligned;
   cacheTrackingPoseFromCurrent(ctx, bounds);
@@ -1740,12 +1738,6 @@ function restoreFreeCameraPose(ctx) {
   target.copy(pose.target);
   ctx.camera.lookAt(target);
   ctx.camera.up.copy(pose.up);
-  if (Number.isFinite(pose.fov) && ctx.camera.fov !== pose.fov) {
-    ctx.camera.fov = pose.fov;
-    if (typeof ctx.camera.updateProjectionMatrix === 'function') {
-      ctx.camera.updateProjectionMatrix();
-    }
-  }
   if (pose.autoAligned) {
     ctx.autoAligned = true;
   }
@@ -1914,9 +1906,19 @@ function applyFixedCameraPreset(ctx, state, { tempVecA, tempVecB, tempVecC, temp
 }
 
 function applyViewerCameraSnapshot(ctx, snapshot, state, bounds, { tempVecA, tempVecB }) {
-  if (!ctx?.camera || !ctx.viewerCameraSynced) return false;
+  if (!ctx?.camera) return false;
   const mode = state?.runtime?.cameraIndex | 0;
   if (mode > 1) return false;
+  // Keep THREE projection aligned with MuJoCo frustum math:
+  // `mjv_updateCamera` uses `mjVisual.global.fovy` for free/tracking cameras.
+  const fovy = Number(state?.model?.vis?.global?.fovy);
+  if (Number.isFinite(fovy) && fovy > 0 && ctx.camera.fov !== fovy) {
+    ctx.camera.fov = fovy;
+    if (typeof ctx.camera.updateProjectionMatrix === 'function') {
+      ctx.camera.updateProjectionMatrix();
+    }
+  }
+  if (!ctx.viewerCameraSynced) return false;
   const cam = snapshot?.viewerCamera;
   if (!cam || !Array.isArray(cam.lookat) || cam.lookat.length < 3) return false;
   const dist = Number(cam.distance);
