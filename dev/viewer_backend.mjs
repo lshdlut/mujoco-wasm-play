@@ -1868,6 +1868,34 @@ export async function createBackend(options = {}) {
     return resolveSnapshot(lastSnapshot);
   }
 
+  function setModelLightActive(active, source = 'ui') {
+    if (typeof client?.postMessage !== 'function') {
+      return resolveSnapshot(lastSnapshot);
+    }
+    const value =
+      ArrayBuffer.isView(active) ? active
+      : Array.isArray(active) ? active
+      : null;
+    if (!value || !value.length) {
+      return resolveSnapshot(lastSnapshot);
+    }
+    try {
+      client.postMessage({
+        cmd: 'setField',
+        target: 'mjModel',
+        path: ['light_active'],
+        kind: 'uint8_vec',
+        size: value.length,
+        value,
+        source,
+      });
+    } catch (err) {
+      logWarn('[backend setField] failed', ['light_active'], err);
+      strictCatch(err, 'backend:setField_mjModel_light_active');
+    }
+    return resolveSnapshot(lastSnapshot);
+  }
+
   async function selectAtCommand(options = {}) {
     const relxRaw = Number(options.relx);
     const relyRaw = Number(options.rely);
@@ -1907,6 +1935,7 @@ export async function createBackend(options = {}) {
     setSelection: setSelectionCommand,
     selectAt: selectAtCommand,
     setVisualState: applyVisualStatePayload,
+    setModelLightActive,
     loadXmlText,
     getStrictReport: async () => ({
       main: getStrictReport(),

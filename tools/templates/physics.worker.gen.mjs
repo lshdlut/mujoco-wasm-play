@@ -1605,6 +1605,9 @@ function snapshot() {
   const scnLabelView = scnNgeom > 0 ? (sim.sceneGeomLabelView?.() || null) : null;
   const n = sim.ngeom?.() | 0;
   const nbodyLocal = sim.nbody?.() | 0;
+  const nlightLocal = sim.nlight?.() | 0;
+  const lightXposView = nlightLocal > 0 ? (sim.lightXposView?.() || null) : null;
+  const lightXdirView = nlightLocal > 0 ? (sim.lightXdirView?.() || null) : null;
   const xposView = sim.geomXposView?.();
   const xmatView = sim.geomXmatView?.();
   const xpos = xposView ? new Float64Array(xposView) : new Float64Array(0);
@@ -1788,6 +1791,14 @@ function snapshot() {
   if (eqActiveView) {
     msg.eq_active = new Uint8Array(eqActiveView);
   }
+  if (nlightLocal > 0) {
+    if (lightXposView) {
+      msg.light_xpos = new Float32Array(lightXposView);
+    }
+    if (lightXdirView) {
+      msg.light_xdir = new Float32Array(lightXdirView);
+    }
+  }
   // Equality names: match simulate's equality_names_ = m->names + m->name_eqadr[i]
   // via mj_id2name(mjOBJ_EQUALITY, i).
   if (eqTypeView && typeof sim.id2name === 'function') {
@@ -1911,6 +1922,21 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.bodies.dofnum);
     push(assets.bodies.mass);
     push(assets.bodies.inertia);
+  }
+  if (assets?.lights) {
+    push(assets.lights.type);
+    push(assets.lights.texid);
+    push(assets.lights.active);
+    push(assets.lights.castshadow);
+    push(assets.lights.bulbradius);
+    push(assets.lights.intensity);
+    push(assets.lights.range);
+    push(assets.lights.attenuation);
+    push(assets.lights.cutoff);
+    push(assets.lights.exponent);
+    push(assets.lights.ambient);
+    push(assets.lights.diffuse);
+    push(assets.lights.specular);
   }
   if (assets?.sensors) {
     push(assets.sensors.type);

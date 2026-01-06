@@ -2,14 +2,14 @@
 
 export const SNAPSHOT_VIEW_FIELDS = [
   [Float64Array, ["xpos","xmat","gsize","qpos","bxpos","bxmat","jnt_range"]],
-  [Float32Array, ["scn_pos","scn_mat","scn_size","scn_rgba","flexvert_xpos"]],
+  [Float32Array, ["scn_pos","scn_mat","scn_size","scn_rgba","flexvert_xpos","light_xpos","light_xdir"]],
   [Int32Array, ["scn_type","scn_matid","scn_dataid","scn_objtype","scn_objid","scn_category","scn_geomorder","gtype","geom_bodyid","body_parentid","body_jntadr","body_jntnum","jtype","jnt_qposadr","eq_type","eq_obj1id","eq_obj2id","eq_objtype"]],
   [Uint8Array, ["scn_label","eq_active"]],
 ];
 
 export const GEOM_VIEW_FIELDS_OPTIONAL = [
   [Float64Array, ["bxpos","bxmat","qpos"]],
-  [Float32Array, ["scn_pos","scn_mat","scn_size","scn_rgba","flexvert_xpos"]],
+  [Float32Array, ["scn_pos","scn_mat","scn_size","scn_rgba","flexvert_xpos","light_xpos","light_xdir"]],
   [Int32Array, ["scn_type","scn_matid","scn_dataid","scn_objtype","scn_objid","scn_category","scn_geomorder","eq_type","eq_obj1id","eq_obj2id","eq_objtype"]],
   [Uint8Array, ["scn_label","eq_active"]],
 ];
@@ -161,6 +161,8 @@ export const SNAPSHOT_TRANSFER_FIELDS = [
   "eq_obj2id",
   "eq_objtype",
   "eq_active",
+  "light_xpos",
+  "light_xdir",
   "ctrl"
 ];
 

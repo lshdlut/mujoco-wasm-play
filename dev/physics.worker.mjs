@@ -2,7 +2,7 @@
 
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
-import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
+import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, heapViewU8, readCString, MjSimLite } from './bridge.mjs';
 import {
   isVerboseDebug,
   logError,
@@ -1607,6 +1607,9 @@ function snapshot() {
   const scnLabelView = scnNgeom > 0 ? (sim.sceneGeomLabelView?.() || null) : null;
   const n = sim.ngeom?.() | 0;
   const nbodyLocal = sim.nbody?.() | 0;
+  const nlightLocal = sim.nlight?.() | 0;
+  const lightXposView = nlightLocal > 0 ? (sim.lightXposView?.() || null) : null;
+  const lightXdirView = nlightLocal > 0 ? (sim.lightXdirView?.() || null) : null;
   const xposView = sim.geomXposView?.();
   const xmatView = sim.geomXmatView?.();
   const xpos = xposView ? new Float64Array(xposView) : new Float64Array(0);
@@ -1790,6 +1793,14 @@ function snapshot() {
   if (eqActiveView) {
     msg.eq_active = new Uint8Array(eqActiveView);
   }
+  if (nlightLocal > 0) {
+    if (lightXposView) {
+      msg.light_xpos = new Float32Array(lightXposView);
+    }
+    if (lightXdirView) {
+      msg.light_xdir = new Float32Array(lightXdirView);
+    }
+  }
   // Equality names: match simulate's equality_names_ = m->names + m->name_eqadr[i]
   // via mj_id2name(mjOBJ_EQUALITY, i).
   if (eqTypeView && typeof sim.id2name === 'function') {
@@ -1913,6 +1924,21 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.bodies.dofnum);
     push(assets.bodies.mass);
     push(assets.bodies.inertia);
+  }
+  if (assets?.lights) {
+    push(assets.lights.type);
+    push(assets.lights.texid);
+    push(assets.lights.active);
+    push(assets.lights.castshadow);
+    push(assets.lights.bulbradius);
+    push(assets.lights.intensity);
+    push(assets.lights.range);
+    push(assets.lights.attenuation);
+    push(assets.lights.cutoff);
+    push(assets.lights.exponent);
+    push(assets.lights.ambient);
+    push(assets.lights.diffuse);
+    push(assets.lights.specular);
   }
   if (assets?.sensors) {
     push(assets.sensors.type);
@@ -2581,6 +2607,39 @@ const commandHandlers = {
       } catch (err) {
         logWarn('worker: setField (mjStatistic) failed', String(err || ''));
         strictCatch(err, 'worker:setField_mjStatistic');
+      }
+    } else if (target === 'mjModel') {
+      try {
+        const pathArr = Array.isArray(payload.path) ? payload.path : [];
+        const field = (pathArr.length === 1) ? pathArr[0] : '';
+        if (field === 'light_active') {
+          if (!sim || !mod || !(h > 0)) return;
+          const nlightLocal = sim.nlight?.() | 0;
+          if (!(nlightLocal > 0)) return;
+          const ptrFn = mod._mjwf_model_light_active_ptr;
+          if (typeof ptrFn !== 'function') {
+            throw new Error('[worker] mjModel.light_active unsupported (missing _mjwf_model_light_active_ptr)');
+          }
+          const ptr = ptrFn.call(mod, h) | 0;
+          if (!(ptr > 0)) {
+            throw new Error('[worker] mjModel.light_active missing pointer');
+          }
+          const dst = heapViewU8(mod, ptr, nlightLocal);
+          const src = payload.value;
+          const srcLen =
+            ArrayBuffer.isView(src) ? src.length
+            : Array.isArray(src) ? src.length
+            : 0;
+          if (!(srcLen > 0)) return;
+          const max = Math.min(dst.length, srcLen);
+          for (let i = 0; i < max; i += 1) {
+            dst[i] = (Number(src[i]) || 0) ? 1 : 0;
+          }
+          emitRenderAssets();
+        }
+      } catch (err) {
+        logWarn('worker: setField (mjModel) failed', String(err || ''));
+        strictCatch(err, 'worker:setField_mjModel');
       }
     }
   },

@@ -45,6 +45,9 @@ const VISUAL_SOURCE_CACHE_TEMPLATE = {
   sceneFlagsModel: null,
   sceneFlagsPresetSun: null,
   sceneFlagsPresetMoon: null,
+  lightActiveModel: null,
+  lightActivePresetSun: null,
+  lightActivePresetMoon: null,
 };
 
 let bindingIndex = null;
@@ -1727,18 +1730,30 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     ? cloneStruct(snapshot.visualDefaults)
     : null;
   const currentSceneFlags = normaliseSceneFlagArray(snapshot.sceneFlags);
+  const lightAssets = snapshot.renderAssets?.lights || null;
+  const nlight = lightAssets?.count | 0;
+  const currentLightActive =
+    (nlight > 0 && lightAssets?.active)
+      ? Array.from(lightAssets.active).slice(0, nlight)
+      : null;
   store.update((draft) => {
     const backups = ensureVisualCache(draft, 'visualBackups');
     const baselines = ensureVisualCache(draft, 'visualBaselines');
     if (!baselines.model && baselineVisual) {
       baselines.model = cloneStruct(baselineVisual);
       baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
+      if (!baselines.lightActiveModel && currentLightActive) {
+        baselines.lightActiveModel = currentLightActive.slice();
+      }
     }
     const wantsPreset = targetMode === 'preset-sun' || targetMode === 'preset-moon';
     if (wantsPreset && !baselines.presetSun && baselines.model) {
       const presetBase = applyPresetOverridesToStruct(baselines.model, 'preset-sun');
       baselines.presetSun = cloneStruct(presetBase);
       baselines.sceneFlagsPresetSun = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
+      if (!baselines.lightActivePresetSun && nlight > 0) {
+        baselines.lightActivePresetSun = Array.from({ length: nlight }, () => 0);
+      }
     }
     if (targetMode === 'preset-moon' && !baselines.presetMoon) {
       // Start moon from sun baseline; can diverge over time via backups.
@@ -1749,6 +1764,9 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
         : baselines.sceneFlagsModel
         ? [...baselines.sceneFlagsModel]
         : null;
+      if (!baselines.lightActivePresetMoon && nlight > 0) {
+        baselines.lightActivePresetMoon = Array.from({ length: nlight }, () => 0);
+      }
     }
     if (currentMode === 'preset-sun') {
       backups.presetSun = cloneStruct(currentVisual) || cloneStruct(baselines.presetSun) || null;
@@ -1757,6 +1775,9 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
         : baselines.sceneFlagsPresetSun
         ? [...baselines.sceneFlagsPresetSun]
         : null;
+      if (currentLightActive) {
+        backups.lightActivePresetSun = currentLightActive.slice();
+      }
     } else if (currentMode === 'preset-moon') {
       backups.presetMoon = cloneStruct(currentVisual) || cloneStruct(baselines.presetMoon) || null;
       backups.sceneFlagsPresetMoon = currentSceneFlags
@@ -1764,6 +1785,9 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
         : baselines.sceneFlagsPresetMoon
         ? [...baselines.sceneFlagsPresetMoon]
         : null;
+      if (currentLightActive) {
+        backups.lightActivePresetMoon = currentLightActive.slice();
+      }
     } else {
       backups.model = cloneStruct(currentVisual) || cloneStruct(baselines.model) || null;
       backups.sceneFlagsModel = currentSceneFlags
@@ -1771,6 +1795,9 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
         : baselines.sceneFlagsModel
         ? [...baselines.sceneFlagsModel]
         : null;
+      if (currentLightActive) {
+        backups.lightActiveModel = currentLightActive.slice();
+      }
     }
   });
   const updatedState = store.get();
@@ -1778,6 +1805,7 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
   const baselines = ensureVisualCache(updatedState, 'visualBaselines');
   let targetVisual = {};
   let targetSceneFlags = normaliseSceneFlagArray(null);
+  let targetLightActive = null;
   if (targetMode === 'preset-sun') {
     const cache = backups.presetSun;
     const base = baselines.presetSun || baselines.model;
@@ -1789,6 +1817,10 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     } else if (Array.isArray(baselines.sceneFlagsModel)) {
       targetSceneFlags = [...baselines.sceneFlagsModel];
     }
+    targetLightActive =
+      Array.isArray(backups.lightActivePresetSun) ? backups.lightActivePresetSun.slice()
+      : Array.isArray(baselines.lightActivePresetSun) ? baselines.lightActivePresetSun.slice()
+      : (nlight > 0 ? Array.from({ length: nlight }, () => 0) : null);
   } else if (targetMode === 'preset-moon') {
     const cache = backups.presetMoon;
     const base = baselines.presetMoon || baselines.presetSun || baselines.model;
@@ -1802,6 +1834,10 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     } else if (Array.isArray(baselines.sceneFlagsModel)) {
       targetSceneFlags = [...baselines.sceneFlagsModel];
     }
+    targetLightActive =
+      Array.isArray(backups.lightActivePresetMoon) ? backups.lightActivePresetMoon.slice()
+      : Array.isArray(baselines.lightActivePresetMoon) ? baselines.lightActivePresetMoon.slice()
+      : (nlight > 0 ? Array.from({ length: nlight }, () => 0) : null);
   } else {
     const cache = backups.model;
     const base = baselines.model;
@@ -1811,6 +1847,10 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     } else if (Array.isArray(baselines.sceneFlagsModel)) {
       targetSceneFlags = [...baselines.sceneFlagsModel];
     }
+    targetLightActive =
+      Array.isArray(backups.lightActiveModel) ? backups.lightActiveModel.slice()
+      : Array.isArray(baselines.lightActiveModel) ? baselines.lightActiveModel.slice()
+      : (currentLightActive ? currentLightActive.slice() : null);
   }
   store.update((draft) => {
     draft.visualSourceMode = targetMode;
@@ -1827,6 +1867,15 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     } catch (err) {
       logError('[visual source switch] apply failed', err);
       strictCatch(err, 'main:visual_source_apply');
+    }
+  }
+  if (typeof backend.setModelLightActive === 'function' && Array.isArray(targetLightActive) && targetLightActive.length) {
+    // Keep model lights under the same mj+js buffer override mechanism as other visual fields.
+    try {
+      await backend.setModelLightActive(targetLightActive, 'visual_source_switch');
+    } catch (err) {
+      logError('[visual source switch] setModelLightActive failed', err);
+      strictCatch(err, 'main:visual_source_light_active_apply');
     }
   }
   return {

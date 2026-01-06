@@ -348,6 +348,13 @@ const MJ_OBJ = {
   DEFAULT: 101,
   MODEL: 102,
 };
+const MJ_LIGHT_TYPE = {
+  SPOT: 0,
+  DIRECTIONAL: 1,
+  POINT: 2,
+  IMAGE: 3,
+};
+const MJ_MAXLIGHT = 128;
 const LABEL_TEXTURE_CACHE = new Map();
 const LABEL_TEXTURE_VERSION = 3;
 const LABEL_DEFAULT_HEIGHT = 0.08;
@@ -1854,6 +1861,231 @@ function applyVisualLighting(ctx, vis) {
     ctx.hemi.intensity = active ? hemiStrength : 0;
     ctx.hemi.color.setRGB(diffuseRGB[0], diffuseRGB[1], diffuseRGB[2]);
     ctx.hemi.groundColor.setRGB(ambientRGB[0], ambientRGB[1], ambientRGB[2]);
+  }
+}
+
+function ensureMjLightRig(ctx) {
+  if (!ctx) return null;
+  const rig = ctx._mjLightRig;
+  if (rig?.group && Array.isArray(rig.slots) && rig.ambient) return rig;
+
+  const group = new THREE.Group();
+  group.name = 'mjLights';
+  const ambient = new THREE.AmbientLight(0xffffff, 0);
+  ambient.name = 'mjAmbient';
+  group.add(ambient);
+
+  const nextRig = {
+    group,
+    ambient,
+    slots: [],
+    tmpPos: new THREE.Vector3(),
+    tmpDir: new THREE.Vector3(),
+  };
+  ctx._mjLightRig = nextRig;
+  const world = getWorldScene(ctx) || ctx.sceneWorld || ctx.scene;
+  if (world) world.add(group);
+  return nextRig;
+}
+
+function removeMjLightSlot(rig, slot) {
+  if (!rig?.group || !slot?.light) return;
+  rig.group.remove(slot.light);
+  if (slot.target) rig.group.remove(slot.target);
+}
+
+function createMjLightSlot(rig, kind) {
+  const group = rig.group;
+  let light = null;
+  let target = null;
+  if (kind === 'directional') {
+    light = new THREE.DirectionalLight(0xffffff, 0);
+    target = new THREE.Object3D();
+    light.target = target;
+    group.add(target);
+    group.add(light);
+  } else if (kind === 'spot') {
+    light = new THREE.SpotLight(0xffffff, 0);
+    target = new THREE.Object3D();
+    light.target = target;
+    light.angle = Math.PI / 4;
+    light.penumbra = 0;
+    group.add(target);
+    group.add(light);
+  } else {
+    light = new THREE.PointLight(0xffffff, 0);
+    group.add(light);
+  }
+  light.visible = false;
+  light.castShadow = false;
+  return { kind, light, target };
+}
+
+function ensureMjLightSlot(rig, slotIndex, kind) {
+  const slots = rig.slots;
+  const existing = slots[slotIndex];
+  if (existing?.light && existing.kind === kind) return existing;
+  if (existing) {
+    removeMjLightSlot(rig, existing);
+  }
+  const created = createMjLightSlot(rig, kind);
+  slots[slotIndex] = created;
+  return created;
+}
+
+function disableMjLightSlot(slot) {
+  if (!slot?.light) return;
+  slot.light.visible = false;
+  slot.light.intensity = 0;
+}
+
+function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
+  const rig = ensureMjLightRig(ctx);
+  if (!rig) return;
+  const enabled = options.enabled !== false;
+  rig.group.visible = enabled;
+  if (!enabled) {
+    rig.ambient.intensity = 0;
+    for (const slot of rig.slots) disableMjLightSlot(slot);
+    return;
+  }
+
+  if (typeof window !== 'undefined') {
+    const search = window.location?.search || '';
+    if (search.includes('forceBasic=1') && !ctx._mjLightForceBasicWarned) {
+      ctx._mjLightForceBasicWarned = true;
+      logWarn('[lights] forceBasic=1 disables lighting (MeshBasicMaterial); remove it to see mj lights');
+    }
+  }
+
+  const camera = ctx?.camera || null;
+  const headlight = state?.model?.vis?.headlight || null;
+  const headActive = !!camera && headlight && ((headlight.active ?? 1) !== 0);
+  const headDiffuse = rgbFromArray(headlight?.diffuse, [1, 1, 1]);
+  const headAmbient = rgbFromArray(headlight?.ambient, [0.2, 0.2, 0.2]);
+
+  rig.ambient.color.setRGB(headAmbient[0], headAmbient[1], headAmbient[2]);
+  rig.ambient.intensity = headActive ? 1 : 0;
+
+  // Slot 0: headlight (id=-1 in mjv_makeLights). In MuJoCo GL3, directional
+  // lights are consumed as `-dir`; in three.js this is achieved by setting the
+  // target point as `pos + dir` (shader uses `position - target`).
+  const headSlot = ensureMjLightSlot(rig, 0, 'directional');
+  if (headActive) {
+    camera.updateMatrixWorld?.(true);
+    camera.getWorldPosition(rig.tmpPos);
+    camera.getWorldDirection(rig.tmpDir);
+    const px = rig.tmpPos.x;
+    const py = rig.tmpPos.y;
+    const pz = rig.tmpPos.z;
+    const dx = rig.tmpDir.x;
+    const dy = rig.tmpDir.y;
+    const dz = rig.tmpDir.z;
+    headSlot.light.visible = true;
+    headSlot.light.intensity = 1;
+    headSlot.light.color.setRGB(headDiffuse[0], headDiffuse[1], headDiffuse[2]);
+    headSlot.light.position.set(px, py, pz);
+    if (headSlot.target) {
+      headSlot.target.position.set(px + dx, py + dy, pz + dz);
+      headSlot.light.target?.updateMatrixWorld?.();
+    }
+  } else {
+    disableMjLightSlot(headSlot);
+  }
+
+  const lightAssets = assets?.lights || snapshot?.renderAssets?.lights || null;
+  const xpos = snapshot?.light_xpos || null;
+  const xdir = snapshot?.light_xdir || null;
+  const nlight = lightAssets?.count | 0;
+  const typeView = lightAssets?.type || null;
+  const activeView = lightAssets?.active || null;
+  const diffuseView = lightAssets?.diffuse || null;
+  const intensityView = lightAssets?.intensity || null;
+  const rangeView = lightAssets?.range || null;
+  const cutoffView = lightAssets?.cutoff || null;
+
+  let slotCursor = 1;
+  if (nlight > 0 && xpos && xdir) {
+    const max = Math.min(nlight, Math.floor(xpos.length / 3), Math.floor(xdir.length / 3));
+    for (let i = 0; i < max && slotCursor < MJ_MAXLIGHT; i += 1) {
+      const isActive = activeView ? ((activeView[i] ?? 0) !== 0) : true;
+      if (!isActive) continue;
+      const lightType = typeView ? (typeView[i] | 0) : MJ_LIGHT_TYPE.POINT;
+      if (lightType === MJ_LIGHT_TYPE.IMAGE) continue;
+      const kind =
+        lightType === MJ_LIGHT_TYPE.DIRECTIONAL
+          ? 'directional'
+          : (lightType === MJ_LIGHT_TYPE.SPOT ? 'spot' : 'point');
+      const slot = ensureMjLightSlot(rig, slotCursor, kind);
+      slotCursor += 1;
+
+      const base = i * 3;
+      const px = Number(xpos[base + 0]) || 0;
+      const py = Number(xpos[base + 1]) || 0;
+      const pz = Number(xpos[base + 2]) || 0;
+      let dx = Number(xdir[base + 0]) || 0;
+      let dy = Number(xdir[base + 1]) || 0;
+      let dz = Number(xdir[base + 2]) || 0;
+      const dlen = Math.hypot(dx, dy, dz);
+      if (dlen > 1e-12) {
+        dx /= dlen;
+        dy /= dlen;
+        dz /= dlen;
+      }
+
+      const colBase = i * 3;
+      const cr = diffuseView ? (Number(diffuseView[colBase + 0]) || 0) : 1;
+      const cg = diffuseView ? (Number(diffuseView[colBase + 1]) || 0) : 1;
+      const cb = diffuseView ? (Number(diffuseView[colBase + 2]) || 0) : 1;
+      const mjIntensity = intensityView ? Number(intensityView[i]) : 0;
+      // MuJoCo's legacy OpenGL lighting uses `light_{ambient,diffuse,specular}` as the
+      // effective per-channel strength, and many built-in models keep `light_intensity == 0`.
+      // Treat non-positive intensity as "legacy" (i.e. multiplier 1) so that model lights
+      // remain visible and match Simulate's behavior.
+      const intensity = (Number.isFinite(mjIntensity) && mjIntensity > 0) ? mjIntensity : 1;
+      const range = rangeView ? (Number(rangeView[i]) || 0) : 0;
+
+      slot.light.visible = true;
+      slot.light.color.setRGB(cr, cg, cb);
+      slot.light.intensity = intensity;
+      slot.light.position.set(px, py, pz);
+
+      if (kind === 'directional') {
+        if (slot.target) {
+          slot.target.position.set(px + dx, py + dy, pz + dz);
+          slot.light.target?.updateMatrixWorld?.();
+        }
+      } else if (kind === 'spot') {
+        slot.light.distance = range > 0 ? range : 0;
+        // MVP phase-1: match MuJoCo's legacy GL attenuation defaults better than
+        // inverse-square. Proper `attenuation/exponent` parity is phase-2.
+        slot.light.decay = 0;
+        if (slot.target) {
+          slot.target.position.set(px + dx, py + dy, pz + dz);
+          slot.light.target?.updateMatrixWorld?.();
+        }
+        const cutoffDeg = cutoffView ? Number(cutoffView[i]) : null;
+        if (Number.isFinite(cutoffDeg) && cutoffDeg > 0) {
+          const rad = Math.min(Math.max((cutoffDeg * Math.PI) / 180, 1e-3), Math.PI / 2);
+          slot.light.angle = rad;
+        }
+      } else {
+        slot.light.distance = range > 0 ? range : 0;
+        // MVP phase-1: avoid over-attenuating MuJoCo lights (phase-2 handles exact coefficients).
+        slot.light.decay = 0;
+      }
+    }
+  } else if (nlight > 0 && !ctx._mjLightMissingDynWarned) {
+    ctx._mjLightMissingDynWarned = true;
+    logWarn('[lights] missing light_xpos/light_xdir snapshot; model lights disabled until available', {
+      nlight,
+      hasXpos: !!xpos,
+      hasXdir: !!xdir,
+    });
+  }
+
+  for (let i = slotCursor; i < rig.slots.length; i += 1) {
+    disableMjLightSlot(rig.slots[i]);
   }
 }
 
@@ -6438,9 +6670,6 @@ function createRendererManager({
     if (typeof ensureEnvIfNeeded === 'function') {
       ensureEnvIfNeeded(context, state, { skyboxEnabled, presetMode });
     }
-  if (!segmentEnabled && presetMode && typeof applyFallbackAppearance === 'function') {
-      applyFallbackAppearance(context, state);
-    }
     const worldScene = getWorldScene(context);
       if (segmentEnabled) {
         if (!context._segmentEnvBackup && worldScene) {
@@ -6563,21 +6792,18 @@ function createRendererManager({
       baseRadius: groundUniforms?.uQuadDistance?.value ?? null,
     };
     if (visStruct && !segmentEnabled) {
-      const mode = state.visualSourceMode || 'model';
-      const presetMode = mode === 'preset' || mode === 'preset-sun' || mode === 'preset-moon';
-      if (!presetMode) {
-        applyVisualLighting(context, visStruct);
-      }
+      applyVisualLighting(context, visStruct);
     }
 
+    const baseShadowEnabled = shadowEnabled && presetMode;
     if (context.renderer) {
-      context.renderer.shadowMap.enabled = shadowEnabled;
+      context.renderer.shadowMap.enabled = baseShadowEnabled;
       if (context.renderer.shadowMap) {
         context.renderer.shadowMap.type = THREE.PCFShadowMap;
       }
     }
     if (context.light) {
-      context.light.castShadow = shadowEnabled;
+      context.light.castShadow = baseShadowEnabled;
     }
 
     const hideAllGeometry = !!hideAllGeometryDefault;
@@ -6621,6 +6847,13 @@ function createRendererManager({
       { trackingBounds, trackingOverride },
     );
     applyViewerCameraSnapshot(context, snapshot, state, nextBounds, { tempVecA, tempVecB });
+    updateMjLightRig(context, snapshot, state, assets, { enabled: !segmentEnabled });
+    if (!segmentEnabled && !presetMode) {
+      if (context.light) context.light.intensity = 0;
+      if (context.fill) context.fill.intensity = 0;
+      if (context.ambient) context.ambient.intensity = 0;
+      if (context.hemi) context.hemi.intensity = 0;
+    }
     let drawn = 0;
 
     const hasSceneSoA =

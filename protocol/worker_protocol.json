@@ -76,7 +76,9 @@
         "scn_mat",
         "scn_size",
         "scn_rgba",
-        "flexvert_xpos"
+        "flexvert_xpos",
+        "light_xpos",
+        "light_xdir"
       ]
     },
     {
@@ -126,7 +128,9 @@
         "scn_mat",
         "scn_size",
         "scn_rgba",
-        "flexvert_xpos"
+        "flexvert_xpos",
+        "light_xpos",
+        "light_xdir"
       ]
     },
     {
@@ -194,6 +198,8 @@
       "eq_obj2id",
       "eq_objtype",
       "eq_active",
+      "light_xpos",
+      "light_xdir",
       "ctrl"
     ],
     "contacts": []

@@ -180,6 +180,7 @@ export function collectRenderAssetsFromModule(mod, handle) {
     actuators: null,
     flexes: null,
     skins: null,
+    lights: null,
     materials: null,
     meshes: null,
     textures: null,
@@ -550,6 +551,39 @@ export function collectRenderAssetsFromModule(mod, handle) {
       texcoordadr: cloneTyped(skinTexcoordAdrView, Int32Array),
       texcoord: cloneTyped(skinTexcoordView, Float32Array),
       nskintexvert,
+    };
+  }
+  const nlight = ensureFunc('_mjwf_model_nlight').call(mod, handle) | 0;
+  if (nlight > 0) {
+    const typeView = readView(mod, ensureFunc('_mjwf_model_light_type_ptr'), handle, nlight, heapViewI32);
+    const texidView = readView(mod, ensureFunc('_mjwf_model_light_texid_ptr'), handle, nlight, heapViewI32);
+    const activeView = readView(mod, ensureFunc('_mjwf_model_light_active_ptr'), handle, nlight, heapViewU8);
+    const castshadowView = readView(mod, ensureFunc('_mjwf_model_light_castshadow_ptr'), handle, nlight, heapViewU8);
+    const bulbradiusView = readView(mod, ensureFunc('_mjwf_model_light_bulbradius_ptr'), handle, nlight, heapViewF32);
+    const intensityView = readView(mod, ensureFunc('_mjwf_model_light_intensity_ptr'), handle, nlight, heapViewF32);
+    const rangeView = readView(mod, ensureFunc('_mjwf_model_light_range_ptr'), handle, nlight, heapViewF32);
+    const attenuationView = readView(mod, ensureFunc('_mjwf_model_light_attenuation_ptr'), handle, nlight * 3, heapViewF32);
+    const cutoffView = readView(mod, ensureFunc('_mjwf_model_light_cutoff_ptr'), handle, nlight, heapViewF32);
+    const exponentView = readView(mod, ensureFunc('_mjwf_model_light_exponent_ptr'), handle, nlight, heapViewF32);
+    const ambientView = readView(mod, ensureFunc('_mjwf_model_light_ambient_ptr'), handle, nlight * 3, heapViewF32);
+    const diffuseView = readView(mod, ensureFunc('_mjwf_model_light_diffuse_ptr'), handle, nlight * 3, heapViewF32);
+    const specularView = readView(mod, ensureFunc('_mjwf_model_light_specular_ptr'), handle, nlight * 3, heapViewF32);
+
+    assets.lights = {
+      count: nlight,
+      type: cloneTyped(typeView, Int32Array),
+      texid: cloneTyped(texidView, Int32Array),
+      active: cloneTyped(activeView, Uint8Array),
+      castshadow: cloneTyped(castshadowView, Uint8Array),
+      bulbradius: cloneTyped(bulbradiusView, Float32Array),
+      intensity: cloneTyped(intensityView, Float32Array),
+      range: cloneTyped(rangeView, Float32Array),
+      attenuation: cloneTyped(attenuationView, Float32Array),
+      cutoff: cloneTyped(cutoffView, Float32Array),
+      exponent: cloneTyped(exponentView, Float32Array),
+      ambient: cloneTyped(ambientView, Float32Array),
+      diffuse: cloneTyped(diffuseView, Float32Array),
+      specular: cloneTyped(specularView, Float32Array),
     };
   }
   const nmat = ensureFunc('_mjwf_model_nmat').call(mod, handle) | 0;
