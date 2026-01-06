@@ -884,75 +884,8 @@ function buildSkyBackground(THREE_NS, palette) {
   return createVerticalGradientTexture(THREE_NS, top, bottom, 96);
 }
 
-function isPresetMode(state) {
-  const mode = state?.visualSourceMode;
-  return mode === 'preset-sun' || mode === 'preset-moon';
-}
-
-function currentPresetKeyFromState(state) {
-  const mode = state?.visualSourceMode;
-  if (mode === 'preset-moon') return 'moon';
-  if (mode === 'preset-sun') return 'sun';
-  // Default to sun when not in an explicit preset mode.
-  return 'sun';
-}
-
-function ensureBaseLightingCache(ctx) {
-  if (!ctx) return;
-  if (!ctx._baseLighting) {
-    ctx._baseLighting = {
-      exposure: ctx.renderer ? ctx.renderer.toneMappingExposure : null,
-      ambientIntensity: ctx.ambient ? ctx.ambient.intensity : null,
-      ambientColor: ctx.ambient ? ctx.ambient.color.clone() : null,
-      hemiIntensity: ctx.hemi ? ctx.hemi.intensity : null,
-      hemiSky: ctx.hemi ? ctx.hemi.color.clone() : null,
-      hemiGround: ctx.hemi ? ctx.hemi.groundColor.clone() : null,
-      lightIntensity: ctx.light ? ctx.light.intensity : null,
-      lightColor: ctx.light ? ctx.light.color.clone() : null,
-      lightPosition: ctx.light ? ctx.light.position.clone() : null,
-      lightTargetPosition: ctx.lightTarget ? ctx.lightTarget.position.clone() : null,
-      fillIntensity: ctx.fill ? ctx.fill.intensity : null,
-      fillColor: ctx.fill ? ctx.fill.color.clone() : null,
-      fillPosition: ctx.fill ? ctx.fill.position.clone() : null,
-    };
-    strictEnsure('ensureBaseLightingCache', { reason: 'capture' });
-  }
-}
-
-function restoreBaseLighting(ctx) {
-  if (!ctx || !ctx._baseLighting) return;
-  const base = ctx._baseLighting;
-  if (ctx.renderer && base.exposure != null) {
-    ctx.renderer.toneMappingExposure = base.exposure;
-  }
-  if (ctx.ambient) {
-    if (base.ambientIntensity != null) ctx.ambient.intensity = base.ambientIntensity;
-    if (base.ambientColor) ctx.ambient.color.copy(base.ambientColor);
-  }
-  if (ctx.hemi) {
-    if (base.hemiIntensity != null) ctx.hemi.intensity = base.hemiIntensity;
-    if (base.hemiSky) ctx.hemi.color.copy(base.hemiSky);
-    if (base.hemiGround) ctx.hemi.groundColor.copy(base.hemiGround);
-  }
-  if (ctx.light) {
-    if (base.lightIntensity != null) ctx.light.intensity = base.lightIntensity;
-    if (base.lightColor) ctx.light.color.copy(base.lightColor);
-    if (base.lightPosition) ctx.light.position.copy(base.lightPosition);
-  }
-  if (ctx.lightTarget && base.lightTargetPosition) {
-    ctx.lightTarget.position.copy(base.lightTargetPosition);
-    ctx.light.target?.updateMatrixWorld?.();
-  }
-  if (ctx.fill) {
-    if (base.fillIntensity != null) ctx.fill.intensity = base.fillIntensity;
-    if (base.fillColor) ctx.fill.color.copy(base.fillColor);
-    if (base.fillPosition) ctx.fill.position.copy(base.fillPosition);
-  }
-}
-
 function createEnvironmentManager({
   THREE_NS,
-  store,
   skyOffParam,
   fallbackEnabledDefault,
   skyDebugModeParam,
@@ -973,17 +906,10 @@ function createEnvironmentManager({
       strictEnsure('ensureOutdoorSkyEnv', { reason: 'init_pmrem' });
     }
     const allowHDRI = options.allowHDRI !== false;
-    // Decide which preset HDRI to use based on viewer state and preset config:
-    // - preset.hdri (if provided) has priority
-    // - otherwise fall back to built-in sun/moon mapping
-    const state = store && typeof store.get === 'function' ? store.get() : null;
-    const visualPresetKey = currentPresetKeyFromState(state);
-    const defaultUrl = visualPresetKey === 'moon'
-      ? 'starmap_random_2020_4k_rot.exr'
-      : 'rustig_koppie_puresky_4k.hdr';
+    // Decide which preset HDRI to use from the unified rendering buffer.
     const url = (preset && typeof preset.hdri === 'string' && preset.hdri.length)
       ? preset.hdri
-      : defaultUrl;
+      : 'rustig_koppie_puresky_4k.hdr';
     const hdrReady =
       ctx.envFromHDRI &&
       ctx.envRT &&
@@ -1073,7 +999,7 @@ function createEnvironmentManager({
           if (THREE_NS.LinearSRGBColorSpace && envTexture) {
             envTexture.colorSpace = THREE_NS.LinearSRGBColorSpace;
           }
-          if (ctx.hdriLoadGen !== token || !isPresetMode(store.get())) {
+          if (ctx.hdriLoadGen !== token || ctx._skyMode !== SKY_MODE_PRESET) {
             try { envRT?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_dispose'); }
             try { hdr?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_dispose'); }
             ctx.hdriLoading = false;
@@ -1104,7 +1030,7 @@ function createEnvironmentManager({
           const intensity = typeof preset?.envIntensity === 'number' ? preset.envIntensity : 1.0;
           ctx.envIntensity = intensity;
           ctx._envDebugPreset = {
-            key: visualPresetKey,
+            key: typeof preset?.hdri === 'string' ? preset.hdri : null,
             url: hdriUrl,
             envIntensity: intensity,
           };
@@ -1113,7 +1039,6 @@ function createEnvironmentManager({
           strictEnsure('ensureOutdoorSkyEnv', {
             reason: 'apply_hdr',
             key: hdriUrl || null,
-            presetKey: visualPresetKey || null,
           });
           return true;
         } catch (error) {
@@ -1128,7 +1053,6 @@ function createEnvironmentManager({
       // Mark HDRI as loading immediately so we don't treat expected async latency as a fallback.
       ctx.hdriLoading = true;
       ctx.hdriLoadPromise = (async () => {
-        // Single preset: choose hausdorf or NightSkyHDRI008_4K based on visualPresetKey.
         // eslint-disable-next-line no-await-in-loop
         const ok = await tryLoadHDRI(url, token);
         if (ok) return true;
@@ -1201,39 +1125,30 @@ function createEnvironmentManager({
   }
 
   function applyFallbackAppearance(ctx, state) {
-    const fallback = ctx.fallback || { enabled: fallbackEnabledDefault, preset: 'sun' };
+    if (!ctx) return;
     const renderer = ctx.renderer;
-    ensureBaseLightingCache(ctx);
-    const presetMode = isPresetMode(state);
-    fallback.enabled = fallbackEnabledDefault && presetMode;
-    if (!fallback.enabled) {
-      restoreBaseLighting(ctx);
-      return;
-    }
-    const stateSnapshot = store && typeof store.get === 'function' ? store.get() : null;
-    const visualPresetKey = currentPresetKeyFromState(stateSnapshot);
-    const presetKey = visualPresetKey === 'moon' ? 'moon' : 'sun';
-    const preset = FALLBACK_PRESETS[presetKey] || FALLBACK_PRESETS.sun;
-    if (renderer && preset.exposure != null) {
-      renderer.toneMappingExposure = preset.exposure;
+    const appearance = state?.rendering?.appearance;
+    if (!appearance || typeof appearance !== 'object') return;
+
+    if (renderer && typeof appearance.exposure === 'number' && Number.isFinite(appearance.exposure)) {
+      renderer.toneMappingExposure = appearance.exposure;
     }
 
-    // In preset mode, always apply preset lights, regardless of model-defined lights.
     if (ctx.ambient) {
-      const ambientCfg = preset.ambient || {};
+      const ambientCfg = appearance.ambient || {};
       ctx.ambient.color.setHex(ambientCfg.color ?? 0xffffff);
-      ctx.ambient.intensity = ambientCfg.intensity ?? 0.2;
+      ctx.ambient.intensity = ambientCfg.intensity ?? 0;
     }
     if (ctx.hemi) {
-      const hemiCfg = preset.hemi || {};
+      const hemiCfg = appearance.hemi || {};
       ctx.hemi.color.setHex(hemiCfg.sky ?? 0xffffff);
       ctx.hemi.groundColor.setHex(hemiCfg.ground ?? 0x20242f);
-      ctx.hemi.intensity = hemiCfg.intensity ?? 0.6;
+      ctx.hemi.intensity = hemiCfg.intensity ?? 0;
     }
     if (ctx.light) {
-      const dirCfg = preset.dir || {};
+      const dirCfg = appearance.dir || {};
       ctx.light.color.setHex(dirCfg.color ?? 0xffffff);
-      ctx.light.intensity = dirCfg.intensity ?? 1.8;
+      ctx.light.intensity = dirCfg.intensity ?? 0;
       if (Array.isArray(dirCfg.position) && dirCfg.position.length === 3) {
         ctx.light.position.set(dirCfg.position[0], dirCfg.position[1], dirCfg.position[2]);
       }
@@ -1243,36 +1158,33 @@ function createEnvironmentManager({
       }
       if (ctx.light.shadow) {
         ctx.light.shadow.bias =
-          dirCfg.shadowBias ?? preset.shadowBias ?? ctx.light.shadow.bias;
+          dirCfg.shadowBias ?? appearance.shadowBias ?? ctx.light.shadow.bias;
       }
     }
     if (ctx.fill) {
-      const fillCfg = preset.fill || {};
-      ctx.fill.color.setHex(fillCfg.color ?? 0xcfe3ff);
-      ctx.fill.intensity = fillCfg.intensity ?? 0.3;
+      const fillCfg = appearance.fill || {};
+      ctx.fill.color.setHex(fillCfg.color ?? 0xffffff);
+      ctx.fill.intensity = fillCfg.intensity ?? 0;
       if (Array.isArray(fillCfg.position) && fillCfg.position.length === 3) {
         ctx.fill.position.set(fillCfg.position[0], fillCfg.position[1], fillCfg.position[2]);
       }
     }
+
     // Base clear colour for renderer background when skybox/env are disabled.
-    const presetClear =
-      typeof preset.clearColor === 'number'
-        ? preset.clearColor
-        : (typeof preset.background === 'number' ? preset.background : null);
-    if (presetClear != null) {
-      ctx.baseClearHex = presetClear;
-    }
-    // Expose preset overrides for renderer (ground/infinite + overlays).
-    if (ctx.fallback) {
-      ctx.fallback.ground = preset.ground || null;
-      ctx.fallback.overlays = preset.overlays || null;
-      ctx.fallback.fogColor = typeof preset.fogColor === 'number' ? preset.fogColor : null;
+    const clearHex =
+      typeof appearance.clearColor === 'number'
+        ? appearance.clearColor
+        : (typeof appearance.background === 'number' ? appearance.background : null);
+    if (clearHex != null) {
+      ctx.baseClearHex = clearHex;
     }
   }
 
 
   function ensureEnvIfNeeded(ctx, state, options = {}) {
-    const presetMode = isPresetMode(state);
+    const appearance = state?.rendering?.appearance || null;
+    const presetMode = !!(appearance && typeof appearance.hdri === 'string' && appearance.hdri.length);
+    const desiredEnvIntensity = Number.isFinite(appearance?.envIntensity) ? Number(appearance.envIntensity) : null;
     const skyboxEnabled = options.skyboxEnabled !== false;
     const skyDebugMode = typeof options.skyDebugMode === 'string'
       ? options.skyDebugMode
@@ -1284,11 +1196,7 @@ function createEnvironmentManager({
     const prevMode = ctx._skyMode;
     const modeChanged = prevMode !== skyMode;
     ctx._skyMode = skyMode;
-    ctx._lastPresetMode = presetMode;
-    const stateSnapshot = store && typeof store.get === 'function' ? store.get() : null;
-    const visualPresetKey = currentPresetKeyFromState(stateSnapshot);
-    const presetKey = visualPresetKey === 'moon' ? 'moon' : 'sun';
-    const preset = FALLBACK_PRESETS[presetKey] || FALLBACK_PRESETS.sun;
+    const preset = presetMode ? appearance : null;
     const cache = ensureSkyCache(ctx);
     if (modeChanged) {
       strictEnsure('ensureEnvIfNeeded', {
@@ -1306,16 +1214,11 @@ function createEnvironmentManager({
       const modelCached = cache?.model || null;
       if (cache && modelCached && modelCached.envRT && modelCached.background) {
         cache.preset = {
-          key: modelCached.key || preset.hdri || presetKey,
+          key: modelCached.key || preset?.hdri || 'preset-hdri',
           envRT: modelCached.envRT,
           background: modelCached.background,
         };
       }
-    }
-    if (ctx.fallback) {
-      ctx.fallback.ground = preset.ground || null;
-      ctx.fallback.overlays = preset.overlays || null;
-      ctx.fallback.fogColor = typeof preset.fogColor === 'number' ? preset.fogColor : null;
     }
     const hasEnv = hasModelEnvironment(state);
     const allowHDRI = skyMode === SKY_MODE_PRESET && fallbackEnabledDefault;
@@ -1336,13 +1239,16 @@ function createEnvironmentManager({
     if (skyMode === SKY_MODE_PRESET) {
       // Keep renderer clear colour in sync with the active preset when using HDRI.
       const presetClear =
-        typeof preset.clearColor === 'number'
+        typeof preset?.clearColor === 'number'
           ? preset.clearColor
-          : (typeof preset.background === 'number' ? preset.background : null);
+          : (typeof preset?.background === 'number' ? preset.background : null);
       if (presetClear != null) {
         ctx.baseClearHex = presetClear;
       }
       ensureOutdoorSkyEnv(ctx, preset, ctx.hdriLoadGen || 0, { allowHDRI });
+      if (desiredEnvIntensity != null) {
+        ctx.envIntensity = desiredEnvIntensity;
+      }
       pushSkyDebug(ctx, {
         mode: 'ensure-preset',
         presetMode: true,
@@ -1359,6 +1265,9 @@ function createEnvironmentManager({
     const skyOk = ensureModelSkyFromAssets(ctx, state, THREE_NS, { skyDebugMode });
     if (!skyOk) {
       ensureModelGradientEnv(ctx, THREE_NS);
+    }
+    if (desiredEnvIntensity != null) {
+      ctx.envIntensity = desiredEnvIntensity;
     }
     const worldScene = getWorldScene(ctx);
     if (worldScene && !worldScene.background) {
@@ -1386,6 +1295,7 @@ function createEnvironmentManager({
 
 
 export {
+  FALLBACK_PRESETS,
   FALLBACK_PRESET_ALIASES,
   createEnvironmentManager,
   pushSkyDebug,

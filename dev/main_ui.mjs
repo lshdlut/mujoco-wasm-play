@@ -26,6 +26,7 @@ import {
   toNumber,
 } from './viewer_shared.mjs';
 import { STAT_FIELD_DESCRIPTORS, VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
+import { FALLBACK_PRESETS } from './main_environment.mjs';
 
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
@@ -48,6 +49,9 @@ const VISUAL_SOURCE_CACHE_TEMPLATE = {
   lightActiveModel: null,
   lightActivePresetSun: null,
   lightActivePresetMoon: null,
+  appearanceModel: null,
+  appearancePresetSun: null,
+  appearancePresetMoon: null,
 };
 
 let bindingIndex = null;
@@ -565,6 +569,37 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     bvhDepth: 1,
     assets: null,
     groups: createViewerGroupState(true),
+    hideAllGeometry: false,
+    // JS-side rendering/lighting state that is treated like a "buffer": presets
+    // override these values by copying + patching, instead of introducing
+    // renderer-only fallback branches.
+    appearance: {
+      background: null,
+      clearColor: 0xd6dce4,
+      exposure: 1.1,
+      envIntensity: 1.0,
+      hdri: null,
+      backgroundBottom: null,
+      ambient: { color: 0xffffff, intensity: 0 },
+      hemi: { sky: 0xffffff, ground: 0x10131c, intensity: 0 },
+      dir: {
+        color: 0xffffff,
+        intensity: 0,
+        position: [6, -8, 8],
+        target: [0, 0, 1],
+        shadowBias: -0.0001,
+      },
+      fill: { color: 0xffffff, intensity: 0, position: [-6, 6, 3] },
+      shadowBias: -0.0001,
+      ground: null,
+      overlays: null,
+      fogColor: null,
+    },
+    options: {
+      materials: { forceBasic: false },
+      instancing: { enabled: true },
+      transparency: { bins: 16, sortMode: 'strict' },
+    },
   },
   hud: {
     time: 0,
@@ -1118,6 +1153,9 @@ function ensureRenderingState(target) {
       flexLayer: 0,
       bvhDepth: 1,
       groups: createViewerGroupState(true),
+      hideAllGeometry: false,
+      appearance: cloneStruct(DEFAULT_VIEWER_STATE.rendering.appearance),
+      options: cloneStruct(DEFAULT_VIEWER_STATE.rendering.options),
     };
     created = true;
   } else {
@@ -1162,6 +1200,18 @@ function ensureRenderingState(target) {
       repairs.push('groups');
     } else {
       target.rendering.groups = normaliseGroupState(target.rendering.groups);
+    }
+    if (typeof target.rendering.hideAllGeometry !== 'boolean') {
+      target.rendering.hideAllGeometry = false;
+      repairs.push('hideAllGeometry');
+    }
+    if (!target.rendering.appearance || typeof target.rendering.appearance !== 'object') {
+      target.rendering.appearance = cloneStruct(DEFAULT_VIEWER_STATE.rendering.appearance);
+      repairs.push('appearance');
+    }
+    if (!target.rendering.options || typeof target.rendering.options !== 'object') {
+      target.rendering.options = cloneStruct(DEFAULT_VIEWER_STATE.rendering.options);
+      repairs.push('options');
     }
   }
   if (created) {
@@ -1690,6 +1740,24 @@ function applyPresetOverridesToStruct(base, presetLabel) {
   return source;
 }
 
+function applyAppearancePresetOverrides(base, presetKey) {
+  const source = cloneStruct(base) || {};
+  const key = presetKey === 'moon' ? 'moon' : 'sun';
+  const preset = FALLBACK_PRESETS[key] || FALLBACK_PRESETS.sun;
+  for (const [field, value] of Object.entries(preset)) {
+    const before = Object.prototype.hasOwnProperty.call(source, field) ? cloneStruct(source[field]) : null;
+    source[field] = cloneStruct(value);
+    strictOverride('applyAppearancePresetOverrides', {
+      source: 'rendering_appearance_preset',
+      preset: key,
+      field,
+      before,
+      after: cloneStruct(value),
+    });
+  }
+  return source;
+}
+
 function ensureVisualCache(target, key) {
   const existing = target?.[key];
   if (existing) return existing;
@@ -1708,6 +1776,8 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
   const currentState = store.get();
   const currentRaw = currentState?.visualSourceMode;
   const currentMode = allowedModes.includes(currentRaw) ? currentRaw : 'model';
+  const currentAppearance = cloneStruct(currentState?.rendering?.appearance)
+    || cloneStruct(DEFAULT_VIEWER_STATE.rendering.appearance);
   let snapshot;
   try {
     snapshot = await backend.snapshot();
@@ -1739,6 +1809,9 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
   store.update((draft) => {
     const backups = ensureVisualCache(draft, 'visualBackups');
     const baselines = ensureVisualCache(draft, 'visualBaselines');
+    if (!baselines.appearanceModel && currentAppearance) {
+      baselines.appearanceModel = cloneStruct(currentAppearance);
+    }
     if (!baselines.model && baselineVisual) {
       baselines.model = cloneStruct(baselineVisual);
       baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
@@ -1755,6 +1828,9 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
         baselines.lightActivePresetSun = Array.from({ length: nlight }, () => 0);
       }
     }
+    if (wantsPreset && !baselines.appearancePresetSun && baselines.appearanceModel) {
+      baselines.appearancePresetSun = applyAppearancePresetOverrides(baselines.appearanceModel, 'sun');
+    }
     if (targetMode === 'preset-moon' && !baselines.presetMoon) {
       // Start moon from sun baseline; can diverge over time via backups.
       const moonBase = baselines.presetSun || baselines.model;
@@ -1768,6 +1844,10 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
         baselines.lightActivePresetMoon = Array.from({ length: nlight }, () => 0);
       }
     }
+    if (targetMode === 'preset-moon' && !baselines.appearancePresetMoon) {
+      const moonBase = baselines.appearancePresetSun || baselines.appearanceModel;
+      baselines.appearancePresetMoon = applyAppearancePresetOverrides(moonBase, 'moon');
+    }
     if (currentMode === 'preset-sun') {
       backups.presetSun = cloneStruct(currentVisual) || cloneStruct(baselines.presetSun) || null;
       backups.sceneFlagsPresetSun = currentSceneFlags
@@ -1778,6 +1858,7 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       if (currentLightActive) {
         backups.lightActivePresetSun = currentLightActive.slice();
       }
+      backups.appearancePresetSun = cloneStruct(currentAppearance) || cloneStruct(baselines.appearancePresetSun) || null;
     } else if (currentMode === 'preset-moon') {
       backups.presetMoon = cloneStruct(currentVisual) || cloneStruct(baselines.presetMoon) || null;
       backups.sceneFlagsPresetMoon = currentSceneFlags
@@ -1788,6 +1869,7 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       if (currentLightActive) {
         backups.lightActivePresetMoon = currentLightActive.slice();
       }
+      backups.appearancePresetMoon = cloneStruct(currentAppearance) || cloneStruct(baselines.appearancePresetMoon) || null;
     } else {
       backups.model = cloneStruct(currentVisual) || cloneStruct(baselines.model) || null;
       backups.sceneFlagsModel = currentSceneFlags
@@ -1798,6 +1880,7 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       if (currentLightActive) {
         backups.lightActiveModel = currentLightActive.slice();
       }
+      backups.appearanceModel = cloneStruct(currentAppearance) || cloneStruct(baselines.appearanceModel) || null;
     }
   });
   const updatedState = store.get();
@@ -1806,6 +1889,7 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
   let targetVisual = {};
   let targetSceneFlags = normaliseSceneFlagArray(null);
   let targetLightActive = null;
+  let targetAppearance = cloneStruct(DEFAULT_VIEWER_STATE.rendering.appearance);
   if (targetMode === 'preset-sun') {
     const cache = backups.presetSun;
     const base = baselines.presetSun || baselines.model;
@@ -1821,6 +1905,10 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       Array.isArray(backups.lightActivePresetSun) ? backups.lightActivePresetSun.slice()
       : Array.isArray(baselines.lightActivePresetSun) ? baselines.lightActivePresetSun.slice()
       : (nlight > 0 ? Array.from({ length: nlight }, () => 0) : null);
+    const appearanceCache = backups.appearancePresetSun;
+    const appearanceBase = baselines.appearancePresetSun || baselines.appearanceModel;
+    targetAppearance =
+      cloneStruct(appearanceCache) || cloneStruct(appearanceBase) || cloneStruct(DEFAULT_VIEWER_STATE.rendering.appearance);
   } else if (targetMode === 'preset-moon') {
     const cache = backups.presetMoon;
     const base = baselines.presetMoon || baselines.presetSun || baselines.model;
@@ -1838,6 +1926,10 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       Array.isArray(backups.lightActivePresetMoon) ? backups.lightActivePresetMoon.slice()
       : Array.isArray(baselines.lightActivePresetMoon) ? baselines.lightActivePresetMoon.slice()
       : (nlight > 0 ? Array.from({ length: nlight }, () => 0) : null);
+    const appearanceCache = backups.appearancePresetMoon;
+    const appearanceBase = baselines.appearancePresetMoon || baselines.appearancePresetSun || baselines.appearanceModel;
+    targetAppearance =
+      cloneStruct(appearanceCache) || cloneStruct(appearanceBase) || cloneStruct(DEFAULT_VIEWER_STATE.rendering.appearance);
   } else {
     const cache = backups.model;
     const base = baselines.model;
@@ -1851,6 +1943,10 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
       Array.isArray(backups.lightActiveModel) ? backups.lightActiveModel.slice()
       : Array.isArray(baselines.lightActiveModel) ? baselines.lightActiveModel.slice()
       : (currentLightActive ? currentLightActive.slice() : null);
+    const appearanceCache = backups.appearanceModel;
+    const appearanceBase = baselines.appearanceModel;
+    targetAppearance =
+      cloneStruct(appearanceCache) || cloneStruct(appearanceBase) || cloneStruct(DEFAULT_VIEWER_STATE.rendering.appearance);
   }
   store.update((draft) => {
     draft.visualSourceMode = targetMode;
@@ -1860,6 +1956,7 @@ async function switchVisualSourceMode(store, backend, requestedMode) {
     rendering.sceneFlags = Array.isArray(targetSceneFlags)
       ? targetSceneFlags.slice()
       : SCENE_FLAG_DEFAULTS.slice();
+    rendering.appearance = cloneStruct(targetAppearance) || cloneStruct(DEFAULT_VIEWER_STATE.rendering.appearance);
   });
   if (typeof backend.setVisualState === 'function') {
     try {

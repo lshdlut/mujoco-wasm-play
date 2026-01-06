@@ -80,6 +80,16 @@ export interface ViewerGroupState {
   skin: boolean[];
 }
 
+export interface RenderingOptionsState {
+  materials: { forceBasic: boolean };
+  instancing: { enabled: boolean };
+  transparency: { bins: number; sortMode: string };
+}
+
+export interface RenderingAppearanceState {
+  [key: string]: unknown;
+}
+
 export interface RenderingState {
   voptFlags: boolean[];
   sceneFlags: boolean[];
@@ -89,6 +99,9 @@ export interface RenderingState {
   bvhDepth: number;
   assets: unknown | null;
   groups: ViewerGroupState;
+  hideAllGeometry: boolean;
+  appearance: RenderingAppearanceState;
+  options: RenderingOptionsState;
 }
 
 export interface HudState {
@@ -199,6 +212,12 @@ export interface VisualBackupsState {
   sceneFlagsModel: boolean[] | null;
   sceneFlagsPresetSun: boolean[] | null;
   sceneFlagsPresetMoon: boolean[] | null;
+  lightActiveModel: number[] | null;
+  lightActivePresetSun: number[] | null;
+  lightActivePresetMoon: number[] | null;
+  appearanceModel: Record<string, unknown> | null;
+  appearancePresetSun: Record<string, unknown> | null;
+  appearancePresetMoon: Record<string, unknown> | null;
 }
 
 export interface VisualBaselinesState {
@@ -208,6 +227,12 @@ export interface VisualBaselinesState {
   presetMoon: Record<string, unknown> | null;
   sceneFlagsPresetSun: boolean[] | null;
   sceneFlagsPresetMoon: boolean[] | null;
+  lightActiveModel: number[] | null;
+  lightActivePresetSun: number[] | null;
+  lightActivePresetMoon: number[] | null;
+  appearanceModel: Record<string, unknown> | null;
+  appearancePresetSun: Record<string, unknown> | null;
+  appearancePresetMoon: Record<string, unknown> | null;
 }
 
 export interface ViewerState {

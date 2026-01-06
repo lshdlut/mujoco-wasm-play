@@ -1950,12 +1950,9 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
     return;
   }
 
-  if (typeof window !== 'undefined') {
-    const search = window.location?.search || '';
-    if (search.includes('forceBasic=1') && !ctx._mjLightForceBasicWarned) {
-      ctx._mjLightForceBasicWarned = true;
-      logWarn('[lights] forceBasic=1 disables lighting (MeshBasicMaterial); remove it to see mj lights');
-    }
+  if (state?.rendering?.options?.materials?.forceBasic === true && !ctx._mjLightForceBasicWarned) {
+    ctx._mjLightForceBasicWarned = true;
+    logWarn('[lights] forceBasic disables lighting (MeshBasicMaterial); disable it to see mj lights');
   }
 
   const camera = ctx?.camera || null;
@@ -1964,8 +1961,9 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
   const headDiffuse = rgbFromArray(headlight?.diffuse, [1, 1, 1]);
   const headAmbient = rgbFromArray(headlight?.ambient, [0.2, 0.2, 0.2]);
 
-  rig.ambient.color.setRGB(headAmbient[0], headAmbient[1], headAmbient[2]);
-  rig.ambient.intensity = headActive ? 1 : 0;
+  let ambientR = headActive ? headAmbient[0] : 0;
+  let ambientG = headActive ? headAmbient[1] : 0;
+  let ambientB = headActive ? headAmbient[2] : 0;
 
   // Slot 0: headlight (id=-1 in mjv_makeLights). In MuJoCo GL3, directional
   // lights are consumed as `-dir`; in three.js this is achieved by setting the
@@ -1999,10 +1997,12 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
   const nlight = lightAssets?.count | 0;
   const typeView = lightAssets?.type || null;
   const activeView = lightAssets?.active || null;
+  const ambientView = lightAssets?.ambient || null;
   const diffuseView = lightAssets?.diffuse || null;
   const intensityView = lightAssets?.intensity || null;
   const rangeView = lightAssets?.range || null;
   const cutoffView = lightAssets?.cutoff || null;
+  const exponentView = lightAssets?.exponent || null;
 
   let slotCursor = 1;
   if (nlight > 0 && xpos && xdir) {
@@ -2045,6 +2045,12 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
       const intensity = (Number.isFinite(mjIntensity) && mjIntensity > 0) ? mjIntensity : 1;
       const range = rangeView ? (Number(rangeView[i]) || 0) : 0;
 
+      if (ambientView && ambientView.length >= (colBase + 3)) {
+        ambientR += (Number(ambientView[colBase + 0]) || 0) * intensity;
+        ambientG += (Number(ambientView[colBase + 1]) || 0) * intensity;
+        ambientB += (Number(ambientView[colBase + 2]) || 0) * intensity;
+      }
+
       slot.light.visible = true;
       slot.light.color.setRGB(cr, cg, cb);
       slot.light.intensity = intensity;
@@ -2056,22 +2062,43 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
           slot.light.target?.updateMatrixWorld?.();
         }
       } else if (kind === 'spot') {
+        // MuJoCo's GL renderer uses the legacy OpenGL spotlight model
+        // (`attenuation`, `exponent`, `cutoff`) rather than inverse-square falloff.
+        // With three.js `physicallyCorrectLights`, `decay` controls the inverse-distance
+        // term. Keep `decay=0` to avoid darkening model lights; `distance` still provides
+        // a smooth cutoff near `range` in three.js' physically-correct shader.
         slot.light.distance = range > 0 ? range : 0;
-        // MVP phase-1: match MuJoCo's legacy GL attenuation defaults better than
-        // inverse-square. Proper `attenuation/exponent` parity is phase-2.
         slot.light.decay = 0;
         if (slot.target) {
           slot.target.position.set(px + dx, py + dy, pz + dz);
           slot.light.target?.updateMatrixWorld?.();
         }
         const cutoffDeg = cutoffView ? Number(cutoffView[i]) : null;
+        let outerAngle = slot.light.angle;
         if (Number.isFinite(cutoffDeg) && cutoffDeg > 0) {
           const rad = Math.min(Math.max((cutoffDeg * Math.PI) / 180, 1e-3), Math.PI / 2);
+          outerAngle = rad;
           slot.light.angle = rad;
         }
+
+        const exponent = exponentView ? Number(exponentView[i]) : 0;
+        // Approximate OpenGL spotlight exponent (pow(cos(theta), exponent)) using
+        // three.js' penumbra model by choosing an "inner cone" where the MuJoCo
+        // falloff is still near full strength, then fading to zero at cutoff.
+        const exp = Number.isFinite(exponent) ? Math.max(0, exponent) : 0;
+        let penumbra = 0;
+        if (exp > 0 && Number.isFinite(outerAngle) && outerAngle > 1e-6) {
+          const nearFull = 0.95;
+          const cosInner = Math.pow(nearFull, 1 / exp);
+          const innerAngle = Math.acos(Math.max(-1, Math.min(1, cosInner)));
+          penumbra = clampUnit(1 - innerAngle / outerAngle);
+        }
+        if (typeof slot.light.penumbra === 'number' && slot.light.penumbra !== penumbra) {
+          slot.light.penumbra = penumbra;
+        }
       } else {
+        // See note above: avoid inverse-square falloff for MuJoCo model lights.
         slot.light.distance = range > 0 ? range : 0;
-        // MVP phase-1: avoid over-attenuating MuJoCo lights (phase-2 handles exact coefficients).
         slot.light.decay = 0;
       }
     }
@@ -2083,6 +2110,9 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
       hasXdir: !!xdir,
     });
   }
+
+  rig.ambient.color.setRGB(ambientR, ambientG, ambientB);
+  rig.ambient.intensity = (ambientR || ambientG || ambientB) ? 1 : 0;
 
   for (let i = slotCursor; i < rig.slots.length; i += 1) {
     disableMjLightSlot(rig.slots[i]);
@@ -2274,8 +2304,6 @@ function meanSizeFromState(state, context = null) {
       ? state.rendering.voptFlags
       : (Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : (getDefaultVopt(context, state) || []));
     const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
-    const mode = state?.visualSourceMode ?? 'model';
-    const presetMode = mode === 'preset' || mode === 'preset-sun' || mode === 'preset-moon';
     const skyboxFlag = sceneFlags[4] !== false;
     const shadowEnabled = segmentEnabled ? false : sceneFlags[0] !== false;
     const reflectionEnabled = segmentEnabled ? false : sceneFlags[2] !== false;
@@ -2292,7 +2320,6 @@ function meanSizeFromState(state, context = null) {
       reflectionEnabled,
       fogEnabled,
       hazeEnabled,
-      presetMode,
       hideAllGeometry,
     };
   }
@@ -2465,9 +2492,7 @@ function updateSceneLabelOverlays(context, snapshot, state, options = {}) {
   labelGroup.visible = used > 0;
 }
 
-function createPrimitiveGeometry(gtype, sizeVec, options = {}) {
-  const fallbackEnabled = options.fallbackEnabled !== false;
-  const preset = options.preset || 'bright-outdoor';
+function createPrimitiveGeometry(gtype, sizeVec) {
   let geometry;
   let materialOpts = {
     color: 0x6fa0ff,
@@ -3074,14 +3099,15 @@ class MaterialPool {
     const rough = Math.round(((spec.roughness ?? 0.55) + Number.EPSILON) * 1000) / 1000;
     const metal = Math.round(((spec.metalness ?? 0.0) + Number.EPSILON) * 1000) / 1000;
     const wire = !!spec.wireframe;
-    return `${kind}|${color}|r${rough}|m${metal}|w${wire}`;
+    const forceBasic = !!spec.forceBasic;
+    return `${kind}|${color}|r${rough}|m${metal}|w${wire}|b${forceBasic ? 1 : 0}`;
   }
   get(spec) {
     const key = this._key(spec);
     if (this.cache.has(key)) return this.cache.get(key);
     const T = this.THREE;
     let mat;
-    const forceBasic = (typeof window !== 'undefined') && (window.location?.search?.includes('forceBasic=1'));
+    const forceBasic = !!spec.forceBasic;
     if (spec.kind === 'standard') {
       mat = forceBasic
         ? new T.MeshBasicMaterial({ color: spec.color ?? 0xffffff, wireframe: !!spec.wireframe })
@@ -3094,14 +3120,10 @@ class MaterialPool {
     } else {
       mat = forceBasic
         ? new T.MeshBasicMaterial({ color: spec.color ?? 0xffffff, wireframe: !!spec.wireframe })
-        : new T.MeshPhysicalMaterial({
+        : new T.MeshStandardMaterial({
             color: spec.color ?? 0xffffff,
             roughness: spec.roughness ?? 0.55,
             metalness: spec.metalness ?? 0.0,
-            clearcoat: 0.2,
-            clearcoatRoughness: 0.15,
-            specularIntensity: 0.25,
-            ior: 1.5,
             wireframe: !!spec.wireframe,
           });
     }
@@ -3221,72 +3243,40 @@ function ensureInstancedGeometry(inst, gtype) {
   return geometry;
 }
 
-function instancingForceBasicMaterial() {
-  if (typeof window === 'undefined') return false;
-  const search = window.location?.search || '';
-  return search.includes('forceBasic=1');
-}
-
 function instancingIsOverlayObjType(objType) {
   const ot = objType | 0;
   return ot === MJ_OBJ.SITE || ot === MJ_OBJ.TENDON;
 }
 
-function instancingDisabledByUrl() {
-  if (typeof globalThis !== 'undefined') {
-    const override = globalThis.PLAY_DISABLE_INSTANCING;
-    if (override === true) return true;
-    if (override === false) return false;
-  }
-  if (typeof window === 'undefined') return false;
-  const search = window.location?.search || '';
-  return (
-    search.includes('inst=0') ||
-    search.includes('instancing=0') ||
-    search.includes('noinst=1')
-  );
+function instancingEnabledFromState(state) {
+  return state?.rendering?.options?.instancing?.enabled !== false;
 }
 
-function transparentBinsFromUrl(defaultBins = 16) {
-  if (typeof globalThis !== 'undefined') {
-    const override = globalThis.PLAY_TRANSPARENT_BINS;
-    if (Number.isFinite(override)) {
-      return Math.max(0, Math.min(16, override | 0));
-    }
-  }
-  if (typeof window === 'undefined') return defaultBins;
-  const search = window.location?.search || '';
-  const match = search.match(/(?:^|[?&])tbins=(\d+)/);
-  if (!match) return defaultBins;
-  const parsed = Number(match[1]);
-  if (!Number.isFinite(parsed)) return defaultBins;
-  const clamped = Math.max(0, Math.min(16, parsed | 0));
-  if (clamped === 0) return 0;
-  if (clamped <= 1) return 1;
-  if (clamped <= 4) return 4;
-  if (clamped <= 8) return 8;
-  return 16;
+function transparentBinsFromState(state, defaultBins = 16) {
+  const override = state?.rendering?.options?.transparency?.bins;
+  if (!Number.isFinite(override)) return defaultBins;
+  return Math.max(0, Math.min(16, override | 0));
 }
 
-function transparentSortModeFromUrl() {
-  if (typeof globalThis !== 'undefined') {
-    const override = globalThis.PLAY_TRANSPARENT_SORT_MODE;
-    if (override === 'strict' || override === 'bins' || override === 'nosort') return override;
-  }
-  if (typeof window === 'undefined') return 'strict';
-  const search = window.location?.search || '';
-  if (search.includes('tmode=nosort') || search.includes('tmode=fast')) return 'nosort';
-  if (search.includes('tmode=strict')) return 'strict';
-  if (search.includes('tmode=bins')) return 'bins';
+function transparentSortModeFromState(state) {
+  const override = state?.rendering?.options?.transparency?.sortMode;
+  if (override === 'strict' || override === 'bins' || override === 'nosort') return override;
   return 'strict';
 }
 
-function ensureInstancedMaterial(inst, reflectanceQ, { wireframe = false, opacityQ = 1000, objType = MJ_OBJ.UNKNOWN } = {}) {
+function ensureInstancedMaterial(
+  inst,
+  reflectanceQ,
+  { roughnessQ = 550, metalnessQ = 0 } = {},
+  { wireframe = false, opacityQ = 1000, objType = MJ_OBJ.UNKNOWN, forceBasic = false } = {}
+) {
   if (!inst) return null;
   if (!(inst.materials instanceof Map)) inst.materials = new Map();
   const oq = Math.max(0, Math.min(1000, opacityQ | 0));
-  const forceBasic = instancingForceBasicMaterial() || instancingIsOverlayObjType(objType);
-  const key = `inst:${forceBasic ? 1 : 0}:o${oq}:r${reflectanceQ | 0}`;
+  const rq = Math.max(0, Math.min(1000, roughnessQ | 0));
+  const mq = Math.max(0, Math.min(1000, metalnessQ | 0));
+  const forceBasicFlag = !!forceBasic || instancingIsOverlayObjType(objType);
+  const key = `inst:${forceBasicFlag ? 1 : 0}:o${oq}:r${reflectanceQ | 0}:ru${rq}:me${mq}`;
   if (inst.materials.has(key)) {
     const mat = inst.materials.get(key);
     if (mat && typeof mat.wireframe === 'boolean' && mat.wireframe !== !!wireframe) {
@@ -3296,7 +3286,7 @@ function ensureInstancedMaterial(inst, reflectanceQ, { wireframe = false, opacit
   }
   const opacity = oq / 1000;
   const transparent = opacity < 0.999;
-  const material = forceBasic
+  const material = forceBasicFlag
     ? new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent,
@@ -3305,10 +3295,10 @@ function ensureInstancedMaterial(inst, reflectanceQ, { wireframe = false, opacit
         depthTest: true,
         toneMapped: false,
       })
-    : new THREE.MeshPhysicalMaterial({
+    : new THREE.MeshStandardMaterial({
         color: 0xffffff,
-        roughness: 0.65,
-        metalness: 0.05,
+        roughness: rq / 1000,
+        metalness: mq / 1000,
         transparent,
         opacity,
         depthWrite: !transparent,
@@ -3316,7 +3306,7 @@ function ensureInstancedMaterial(inst, reflectanceQ, { wireframe = false, opacit
       });
   material.vertexColors = true;
   material.wireframe = !!wireframe;
-  if (!forceBasic && 'envMapIntensity' in material) {
+  if (!forceBasicFlag && 'envMapIntensity' in material) {
     material.envMapIntensity = 0;
   }
   material.userData = material.userData || {};
@@ -3722,11 +3712,6 @@ function applyMaterialFlags(mesh, index, state, sceneFlagsOverride = null) {
   if (!mesh || !mesh.material) return;
   const sceneFlags = sceneFlagsOverride || state.rendering?.sceneFlags || [];
   mesh.material.wireframe = !!sceneFlags[1];
-  if (mesh.material.emissive && typeof mesh.material.emissive.set === 'function') {
-    mesh.material.emissive.set(0x000000);
-  } else if (mesh.material && 'emissive' in mesh.material) {
-    mesh.material.emissive = new THREE.Color(0x000000);
-  }
 }
 
 function resolveMaterialReflectance(matIndex, assets) {
@@ -3738,10 +3723,37 @@ function resolveMaterialReflectance(matIndex, assets) {
   return Math.max(0, Number(value));
 }
 
+function resolveMaterialMetallic(matIndex, assets) {
+  if (!(matIndex >= 0)) return null;
+  const metallicArr = assets?.materials?.metallic || null;
+  if (!metallicArr) return null;
+  const value = metallicArr[matIndex];
+  if (!Number.isFinite(value)) return null;
+  return clampUnit(Number(value));
+}
+
+function resolveMaterialRoughness(matIndex, assets) {
+  if (!(matIndex >= 0)) return null;
+  const roughnessArr = assets?.materials?.roughness || null;
+  if (!roughnessArr) return null;
+  const value = roughnessArr[matIndex];
+  if (!Number.isFinite(value)) return null;
+  return clampUnit(Number(value));
+}
+
+function resolveMaterialEmission(matIndex, assets) {
+  if (!(matIndex >= 0)) return null;
+  const emissionArr = assets?.materials?.emission || null;
+  if (!emissionArr) return null;
+  const value = emissionArr[matIndex];
+  if (!Number.isFinite(value)) return null;
+  const scalar = Number(value);
+  return scalar > 0 ? scalar : 0;
+}
+
 function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
   if (!mesh) return;
   mesh.userData = mesh.userData || {};
-  const mode = ctx?.visualSourceMode || 'model';
   const baseIntensity = typeof ctx?.envIntensity === 'number' ? ctx.envIntensity : 0;
   const mat = mesh.material;
   if (!mat || !('envMapIntensity' in mat)) return;
@@ -3750,10 +3762,9 @@ function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
   }
   const clampedReflectance = Number.isFinite(reflectance) ? Math.max(0, reflectance) : 0;
   mesh.userData.reflectance = clampedReflectance;
-  const presetMode = mode === 'preset-sun' || mode === 'preset-moon';
   const effectiveReflectance = clampedReflectance > 0 ? clampedReflectance : 0;
   let nextEnvIntensity = mat.envMapIntensity;
-  if (!reflectionEnabled || baseIntensity <= 0 || !presetMode) {
+  if (!reflectionEnabled || baseIntensity <= 0) {
     nextEnvIntensity = 0;
   } else {
     nextEnvIntensity = baseIntensity * effectiveReflectance;
@@ -3857,11 +3868,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
         }
       }
       if (!geometryInfo) {
-        const fb = ctx.fallback || {};
-        geometryInfo = createPrimitiveGeometry(gtype, sizeVec, {
-          fallbackEnabled: fb.enabled !== false,
-          preset: fb.preset || 'bright-outdoor',
-        });
+        geometryInfo = createPrimitiveGeometry(gtype, sizeVec);
         geometryInfo.ownGeometry = true;
       }
       const objectKind = geometryInfo.objectKind || 'mesh';
@@ -3906,6 +3913,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
             roughness: baseOpts.roughness ?? 0.55,
             metalness: baseOpts.metalness ?? 0.0,
             wireframe: wire,
+            forceBasic: state?.rendering?.options?.materials?.forceBasic === true,
           };
           if (!ctx.materialPool) ctx.materialPool = new MaterialPool(THREE);
           material = ctx.materialPool.get(poolKey);
@@ -5207,7 +5215,8 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   };
   const geomMetaCache = ctx._scnGeomMeta || (ctx._scnGeomMeta = []);
 
-  const instancingEnabled = !segmentEnabled && !instancingDisabledByUrl();
+  const forceBasicRequested = state?.rendering?.options?.materials?.forceBasic === true;
+  const instancingEnabled = !segmentEnabled && instancingEnabledFromState(state);
   const inst = instancingEnabled ? ensureInstancingRoot(ctx) : null;
   if (inst && inst.batches instanceof Map) {
     for (const batch of inst.batches.values()) {
@@ -5231,8 +5240,8 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     }
   }
 
-  const transparentBinsRequested = transparentBinsFromUrl(16);
-  const transparentSortMode = transparentSortModeFromUrl();
+  const transparentBinsRequested = transparentBinsFromState(state, 16);
+  const transparentSortMode = transparentSortModeFromState(state);
   const transparentBins = transparentSortMode === 'strict' ? 1 : transparentBinsRequested;
   const transparentOrderingEnabled = transparentBins > 0;
   const sortTransparentInstances = transparentOrderingEnabled && transparentSortMode === 'strict';
@@ -5678,11 +5687,13 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
         gtypeRaw === MJ_GEOM.CAPSULE ||
         gtypeRaw === MJ_GEOM.CYLINDER ||
         gtypeRaw === MJ_GEOM.BOX;
+      const baseEmission = resolveMaterialEmission(matId, assets) || 0;
       const eligibleForInstancing =
         instancedType &&
         (opaque || (transparentOrderingEnabled && isTransparent)) &&
         !materialOverrides &&
-        !wantsTexture;
+        !wantsTexture &&
+        baseEmission <= 1e-6;
       if (eligibleForInstancing) {
         if (meshIndex >= 0 && meshIndex < baseNgeom) {
           const proxy = ensureGeomProxy(meshIndex);
@@ -5724,10 +5735,21 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       if (visible && eligibleForInstancing) {
         const reflectanceValue = resolveMaterialReflectance(matId, assets);
         const reflectanceQ = quantize1e6(reflectanceValue);
+        const roughnessValue = resolveMaterialRoughness(matId, assets);
+        const metalnessValue = resolveMaterialMetallic(matId, assets);
+        const roughnessQ = quantize1e3(roughnessValue != null ? roughnessValue : 0.55);
+        const metalnessQ = quantize1e3(metalnessValue != null ? metalnessValue : 0.0);
         const wireframe = !!flags?.[1];
         const geometry = ensureInstancedGeometry(inst, gtypeRaw);
         const scnObjType = objTypeView[si] | 0;
-        const material = geometry ? ensureInstancedMaterial(inst, reflectanceQ, { wireframe, opacityQ, objType: scnObjType }) : null;
+        const material = geometry
+          ? ensureInstancedMaterial(
+            inst,
+            reflectanceQ,
+            { roughnessQ, metalnessQ },
+            { wireframe, opacityQ, objType: scnObjType, forceBasic: forceBasicRequested },
+          )
+          : null;
         let depthQ16 = 0;
         if (transparentBinKey >= 0 && sortTransparentInstances) {
           depthQ16 = Math.max(0, Math.min(65535, Math.floor((1 - transparentDepthNorm) * 65535))) | 0;
@@ -5735,7 +5757,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
         const orderRank = (transparentBinKey >= 0)
           ? (sortTransparentInstances ? (((transparentOrder | 0) << 16) | (depthQ16 | 0)) : (transparentOrder | 0))
           : (geomOrderRank ? (geomOrderRank[si] | 0) : si);
-        const batchKey = `g${gtypeRaw | 0}:ot${scnObjType}:o${opaque ? 1000 : opacityQ | 0}:r${reflectanceQ | 0}:tb${transparentBinKey | 0}`;
+        const batchKey = `g${gtypeRaw | 0}:ot${scnObjType}:o${opaque ? 1000 : opacityQ | 0}:r${reflectanceQ | 0}:ru${roughnessQ | 0}:me${metalnessQ | 0}:tb${transparentBinKey | 0}`;
         const batchCapacity = (transparentBinKey >= 0) ? transparentBatchCapacity : scnNgeom;
         const batch = (geometry && material)
           ? ensureInstancedBatch(ctx, inst, batchKey, geometry, material, batchCapacity)
@@ -6113,18 +6135,43 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       userData.geomOpacity = a;
       userData.baseAlpha = a;
 
-      if (view && mat) {
-        if (view.roughnessOverride != null && ('roughness' in mat) && mat.roughness !== view.roughnessOverride) {
-          mat.roughness = view.roughnessOverride;
+      if (mat) {
+        const baseRoughness = resolveMaterialRoughness(matId, assets);
+        const baseMetalness = resolveMaterialMetallic(matId, assets);
+        const baseEmission = resolveMaterialEmission(matId, assets);
+
+        const roughnessOverride = view?.roughnessOverride;
+        const metalnessOverride = view?.metalnessOverride;
+        const envOverride = view?.envMapIntensityOverride;
+        const emissiveOverride = view?.emissiveIntensityOverride;
+
+        const desiredRoughness = roughnessOverride != null ? roughnessOverride : baseRoughness;
+        if (desiredRoughness != null && ('roughness' in mat) && mat.roughness !== desiredRoughness) {
+          mat.roughness = desiredRoughness;
         }
-        if (view.metalnessOverride != null && ('metalness' in mat) && mat.metalness !== view.metalnessOverride) {
-          mat.metalness = view.metalnessOverride;
+        const desiredMetalness = metalnessOverride != null ? metalnessOverride : baseMetalness;
+        if (desiredMetalness != null && ('metalness' in mat) && mat.metalness !== desiredMetalness) {
+          mat.metalness = desiredMetalness;
         }
-        if (view.envMapIntensityOverride != null && ('envMapIntensity' in mat) && mat.envMapIntensity !== view.envMapIntensityOverride) {
-          mat.envMapIntensity = view.envMapIntensityOverride;
+        if (envOverride != null && ('envMapIntensity' in mat) && mat.envMapIntensity !== envOverride) {
+          mat.envMapIntensity = envOverride;
         }
-        if (view.emissiveIntensityOverride != null && ('emissiveIntensity' in mat) && mat.emissiveIntensity !== view.emissiveIntensityOverride) {
-          mat.emissiveIntensity = view.emissiveIntensityOverride;
+
+        const desiredEmissionRaw = emissiveOverride != null
+          ? emissiveOverride
+          : (baseEmission != null ? baseEmission : 0);
+        const desiredEmission = Math.max(0, Number(desiredEmissionRaw) || 0);
+        if ('emissiveIntensity' in mat && mat.emissiveIntensity !== desiredEmission) {
+          mat.emissiveIntensity = desiredEmission;
+        }
+        if (mat.emissive && typeof mat.emissive.setRGB === 'function') {
+          const wantEmissive = desiredEmission > 1e-6;
+          const er = wantEmissive ? r : 0;
+          const eg = wantEmissive ? g : 0;
+          const eb = wantEmissive ? b : 0;
+          if ((mat.emissive.r !== er) || (mat.emissive.g !== eg) || (mat.emissive.b !== eb)) {
+            mat.emissive.setRGB(er, eg, eb);
+          }
         }
       }
       if (view) view.__dirty = false;
@@ -6283,11 +6330,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       if (batch.material && 'envMapIntensity' in batch.material) {
         const q = batch.material.userData?.reflectanceQ;
         const reflectance = Number.isFinite(q) ? Math.max(0, Number(q)) / 1e6 : 0;
-        const mode = ctx?.visualSourceMode || 'model';
-        const presetMode = mode === 'preset-sun' || mode === 'preset-moon';
         const baseIntensity = typeof ctx?.envIntensity === 'number' ? ctx.envIntensity : 0;
         const nextEnvIntensity =
-          reflectionEnabled && presetMode && baseIntensity > 0 && reflectance > 0
+          reflectionEnabled && baseIntensity > 0 && reflectance > 0
             ? baseIntensity * reflectance
             : 0;
         const current = typeof batch.material.envMapIntensity === 'number' ? batch.material.envMapIntensity : 0;
@@ -6381,10 +6426,6 @@ function createRendererManager({
   renderCtx,
   applyFallbackAppearance,
   ensureEnvIfNeeded,
-  hideAllGeometryDefault,
-  fallbackEnabledDefault,
-  fallbackPresetKey,
-  fallbackModeParam,
   debugMode = false,
   setRenderStats = () => {},
 }) {
@@ -6607,12 +6648,6 @@ function createRendererManager({
       skyPalette: null,
       skyDebugMode: null,
       skyInit: false,
-      _lastPresetMode: null,
-      fallback: {
-        enabled: fallbackEnabledDefault,
-        preset: fallbackPresetKey,
-        mode: fallbackModeParam,
-      },
     });
 
     updateRendererViewport();
@@ -6650,7 +6685,6 @@ function createRendererManager({
       reflectionEnabled,
       fogEnabled,
       hazeEnabled,
-      presetMode,
     } = policy;
     context.reflectionActive = reflectionEnabled;
 
@@ -6668,7 +6702,7 @@ function createRendererManager({
     const skinGroupMask = Array.isArray(state.rendering?.groups?.skin) ? state.rendering.groups.skin : null;
 
     if (typeof ensureEnvIfNeeded === 'function') {
-      ensureEnvIfNeeded(context, state, { skyboxEnabled, presetMode });
+      ensureEnvIfNeeded(context, state, { skyboxEnabled });
     }
     const worldScene = getWorldScene(context);
       if (segmentEnabled) {
@@ -6716,6 +6750,9 @@ function createRendererManager({
         }
         context._segmentEnvBackup = null;
         context._segmentEnvBackupApplied = false;
+      }
+      if (typeof applyFallbackAppearance === 'function') {
+        applyFallbackAppearance(context, state);
       }
       applySkyboxVisibility(context, skyboxEnabled, { useBlackOnDisable: true });
     }
@@ -6770,8 +6807,9 @@ function createRendererManager({
     }
     const fogConfig = resolveFogConfig(visStruct, statStruct, context.bounds, fogEnabled);
     if (fogConfig.enabled && !fogConfig.color) {
-      const presetFog = context.fallback && Number.isFinite(context.fallback.fogColor)
-        ? context.fallback.fogColor
+      const presetFogRaw = state?.rendering?.appearance?.fogColor;
+      const presetFog = (typeof presetFogRaw === 'number' && Number.isFinite(presetFogRaw))
+        ? presetFogRaw
         : null;
       if (presetFog != null) {
         fogConfig.color = new THREE.Color(presetFog);
@@ -6791,11 +6829,8 @@ function createRendererManager({
       fadeEnd: groundUniforms?.uFadeEnd?.value ?? null,
       baseRadius: groundUniforms?.uQuadDistance?.value ?? null,
     };
-    if (visStruct && !segmentEnabled) {
-      applyVisualLighting(context, visStruct);
-    }
-
-    const baseShadowEnabled = shadowEnabled && presetMode;
+    const baseShadowEnabled = shadowEnabled
+      && (Number(state?.rendering?.appearance?.dir?.intensity) > 0);
     if (context.renderer) {
       context.renderer.shadowMap.enabled = baseShadowEnabled;
       if (context.renderer.shadowMap) {
@@ -6806,7 +6841,7 @@ function createRendererManager({
       context.light.castShadow = baseShadowEnabled;
     }
 
-    const hideAllGeometry = !!hideAllGeometryDefault;
+    const hideAllGeometry = !!policy.hideAllGeometry;
 
     const ngeom = snapshot.ngeom | 0;
     const nextBounds = ngeom > 0 ? computeBoundsFromSnapshot(snapshot) : null;
@@ -6848,12 +6883,6 @@ function createRendererManager({
     );
     applyViewerCameraSnapshot(context, snapshot, state, nextBounds, { tempVecA, tempVecB });
     updateMjLightRig(context, snapshot, state, assets, { enabled: !segmentEnabled });
-    if (!segmentEnabled && !presetMode) {
-      if (context.light) context.light.intensity = 0;
-      if (context.fill) context.fill.intensity = 0;
-      if (context.ambient) context.ambient.intensity = 0;
-      if (context.hemi) context.hemi.intensity = 0;
-    }
     let drawn = 0;
 
     const hasSceneSoA =
@@ -6922,8 +6951,7 @@ function createRendererManager({
     if (context.ground && Array.isArray(context.geomState)) {
       const groundIndex = context.ground.userData?.geomIndex;
       if (Number.isFinite(groundIndex)) {
-        const presetMode = context._lastPresetMode === true;
-        const groundPreset = presetMode ? context.fallback?.ground || null : null;
+        const groundPreset = state?.rendering?.appearance?.ground || null;
         if (groundPreset && typeof groundPreset === 'object') {
           setGeomViewProps(context, groundIndex, {
             color: groundPreset.color,

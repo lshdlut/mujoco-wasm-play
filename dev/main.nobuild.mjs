@@ -44,7 +44,7 @@ import {
   readControlValue,
 } from './main_ui.mjs';
 import { createCameraController, createPickingController, createRendererManager } from './main_renderer.mjs';
-import { FALLBACK_PRESET_ALIASES, createEnvironmentManager } from './main_environment.mjs';
+import { createEnvironmentManager } from './main_environment.mjs';
 
 perfMarkOnce('play:main:start', {
   href: (typeof window !== 'undefined' && window.location?.href) ? window.location.href : null,
@@ -121,7 +121,6 @@ const renderCtx = {
 
 const {
   fallbackModeParam,
-  presetParam: fallbackPresetParam,
   debugMode,
   hideAllGeometryDefault,
   dumpToken,
@@ -146,14 +145,63 @@ if (typeof window !== 'undefined') {
 
 const fallbackEnabledDefault = fallbackModeParam !== 'off';
 
-const fallbackPresetKey = FALLBACK_PRESET_ALIASES[fallbackPresetParam] || 'bright-outdoor';
 const { applyFallbackAppearance, ensureEnvIfNeeded } = createEnvironmentManager({
   THREE_NS: THREE,
-  store,
   skyOffParam,
   fallbackEnabledDefault,
   skyDebugModeParam,
 });
+
+const parseTransparentBins = (search, fallbackBins = 16) => {
+  const match = String(search || '').match(/(?:^|[?&])tbins=(\d+)/);
+  if (!match) return fallbackBins;
+  const parsed = Number(match[1]);
+  if (!Number.isFinite(parsed)) return fallbackBins;
+  const clamped = Math.max(0, Math.min(16, parsed | 0));
+  if (clamped === 0) return 0;
+  if (clamped <= 1) return 1;
+  if (clamped <= 4) return 4;
+  if (clamped <= 8) return 8;
+  return 16;
+};
+
+const parseTransparentSortMode = (search) => {
+  const s = String(search || '');
+  if (s.includes('tmode=nosort') || s.includes('tmode=fast')) return 'nosort';
+  if (s.includes('tmode=bins')) return 'bins';
+  return 'strict';
+};
+
+if (store && typeof store.update === 'function') {
+  const search = (typeof window !== 'undefined') ? (window.location?.search || '') : '';
+  const forceBasic = search.includes('forceBasic=1');
+  let disableInstancing = search.includes('inst=0') || search.includes('instancing=0') || search.includes('noinst=1');
+  if (typeof globalThis !== 'undefined') {
+    const override = globalThis.PLAY_DISABLE_INSTANCING;
+    if (override === true) disableInstancing = true;
+    if (override === false) disableInstancing = false;
+  }
+  let transparentBins = parseTransparentBins(search, 16);
+  let transparentSortMode = parseTransparentSortMode(search);
+  if (typeof globalThis !== 'undefined') {
+    const bins = globalThis.PLAY_TRANSPARENT_BINS;
+    if (Number.isFinite(bins)) transparentBins = Math.max(0, Math.min(16, bins | 0));
+    const mode = globalThis.PLAY_TRANSPARENT_SORT_MODE;
+    if (mode === 'strict' || mode === 'bins' || mode === 'nosort') transparentSortMode = mode;
+  }
+  store.update((draft) => {
+    if (!draft.rendering) draft.rendering = { ...DEFAULT_VIEWER_STATE.rendering };
+    draft.rendering.hideAllGeometry = !!hideAllGeometryDefault;
+    if (!draft.rendering.options) draft.rendering.options = { ...DEFAULT_VIEWER_STATE.rendering.options };
+    if (!draft.rendering.options.materials) draft.rendering.options.materials = { ...DEFAULT_VIEWER_STATE.rendering.options.materials };
+    draft.rendering.options.materials.forceBasic = !!forceBasic;
+    if (!draft.rendering.options.instancing) draft.rendering.options.instancing = { ...DEFAULT_VIEWER_STATE.rendering.options.instancing };
+    draft.rendering.options.instancing.enabled = !disableInstancing;
+    if (!draft.rendering.options.transparency) draft.rendering.options.transparency = { ...DEFAULT_VIEWER_STATE.rendering.options.transparency };
+    draft.rendering.options.transparency.bins = transparentBins;
+    draft.rendering.options.transparency.sortMode = transparentSortMode;
+  });
+}
 
 const rendererManager = createRendererManager({
   canvas,
@@ -161,10 +209,6 @@ const rendererManager = createRendererManager({
   renderCtx,
   applyFallbackAppearance,
   ensureEnvIfNeeded,
-  hideAllGeometryDefault,
-  fallbackEnabledDefault,
-  fallbackPresetKey,
-  fallbackModeParam,
   debugMode,
   setRenderStats: (stats) => {
     renderStats = { ...renderStats, ...stats };
