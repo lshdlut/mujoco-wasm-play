@@ -278,7 +278,7 @@ ${shader.fragmentShader.replace(
       // Match MuJoCo's generated 2D texture coords (see engine_vis_visualize.c):
       // u = 0.5 * repeatX * x - 0.5, v = -0.5 * repeatY * y - 0.5.
       if (uMuJoCoTexEnabled > 0.5) {
-        vec2 scl = max(uMuJoCoTexScl, vec2(1e-6));
+        vec2 scl = uMuJoCoTexScl;
         vec2 uv = vec2(
           0.5 * vPlaneCoord.x * scl.x - 0.5,
           -0.5 * vPlaneCoord.y * scl.y - 0.5
@@ -448,6 +448,19 @@ const __TMP_VEC3_A = new THREE.Vector3();
 const __TMP_VEC3_B = new THREE.Vector3();
 const __TMP_VEC3_C = new THREE.Vector3();
 const __TMP_VEC3_D = new THREE.Vector3();
+const __TMP_QUAT_A = new THREE.Quaternion();
+
+// MuJoCo uses `mju_round` (half away from zero), which differs from
+// `Math.round` for negative half-values.
+function mjuRound(value) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return 0;
+  return v >= 0 ? Math.floor(v + 0.5) : Math.ceil(v - 0.5);
+}
+
+// MuJoCo constant from mjmodel.h; used by engine_vis_visualize.c when
+// re-centering infinite planes.
+const MJ_MAXPLANEGRID = 11;
 const __TMP_COLOR = new THREE.Color();
 const LABEL_DPR_CAP = 2;
 const LABEL_GEOM_LIMIT = 120;
@@ -918,8 +931,24 @@ function resolveMaterialTextureDescriptor(matId, assets) {
   let repeatX = 1;
   let repeatY = 1;
   if (repeatView && repeatView.length >= (matId * 2 + 2)) {
-    repeatX = Number(repeatView[matId * 2 + 0]) || 1;
-    repeatY = Number(repeatView[matId * 2 + 1]) || 1;
+    const rx = Number(repeatView[matId * 2 + 0]);
+    const ry = Number(repeatView[matId * 2 + 1]);
+    repeatX = Number.isFinite(rx) ? rx : 0;
+    repeatY = Number.isFinite(ry) ? ry : 0;
+    // MuJoCo XML allows `texrepeat="x"` (single scalar). The unused component is
+    // stored as 0 in `mjModel.mat_texrepeat`, but the renderer treats it as
+    // "copy the other axis" rather than disabling repetition.
+    if (repeatX === 0 && repeatY === 0) {
+      repeatX = 1;
+      repeatY = 1;
+    } else if (repeatX === 0) {
+      repeatX = repeatY;
+    } else if (repeatY === 0) {
+      repeatY = repeatX;
+    }
+  } else {
+    repeatX = 1;
+    repeatY = 1;
   }
   const uniformView = materials?.texuniform || null;
   const uniform = !!(uniformView && matId < uniformView.length && uniformView[matId]);
@@ -4338,7 +4367,7 @@ function setGeomViewProps(context, geomIndex, props = {}) {
   view.__dirty = true;
 }
 
-function updateInfinitePlaneFromSceneSoA(mesh, scnIndex, snapshot, sceneFlags = null) {
+function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, model, sceneFlags = null) {
   const groundData = mesh.userData?.infiniteGround;
   if (!groundData) return;
   const xpos = snapshot?.scn_pos;
@@ -4354,29 +4383,96 @@ function updateInfinitePlaneFromSceneSoA(mesh, scnIndex, snapshot, sceneFlags = 
   const py = xpos?.[baseIndex + 1] ?? 0;
   const pz = xpos?.[baseIndex + 2] ?? 0;
   const matBase = 9 * i;
-  const rot = [
-    xmat?.[matBase + 0] ?? 1,
-    xmat?.[matBase + 1] ?? 0,
-    xmat?.[matBase + 2] ?? 0,
-    xmat?.[matBase + 3] ?? 0,
-    xmat?.[matBase + 4] ?? 1,
-    xmat?.[matBase + 5] ?? 0,
-    xmat?.[matBase + 6] ?? 0,
-    xmat?.[matBase + 7] ?? 0,
-    xmat?.[matBase + 8] ?? 1,
-  ];
-  const quat = mat3ToQuat(rot);
+  const m00 = xmat?.[matBase + 0] ?? 1;
+  const m01 = xmat?.[matBase + 1] ?? 0;
+  const m02 = xmat?.[matBase + 2] ?? 0;
+  const m10 = xmat?.[matBase + 3] ?? 0;
+  const m11 = xmat?.[matBase + 4] ?? 1;
+  const m12 = xmat?.[matBase + 5] ?? 0;
+  const m20 = xmat?.[matBase + 6] ?? 0;
+  const m21 = xmat?.[matBase + 7] ?? 0;
+  const m22 = xmat?.[matBase + 8] ?? 1;
+  setQuatFromMat3(__TMP_QUAT_A, m00, m01, m02, m10, m11, m12, m20, m21, m22);
+  const axisU = __TMP_VEC3_A.set(1, 0, 0).applyQuaternion(__TMP_QUAT_A).normalize();
+  const axisV = __TMP_VEC3_B.set(0, 1, 0).applyQuaternion(__TMP_QUAT_A).normalize();
+  const normal = __TMP_VEC3_C.set(0, 0, 1).applyQuaternion(__TMP_QUAT_A).normalize();
+
+  // MuJoCo (engine_vis_visualize.c) re-centers infinite planes around the
+  // active camera and quantizes the translation in increments tied to the
+  // material texrepeat, ensuring stable wrapping without texture swimming.
+  let originX = px;
+  let originY = py;
+  let originZ = pz;
+  const sizeView = snapshot?.scn_size || null;
+  const sx = sizeView ? (Number(sizeView[baseIndex + 0]) || 0) : 0;
+  const sy = sizeView ? (Number(sizeView[baseIndex + 1]) || 0) : 0;
+  const recenterU = sx <= 0;
+  const recenterV = sy <= 0;
+  const cameraPos = ctx?.camera?.position || null;
+  if (cameraPos && (recenterU || recenterV)) {
+    const vx = cameraPos.x - originX;
+    const vy = cameraPos.y - originY;
+    const vz = cameraPos.z - originZ;
+
+    const matId = Number.isFinite(userData.matId) ? (userData.matId | 0) : -1;
+    const texrepeat = assets?.materials?.texrepeat || null;
+    let repeatX = (texrepeat && matId >= 0 && texrepeat.length >= (matId * 2 + 2))
+      ? Number(texrepeat[matId * 2 + 0])
+      : 0;
+    let repeatY = (texrepeat && matId >= 0 && texrepeat.length >= (matId * 2 + 2))
+      ? Number(texrepeat[matId * 2 + 1])
+      : 0;
+    // Mirror the `texrepeat="x"` MuJoCo XML behavior: the missing axis is 0 in
+    // the model buffer, but the renderer treats it as "copy the other axis".
+    if (!Number.isFinite(repeatX)) repeatX = 0;
+    if (!Number.isFinite(repeatY)) repeatY = 0;
+    if (repeatX === 0 && repeatY === 0) {
+      repeatX = 1;
+      repeatY = 1;
+    } else if (repeatX === 0) {
+      repeatX = repeatY;
+    } else if (repeatY === 0) {
+      repeatY = repeatX;
+    }
+    const mapZfar = Number(model?.vis?.map?.zfar);
+    const extent = Number(model?.stat?.extent);
+    let zfar = (Number.isFinite(mapZfar) ? mapZfar : 0) * (Number.isFinite(extent) ? extent : 1);
+    if (!(Number.isFinite(zfar) && zfar > 0)) {
+      const fallbackFar = Number(ctx?.camera?.far);
+      zfar = Number.isFinite(fallbackFar) && fallbackFar > 0 ? fallbackFar : 1;
+    }
+    const fallbackStep = (2.1 * zfar) / (MJ_MAXPLANEGRID - 2);
+
+    if (recenterU) {
+      let sX = fallbackStep;
+      if (repeatX > 0) sX = 2 / repeatX;
+      const dX = vx * axisU.x + vy * axisU.y + vz * axisU.z;
+      const stepX = 2 * sX * mjuRound(0.5 * dX / sX);
+      originX += axisU.x * stepX;
+      originY += axisU.y * stepX;
+      originZ += axisU.z * stepX;
+    }
+    if (recenterV) {
+      let sY = fallbackStep;
+      if (repeatY > 0) sY = 2 / repeatY;
+      const dY = vx * axisV.x + vy * axisV.y + vz * axisV.z;
+      const stepY = 2 * sY * mjuRound(0.5 * dY / sY);
+      originX += axisV.x * stepY;
+      originY += axisV.y * stepY;
+      originZ += axisV.z * stepY;
+    }
+  }
   if (uniforms.uPlaneOrigin?.value) {
-    uniforms.uPlaneOrigin.value.set(px, py, pz);
+    uniforms.uPlaneOrigin.value.set(originX, originY, originZ);
   }
   if (uniforms.uPlaneAxisU?.value) {
-    uniforms.uPlaneAxisU.value.copy(__TMP_VEC3_A.set(1, 0, 0).applyQuaternion(quat).normalize());
+    uniforms.uPlaneAxisU.value.copy(axisU);
   }
   if (uniforms.uPlaneAxisV?.value) {
-    uniforms.uPlaneAxisV.value.copy(__TMP_VEC3_B.set(0, 1, 0).applyQuaternion(quat).normalize());
+    uniforms.uPlaneAxisV.value.copy(axisV);
   }
   if (uniforms.uPlaneNormal?.value) {
-    uniforms.uPlaneNormal.value.copy(__TMP_VEC3_C.set(0, 0, 1).applyQuaternion(quat).normalize());
+    uniforms.uPlaneNormal.value.copy(normal);
   }
 
   // Segment view: temporarily hide the ground grid by zeroing intensity,
@@ -6202,7 +6298,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     const tXformStart = perfEnabled ? perfNow() : 0;
     const isInfinitePlane = !!mesh.userData?.infinitePlane;
     if (isInfinitePlane) {
-      updateInfinitePlaneFromSceneSoA(mesh, si, snapshot, flags);
+      updateInfinitePlaneFromSceneSoA(ctx, mesh, si, snapshot, assets, state?.model || null, flags);
       if (perfEnabled) infiniteXformUpdates += 1;
     } else {
       const posBase = si * 3;

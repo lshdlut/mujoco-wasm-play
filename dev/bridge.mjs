@@ -589,29 +589,31 @@ export function collectRenderAssetsFromModule(mod, handle) {
   const nmat = ensureFunc('_mjwf_model_nmat').call(mod, handle) | 0;
   if (nmat > 0) {
     const rgbaView = readView(mod, ensureFunc('_mjwf_model_mat_rgba_ptr'), handle, nmat * 4, heapViewF32);
-    const reflectanceView = readView(mod, ensureFunc('_mjwf_model_mat_reflectance_ptr'), handle, nmat, heapViewF64);
-    const emissionView = readView(mod, ensureFunc('_mjwf_model_mat_emission_ptr'), handle, nmat, heapViewF64);
-    const specularView = readView(mod, ensureFunc('_mjwf_model_mat_specular_ptr'), handle, nmat, heapViewF64);
-    const shininessView = readView(mod, ensureFunc('_mjwf_model_mat_shininess_ptr'), handle, nmat, heapViewF64);
-    const metallicView = readView(mod, ensureFunc('_mjwf_model_mat_metallic_ptr'), handle, nmat, heapViewF64);
-    const roughnessView = readView(mod, ensureFunc('_mjwf_model_mat_roughness_ptr'), handle, nmat, heapViewF64);
+    // mjModel material scalar fields are floats (not mjtNum); keep types aligned
+    // with mjmodel.h to avoid mis-reading float32 as float64.
+    const reflectanceView = readView(mod, ensureFunc('_mjwf_model_mat_reflectance_ptr'), handle, nmat, heapViewF32);
+    const emissionView = readView(mod, ensureFunc('_mjwf_model_mat_emission_ptr'), handle, nmat, heapViewF32);
+    const specularView = readView(mod, ensureFunc('_mjwf_model_mat_specular_ptr'), handle, nmat, heapViewF32);
+    const shininessView = readView(mod, ensureFunc('_mjwf_model_mat_shininess_ptr'), handle, nmat, heapViewF32);
+    const metallicView = readView(mod, ensureFunc('_mjwf_model_mat_metallic_ptr'), handle, nmat, heapViewF32);
+    const roughnessView = readView(mod, ensureFunc('_mjwf_model_mat_roughness_ptr'), handle, nmat, heapViewF32);
     // mjModel.mat_texid is (nmat x mjNTEXROLE). Simulate uses mjTEXROLE_RGB for
     // regular textures, so we need all roles.
     const texidView = readView(mod, ensureFunc('_mjwf_model_mat_texid_ptr'), handle, nmat * 10, heapViewI32);
-    const texrepeatView = readView(mod, ensureFunc('_mjwf_model_mat_texrepeat_ptr'), handle, nmat * 2, heapViewF64);
-    const texuniformView = readView(mod, ensureFunc('_mjwf_model_mat_texuniform_ptr'), handle, nmat, heapViewI32);
+    const texrepeatView = readView(mod, ensureFunc('_mjwf_model_mat_texrepeat_ptr'), handle, nmat * 2, heapViewF32);
+    const texuniformView = readView(mod, ensureFunc('_mjwf_model_mat_texuniform_ptr'), handle, nmat, heapViewU8);
     assets.materials = {
       count: nmat,
       rgba: cloneTyped(rgbaView, Float32Array),
-      reflectance: cloneTyped(reflectanceView, Float64Array),
-      emission: cloneTyped(emissionView, Float64Array),
-      specular: cloneTyped(specularView, Float64Array),
-      shininess: cloneTyped(shininessView, Float64Array),
-      metallic: cloneTyped(metallicView, Float64Array),
-      roughness: cloneTyped(roughnessView, Float64Array),
+      reflectance: cloneTyped(reflectanceView, Float32Array),
+      emission: cloneTyped(emissionView, Float32Array),
+      specular: cloneTyped(specularView, Float32Array),
+      shininess: cloneTyped(shininessView, Float32Array),
+      metallic: cloneTyped(metallicView, Float32Array),
+      roughness: cloneTyped(roughnessView, Float32Array),
       texid: cloneTyped(texidView, Int32Array),
-      texrepeat: cloneTyped(texrepeatView, Float64Array),
-      texuniform: cloneTyped(texuniformView, Int32Array),
+      texrepeat: cloneTyped(texrepeatView, Float32Array),
+      texuniform: cloneTyped(texuniformView, Uint8Array),
     };
   }
   const nmesh = ensureFunc('_mjwf_model_nmesh').call(mod, handle) | 0;
