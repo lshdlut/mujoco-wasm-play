@@ -40,8 +40,8 @@ import { applySpecAction } from './main_ui.mjs';
 // range. This requires flipping the polygon-offset sign. The magnitudes are tuned
 // for three.js to avoid contact-shadow "peter-panning" (gaps near the ground) while
 // still suppressing self-shadow acne.
-const MUJOCO_SHADOW_POLYGON_OFFSET_FACTOR = 0.75;
-const MUJOCO_SHADOW_POLYGON_OFFSET_UNITS = 1.0;
+const MUJOCO_SHADOW_POLYGON_OFFSET_FACTOR = 1.0;
+const MUJOCO_SHADOW_POLYGON_OFFSET_UNITS = 4.0;
 // MuJoCo renders shadow maps into an inset viewport (1 px border) to avoid
 // "infinite" shadowing from clamped edge samples (render_gl3.c). With
 // `PCFShadowMap` the filter footprint stays within +/-1 texel, so 1 px matches

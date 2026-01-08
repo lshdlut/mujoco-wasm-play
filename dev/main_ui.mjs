@@ -593,10 +593,11 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
       },
       fill: { color: 0xffffff, intensity: 0, position: [-6, 6, 3] },
       // MuJoCo GL3 relies on polygon offset while rendering shadow maps; keep the
-      // shadow compare bias at 0 by default to avoid contact-shadow detachment
-      // (peter-panning). When needed, presets can override this via the unified
-      // state buffer.
-      shadowBias: 0,
+      // shadow compare bias near 0. WebGL forward-Z + depth packing can still
+      // exhibit self-shadow acne; use a tiny negative bias as a practical default
+      // while keeping contact shadows stable. Presets can override this via the
+      // unified state buffer.
+      shadowBias: -0.00005,
       ground: null,
       overlays: null,
       fogColor: null,
