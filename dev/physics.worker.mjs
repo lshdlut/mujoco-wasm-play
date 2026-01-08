@@ -1548,6 +1548,10 @@ async function loadXmlWithFallback(xmlText) {
       sim.term();
       sim.initFromXmlStrict(text);
       h = sim.h | 0;
+      // MuJoCo-derived fields such as `d->light_xpos/light_xdir` are populated by `mj_forward`.
+      // Snapshots can be requested before the first `mj_step`, so run `mj_forward` once after
+      // loading to keep model-mode lighting/shadows aligned with MuJoCo Simulate.
+      sim.forward();
       if (perfEnabled) {
         perfStages.initFromXmlMs = perfNowMs() - tInitStart;
       }

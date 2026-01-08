@@ -31,6 +31,73 @@ import { compatFallback } from './fallbacks.mjs';
 import { pushSkyDebug } from './main_environment.mjs';
 import { applySpecAction } from './main_ui.mjs';
 
+// MuJoCo GL3 shadow rendering disables face culling and uses `glPolygonOffset` while
+// writing the shadow map (see `mujoco/src/render/render_gl3.c`). three.js exposes
+// polygon offset on materials; apply it to the generated depth materials via
+// `onBeforeShadow` for closer Simulate parity without adding a separate pipeline.
+//
+// NOTE: MuJoCo uses reverse-Z, while three.js uses a conventional forward-Z depth
+// range. This requires flipping the polygon-offset sign. The magnitudes are tuned
+// for three.js to avoid contact-shadow "peter-panning" (gaps near the ground) while
+// still suppressing self-shadow acne.
+const MUJOCO_SHADOW_POLYGON_OFFSET_FACTOR = 0.75;
+const MUJOCO_SHADOW_POLYGON_OFFSET_UNITS = 1.0;
+// MuJoCo renders shadow maps into an inset viewport (1 px border) to avoid
+// "infinite" shadowing from clamped edge samples (render_gl3.c). With
+// `PCFShadowMap` the filter footprint stays within +/-1 texel, so 1 px matches
+// Simulate while maximizing the usable shadow-map area.
+const MUJOCO_SHADOW_VIEWPORT_INSET_PX = 1;
+const MUJOCO_SHADOW_VIEWPORT_INSET_SENTINEL = Symbol('play:mujoco_shadow_viewport_inset');
+const MUJOCO_SHADOW_VIEWPORT_INSET_TMP = new THREE.Vector4();
+function installMuJoCoShadowViewportInset(renderer) {
+  if (!renderer?.shadowMap || !renderer?.state) return false;
+  const shadowMap = renderer.shadowMap;
+  if (shadowMap[MUJOCO_SHADOW_VIEWPORT_INSET_SENTINEL]) return false;
+  shadowMap[MUJOCO_SHADOW_VIEWPORT_INSET_SENTINEL] = true;
+
+  const state = renderer.state;
+  if (typeof state.viewport !== 'function' || typeof shadowMap.render !== 'function') return false;
+
+  let inShadowPass = false;
+  const originalShadowRender = shadowMap.render.bind(shadowMap);
+  shadowMap.render = (lights, scene, camera) => {
+    inShadowPass = true;
+    try {
+      return originalShadowRender(lights, scene, camera);
+    } finally {
+      inShadowPass = false;
+    }
+  };
+
+  const originalViewport = state.viewport.bind(state);
+  state.viewport = (viewport) => {
+    if (!inShadowPass || !viewport) return originalViewport(viewport);
+    const borderPx = MUJOCO_SHADOW_VIEWPORT_INSET_PX;
+    const w = viewport.z;
+    const h = viewport.w;
+    if (!(w > 2 * borderPx && h > 2 * borderPx)) return originalViewport(viewport);
+    MUJOCO_SHADOW_VIEWPORT_INSET_TMP.set(
+      viewport.x + borderPx,
+      viewport.y + borderPx,
+      w - 2 * borderPx,
+      h - 2 * borderPx,
+    );
+    return originalViewport(MUJOCO_SHADOW_VIEWPORT_INSET_TMP);
+  };
+
+  return true;
+}
+function onBeforeShadowMuJoCo(renderer, object, camera, shadowCamera, geometry, depthMaterial) {
+  if (!depthMaterial) return;
+  if (depthMaterial.polygonOffset !== true) depthMaterial.polygonOffset = true;
+  if (depthMaterial.polygonOffsetFactor !== MUJOCO_SHADOW_POLYGON_OFFSET_FACTOR) {
+    depthMaterial.polygonOffsetFactor = MUJOCO_SHADOW_POLYGON_OFFSET_FACTOR;
+  }
+  if (depthMaterial.polygonOffsetUnits !== MUJOCO_SHADOW_POLYGON_OFFSET_UNITS) {
+    depthMaterial.polygonOffsetUnits = MUJOCO_SHADOW_POLYGON_OFFSET_UNITS;
+  }
+}
+
 /* TODO delete unused helper once confirmed not needed.
 function createInfiniteGridHelper({
   size1 = 1.0,
@@ -134,7 +201,9 @@ function createInfiniteGroundHelper({
     uPlaneNormal: { value: new THREE.Vector3(0, 0, 1) },
     uGridStep: { value: 2.0 },
     uGridColor: { value: colorObj.clone() },
-    uGridIntensity: { value: 0.2 },
+    // Model mode should be driven by MuJoCo materials/textures. Presets can
+    // opt-in to extra ground grid overlays by overriding these uniforms.
+    uGridIntensity: { value: 0.0 },
   };
   material.extensions = material.extensions || {};
   material.extensions.derivatives = true;
@@ -203,6 +272,21 @@ uniform float uGridStep;
 uniform vec3 uGridColor;
 uniform float uGridIntensity;
 ${shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `#include <map_fragment>
+
+      // Match MuJoCo's generated 2D texture coords (see engine_vis_visualize.c):
+      // u = 0.5 * repeatX * x - 0.5, v = -0.5 * repeatY * y - 0.5.
+      if (uMuJoCoTexEnabled > 0.5) {
+        vec2 scl = max(uMuJoCoTexScl, vec2(1e-6));
+        vec2 uv = vec2(
+          0.5 * vPlaneCoord.x * scl.x - 0.5,
+          -0.5 * vPlaneCoord.y * scl.y - 0.5
+        );
+        vec4 texColor = texture2D(uMuJoCoMap, uv);
+        diffuseColor.rgb *= texColor.rgb;
+      }`
+    ).replace(
       '#include <dithering_fragment>',
       `
       vec3 camVec = cameraPosition - uPlaneOrigin;
@@ -230,11 +314,6 @@ ${shader.fragmentShader.replace(
       }
       if (alpha <= 0.0) discard;
       vec3 baseColor = gl_FragColor.rgb;
-      if (uMuJoCoTexEnabled > 0.5) {
-        vec2 uv = vPlaneCoord * max(uMuJoCoTexScl, vec2(1e-6));
-        vec4 texColor = texture2D(uMuJoCoMap, uv);
-        baseColor *= texColor.rgb;
-      }
       if (uGridStep > 1e-6 && uGridIntensity > 1e-6) {
         vec2 r = vPlaneCoord / max(uGridStep, 1e-6);
         vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
@@ -243,7 +322,7 @@ ${shader.fragmentShader.replace(
         float mixAmt = clamp(gridStrength * uGridIntensity, 0.0, 1.0);
         gl_FragColor.rgb = mix(baseColor, uGridColor, mixAmt);
       } else {
-        gl_FragColor.rgb = baseColor;
+      gl_FragColor.rgb = baseColor;
       }
       gl_FragColor.a = alpha;
       #include <dithering_fragment>`
@@ -1937,17 +2016,20 @@ function disableMjLightSlot(slot) {
   if (!slot?.light) return;
   slot.light.visible = false;
   slot.light.intensity = 0;
+  slot.light.castShadow = false;
 }
 
 function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
   const rig = ensureMjLightRig(ctx);
-  if (!rig) return;
+  if (!rig) return 0;
   const enabled = options.enabled !== false;
+  const shadowEnabled = options.shadowEnabled !== false;
+  const bounds = options.bounds || null;
   rig.group.visible = enabled;
   if (!enabled) {
     rig.ambient.intensity = 0;
     for (const slot of rig.slots) disableMjLightSlot(slot);
-    return;
+    return 0;
   }
 
   if (state?.rendering?.options?.materials?.forceBasic === true && !ctx._mjLightForceBasicWarned) {
@@ -2001,11 +2083,25 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
   const diffuseView = lightAssets?.diffuse || null;
   const intensityView = lightAssets?.intensity || null;
   const rangeView = lightAssets?.range || null;
+  const castshadowView = lightAssets?.castshadow || null;
   const cutoffView = lightAssets?.cutoff || null;
   const exponentView = lightAssets?.exponent || null;
 
   let slotCursor = 1;
+  let shadowCasters = 0;
   if (nlight > 0 && xpos && xdir) {
+    const statExtent = Number(state?.model?.stat?.extent);
+    const extentFallback = Number.isFinite(statExtent) && statExtent > 1e-6
+      ? statExtent
+      : Math.max(0.1, Number(bounds?.radius) || 1);
+    const shadowclipFactor = Number(state?.model?.vis?.map?.shadowclip);
+    const shadowClip = extentFallback * (Number.isFinite(shadowclipFactor) && shadowclipFactor > 1e-6 ? shadowclipFactor : 1);
+    const znearFactor = Number(state?.model?.vis?.map?.znear);
+    const zfarFactor = Number(state?.model?.vis?.map?.zfar);
+    const frustumNear = Math.max(0.01, (Number.isFinite(znearFactor) && znearFactor > 1e-6 ? znearFactor : 0.01) * extentFallback);
+    const frustumFar = Math.max(frustumNear + 0.1, (Number.isFinite(zfarFactor) && zfarFactor > 0 ? zfarFactor : 50) * extentFallback);
+    const shadowscale = Number(state?.model?.vis?.map?.shadowscale);
+    const shadowScale = Number.isFinite(shadowscale) && shadowscale > 1e-6 ? shadowscale : 0.6;
     const max = Math.min(nlight, Math.floor(xpos.length / 3), Math.floor(xdir.length / 3));
     for (let i = 0; i < max && slotCursor < MJ_MAXLIGHT; i += 1) {
       const isActive = activeView ? ((activeView[i] ?? 0) !== 0) : true;
@@ -2056,9 +2152,102 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
       slot.light.intensity = intensity;
       slot.light.position.set(px, py, pz);
 
+      const wantsShadow = shadowEnabled && ((castshadowView?.[i] ?? 0) !== 0);
+      const supportsShadow = kind !== 'point';
+      const shouldCastShadow = wantsShadow && supportsShadow;
+      if (slot.light.castShadow !== shouldCastShadow) slot.light.castShadow = shouldCastShadow;
+      if (wantsShadow && !supportsShadow && !ctx._mjLightPointShadowWarned) {
+        ctx._mjLightPointShadowWarned = true;
+        logWarn('[lights] ignoring castshadow on unsupported point light (MuJoCo only supports directional/spot shadows)');
+      }
+
+      if (shouldCastShadow) {
+        shadowCasters += 1;
+        const shadow = slot.light.shadow || null;
+        const modelShadowSize = Number(state?.model?.vis?.quality?.shadowsize);
+        const desiredShadowSize = (Number.isFinite(modelShadowSize) && modelShadowSize > 0)
+          ? Math.max(16, modelShadowSize | 0)
+          : 2048;
+        if (shadow && shadow.mapSize?.set) {
+          if (shadow.mapSize.x !== desiredShadowSize || shadow.mapSize.y !== desiredShadowSize) {
+            shadow.mapSize.set(desiredShadowSize, desiredShadowSize);
+          }
+        }
+        const bias = Number(state?.rendering?.appearance?.shadowBias);
+        if (shadow && Number.isFinite(bias) && shadow.bias !== bias) {
+          shadow.bias = bias;
+        }
+        if (shadow && 'normalBias' in shadow) {
+          // MuJoCo applies polygon offset while *rendering the shadow map*.
+          // three.js' `normalBias` offsets the *receiver* position instead and
+          // can cause contact shadows to "peter pan" (crescent-shaped gaps) on
+          // near-ground geometry. Keep it disabled; use `shadow.bias` only.
+          const desired = 0;
+          if (shadow.normalBias !== desired) shadow.normalBias = desired;
+        }
+        if (shadow && 'radius' in shadow) {
+          // MuJoCo uses linear filtering on shadow maps (PCF-like). Keep a
+          // non-zero radius so three.js applies percentage-closer filtering.
+          const desiredRadius = 1;
+          if (shadow.radius !== desiredRadius) {
+            shadow.radius = desiredRadius;
+          }
+        }
+        if (shadow?.camera) {
+          const cam = shadow.camera;
+          // MuJoCo's renderer uses `mjr_orthoVec` to pick a stable up-vector for the
+          // light view matrix. three.js' shadow cameras default to `up=(0,1,0)` which
+          // becomes ill-conditioned when the light direction is near +/-Y; this
+          // manifests as shadow map "rolling" and flickering cutoffs (notably for
+          // the humanoid spotlight). Mirror MuJoCo's basis choice to keep shadows
+          // stable.
+          if (cam.up?.set) {
+            // cross(dir, [-1, 0, 0])
+            cam.up.set(0, -dz, dy);
+            const upLen2 = cam.up.x * cam.up.x + cam.up.y * cam.up.y + cam.up.z * cam.up.z;
+            if (!(upLen2 > 0.01)) {
+              // cross(dir, [0, 1, 0])
+              cam.up.set(-dz, 0, dx);
+            }
+            cam.up.normalize();
+          }
+          if (kind === 'directional' && typeof cam.left !== 'undefined') {
+            // MuJoCo GL3: glOrtho(-shadowClip, shadowClip, -shadowClip, shadowClip, frustumNear, frustumFar)
+            cam.left = -shadowClip;
+            cam.right = shadowClip;
+            cam.top = shadowClip;
+            cam.bottom = -shadowClip;
+            cam.near = frustumNear;
+            cam.far = frustumFar;
+            cam.updateProjectionMatrix?.();
+          } else if (kind === 'spot' && typeof cam.fov === 'number') {
+            // MuJoCo GL3: perspective(min(2*cutoff*shadowScale, 160), 1, frustumNear, frustumFar).
+            // three.js uses shadow.focus to scale the shadow camera FOV relative to light.angle.
+            shadow.focus = shadowScale;
+            // MuJoCo uses reverse-Z + GEQUAL for shadow rendering, keeping good depth
+            // precision even when the viewer frustum spans a large range. three.js
+            // uses a conventional forward-Z depth buffer; with very small `near`
+            // values this can lead to contact-shadow dropouts near the ground.
+            // Clamp the shadow camera near plane to a small fraction of the far
+            // range (and light range when available) to preserve precision.
+            let desiredNear = frustumNear;
+            const ratioNear = frustumFar / 1000;
+            if (Number.isFinite(ratioNear) && ratioNear > desiredNear) desiredNear = ratioNear;
+            const rangeNear = range > 0 ? (range * 0.01) : 0;
+            if (Number.isFinite(rangeNear) && rangeNear > desiredNear) desiredNear = rangeNear;
+            if (desiredNear > frustumFar - 0.1) desiredNear = Math.max(frustumNear, frustumFar - 0.1);
+            cam.near = desiredNear;
+            cam.far = frustumFar;
+            cam.updateProjectionMatrix?.();
+          }
+        }
+      }
+
       if (kind === 'directional') {
         if (slot.target) {
-          slot.target.position.set(px + dx, py + dy, pz + dz);
+          // Use the current light position (may be repositioned for shadows).
+          const lp = slot.light.position;
+          slot.target.position.set(lp.x + dx, lp.y + dy, lp.z + dz);
           slot.light.target?.updateMatrixWorld?.();
         }
       } else if (kind === 'spot') {
@@ -2067,7 +2256,15 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
         // With three.js `physicallyCorrectLights`, `decay` controls the inverse-distance
         // term. Keep `decay=0` to avoid darkening model lights; `distance` still provides
         // a smooth cutoff near `range` in three.js' physically-correct shader.
-        slot.light.distance = range > 0 ? range : 0;
+        // IMPORTANT: SpotLightShadow.updateMatrices() forces shadow camera far to
+        // `light.distance` when non-zero. MuJoCo's shadow frustum uses the viewer
+        // camera clip planes (mjv_cameraFrustum), so keep `distance=0` when
+        // casting shadows to avoid clipping/popping at the range boundary.
+        if (shouldCastShadow) {
+          slot.light.distance = 0;
+        } else {
+          slot.light.distance = range > 0 ? range : 0;
+        }
         slot.light.decay = 0;
         if (slot.target) {
           slot.target.position.set(px + dx, py + dy, pz + dz);
@@ -2117,6 +2314,7 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
   for (let i = slotCursor; i < rig.slots.length; i += 1) {
     disableMjLightSlot(rig.slots[i]);
   }
+  return shadowCasters;
 }
 
 function applyFixedCameraPreset(ctx, state, { tempVecA, tempVecB, tempVecC, tempVecD }) {
@@ -3309,6 +3507,12 @@ function ensureInstancedMaterial(
   if (!forceBasicFlag && 'envMapIntensity' in material) {
     material.envMapIntensity = 0;
   }
+  // MuJoCo GL3 disables face culling when rendering shadow maps, while three.js flips
+  // FrontSide -> BackSide by default. Using DoubleSide for the shadow pass avoids
+  // contact-shadow "peter panning" gaps and matches MuJoCo's behaviour more closely.
+  if ('shadowSide' in material) {
+    material.shadowSide = THREE.DoubleSide;
+  }
   material.userData = material.userData || {};
   material.userData.instanced = true;
   material.userData.reflectanceQ = reflectanceQ | 0;
@@ -3360,6 +3564,7 @@ function ensureInstancedBatch(ctx, inst, batchKey, geometry, material, capacity)
   mesh.visible = false;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  mesh.onBeforeShadow = onBeforeShadowMuJoCo;
   if (mesh.instanceMatrix && typeof mesh.instanceMatrix.setUsage === 'function') {
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   }
@@ -3927,6 +4132,10 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
         }
       }
       if (material && 'side' in material) material.side = THREE.FrontSide;
+      // MuJoCo renders shadow maps with culling disabled (glDisable(GL_CULL_FACE)).
+      // three.js' default shadow-side flip can introduce contact gaps; keep the
+      // visible pass FrontSide but force DoubleSide for the shadow pass.
+      if (material && 'shadowSide' in material) material.shadowSide = THREE.DoubleSide;
       mesh = objectKind === 'line'
         ? new THREE.LineSegments(geometryInfo.geometry, material)
         : new THREE.Mesh(geometryInfo.geometry, material);
@@ -3939,6 +4148,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
         gtype === MJ_GEOM.TRIANGLE;
       mesh.castShadow = !isDebugGeom;
       mesh.receiveShadow = !isDebugGeom;
+      mesh.onBeforeShadow = onBeforeShadowMuJoCo;
       if (typeof geometryInfo.postCreate === 'function') {
         geometryInfo.postCreate(mesh);
       }
@@ -6558,6 +6768,7 @@ function createRendererManager({
       powerPreference: 'high-performance',
       preserveDrawingBuffer: wantPreserve,
     });
+    installMuJoCoShadowViewportInset(renderer);
     renderer.autoClear = false;
     renderer.sortObjects = true;
     if (typeof window !== 'undefined') {
@@ -6571,18 +6782,25 @@ function createRendererManager({
     }
     renderer.setClearColor(DEFAULT_CLEAR_HEX, 1);
     ctx.baseClearHex = DEFAULT_CLEAR_HEX;
-    renderer.shadowMap.enabled = true;
+    // Shadow map enablement is controlled by the unified state buffer
+    // (sceneFlags + appearance + mj lights); avoid an always-on default.
+    renderer.shadowMap.enabled = false;
+    // MuJoCo's GL renderer relies on depth-compare + linear filtering (PCF-like).
+    // Use three.js' PCF filter as the closest built-in match.
     renderer.shadowMap.type = THREE.PCFShadowMap;
 
     const sceneWorld = new THREE.Scene();
 
     const ambient = new THREE.AmbientLight(0xffffff, 0);
+    ambient.visible = false;
     sceneWorld.add(ambient);
     const hemi = new THREE.HemisphereLight(0xffffff, 0x10131c, 0);
+    hemi.visible = false;
     sceneWorld.add(hemi);
-    const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 0);
     keyLight.position.set(6, -8, 8);
-    keyLight.castShadow = true;
+    keyLight.visible = false;
+    keyLight.castShadow = false;
     keyLight.shadow.mapSize.set(4096, 4096);
     keyLight.shadow.camera.near = 0.1;
     keyLight.shadow.camera.far = 200;
@@ -6598,8 +6816,9 @@ function createRendererManager({
     sceneWorld.add(lightTarget);
     keyLight.target = lightTarget;
     sceneWorld.add(keyLight);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.25);
+    const fill = new THREE.DirectionalLight(0xffffff, 0);
     fill.position.set(-6, 6, 3);
+    fill.visible = false;
     sceneWorld.add(fill);
 
     const camera = new THREE.PerspectiveCamera(75, 1, 0.01, GROUND_DISTANCE * 20);
@@ -6829,17 +7048,6 @@ function createRendererManager({
       fadeEnd: groundUniforms?.uFadeEnd?.value ?? null,
       baseRadius: groundUniforms?.uQuadDistance?.value ?? null,
     };
-    const baseShadowEnabled = shadowEnabled
-      && (Number(state?.rendering?.appearance?.dir?.intensity) > 0);
-    if (context.renderer) {
-      context.renderer.shadowMap.enabled = baseShadowEnabled;
-      if (context.renderer.shadowMap) {
-        context.renderer.shadowMap.type = THREE.PCFShadowMap;
-      }
-    }
-    if (context.light) {
-      context.light.castShadow = baseShadowEnabled;
-    }
 
     const hideAllGeometry = !!policy.hideAllGeometry;
 
@@ -6882,7 +7090,24 @@ function createRendererManager({
       { trackingBounds, trackingOverride },
     );
     applyViewerCameraSnapshot(context, snapshot, state, nextBounds, { tempVecA, tempVecB });
-    updateMjLightRig(context, snapshot, state, assets, { enabled: !segmentEnabled });
+    const mjShadowCasters = updateMjLightRig(context, snapshot, state, assets, {
+      enabled: !segmentEnabled,
+      shadowEnabled,
+      bounds: nextBounds || context.bounds || null,
+    });
+
+    const baseShadowEnabled = shadowEnabled
+      && (Number(state?.rendering?.appearance?.dir?.intensity) > 0);
+    const shadowMapEnabled = baseShadowEnabled || (shadowEnabled && (mjShadowCasters | 0) > 0);
+    if (context.renderer) {
+      context.renderer.shadowMap.enabled = shadowMapEnabled;
+      if (context.renderer.shadowMap) {
+        context.renderer.shadowMap.type = THREE.PCFShadowMap;
+      }
+    }
+    if (context.light) {
+      context.light.castShadow = baseShadowEnabled;
+    }
     let drawn = 0;
 
     const hasSceneSoA =

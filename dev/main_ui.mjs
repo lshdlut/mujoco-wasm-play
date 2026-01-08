@@ -577,7 +577,9 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
       background: null,
       clearColor: 0xd6dce4,
       exposure: 1.1,
-      envIntensity: 1.0,
+      // Model mode should match MuJoCo Simulate (no IBL by default). Presets can
+      // opt-in by overriding this via the unified state buffer.
+      envIntensity: 0.0,
       hdri: null,
       backgroundBottom: null,
       ambient: { color: 0xffffff, intensity: 0 },
@@ -590,7 +592,11 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
         shadowBias: -0.0001,
       },
       fill: { color: 0xffffff, intensity: 0, position: [-6, 6, 3] },
-      shadowBias: -0.0001,
+      // MuJoCo GL3 relies on polygon offset while rendering shadow maps; keep the
+      // shadow compare bias at 0 by default to avoid contact-shadow detachment
+      // (peter-panning). When needed, presets can override this via the unified
+      // state buffer.
+      shadowBias: 0,
       ground: null,
       overlays: null,
       fogColor: null,
@@ -1673,7 +1679,9 @@ function applyGesture(store, backend, payload) {
 
 const VISUAL_OVERRIDE_PRESET = [
   { path: ['global', 'fovy'], kind: 'float', size: 1, value: 70 },
-  { path: ['headlight', 'active'], kind: 'enum', size: 1, value: 1 },
+  // Presets should not be lit by MuJoCo headlight/model lights; they use the
+  // preset appearance buffer (HDRI + dir/fill/ambient/hemi).
+  { path: ['headlight', 'active'], kind: 'enum', size: 1, value: 0 },
   { path: ['headlight', 'ambient'], kind: 'float_vec', size: 3, value: [0.1, 0.1, 0.1] },
   { path: ['headlight', 'diffuse'], kind: 'float_vec', size: 3, value: [0.4, 0.4, 0.4] },
   { path: ['headlight', 'specular'], kind: 'float_vec', size: 3, value: [0.5, 0.5, 0.5] },

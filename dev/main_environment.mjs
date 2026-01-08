@@ -721,12 +721,14 @@ function createSkyShaderMaterial(THREE_NS) {
     uZenithColor: { value: new THREE_NS.Color(0.6, 0.8, 1.0) },
     uHorizonColor: { value: new THREE_NS.Color(0.45, 0.6, 0.8) },
     uGroundColor: { value: new THREE_NS.Color(0.08, 0.11, 0.18) },
-    uSunDirection: { value: new THREE_NS.Vector3(0.15, 0.35, 0.92) },
+    // TODO(delete): Former "sun highlight" overlay inputs. Disabled to avoid
+    // injecting a non-MuJoCo lighting cue into model mode.
+    // uSunDirection: { value: new THREE_NS.Vector3(0.15, 0.35, 0.92) },
     uExposure: { value: 1.0 },
     uGradientPower: { value: 1.1 },
     uHorizonSharpness: { value: 0.6 },
-    uEffectStrength: { value: 0.25 },
-    uBaseAlpha: { value: 0.04 },
+    // uEffectStrength: { value: 0.25 },
+    // uBaseAlpha: { value: 0.04 },
   };
   const vertexShader = `
     varying vec3 vWorldDirection;
@@ -741,12 +743,13 @@ function createSkyShaderMaterial(THREE_NS) {
     uniform vec3 uZenithColor;
     uniform vec3 uHorizonColor;
     uniform vec3 uGroundColor;
-    uniform vec3 uSunDirection;
+    // TODO(delete): Disabled "sun highlight" overlay uniforms.
+    // uniform vec3 uSunDirection;
     uniform float uExposure;
     uniform float uGradientPower;
     uniform float uHorizonSharpness;
-    uniform float uEffectStrength;
-    uniform float uBaseAlpha;
+    // uniform float uEffectStrength;
+    // uniform float uBaseAlpha;
 
     float remapUp(float v) {
       return clamp(v * 0.5 + 0.5, 0.0, 1.0);
@@ -762,52 +765,18 @@ function createSkyShaderMaterial(THREE_NS) {
       // underlying gradient/background.
       vec3 base = mix(uGroundColor, uZenithColor, grad);
 
-      // Localised sun highlight; keep most of the sky close to the base gradient
-      vec3 sunDir = normalize(uSunDirection);
-      float sunAmount = max(dot(sunDir, dir), 0.0);
-
-      // --- Anisotropic halo shape: vertical streak broader than horizontal ---
-      vec3 sunHoriz = normalize(vec3(sunDir.x, sunDir.y, 0.0));
-      vec3 dirHoriz = normalize(vec3(dir.x, dir.y, 0.0));
-      float horizDot = dot(sunHoriz, dirHoriz);
-      if (!all(greaterThan(vec3(length(sunHoriz)), vec3(1e-4)))) {
-        horizDot = 1.0;
-      }
-      horizDot = clamp(horizDot, -1.0, 1.0);
-      // Horizontal: keep relatively tight around sun azimuth
-      float horizMask = smoothstep(0.92, 0.99, horizDot);
-
-      float sunUp = remapUp(sunDir.z);
-      float upDiff = abs(up - sunUp);
-      // Vertical: allow a noticeably wider band to create a streak
-      float vertMask = smoothstep(0.9, -0.05, upDiff);
-
-      float shapeMask = clamp(horizMask * vertMask, 0.0, 1.0);
-
-      // Radial falloff for core and halo
-      // - core: sharper highlight very close to the sun
-      // - halo: slower decay so the influence extends further but remains subtle
-      float glow = pow(sunAmount, 12.0);
-      float halo = pow(sunAmount, 1.5);
-
-      // Blend towards brighter/whiter near the sun, but keep base colour visible
-      vec3 glowColor = mix(base, vec3(1.0), 0.6);
-      vec3 haloColor = mix(base, uZenithColor, 0.4);
-
-      float intensity = uEffectStrength * shapeMask;
-      vec3 color = base
-        + glowColor * glow * intensity
-        + haloColor * halo * (intensity * 0.4);
+      // TODO(delete): Remove the experimental "sun highlight" overlay. MuJoCo
+      // Simulate's model mode should not introduce an extra solar cue beyond
+      // the packed skybox/background colors.
+      vec3 color = base;
 
       // Simple exposure; keep contrast and saturation
       color *= uExposure;
       color = clamp(color, 0.0, 1.0);
 
-      // Angle-dependent alpha: far from the sun we are almost transparent,
-      // near the sun we blend in more strongly (matching the halo radius).
-      float alphaSun = clamp(intensity + intensity * 0.4 * halo, 0.0, 1.0);
-      float alpha = clamp(uBaseAlpha + alphaSun, 0.0, 1.0);
-      gl_FragColor = vec4(color, alpha);
+      // Keep the shader dome fully transparent (background gradient/cubemap is
+      // the only sky source used for model mode parity).
+      gl_FragColor = vec4(color, 0.0);
     }
   `;
   const material = new THREE_NS.ShaderMaterial({
@@ -855,19 +824,21 @@ function updateSkyDome(ctx, palette, THREE_NS) {
   mat.uniforms.uGradientPower.value = 1.0 + (0.5 - brightness) * 0.2;
   // Horizon sharpness: dimmer skies get a slightly stronger band, still subtle
   mat.uniforms.uHorizonSharpness.value = 0.5 + (1.0 - brightness) * 0.2;
+  /* TODO(delete): Disabled "sun highlight" overlay updates.
   // Effect and base alpha: keep very subtle by default; uBaseAlpha can be
   // driven lower if we want the sky layer to be almost invisible away from
   // the sun direction.
   if (mat.uniforms.uEffectStrength) {
-    mat.uniforms.uEffectStrength.value = 0.25;
+    mat.uniforms.uEffectStrength.value = 0.0;
   }
   if (mat.uniforms.uBaseAlpha) {
-    mat.uniforms.uBaseAlpha.value = 0.03;
+    mat.uniforms.uBaseAlpha.value = 0.0;
   }
   if (ctx.light) {
     const sun = ctx.light.position.clone().normalize();
     mat.uniforms.uSunDirection.value.copy(sun);
   }
+  */
   mat.needsUpdate = true;
   const worldScene = getWorldScene(ctx);
   const far = ctx?.camera && Number.isFinite(ctx.camera.far) && ctx.camera.far > 0 ? ctx.camera.far : 1000;
@@ -1137,18 +1108,26 @@ function createEnvironmentManager({
     if (ctx.ambient) {
       const ambientCfg = appearance.ambient || {};
       ctx.ambient.color.setHex(ambientCfg.color ?? 0xffffff);
-      ctx.ambient.intensity = ambientCfg.intensity ?? 0;
+      const intensity = Number(ambientCfg.intensity);
+      ctx.ambient.intensity = Number.isFinite(intensity) ? intensity : 0;
+      // Keep lights out of the active light list when intensity is zero so model
+      // mode is driven purely by MuJoCo lights (mjv_makeLights parity).
+      ctx.ambient.visible = ctx.ambient.intensity > 0;
     }
     if (ctx.hemi) {
       const hemiCfg = appearance.hemi || {};
       ctx.hemi.color.setHex(hemiCfg.sky ?? 0xffffff);
       ctx.hemi.groundColor.setHex(hemiCfg.ground ?? 0x20242f);
-      ctx.hemi.intensity = hemiCfg.intensity ?? 0;
+      const intensity = Number(hemiCfg.intensity);
+      ctx.hemi.intensity = Number.isFinite(intensity) ? intensity : 0;
+      ctx.hemi.visible = ctx.hemi.intensity > 0;
     }
     if (ctx.light) {
       const dirCfg = appearance.dir || {};
       ctx.light.color.setHex(dirCfg.color ?? 0xffffff);
-      ctx.light.intensity = dirCfg.intensity ?? 0;
+      const intensity = Number(dirCfg.intensity);
+      ctx.light.intensity = Number.isFinite(intensity) ? intensity : 0;
+      ctx.light.visible = ctx.light.intensity > 0;
       if (Array.isArray(dirCfg.position) && dirCfg.position.length === 3) {
         ctx.light.position.set(dirCfg.position[0], dirCfg.position[1], dirCfg.position[2]);
       }
@@ -1164,7 +1143,9 @@ function createEnvironmentManager({
     if (ctx.fill) {
       const fillCfg = appearance.fill || {};
       ctx.fill.color.setHex(fillCfg.color ?? 0xffffff);
-      ctx.fill.intensity = fillCfg.intensity ?? 0;
+      const intensity = Number(fillCfg.intensity);
+      ctx.fill.intensity = Number.isFinite(intensity) ? intensity : 0;
+      ctx.fill.visible = ctx.fill.intensity > 0;
       if (Array.isArray(fillCfg.position) && fillCfg.position.length === 3) {
         ctx.fill.position.set(fillCfg.position[0], fillCfg.position[1], fillCfg.position[2]);
       }
