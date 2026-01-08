@@ -648,7 +648,18 @@ function applySkyboxVisibility(ctx, enabled, options = {}) {
     pushSkyDebug(ctx, { mode: 'sky-cube', background: !!worldScene.background });
     return;
   }
-  // If no sky resources exist, fall back to a solid clear colour
+  // If no sky resources exist, match MuJoCo model-mode behavior: when there is
+  // no skybox texture, sky rendering is skipped and the clear color shows
+  // through (no explicit background).
+  worldScene.environment = null;
+  if (ctx._skyMode === 'mj-sky') {
+    worldScene.background = null;
+    if (ctx.skyShader) ctx.skyShader.visible = false;
+    pushSkyDebug(ctx, { mode: 'model-none' });
+    return;
+  }
+  // Preset fallback: keep a solid background so the scene is readable even if
+  // HDRI/sky resources are unavailable.
   worldScene.background = new THREE.Color(baseClear);
   pushSkyDebug(ctx, { mode: 'fallback' });
 }
@@ -1236,6 +1247,12 @@ function ensureMuJoCo2DGeneratedTexcoords(mesh, geomType, geomSize, geomDataId, 
   resolveMuJoCoTexcoordScale3(geomType, geomSize, TMP_TEX_SCALE3);
   const scaleX = TMP_TEX_SCALE3.scaleX;
   const scaleY = TMP_TEX_SCALE3.scaleY;
+  // MuJoCo render_gl3.c uses `geom->dataid >= 0` to detect pre-scaled displaylists
+  // (e.g. planes/meshes). Match that by using raw vertex coordinates for those
+  // geoms and normalized coordinates (divide by geom size) for others.
+  const prescaled = did >= 0;
+  const invScaleX = prescaled ? 1 : (1 / scaleX);
+  const invScaleY = prescaled ? 1 : (1 / scaleY);
   const vcount = positionAttr.count | 0;
   const matKey = matId | 0;
   const geomTypeKey = geomType | 0;
@@ -1277,8 +1294,8 @@ function ensureMuJoCo2DGeneratedTexcoords(mesh, geomType, geomSize, geomDataId, 
   for (let i = 0; i < vcount; i += 1) {
     const x = positionAttr.getX(i);
     const y = positionAttr.getY(i);
-    const x0 = x / scaleX;
-    const y0 = y / scaleY;
+    const x0 = x * invScaleX;
+    const y0 = y * invScaleY;
     uv[i * 2 + 0] = 0.5 * scl0 * x0 - 0.5;
     uv[i * 2 + 1] = -0.5 * scl1 * y0 - 0.5;
   }

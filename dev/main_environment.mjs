@@ -305,13 +305,16 @@ function readSkyboxTextureFromAssets(state) {
       nchan,
       data: uint8,
       adr,
+      key,
+      buffer: srcBuffer,
     };
     LAST_SKYBOX_TEXTURE = tex;
     LAST_SKYBOX_KEY = key;
     LAST_SKYBOX_BUFFER = srcBuffer;
     return tex;
   }
-  return LAST_SKYBOX_TEXTURE;
+  // No skybox texture in the current model: do not reuse the previous one.
+  return null;
 }
 
 function createCubeTextureFromSkybox(THREE_NS, skyTex) {
@@ -394,9 +397,23 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
     : (ctx.skyDebugMode || null);
   const forceCube = skyDebugMode === 'cube' || skyDebugMode === 'off';
   const forceShader = skyDebugMode === 'mj-sky-shader' || skyDebugMode === 'shader';
+  const skyTex = readSkyboxTextureFromAssets(state);
+  if (!skyTex) {
+    pushSkyDebug(ctx, { mode: 'model-sky-missing' });
+    return false;
+  }
+  const skyKey = typeof skyTex.key === 'string' ? skyTex.key : null;
+  const skyBuffer = skyTex.buffer || skyTex.data?.buffer || null;
   const cachedModel = cache?.model;
 
-  if (!forceCube && cachedModel?.envRT && cachedModel?.background && cachedModel.kind === 'shader') {
+  if (
+    !forceCube &&
+    cachedModel?.envRT &&
+    cachedModel?.background &&
+    cachedModel.kind === 'shader' &&
+    cachedModel.skyKey === skyKey &&
+    cachedModel.skyBuffer === skyBuffer
+  ) {
     const dome = ensureSkyDome(ctx, THREE_NS);
     updateSkyDome(ctx, cachedModel.palette || null, THREE_NS);
     if (dome) dome.visible = true;
@@ -414,7 +431,14 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
     pushSkyDebug(ctx, { mode: 'model-sky-shader-cache', stats: cachedModel.stats || null });
     return true;
   }
-  if (!forceShader && cachedModel?.envRT && cachedModel?.cube && cachedModel.kind === 'cube') {
+  if (
+    !forceShader &&
+    cachedModel?.envRT &&
+    cachedModel?.cube &&
+    cachedModel.kind === 'cube' &&
+    cachedModel.skyKey === skyKey &&
+    cachedModel.skyBuffer === skyBuffer
+  ) {
     worldScene.environment = cachedModel.envRT.texture || null;
     worldScene.background = cachedModel.cube;
     if (ctx.skyShader) ctx.skyShader.visible = false;
@@ -429,9 +453,6 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
     pushSkyDebug(ctx, { mode: 'model-sky-cube-cache', stats: cachedModel.stats || null });
     return true;
   }
-
-  const skyTex = readSkyboxTextureFromAssets(state);
-  if (!skyTex) return false;
   if (!ctx.pmrem && ctx.renderer) {
     ctx.pmrem = new THREE_NS.PMREMGenerator(ctx.renderer);
   }
@@ -477,6 +498,8 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
         palette,
         kind: 'shader',
         stats: classification.stats || null,
+        skyKey,
+        skyBuffer,
       };
     }
     strictEnsure('ensureModelSkyFromAssets', {
@@ -514,6 +537,8 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
       cube,
       kind: 'cube',
       stats: classification.stats || null,
+      skyKey,
+      skyBuffer,
     };
   }
   strictEnsure('ensureModelSkyFromAssets', {
@@ -1245,7 +1270,10 @@ function createEnvironmentManager({
     ctx.hdriReady = false;
     const skyOk = ensureModelSkyFromAssets(ctx, state, THREE_NS, { skyDebugMode });
     if (!skyOk) {
-      ensureModelGradientEnv(ctx, THREE_NS);
+      // MuJoCo: if there is no skybox texture, skybox rendering is skipped and
+      // the clear color (black by default) shows through.
+      detachEnvironment(ctx);
+      ctx.baseClearHex = 0x000000;
     }
     if (desiredEnvIntensity != null) {
       ctx.envIntensity = desiredEnvIntensity;
