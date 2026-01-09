@@ -1392,13 +1392,19 @@ async function loadModule() {
     try {
       distBase = new URL(forgeBaseOverride);
     } catch (err) {
-      // Fallback to local dist layout if forgeBase is malformed.
+      // Support origin-relative paths like "/dist/<ver>/" by resolving against this worker URL.
       strictCatch(err, 'worker:forgeBase_url', { allow: true });
-      distBase = compatFallback(
-        'forgeBase.malformed',
-        { forgeBase: forgeBaseOverride },
-        () => new URL(`../dist/${ver}/`, import.meta.url),
-      );
+      try {
+        distBase = new URL(forgeBaseOverride, import.meta.url);
+      } catch (innerErr) {
+        // Fallback to local dist layout if forgeBase is still malformed.
+        strictCatch(innerErr, 'worker:forgeBase_resolve', { allow: true });
+        distBase = compatFallback(
+          'forgeBase.malformed',
+          { forgeBase: forgeBaseOverride },
+          () => new URL(`../dist/${ver}/`, import.meta.url),
+        );
+      }
     }
   } else {
     // Local dev: serve dist/<ver>/ from the same origin.

@@ -119,7 +119,7 @@ test('model skybox uses MuJoCo sky texture when available', async ({ page }) => 
   });
   await waitForViewerReady(
     page,
-    '/index.html?model=RKOB_simplified_upper_with_marker_CAMS.xml&mode=worker&snapshot=1&log=0&forgeBase=/dist/3.3.7/',
+    '/index.html?model=RKOB_simplified_upper_with_marker_CAMS.xml&mode=worker&snapshot=1&log=0',
   );
 
   await setVisualSource(page, 'Model');
