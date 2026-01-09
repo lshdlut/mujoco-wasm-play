@@ -57,14 +57,17 @@ function readSkyDebug() {
 }
 
 async function setVisualSource(page, label) {
-  const target = label.toLowerCase().startsWith('preset') ? 'preset-sun' : 'model';
-  await page.evaluate((mode) => {
-    const store = (window as any).__viewerStore;
-    store?.update?.((draft: any) => {
-      draft.visualSourceMode = mode;
-    });
-  }, target);
-  await expect.poll(async () => page.evaluate(() => (window as any).__viewerStore?.get?.()?.visualSourceMode)).toBe(target);
+  const token = String(label || '').toLowerCase();
+  const target = token.startsWith('preset') ? 'PresetSun' : 'Model';
+  await page.evaluate(async ({ id, value }) => {
+    const controls = (window as any).__viewerControls;
+    if (!controls?.toggleControl) throw new Error('Missing __viewerControls.toggleControl');
+    await controls.toggleControl(id, value);
+  }, { id: VISUAL_SOURCE_TEST_ID, value: target });
+  const expected = target === 'PresetSun' ? 'preset-sun' : 'model';
+  await expect
+    .poll(async () => page.evaluate(() => (window as any).__viewerStore?.get?.()?.visualSourceMode))
+    .toBe(expected);
 }
 
 async function setSkyboxState(page, enabled) {
@@ -79,7 +82,7 @@ async function setSkyboxState(page, enabled) {
 }
 
 test('skybox flag controls background across visual sources', async ({ page }) => {
-  await waitForViewerReady(page);
+  await waitForViewerReady(page, '/index.html?model=demo_skybox.xml&mode=worker&snapshot=1&log=0');
 
   const skyState = () => page.evaluate(readSkyState);
 

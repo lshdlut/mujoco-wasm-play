@@ -575,7 +575,8 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
     // renderer-only fallback branches.
     appearance: {
       background: null,
-      clearColor: 0xd6dce4,
+      // MuJoCo default when no skybox texture exists: clear to black.
+      clearColor: 0x000000,
       exposure: 1.1,
       // Model mode should match MuJoCo Simulate (no IBL by default). Presets can
       // opt-in by overriding this via the unified state buffer.

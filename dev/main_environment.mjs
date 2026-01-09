@@ -886,6 +886,16 @@ function createEnvironmentManager({
   fallbackEnabledDefault,
   skyDebugModeParam,
 }) {
+  function syncRendererClearColor(ctx) {
+    const renderer = ctx?.renderer;
+    if (!renderer || typeof renderer.setClearColor !== 'function') return;
+    const clearHex = typeof ctx.baseClearHex === 'number' ? ctx.baseClearHex : null;
+    if (clearHex == null) return;
+    if (ctx._clearHexApplied === clearHex) return;
+    renderer.setClearColor(clearHex, 1);
+    ctx._clearHexApplied = clearHex;
+  }
+
   function ensureOutdoorSkyEnv(ctx, preset, generation = null, options = {}) {
     const worldScene = getWorldScene(ctx);
     if (!ctx || !ctx.renderer || !worldScene) return;
@@ -930,6 +940,7 @@ function createEnvironmentManager({
       ctx.envDirty = false;
       worldScene.environment = cachedPreset.envRT.texture;
       worldScene.background = cachedPreset.background;
+      syncRendererClearColor(ctx);
       if ('backgroundIntensity' in worldScene) {
         worldScene.backgroundIntensity = 1.0;
       }
@@ -1184,6 +1195,7 @@ function createEnvironmentManager({
     if (clearHex != null) {
       ctx.baseClearHex = clearHex;
     }
+    syncRendererClearColor(ctx);
   }
 
 
@@ -1233,6 +1245,7 @@ function createEnvironmentManager({
       ctx.hdriReady = false;
       ctx.envDirty = false;
       detachEnvironment(ctx);
+      syncRendererClearColor(ctx);
       pushSkyDebug(ctx, {
         mode: 'skip',
         reason: 'skybox-off',
@@ -1255,6 +1268,7 @@ function createEnvironmentManager({
       if (desiredEnvIntensity != null) {
         ctx.envIntensity = desiredEnvIntensity;
       }
+      syncRendererClearColor(ctx);
       pushSkyDebug(ctx, {
         mode: 'ensure-preset',
         presetMode: true,
@@ -1290,6 +1304,7 @@ function createEnvironmentManager({
       skyKind: ctx.skyMode || null,
       skyDebugMode,
     });
+    syncRendererClearColor(ctx);
   }
 
   return {

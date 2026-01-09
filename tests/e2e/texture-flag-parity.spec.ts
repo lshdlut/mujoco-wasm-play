@@ -84,11 +84,11 @@ test('mjVIS_TEXTURE toggles material.map (basic)', async ({ page }) => {
   const picked = await page.evaluate(pickMeshWithMap);
   expect(picked, JSON.stringify(picked)).toMatchObject({ ok: true, hasMap: true });
 
-  const textureSwitch = page.getByRole('switch', { name: 'Texture' });
-  await textureSwitch.scrollIntoViewIfNeeded();
-  if (await textureSwitch.isChecked()) {
-    await textureSwitch.click();
-  }
+  await page.evaluate(async ({ id, value }) => {
+    const controls = (window as any).__viewerControls;
+    if (!controls?.toggleControl) throw new Error('Missing __viewerControls.toggleControl');
+    await controls.toggleControl(id, value);
+  }, { id: 'rendering.model_flags.Texture', value: false });
   await forceRender(page);
 
   await expect.poll(async () => {
@@ -96,9 +96,11 @@ test('mjVIS_TEXTURE toggles material.map (basic)', async ({ page }) => {
     return page.evaluate(meshMapState, (picked as any).index);
   }, { timeout: 10_000 }).toMatchObject({ ok: true, hasMap: false, voptTextureFlag: false });
 
-  if (!(await textureSwitch.isChecked())) {
-    await textureSwitch.click();
-  }
+  await page.evaluate(async ({ id, value }) => {
+    const controls = (window as any).__viewerControls;
+    if (!controls?.toggleControl) throw new Error('Missing __viewerControls.toggleControl');
+    await controls.toggleControl(id, value);
+  }, { id: 'rendering.model_flags.Texture', value: true });
   await forceRender(page);
 
   await expect.poll(async () => {
