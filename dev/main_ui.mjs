@@ -2023,6 +2023,7 @@ function createControlManager({
   const shortcutHandlers = new Map();
   const CAMERA_FALLBACK_PRESETS = ['Free', 'Tracking'];
   const modelLibrary = [];
+  let lastModelFolderHandle = null;
   let modelSelectEl = null;
   const refreshModelSelectOptions = () => {
     if (!modelSelectEl) return;
@@ -2105,12 +2106,16 @@ function createControlManager({
 
   async function pickDirectoryHandle() {
     if (typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function') {
-      return window.showDirectoryPicker({ mode: 'read' });
+      const options = { mode: 'read' };
+      if (lastModelFolderHandle) {
+        options.startIn = lastModelFolderHandle;
+      }
+      return window.showDirectoryPicker(options);
     }
     throw new Error('Directory picker unavailable (requires File System Access API)');
   }
 
-  async function promptDirectoryHandleForXmlRefs(xmlName, refCount) {
+  async function promptDirectoryHandleForXmlRefs(xmlName, refCount, samplePaths = null) {
     const name = String(xmlName || '').trim();
     const count = Number.isFinite(refCount) ? refCount : null;
     if (!name) throw new Error('promptDirectoryHandleForXmlRefs: missing xmlName');
@@ -2120,6 +2125,37 @@ function createControlManager({
       // No DOM available; fall back to the raw picker (may still be blocked by user-activation rules).
       return pickDirectoryHandle();
     }
+
+    const sampleList = Array.isArray(samplePaths)
+      ? samplePaths.map((p) => String(p ?? '').trim()).filter((p) => p.length)
+      : [];
+
+    const folderHint = (() => {
+      let maxUp = 0;
+      const expected = new Set();
+      for (const rawPath of sampleList) {
+        let token = rawPath.replaceAll('\\', '/');
+        let up = 0;
+        while (token === '..' || token.startsWith('../')) {
+          up += 1;
+          token = token === '..' ? '' : token.slice(3);
+        }
+        if (up > maxUp) maxUp = up;
+        const first = token.split('/').filter(Boolean)[0];
+        if (first) expected.add(first);
+      }
+
+      if (maxUp <= 0) {
+        return { message: 'Pick the folder that contains this XML and its referenced files.' };
+      }
+
+      const level = maxUp === 1 ? '1 level' : `${maxUp} levels`;
+      const expectedHint = expected.size
+        ? ` (should contain: ${Array.from(expected).slice(0, 3).join(', ')}${expected.size > 3 ? ` +${expected.size - 3} more` : ''})`
+        : '';
+      return { message: `Pick a folder ${level} higher${expectedHint}.` };
+    })();
+    const examplePath = sampleList.find((p) => p === '..' || p.startsWith('../')) || sampleList[0] || '';
 
     // File System Access pickers must be invoked from a user gesture. The file input `change` handler
     // awaits `file.text()`, which can consume the transient activation. We therefore prompt with a
@@ -2146,8 +2182,28 @@ function createControlManager({
 
       const subtitle = doc.createElement('div');
       subtitle.className = 'help-subtitle';
-      const prefix = count != null ? `Detected ${count} file reference(s) in ${name}. ` : '';
-      subtitle.textContent = `${prefix}Select the folder that contains this XML and its referenced files.`;
+      subtitle.textContent = 'Select a folder so the viewer can read referenced files.';
+
+      const grid = doc.createElement('div');
+      grid.className = 'help-grid';
+      const addRow = (key, value) => {
+        const keyEl = doc.createElement('div');
+        keyEl.className = 'help-key';
+        keyEl.textContent = key;
+        const valueEl = doc.createElement('div');
+        valueEl.className = 'help-desc';
+        valueEl.textContent = value;
+        grid.append(keyEl, valueEl);
+      };
+
+      addRow('XML', name);
+      if (count != null) addRow('Refs', String(count));
+      if (examplePath) addRow('Example', examplePath);
+      addRow('Pick', folderHint.message);
+
+      const footnote = doc.createElement('div');
+      footnote.className = 'help-subtitle help-subtitle-unimplemented';
+      footnote.textContent = 'Local-only: reads referenced files from your selected folder (no upload).';
 
       const actions = doc.createElement('div');
       actions.style.display = 'flex';
@@ -2198,7 +2254,7 @@ function createControlManager({
       });
 
       actions.append(ok, cancel);
-      card.append(title, subtitle, actions);
+      card.append(title, subtitle, grid, footnote, actions);
       backdrop.append(card);
       doc.body.append(backdrop);
       ok.focus();
@@ -2543,8 +2599,41 @@ function createControlManager({
     }
 
     if (unsupported.length) {
-      const sample = unsupported.slice(0, 3).map((r) => r.path).filter(Boolean);
-      const suffix = unsupported.length > 3 ? ` (+${unsupported.length - 3} more)` : '';
+      const outsideRoot = unsupported.filter((r) => r && r.outsideRoot);
+
+      const formatSample = (items) => {
+        const sample = items.slice(0, 3).map((r) => r.path).filter(Boolean);
+        const suffix = items.length > 3 ? ` (+${items.length - 3} more)` : '';
+        return { sample, suffix };
+      };
+
+      if (outsideRoot.length) {
+        const { sample, suffix } = formatSample(outsideRoot);
+        let maxUp = 0;
+        const expectedDirs = new Set();
+        for (const entry of outsideRoot) {
+          let token = String(entry?.path ?? '').trim().replaceAll('\\', '/');
+          let up = 0;
+          while (token === '..' || token.startsWith('../')) {
+            up += 1;
+            token = token === '..' ? '' : token.slice(3);
+          }
+          if (up > maxUp) maxUp = up;
+          const first = token.split('/').filter(Boolean)[0];
+          if (first) expectedDirs.add(first);
+        }
+        const levelHint = maxUp === 1 ? '1 level' : `${maxUp} levels`;
+        const dirHint = expectedDirs.size
+          ? ` (expected to find: ${Array.from(expectedDirs).slice(0, 3).join(', ')}${expectedDirs.size > 3 ? ` +${expectedDirs.size - 3} more` : ''})`
+          : '';
+        throw new Error(
+          `Selected folder is too narrow.\n` +
+            `Ref escapes folder: ${sample.join(', ')}${suffix}\n` +
+            `Select a folder ${levelHint} higher${dirHint}.`,
+        );
+      }
+
+      const { sample, suffix } = formatSample(unsupported);
       throw new Error(`Unsupported file reference(s): ${sample.join(', ')}${suffix}`);
     }
 
@@ -2589,11 +2678,13 @@ function createControlManager({
       throw new Error('Missing xml file name for folder-based load');
     }
 
-    const root = await promptDirectoryHandleForXmlRefs(xmlName, rootLocal.length);
+    const refPaths = rootLocal.map((r) => r.path).filter(Boolean);
+    const root = await promptDirectoryHandleForXmlRefs(xmlName, rootLocal.length, refPaths);
     if (!root) {
       pushToast?.('Folder selection canceled');
       return;
     }
+    lastModelFolderHandle = root;
     const found = await findFirstFileByName(root, xmlName, '', expectedSize);
     if (!found?.relPath) {
       throw new Error(`Unable to locate ${xmlName} inside the selected folder`);
@@ -3326,7 +3417,10 @@ function shortcutFromEvent(event) {
         await loadXmlTextWithFolderRefs(text, file.name || null, file.size);
       } catch (err) {
         logError('[ui] load xml from file failed', err);
-        pushToast?.('Failed to load xml from file');
+        const message = (err && typeof err.message === 'string' && err.message.trim().length)
+          ? err.message.trim()
+          : 'Failed to load xml from file';
+        pushToast?.(message);
         strictCatch(err, 'main:ui_load_xml_file');
         throw err;
       } finally {
@@ -3356,6 +3450,7 @@ function shortcutFromEvent(event) {
               xmlPath: `/mem/${bundle.xmlRel}`,
               files: bundle.files,
             });
+            lastModelFolderHandle = entry.source.rootHandle;
             pushToast?.(`Loaded model: ${entry.label || id}`);
             store.update((draft) => {
               if (!draft.hud) draft.hud = {};

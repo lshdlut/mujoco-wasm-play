@@ -423,8 +423,41 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
   }
 
   if (unsupported.length) {
-    const sample = unsupported.slice(0, 3).map((r) => r.path).filter(Boolean);
-    const suffix = unsupported.length > 3 ? ` (+${unsupported.length - 3} more)` : '';
+    const outsideRoot = unsupported.filter((r) => r && r.outsideRoot);
+
+    const formatSample = (items) => {
+      const sample = items.slice(0, 3).map((r) => r.path).filter(Boolean);
+      const suffix = items.length > 3 ? ` (+${items.length - 3} more)` : '';
+      return { sample, suffix };
+    };
+
+    if (outsideRoot.length) {
+      const { sample, suffix } = formatSample(outsideRoot);
+      let maxUp = 0;
+      const expectedDirs = new Set();
+      for (const entry of outsideRoot) {
+        let token = normaliseSlashes(entry?.path);
+        let up = 0;
+        while (token === '..' || token.startsWith('../')) {
+          up += 1;
+          token = token === '..' ? '' : token.slice(3);
+        }
+        if (up > maxUp) maxUp = up;
+        const first = token.split('/').filter(Boolean)[0];
+        if (first) expectedDirs.add(first);
+      }
+      const levelHint = maxUp === 1 ? '1 level' : `${maxUp} levels`;
+      const dirHint = expectedDirs.size
+        ? ` (expected to find: ${Array.from(expectedDirs).slice(0, 3).join(', ')}${expectedDirs.size > 3 ? ` +${expectedDirs.size - 3} more` : ''})`
+        : '';
+      throw new Error(
+        `Selected folder is too narrow.\n` +
+          `Ref escapes folder: ${sample.join(', ')}${suffix}\n` +
+          `Select a folder ${levelHint} higher${dirHint}.`,
+      );
+    }
+
+    const { sample, suffix } = formatSample(unsupported);
     throw new Error(`Unsupported file reference(s): ${sample.join(', ')}${suffix}`);
   }
 
