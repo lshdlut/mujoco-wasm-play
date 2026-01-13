@@ -2024,6 +2024,7 @@ function createControlManager({
   const CAMERA_FALLBACK_PRESETS = ['Free', 'Tracking'];
   const modelLibrary = [];
   let lastModelFolderHandle = null;
+  let lastModelXmlFileHandle = null;
   let modelSelectEl = null;
   const refreshModelSelectOptions = () => {
     if (!modelSelectEl) return;
@@ -2107,7 +2108,9 @@ function createControlManager({
   async function pickDirectoryHandle() {
     if (typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function') {
       const options = { mode: 'read' };
-      if (lastModelFolderHandle) {
+      if (lastModelXmlFileHandle) {
+        options.startIn = lastModelXmlFileHandle;
+      } else if (lastModelFolderHandle) {
         options.startIn = lastModelFolderHandle;
       }
       return window.showDirectoryPicker(options);
@@ -2240,12 +2243,14 @@ function createControlManager({
         cancel.disabled = true;
         try {
           const handle = await pickDirectoryHandle();
+          lastModelXmlFileHandle = null;
           cleanup();
           resolve(handle);
         } catch (err) {
           cleanup();
           // User canceled the picker.
           if (err && (err.name === 'AbortError' || err.name === 'NotAllowedError')) {
+            lastModelXmlFileHandle = null;
             resolve(null);
             return;
           }
@@ -3409,12 +3414,58 @@ function shortcutFromEvent(event) {
       addModelEntry(entry);
     }
 
+    const loadXmlFileImpl = async (file, fileHandle = null) => {
+      if (!file) return;
+      try {
+        const text = await file.text();
+        if (fileHandle) lastModelXmlFileHandle = fileHandle;
+        await loadXmlTextWithFolderRefs(text, file.name || null, file.size);
+      } finally {
+        // Always reset so the same file can be selected again.
+        loadInput.value = '';
+      }
+    };
+
+    loadLabel.addEventListener(
+      'click',
+      async (event) => {
+        if (typeof window === 'undefined' || typeof window.showOpenFilePicker !== 'function') return;
+        // Use the File System Access picker when available so we can start the folder picker near the selected XML.
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+          const [handle] = await window.showOpenFilePicker({
+            multiple: false,
+            excludeAcceptAllOption: true,
+            types: [
+              {
+                description: 'MuJoCo XML',
+                accept: { 'application/xml': ['.xml'], 'text/xml': ['.xml'] },
+              },
+            ],
+          });
+          if (!handle) return;
+          const file = await handle.getFile();
+          await loadXmlFileImpl(file, handle);
+        } catch (err) {
+          if (err && (err.name === 'AbortError' || err.name === 'NotAllowedError')) return;
+          logError('[ui] load xml from file failed', err);
+          const message = (err && typeof err.message === 'string' && err.message.trim().length)
+            ? err.message.trim()
+            : 'Failed to load xml from file';
+          pushToast?.(message);
+          strictCatch(err, 'main:ui_load_xml_file');
+          throw err;
+        }
+      },
+      { capture: true },
+    );
+
     loadInput.addEventListener('change', async () => {
       const file = loadInput.files && loadInput.files[0];
       if (!file) return;
       try {
-        const text = await file.text();
-        await loadXmlTextWithFolderRefs(text, file.name || null, file.size);
+        await loadXmlFileImpl(file);
       } catch (err) {
         logError('[ui] load xml from file failed', err);
         const message = (err && typeof err.message === 'string' && err.message.trim().length)
@@ -3423,8 +3474,6 @@ function shortcutFromEvent(event) {
         pushToast?.(message);
         strictCatch(err, 'main:ui_load_xml_file');
         throw err;
-      } finally {
-        loadInput.value = '';
       }
     });
 
@@ -3451,6 +3500,7 @@ function shortcutFromEvent(event) {
               files: bundle.files,
             });
             lastModelFolderHandle = entry.source.rootHandle;
+            lastModelXmlFileHandle = null;
             pushToast?.(`Loaded model: ${entry.label || id}`);
             store.update((draft) => {
               if (!draft.hud) draft.hud = {};
