@@ -27,6 +27,7 @@ import {
 } from './viewer_shared.mjs';
 import { STAT_FIELD_DESCRIPTORS, VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
 import { FALLBACK_PRESETS } from './main_environment.mjs';
+import { joinMuJoCoRelativePath, normaliseMuJoCoVirtualPath, parseMuJoCoDirectFileRefs } from './xml_refs.mjs';
 
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
@@ -2066,7 +2067,7 @@ function createControlManager({
     }
   };
 
-  async function loadXmlTextAsModel(xmlText, label) {
+  async function loadXmlTextAsModel(xmlText, label, options = null) {
     const text = typeof xmlText === 'string' ? xmlText : '';
     const name = typeof label === 'string' && label.trim().length ? label.trim() : `Model ${modelLibrary.length + 1}`;
     if (!text.trim()) {
@@ -2078,11 +2079,587 @@ function createControlManager({
       kind: 'xmlText',
       xmlText: text,
     };
+    if (options?.source && typeof options.source === 'object') {
+      entry.source = options.source;
+    }
     addModelEntry(entry);
     resetModelFrontendState(store);
+    if (options?.bundle && typeof backend?.loadXmlBundle === 'function') {
+      await backend.loadXmlBundle(options.bundle);
+      pushToast?.(`Loaded model: ${name}`);
+      return;
+    }
     if (typeof backend?.loadXmlText === 'function') {
       await backend.loadXmlText(text);
       pushToast?.(`Loaded model: ${name}`);
+    }
+  }
+
+  function deriveXmlFileName(label) {
+    const raw = typeof label === 'string' ? label.trim() : '';
+    if (!raw) return '';
+    const token = raw.replaceAll('\\', '/');
+    const idx = token.lastIndexOf('/');
+    return idx >= 0 ? token.slice(idx + 1) : token;
+  }
+
+  async function pickDirectoryHandle() {
+    if (typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function') {
+      return window.showDirectoryPicker({ mode: 'read' });
+    }
+    throw new Error('Directory picker unavailable (requires File System Access API)');
+  }
+
+  async function promptDirectoryHandleForXmlRefs(xmlName, refCount) {
+    const name = String(xmlName || '').trim();
+    const count = Number.isFinite(refCount) ? refCount : null;
+    if (!name) throw new Error('promptDirectoryHandleForXmlRefs: missing xmlName');
+
+    const doc = typeof document !== 'undefined' ? document : null;
+    if (!doc?.body) {
+      // No DOM available; fall back to the raw picker (may still be blocked by user-activation rules).
+      return pickDirectoryHandle();
+    }
+
+    // File System Access pickers must be invoked from a user gesture. The file input `change` handler
+    // awaits `file.text()`, which can consume the transient activation. We therefore prompt with a
+    // dedicated button so `showDirectoryPicker()` runs on a click.
+    return new Promise((resolve, reject) => {
+      const backdrop = doc.createElement('div');
+      backdrop.style.position = 'fixed';
+      backdrop.style.inset = '0';
+      backdrop.style.zIndex = '9999';
+      backdrop.style.display = 'flex';
+      backdrop.style.alignItems = 'center';
+      backdrop.style.justifyContent = 'center';
+      backdrop.style.padding = '16px';
+      backdrop.style.background = 'rgba(0, 0, 0, 0.45)';
+
+      const card = doc.createElement('div');
+      card.className = 'overlay-card visible';
+      card.style.minWidth = 'min(520px, calc(100vw - 32px))';
+      card.style.pointerEvents = 'auto';
+
+      const title = doc.createElement('div');
+      title.className = 'help-title';
+      title.textContent = 'Folder access required';
+
+      const subtitle = doc.createElement('div');
+      subtitle.className = 'help-subtitle';
+      const prefix = count != null ? `Detected ${count} file reference(s) in ${name}. ` : '';
+      subtitle.textContent = `${prefix}Select the folder that contains this XML and its referenced files.`;
+
+      const actions = doc.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.gap = '10px';
+      actions.style.marginTop = '12px';
+
+      const ok = doc.createElement('button');
+      ok.type = 'button';
+      ok.className = 'btn-primary';
+      ok.textContent = 'Select folder';
+
+      const cancel = doc.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn-secondary';
+      cancel.textContent = 'Cancel';
+
+      const cleanup = () => {
+        ok.replaceWith(ok.cloneNode(true));
+        cancel.replaceWith(cancel.cloneNode(true));
+        backdrop.remove();
+      };
+
+      const resolveCancel = () => {
+        cleanup();
+        resolve(null);
+      };
+
+      backdrop.addEventListener('click', (ev) => {
+        if (ev.target === backdrop) resolveCancel();
+      });
+      cancel.addEventListener('click', resolveCancel);
+      ok.addEventListener('click', async () => {
+        ok.disabled = true;
+        cancel.disabled = true;
+        try {
+          const handle = await pickDirectoryHandle();
+          cleanup();
+          resolve(handle);
+        } catch (err) {
+          cleanup();
+          // User canceled the picker.
+          if (err && (err.name === 'AbortError' || err.name === 'NotAllowedError')) {
+            resolve(null);
+            return;
+          }
+          reject(err);
+        }
+      });
+
+      actions.append(ok, cancel);
+      card.append(title, subtitle, actions);
+      backdrop.append(card);
+      doc.body.append(backdrop);
+      ok.focus();
+    });
+  }
+
+  async function findFirstFileByName(dirHandle, fileName, prefix = '', expectedSize = null) {
+    if (!dirHandle || typeof dirHandle.entries !== 'function') return null;
+    const target = String(fileName || '');
+    if (!target) return null;
+    const size = Number.isFinite(expectedSize) ? expectedSize : null;
+    let fallback = null;
+    try {
+      // Enumerating handles is cheap (metadata only) and requires no extra permissions once the root is granted.
+      for await (const [name, handle] of dirHandle.entries()) {
+        if (!handle) continue;
+        const rel = prefix ? `${prefix}/${name}` : name;
+        if (handle.kind === 'file') {
+          if (name === target) {
+            if (size == null) return { handle, relPath: rel, sizeMatch: false };
+            const file = await handle.getFile();
+            if (file.size === size) return { handle, relPath: rel, sizeMatch: true };
+            if (!fallback) fallback = { handle, relPath: rel, sizeMatch: false };
+          }
+          continue;
+        }
+        if (handle.kind === 'directory') {
+          const found = await findFirstFileByName(handle, target, rel, size);
+          if (found?.sizeMatch) return found;
+          if (found && !fallback) fallback = found;
+        }
+      }
+    } catch (err) {
+      strictCatch(err, 'main:findFirstFileByName');
+      throw err;
+    }
+    return fallback;
+  }
+
+  async function getFileHandleByRelPath(rootHandle, relPath) {
+    const rel = normaliseMuJoCoVirtualPath(relPath);
+    if (!rel) throw new Error('Missing relPath');
+    const parts = rel.split('/').filter(Boolean);
+    let cur = rootHandle;
+    for (let i = 0; i < parts.length; i += 1) {
+      const part = parts[i];
+      if (i === parts.length - 1) {
+        return cur.getFileHandle(part, { create: false });
+      }
+      cur = await cur.getDirectoryHandle(part, { create: false });
+    }
+    throw new Error(`Invalid relPath: ${relPath}`);
+  }
+
+  async function readDirectoryFileArrayBuffer(rootHandle, relPath) {
+    const fileHandle = await getFileHandleByRelPath(rootHandle, relPath);
+    const file = await fileHandle.getFile();
+    return file.arrayBuffer();
+  }
+
+  function decodeXmlTextFromArrayBuffer(buf) {
+    if (!(buf instanceof ArrayBuffer)) return '';
+    if (typeof TextDecoder === 'function') {
+      try {
+        return new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(buf));
+      } catch (err) {
+        strictCatch(err, 'main:decodeXmlTextFromArrayBuffer');
+        throw err;
+      }
+    }
+    throw new Error('TextDecoder unavailable');
+  }
+
+  function dirnamePosix(relPath) {
+    const rel = normaliseMuJoCoVirtualPath(relPath);
+    if (!rel) return '';
+    const idx = rel.lastIndexOf('/');
+    return idx >= 0 ? rel.slice(0, idx) : '';
+  }
+
+  async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
+    const rootRel = normaliseMuJoCoVirtualPath(xmlRel);
+    if (!rootRel) throw new Error('buildMuJoCoBundle: missing xmlRel');
+    if (typeof readFileArrayBuffer !== 'function') {
+      throw new Error('buildMuJoCoBundle: missing readFileArrayBuffer');
+    }
+    const visitedXml = new Set();
+    const visitedObj = new Set();
+    const visitedMtl = new Set();
+    const fileBuffers = new Map();
+    const pending = [{ type: 'xml', rel: rootRel, text: String(xmlText ?? ''), compilerState: null }];
+    const unsupported = [];
+
+    const isProbablyRemotePath = (value) => {
+      const v = String(value ?? '').trim().toLowerCase();
+      return v.startsWith('http://') || v.startsWith('https://') || v.startsWith('data:');
+    };
+
+    const shouldTreatAsAbsolutePath = (value) => {
+      const v = String(value ?? '').trim().replaceAll('\\', '/');
+      if (!v) return false;
+      if (v.startsWith('/')) return true;
+      return /^[a-zA-Z]:\//.test(v);
+    };
+
+    const isOutsideRoot = (relPath) => relPath === '..' || relPath.startsWith('../');
+
+    async function ensureFileBuffer(relPath) {
+      if (!fileBuffers.has(relPath)) {
+        const buf = await readFileArrayBuffer(relPath);
+        fileBuffers.set(relPath, buf);
+      }
+      return fileBuffers.get(relPath) || null;
+    }
+
+    function resolveCompilerDir(baseDir, rawDir, rel, kind) {
+      const raw = typeof rawDir === 'string' ? rawDir.trim() : '';
+      if (!raw) return '';
+      if (isProbablyRemotePath(raw) || shouldTreatAsAbsolutePath(raw)) {
+        unsupported.push({ kind: `compiler:${kind}`, path: raw, from: rel, remote: isProbablyRemotePath(raw), absolute: shouldTreatAsAbsolutePath(raw) });
+        return '';
+      }
+      const resolved = joinMuJoCoRelativePath(baseDir, raw);
+      if (!resolved) return '';
+      if (isOutsideRoot(resolved)) {
+        unsupported.push({ kind: `compiler:${kind}`, path: resolved, from: rel, outsideRoot: true });
+        return '';
+      }
+      return resolved;
+    }
+
+    function resolveCompilerState(baseDir, localCompiler, inheritedState, rel) {
+      const inherited = inheritedState && typeof inheritedState === 'object'
+        ? inheritedState
+        : { assetBase: baseDir, meshBase: baseDir, textureBase: baseDir, hfieldBase: baseDir };
+
+      const rawAsset = typeof localCompiler?.assetdir === 'string' ? localCompiler.assetdir.trim() : '';
+      const rawMesh = typeof localCompiler?.meshdir === 'string' ? localCompiler.meshdir.trim() : '';
+      const rawTex = typeof localCompiler?.texturedir === 'string' ? localCompiler.texturedir.trim() : '';
+      const rawHfield = typeof localCompiler?.hfielddir === 'string' ? localCompiler.hfielddir.trim() : '';
+
+      const assetBase = rawAsset ? resolveCompilerDir(baseDir, rawAsset, rel, 'assetdir') || inherited.assetBase : inherited.assetBase;
+      const meshBase = rawMesh ? resolveCompilerDir(assetBase, rawMesh, rel, 'meshdir') || inherited.meshBase : (rawAsset ? assetBase : inherited.meshBase);
+      const textureBase = rawTex ? resolveCompilerDir(assetBase, rawTex, rel, 'texturedir') || inherited.textureBase : (rawAsset ? assetBase : inherited.textureBase);
+      const hfieldBase = rawHfield ? resolveCompilerDir(assetBase, rawHfield, rel, 'hfielddir') || inherited.hfieldBase : (rawAsset ? assetBase : inherited.hfieldBase);
+
+      return { assetBase, meshBase, textureBase, hfieldBase };
+    }
+
+    function resolveRefPath(baseDir, compilerState, ref, rel) {
+      const rawPath = ref?.path ? String(ref.path) : '';
+      if (!rawPath) return '';
+      if (ref.remote || ref.absolute) {
+        unsupported.push({ ...ref, from: rel });
+        return '';
+      }
+      const base = (() => {
+        switch (ref.kind) {
+          case 'include':
+            return baseDir;
+          case 'model':
+            return compilerState?.assetBase ?? baseDir;
+          case 'mesh':
+            return compilerState?.meshBase ?? baseDir;
+          case 'texture':
+            return compilerState?.textureBase ?? baseDir;
+          case 'hfield':
+            return compilerState?.hfieldBase ?? baseDir;
+          case 'skin':
+            return compilerState?.assetBase ?? baseDir;
+          default:
+            return baseDir;
+        }
+      })();
+      const resolved = joinMuJoCoRelativePath(base, rawPath);
+      if (!resolved) return '';
+      if (isOutsideRoot(resolved)) {
+        unsupported.push({ ...ref, path: resolved, from: rel, outsideRoot: true });
+        return '';
+      }
+      return resolved;
+    }
+
+    function parseObjMtllib(objText) {
+      const out = [];
+      const text = typeof objText === 'string' ? objText : '';
+      for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const parts = line.split(/\s+/);
+        if (!parts.length) continue;
+        if (parts[0].toLowerCase() !== 'mtllib') continue;
+        for (const token of parts.slice(1)) {
+          const t = token.trim();
+          if (t) out.push(t);
+        }
+      }
+      return out;
+    }
+
+    function parseMtlTextureRefs(mtlText) {
+      const keys = new Set([
+        'map_ka',
+        'map_kd',
+        'map_ks',
+        'map_ke',
+        'map_ns',
+        'map_d',
+        'bump',
+        'map_bump',
+        'disp',
+        'decal',
+        'norm',
+      ]);
+      const out = [];
+      const text = typeof mtlText === 'string' ? mtlText : '';
+      for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const parts = line.split(/\s+/);
+        if (parts.length < 2) continue;
+        const key = parts[0].toLowerCase();
+        if (!keys.has(key)) continue;
+        const candidate = parts[parts.length - 1];
+        if (candidate && !candidate.startsWith('-')) {
+          out.push(candidate);
+        }
+      }
+      return out;
+    }
+
+    while (pending.length) {
+      const item = pending.pop();
+      const rel = item?.rel ? normaliseMuJoCoVirtualPath(item.rel) : '';
+      if (!rel) continue;
+
+      if (item.type === 'xml') {
+        if (visitedXml.has(rel)) continue;
+        visitedXml.add(rel);
+
+        let parsed = null;
+        try {
+          parsed = parseMuJoCoDirectFileRefs(item.text);
+        } catch (err) {
+          strictCatch(err, 'main:parseMuJoCoDirectFileRefs', { rel });
+          throw err;
+        }
+        const baseDir = dirnamePosix(rel);
+        let compilerState = resolveCompilerState(baseDir, parsed.compiler, item.compilerState, rel);
+
+        // MuJoCo `<include>` behaves like textual insertion; compiler directives inside an included file
+        // (e.g. `scene.xml`) affect subsequent file path resolution in the including XML.
+        // We approximate this by parsing includes first and "rolling forward" the compiler state.
+        for (const ref of parsed.refs ?? []) {
+          if (ref.kind !== 'include') continue;
+          const resolvedRel = resolveRefPath(baseDir, compilerState, ref, rel);
+          if (!resolvedRel) continue;
+          await ensureFileBuffer(resolvedRel);
+          const buf = fileBuffers.get(resolvedRel) || null;
+          const includeText = decodeXmlTextFromArrayBuffer(buf);
+          if (!visitedXml.has(resolvedRel)) {
+            pending.push({ type: 'xml', rel: resolvedRel, text: includeText, compilerState });
+          }
+          const includeParsed = parseMuJoCoDirectFileRefs(includeText);
+          const includeDir = dirnamePosix(resolvedRel);
+          compilerState = resolveCompilerState(includeDir, includeParsed.compiler, compilerState, resolvedRel);
+        }
+
+        for (const ref of parsed.refs ?? []) {
+          const resolvedRel = resolveRefPath(baseDir, compilerState, ref, rel);
+          if (!resolvedRel) continue;
+          await ensureFileBuffer(resolvedRel);
+
+          const lower = resolvedRel.toLowerCase();
+          if (ref.kind === 'include') {
+            // handled above (compiler propagation + queue)
+            continue;
+          }
+          if (ref.kind === 'model' && !visitedXml.has(resolvedRel)) {
+            const buf = fileBuffers.get(resolvedRel) || null;
+            const modelText = decodeXmlTextFromArrayBuffer(buf);
+            // MuJoCo loads `<model file="...">` as a separate model asset; do not inherit compiler dirs.
+            pending.push({ type: 'xml', rel: resolvedRel, text: modelText, compilerState: null });
+          } else if (ref.kind === 'mesh' && lower.endsWith('.obj')) {
+            pending.push({ type: 'obj', rel: resolvedRel });
+          }
+        }
+        continue;
+      }
+
+      if (item.type === 'obj') {
+        if (visitedObj.has(rel)) continue;
+        visitedObj.add(rel);
+        const buf = await ensureFileBuffer(rel);
+        if (!(buf instanceof ArrayBuffer)) continue;
+        const objText = decodeXmlTextFromArrayBuffer(buf);
+        const baseDir = dirnamePosix(rel);
+        for (const mtlName of parseObjMtllib(objText)) {
+          const raw = String(mtlName ?? '').trim();
+          if (!raw) continue;
+          if (isProbablyRemotePath(raw) || shouldTreatAsAbsolutePath(raw)) {
+            unsupported.push({ kind: 'mtllib', path: raw, from: rel, remote: isProbablyRemotePath(raw), absolute: shouldTreatAsAbsolutePath(raw) });
+            continue;
+          }
+          const resolvedMtl = joinMuJoCoRelativePath(baseDir, raw);
+          if (!resolvedMtl) continue;
+          if (isOutsideRoot(resolvedMtl)) {
+            unsupported.push({ kind: 'mtllib', path: resolvedMtl, from: rel, outsideRoot: true });
+            continue;
+          }
+          await ensureFileBuffer(resolvedMtl);
+          if (resolvedMtl.toLowerCase().endsWith('.mtl')) {
+            pending.push({ type: 'mtl', rel: resolvedMtl });
+          }
+        }
+        continue;
+      }
+
+      if (item.type === 'mtl') {
+        if (visitedMtl.has(rel)) continue;
+        visitedMtl.add(rel);
+        const buf = await ensureFileBuffer(rel);
+        if (!(buf instanceof ArrayBuffer)) continue;
+        const mtlText = decodeXmlTextFromArrayBuffer(buf);
+        const baseDir = dirnamePosix(rel);
+        for (const texName of parseMtlTextureRefs(mtlText)) {
+          const raw = String(texName ?? '').trim();
+          if (!raw) continue;
+          if (isProbablyRemotePath(raw) || shouldTreatAsAbsolutePath(raw)) {
+            unsupported.push({ kind: 'mtl:texture', path: raw, from: rel, remote: isProbablyRemotePath(raw), absolute: shouldTreatAsAbsolutePath(raw) });
+            continue;
+          }
+          const resolvedTex = joinMuJoCoRelativePath(baseDir, raw);
+          if (!resolvedTex) continue;
+          if (isOutsideRoot(resolvedTex)) {
+            unsupported.push({ kind: 'mtl:texture', path: resolvedTex, from: rel, outsideRoot: true });
+            continue;
+          }
+          await ensureFileBuffer(resolvedTex);
+        }
+      }
+    }
+
+    if (unsupported.length) {
+      const sample = unsupported.slice(0, 3).map((r) => r.path).filter(Boolean);
+      const suffix = unsupported.length > 3 ? ` (+${unsupported.length - 3} more)` : '';
+      throw new Error(`Unsupported file reference(s): ${sample.join(', ')}${suffix}`);
+    }
+
+    const files = [];
+    for (const [relPath, buf] of fileBuffers.entries()) {
+      files.push({ path: `/mem/${relPath}`, data: buf });
+    }
+    return { xmlRel: rootRel, files };
+  }
+
+  async function readUrlFileArrayBuffer(baseUrl, relPath) {
+    const rel = normaliseMuJoCoVirtualPath(relPath);
+    if (!rel) throw new Error('Missing relPath');
+    const url = new URL(rel, baseUrl);
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch ${rel} (${res.status})`);
+    }
+    return res.arrayBuffer();
+  }
+
+  async function loadXmlTextWithFolderRefs(xmlText, label, expectedSize = null) {
+    const text = typeof xmlText === 'string' ? xmlText : '';
+    if (!text.trim()) throw new Error('loadXmlTextWithFolderRefs: empty xml text');
+
+    const rootParsed = parseMuJoCoDirectFileRefs(text);
+    const rootLocal = (rootParsed.refs ?? []).filter((r) => r && r.path && !r.remote && !r.absolute);
+    const rootUnsupported = (rootParsed.refs ?? []).filter((r) => r && r.path && (r.remote || r.absolute));
+    if (rootUnsupported.length) {
+      const items = rootUnsupported.map((r) => r.path).filter(Boolean).slice(0, 3);
+      const suffix = rootUnsupported.length > 3 ? ` (+${rootUnsupported.length - 3} more)` : '';
+      throw new Error(`Unsupported file reference(s): ${items.join(', ')}${suffix}`);
+    }
+
+    if (!rootLocal.length) {
+      await loadXmlTextAsModel(text, label);
+      return;
+    }
+
+    const xmlName = deriveXmlFileName(label);
+    if (!xmlName) {
+      throw new Error('Missing xml file name for folder-based load');
+    }
+
+    const root = await promptDirectoryHandleForXmlRefs(xmlName, rootLocal.length);
+    if (!root) {
+      pushToast?.('Folder selection canceled');
+      return;
+    }
+    const found = await findFirstFileByName(root, xmlName, '', expectedSize);
+    if (!found?.relPath) {
+      throw new Error(`Unable to locate ${xmlName} inside the selected folder`);
+    }
+
+    const bundle = await buildMuJoCoBundle(
+      found.relPath,
+      text,
+      async (relPath) => readDirectoryFileArrayBuffer(root, relPath),
+    );
+
+    await loadXmlTextAsModel(text, label, {
+      bundle: {
+        xmlText: text,
+        xmlPath: `/mem/${bundle.xmlRel}`,
+        files: bundle.files,
+      },
+      source: {
+        kind: 'folder',
+        rootHandle: root,
+        xmlRel: found.relPath,
+      },
+    });
+  }
+
+  async function loadXmlTextWithUrlRefs(xmlText, xmlRelPath, label) {
+    const text = typeof xmlText === 'string' ? xmlText : '';
+    if (!text.trim()) throw new Error('loadXmlTextWithUrlRefs: empty xml text');
+    const rel = normaliseMuJoCoVirtualPath(xmlRelPath);
+    if (!rel) throw new Error('loadXmlTextWithUrlRefs: missing xmlRelPath');
+
+    const rootParsed = parseMuJoCoDirectFileRefs(text);
+    const rootLocal = (rootParsed.refs ?? []).filter((r) => r && r.path && !r.remote && !r.absolute);
+    const rootUnsupported = (rootParsed.refs ?? []).filter((r) => r && r.path && (r.remote || r.absolute));
+    if (rootUnsupported.length) {
+      const items = rootUnsupported.map((r) => r.path).filter(Boolean).slice(0, 3);
+      const suffix = rootUnsupported.length > 3 ? ` (+${rootUnsupported.length - 3} more)` : '';
+      throw new Error(`Unsupported file reference(s): ${items.join(', ')}${suffix}`);
+    }
+
+    if (!rootLocal.length) {
+      resetModelFrontendState(store);
+      if (typeof backend?.loadXmlText === 'function') {
+        await backend.loadXmlText(text);
+        pushToast?.(`Loaded model: ${label || rel}`);
+      }
+      return;
+    }
+
+    const devRootUrl = new URL('./', import.meta.url);
+    const bundle = await buildMuJoCoBundle(
+      rel,
+      text,
+      async (refRel) => readUrlFileArrayBuffer(devRootUrl, refRel),
+    );
+    resetModelFrontendState(store);
+    if (typeof backend?.loadXmlBundle === 'function') {
+      await backend.loadXmlBundle({
+        xmlText: text,
+        xmlPath: `/mem/${bundle.xmlRel}`,
+        files: bundle.files,
+      });
+      pushToast?.(`Loaded model: ${label || rel}`);
+    } else if (typeof backend?.loadXmlText === 'function') {
+      await backend.loadXmlText(text);
+      pushToast?.(`Loaded model: ${label || rel}`);
     }
   }
 
@@ -2746,7 +3323,7 @@ function shortcutFromEvent(event) {
       if (!file) return;
       try {
         const text = await file.text();
-        await loadXmlTextAsModel(text, file.name || null);
+        await loadXmlTextWithFolderRefs(text, file.name || null, file.size);
       } catch (err) {
         logError('[ui] load xml from file failed', err);
         pushToast?.('Failed to load xml from file');
@@ -2764,10 +3341,44 @@ function shortcutFromEvent(event) {
       if (!entry) return;
       try {
         if (entry.kind === 'xmlText' && entry.xmlText) {
-          resetModelFrontendState(store);
-          if (typeof backend?.loadXmlText === 'function') {
-            await backend.loadXmlText(entry.xmlText);
+          if (entry.source?.kind === 'folder' && entry.source.rootHandle && entry.source.xmlRel) {
+            const bundle = await buildMuJoCoBundle(
+              entry.source.xmlRel,
+              entry.xmlText,
+              async (relPath) => readDirectoryFileArrayBuffer(entry.source.rootHandle, relPath),
+            );
+            resetModelFrontendState(store);
+            if (typeof backend?.loadXmlBundle !== 'function') {
+              throw new Error('Folder-based model reload requires backend.loadXmlBundle');
+            }
+            await backend.loadXmlBundle({
+              xmlText: entry.xmlText,
+              xmlPath: `/mem/${bundle.xmlRel}`,
+              files: bundle.files,
+            });
             pushToast?.(`Loaded model: ${entry.label || id}`);
+            store.update((draft) => {
+              if (!draft.hud) draft.hud = {};
+              draft.hud.modelLabel = entry.label || entry.id || '';
+            });
+            return;
+          }
+          if (entry.file) {
+            await loadXmlTextWithUrlRefs(entry.xmlText, entry.file, entry.label || id);
+            store.update((draft) => {
+              if (!draft.hud) draft.hud = {};
+              draft.hud.modelLabel = entry.label || entry.file || entry.id || '';
+            });
+          } else {
+            resetModelFrontendState(store);
+            if (typeof backend?.loadXmlText === 'function') {
+              await backend.loadXmlText(entry.xmlText);
+              pushToast?.(`Loaded model: ${entry.label || id}`);
+              store.update((draft) => {
+                if (!draft.hud) draft.hud = {};
+                draft.hud.modelLabel = entry.label || entry.id || '';
+              });
+            }
           }
           return;
         }
@@ -2781,11 +3392,11 @@ function shortcutFromEvent(event) {
           const text = await res.text();
           entry.kind = 'xmlText';
           entry.xmlText = text;
-          resetModelFrontendState(store);
-          if (typeof backend?.loadXmlText === 'function') {
-            await backend.loadXmlText(text);
-            pushToast?.(`Loaded model: ${entry.label || id}`);
-          }
+          await loadXmlTextWithUrlRefs(text, entry.file, entry.label || id);
+          store.update((draft) => {
+            if (!draft.hud) draft.hud = {};
+            draft.hud.modelLabel = entry.label || entry.file || entry.id || '';
+          });
         }
       } catch (err) {
         logError('[ui] model select reload failed', err);

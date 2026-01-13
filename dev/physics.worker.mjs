@@ -1534,7 +1534,7 @@ async function loadModule() {
 }
 
 
-async function loadXmlWithFallback(xmlText) {
+async function loadXmlWithFallback(xmlText, options = null) {
   if (!mod) await loadModule();
   const ensureSim = () => {
     if (!sim || sim.mod !== mod) {
@@ -1552,7 +1552,7 @@ async function loadXmlWithFallback(xmlText) {
       const tInitStart = perfEnabled ? perfNowMs() : 0;
       ensureSim();
       sim.term();
-      sim.initFromXmlStrict(text);
+      sim.initFromXmlStrict(text, options);
       h = sim.h | 0;
       // MuJoCo-derived fields such as `d->light_xpos/light_xdir` are populated by `mj_forward`.
       // Snapshots can be requested before the first `mj_step`, so run `mj_forward` once after
@@ -2216,7 +2216,10 @@ const commandHandlers = {
       try { mod._mjwf_helper_free(h); } catch (err) { strictCatch(err, 'worker:helper_free'); }
     }
     h = 0;
-    const result = await loadXmlWithFallback(payload.xmlText || '');
+    const result = await loadXmlWithFallback(payload.xmlText || '', {
+      xmlPath: payload.xmlPath,
+      files: payload.files,
+    });
     if (!result || !result.ok || !(result.handle > 0)) {
       const errMeta = {
         errno: result?.errno ?? 0,

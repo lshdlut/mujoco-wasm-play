@@ -4,6 +4,7 @@ import { buildWorkerUrl, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWa
 import { MJ_GROUP_COUNT, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
 import { VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
 import { bool, cloneStruct, createDefaultHistoryState, createDefaultKeyframeState, createDefaultWatchState, createViewerGroupState, normaliseGroupState, resolveStructPath, toNumber } from './viewer_shared.mjs';
+import { buildMuJoCoBundle, normaliseMuJoCoVirtualPath, parseMuJoCoDirectFileRefs } from './xml_refs.mjs';
 import { dispatchEvent } from './dispatch.gen.mjs';
 import { SNAPSHOT_VIEW_FIELDS, GEOM_VIEW_FIELDS_OPTIONAL, GEOM_VIEW_FIELDS_ALWAYS } from './protocol.gen.mjs';
 
@@ -410,6 +411,7 @@ export async function createBackend(options = {}) {
   let lastFrameId = -1;
   let messageHandler = null;
   let lastXmlText = null;
+  let lastLoadOrigin = 'default';
   let strictRequestSeq = 0;
   const strictRequests = new Map();
   const SNAPSHOT_ADAPT_DEFAULT_HZ = 60;
@@ -552,6 +554,17 @@ export async function createBackend(options = {}) {
     return new Worker(workerUrl, { type: 'module' });
   }
 
+  async function readUrlFileArrayBuffer(baseUrl, relPath) {
+    const rel = normaliseMuJoCoVirtualPath(relPath);
+    if (!rel) throw new Error('Missing relPath');
+    const url = new URL(rel, baseUrl);
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch ${rel} (${res.status})`);
+    }
+    return res.arrayBuffer();
+  }
+
   async function requestWorkerStrictReport() {
     if (!client || typeof client.postMessage !== 'function') return null;
     const id = (strictRequestSeq += 1);
@@ -586,7 +599,24 @@ export async function createBackend(options = {}) {
       }
       const text = await res.text();
       if (text && text.trim().length > 0) {
-        return text;
+        const xmlText = text;
+        const xmlRel = normaliseMuJoCoVirtualPath(file) || file;
+        const basePayload = { xmlText, xmlPath: `/mem/${xmlRel}` };
+        try {
+          const parsed = parseMuJoCoDirectFileRefs(xmlText);
+          const localRefs = (parsed.refs ?? []).filter((r) => r && r.path && !r.remote && !r.absolute);
+          if (!localRefs.length) return basePayload;
+          const bundle = await buildMuJoCoBundle(
+            xmlRel,
+            xmlText,
+            async (relPath) => readUrlFileArrayBuffer(ASSET_BASE_URL, relPath),
+          );
+          return { ...basePayload, xmlPath: `/mem/${bundle.xmlRel}`, files: bundle.files };
+        } catch (err) {
+          logWarn('[backend] default bundle build failed; falling back to raw xmlText load', { file, err });
+          strictCatch(err, 'backend:bundle_default_xml', { allow: true, file });
+          return basePayload;
+        }
       }
       errors.push(`empty content for ${file}`);
     } catch (err) {
@@ -628,9 +658,27 @@ export async function createBackend(options = {}) {
     }
   }
 
-  async function restartWorkerWithXml(xmlText) {
-    const payload = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
-    if (!payload || payload.trim().length === 0) {
+  function buildLoadTransferList(loadPayload) {
+    const transfers = [];
+    const files = Array.isArray(loadPayload?.files) ? loadPayload.files : null;
+    if (!files) return transfers;
+    for (const entry of files) {
+      const data = entry?.data;
+      if (data instanceof ArrayBuffer) {
+        transfers.push(data);
+        continue;
+      }
+      if (ArrayBuffer.isView(data) && data.buffer instanceof ArrayBuffer) {
+        transfers.push(data.buffer);
+      }
+    }
+    return transfers;
+  }
+
+  async function restartWorkerWithLoadPayload(loadPayload) {
+    const rawXml = loadPayload && typeof loadPayload === 'object' ? loadPayload.xmlText : loadPayload;
+    const xmlText = typeof rawXml === 'string' ? rawXml : String(rawXml ?? '');
+    if (!xmlText || xmlText.trim().length === 0) {
       return resolveSnapshot(lastSnapshot);
     }
     // Tear down old worker (if any).
@@ -661,7 +709,18 @@ export async function createBackend(options = {}) {
     resetAdaptiveSnapshotState();
     notifyListeners();
     try {
-      client.postMessage({ cmd: 'load', rate: loadRate, xmlText: payload });
+      const payload = {
+        ...(loadPayload && typeof loadPayload === 'object' ? loadPayload : {}),
+        cmd: 'load',
+        rate: loadRate,
+        xmlText,
+      };
+      const transfers = buildLoadTransferList(payload);
+      if (transfers.length) {
+        client.postMessage(payload, transfers);
+      } else {
+        client.postMessage(payload);
+      }
       client.postMessage({ cmd: 'setSnapshotHz', hz: SNAPSHOT_ADAPT_DEFAULT_HZ });
       client.postMessage({ cmd: 'snapshot' });
     } catch (err) {
@@ -809,7 +868,21 @@ export async function createBackend(options = {}) {
   async function loadXmlText(xmlText) {
     const payload = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
     lastXmlText = payload;
-    return restartWorkerWithXml(payload);
+    lastLoadOrigin = 'custom';
+    return restartWorkerWithLoadPayload({ xmlText: payload });
+  }
+
+  async function loadXmlBundle(bundle) {
+    if (!bundle || typeof bundle !== 'object') {
+      throw new Error('loadXmlBundle: expected payload object');
+    }
+    const xmlText = typeof bundle.xmlText === 'string' ? bundle.xmlText : String(bundle.xmlText ?? '');
+    if (!xmlText.trim()) {
+      throw new Error('loadXmlBundle: empty xmlText');
+    }
+    lastXmlText = xmlText;
+    lastLoadOrigin = 'custom';
+    return restartWorkerWithLoadPayload({ ...bundle, xmlText });
   }
 
   function applyVisualStatePayload(payload) {
@@ -1332,9 +1405,10 @@ export async function createBackend(options = {}) {
     }
   }
 
-  const initialXml = await loadDefaultXml();
-  lastXmlText = typeof initialXml === 'string' ? initialXml : String(initialXml ?? '');
-  await restartWorkerWithXml(initialXml);
+  const initialLoad = await loadDefaultXml();
+  lastXmlText = typeof initialLoad?.xmlText === 'string' ? initialLoad.xmlText : String(initialLoad?.xmlText ?? '');
+  lastLoadOrigin = 'default';
+  await restartWorkerWithLoadPayload(initialLoad);
 
   const uiHandlers = new Map([
     ['simulation.history_scrubber', (value) => {
@@ -1691,12 +1765,18 @@ export async function createBackend(options = {}) {
         client.postMessage?.({ cmd: 'reset' });
         break;
       case 'simulation.reload': {
-        if (lastXmlText && typeof lastXmlText === 'string' && lastXmlText.trim().length > 0) {
-          return restartWorkerWithXml(lastXmlText);
+        if (lastLoadOrigin === 'default') {
+          const nextLoad = await loadDefaultXml();
+          lastXmlText = typeof nextLoad?.xmlText === 'string' ? nextLoad.xmlText : String(nextLoad?.xmlText ?? '');
+          return restartWorkerWithLoadPayload(nextLoad);
         }
-        const xmlText = await loadDefaultXml();
-        lastXmlText = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
-        return restartWorkerWithXml(xmlText);
+        if (lastXmlText && typeof lastXmlText === 'string' && lastXmlText.trim().length > 0) {
+          return restartWorkerWithLoadPayload({ xmlText: lastXmlText });
+        }
+        const nextLoad = await loadDefaultXml();
+        lastXmlText = typeof nextLoad?.xmlText === 'string' ? nextLoad.xmlText : String(nextLoad?.xmlText ?? '');
+        lastLoadOrigin = 'default';
+        return restartWorkerWithLoadPayload(nextLoad);
       }
       case 'simulation.align': {
         try {
@@ -1937,6 +2017,7 @@ export async function createBackend(options = {}) {
     setVisualState: applyVisualStatePayload,
     setModelLightActive,
     loadXmlText,
+    loadXmlBundle,
     getStrictReport: async () => ({
       main: getStrictReport(),
       worker: await requestWorkerStrictReport(),

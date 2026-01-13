@@ -890,9 +890,44 @@ export class MjSimLite {
   }
 
   _mkdirTree(path){
-    try { if (!path) return; const FS=this.mod.FS; const parts = String(path).split('/').filter(Boolean); let cur='';
-      for (const p of parts){ cur += '/' + p; try { FS.mkdir(cur); } catch (err) { strictCatch(err, 'bridge:mkdirTree'); } }
-    } catch (err) { strictCatch(err, 'bridge:mkdirTree'); }
+    // Keep directory creation idempotent and strict: MuJoCo resolves relative file references
+    // (e.g. `<model file="humanoid.xml">`) from the entry XML path, so we must not "fall back"
+    // to a different entry filename due to swallowed FS errors.
+    if (!path) return;
+    const FS = this.mod?.FS;
+    if (!FS || typeof FS.mkdir !== 'function') {
+      throw new Error('FS unavailable');
+    }
+    const raw = String(path);
+    if (!raw) return;
+
+    if (typeof FS.mkdirTree === 'function') {
+      try {
+        FS.mkdirTree(raw);
+      } catch (err) {
+        strictCatch(err, 'bridge:mkdirTree');
+        throw err;
+      }
+      return;
+    }
+
+    if (typeof FS.analyzePath !== 'function') {
+      throw new Error('FS.analyzePath unavailable');
+    }
+    const parts = raw.split('/').filter(Boolean);
+    let cur = '';
+    for (const part of parts) {
+      cur += `/${part}`;
+      const analyzed = FS.analyzePath(cur);
+      if (analyzed?.exists) {
+        const mode = analyzed.object?.mode;
+        if (typeof FS.isDir === 'function' && mode != null && !FS.isDir(mode)) {
+          throw new Error(`Expected directory but found file: ${cur}`);
+        }
+        continue;
+      }
+      FS.mkdir(cur);
+    }
   }
 
   _tryHelperMakeFromXml(paths){
@@ -984,8 +1019,8 @@ export class MjSimLite {
     }
   }
 
-  // Strict helper path: write XML to FS and call mjwf_helper_make_from_xml.
-  initFromXmlStrict(xmlText){
+  // Strict helper path: write XML + referenced files to FS and call mjwf_helper_make_from_xml.
+  initFromXmlStrict(xmlText, options = null){
     const m = this.mod;
     const required = [
       '_mjwf_helper_make_from_xml',
@@ -998,10 +1033,44 @@ export class MjSimLite {
     if (missing.length) {
       throw new Error(`Required mjwf functions missing: ${missing.join(', ')}`);
     }
+
+    const files = Array.isArray(options?.files) ? options.files : null;
+    if (files && files.length) {
+      for (const entry of files) {
+        const target = typeof entry?.path === 'string' ? entry.path : String(entry?.path ?? '');
+        if (!target || !target.trim()) {
+          throw new Error('initFromXmlStrict: file entry missing path');
+        }
+        const data = entry?.data;
+        let bytes = null;
+        if (data instanceof ArrayBuffer) {
+          bytes = new Uint8Array(data);
+        } else if (ArrayBuffer.isView(data) && data.buffer instanceof ArrayBuffer) {
+          bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        } else {
+          throw new Error(`initFromXmlStrict: unsupported file payload for ${target}`);
+        }
+        try {
+          if (target.includes('/')) {
+            const dir = target.slice(0, target.lastIndexOf('/'));
+            if (dir) this._mkdirTree(dir);
+          }
+          m.FS.writeFile(target, bytes);
+        } catch (err) {
+          strictCatch(err, 'bridge:write_ref_file', { target });
+          throw err;
+        }
+      }
+    }
     // FS path only: write XML to helper targets then call helper wrapper with PATH.
     const xmlStr = String(xmlText);
     const bytes = new TextEncoder().encode(xmlStr);
-    const helperTargets = ['/mem/model.xml','/model.xml','model.xml'];
+    const primaryTarget = (typeof options?.xmlPath === 'string' && options.xmlPath.trim().length)
+      ? String(options.xmlPath)
+      : '';
+    const helperTargets = primaryTarget
+      ? [primaryTarget]
+      : ['/mem/model.xml','/model.xml','model.xml'];
     for (const target of helperTargets) {
       if (target.includes('/')) {
         const dir = target.slice(0, target.lastIndexOf('/'));
@@ -1018,7 +1087,8 @@ export class MjSimLite {
         ? this._cstr(m._mjwf_helper_errmsg_last_global() | 0)
         : '';
       logError('make_from_xml failed', { eno, emsg });
-      throw new Error('make_from_xml failed');
+      const detail = emsg ? `: ${emsg}` : (eno ? `: errno=${eno}` : '');
+      throw new Error(`make_from_xml failed${detail}`);
     }
     this._validateHandleOrThrow(h);
     this.h = h;
