@@ -1,9 +1,10 @@
-import { buildWorkerUrl, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWarn, logError, logStatus, strictCatch, getStrictReport } from './viewer_runtime.mjs';
+import { buildWorkerUrl, readNumericParam, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWarn, logError, logStatus, strictCatch, getStrictReport } from './viewer_runtime.mjs';
 import { MJ_GROUP_COUNT, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
 import { VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
 import { bool, cloneStruct, createDefaultHistoryState, createDefaultKeyframeState, createDefaultWatchState, createViewerGroupState, normaliseGroupState, resolveStructPath, toNumber } from './viewer_shared.mjs';
 import { dispatchEvent } from './dispatch.gen.mjs';
 import { SNAPSHOT_VIEW_FIELDS, GEOM_VIEW_FIELDS_OPTIONAL, GEOM_VIEW_FIELDS_ALWAYS } from './protocol.gen.mjs';
+import { parseMuJoCoDirectFileRefs, buildMuJoCoBundle } from './xml_refs.mjs';
 
 const ASSET_BASE_URL = new URL('./', import.meta.url);
 const WORKER_URL = new URL('physics.worker.mjs', ASSET_BASE_URL);
@@ -410,7 +411,12 @@ export async function createBackend(options = {}) {
   let lastXmlText = null;
   let strictRequestSeq = 0;
   const strictRequests = new Map();
-  const SNAPSHOT_ADAPT_DEFAULT_HZ = 60;
+  const SNAPSHOT_ADAPT_MAX_HZ = readNumericParam(
+    'snapshot_hz_max',
+    60,
+    { parser: (value) => Number.parseInt(value, 10), min: 30, max: 120 }
+  );
+  const SNAPSHOT_ADAPT_DEFAULT_HZ = Math.min(60, SNAPSHOT_ADAPT_MAX_HZ);
   const SNAPSHOT_ADAPT_ALPHA = 0.2;
   const SNAPSHOT_ADAPT_UPGRADE_HOLD_MS = 180;
   const SNAPSHOT_ADAPT_MIN_CHANGE_MS = 200;
@@ -465,8 +471,10 @@ export async function createBackend(options = {}) {
     const currentIntervalMs = 1000 / Math.max(1, currentHz);
     const sinceChangeMs = now - adaptiveLastChangeWallMs;
     const canChange = sinceChangeMs >= SNAPSHOT_ADAPT_MIN_CHANGE_MS;
-    const lowerHz = currentHz === 120 ? 60 : (currentHz === 60 ? 30 : null);
-    const higherHz = currentHz === 30 ? 60 : (currentHz === 60 ? 120 : null);
+    const tiers = SNAPSHOT_ADAPT_MAX_HZ >= 120 ? [30, 60, 120] : [30, 60];
+    const tierIndex = tiers.indexOf(currentHz);
+    const lowerHz = tierIndex > 0 ? tiers[tierIndex - 1] : null;
+    const higherHz = tierIndex >= 0 && tierIndex < (tiers.length - 1) ? tiers[tierIndex + 1] : null;
     const ewmaSnap = Number(adaptiveSnapshotEwmaMs);
     const ewmaXfer = Number(adaptiveTransferEwmaMs);
 
@@ -550,6 +558,20 @@ export async function createBackend(options = {}) {
     return new Worker(workerUrl, { type: 'module' });
   }
 
+  function collectLoadTransfers(files) {
+    if (!Array.isArray(files) || !files.length) return [];
+    const transfers = [];
+    for (const entry of files) {
+      const buf = entry && entry.data;
+      if (buf instanceof ArrayBuffer) {
+        transfers.push(buf);
+      } else if (ArrayBuffer.isView(buf)) {
+        transfers.push(buf.buffer);
+      }
+    }
+    return transfers;
+  }
+
   async function requestWorkerStrictReport() {
     if (!client || typeof client.postMessage !== 'function') return null;
     const id = (strictRequestSeq += 1);
@@ -583,10 +605,39 @@ export async function createBackend(options = {}) {
         continue;
       }
       const text = await res.text();
-      if (text && text.trim().length > 0) {
-        return text;
+      if (!text || text.trim().length === 0) {
+        errors.push(`empty content for ${file}`);
+        continue;
       }
-      errors.push(`empty content for ${file}`);
+      try {
+        const parsed = parseMuJoCoDirectFileRefs(text);
+        const localRefs = (parsed.refs ?? []).filter((r) => r && r.path && !r.remote && !r.absolute);
+        const unsupported = (parsed.refs ?? []).filter((r) => r && r.path && (r.remote || r.absolute));
+        if (unsupported.length) {
+          const items = unsupported.map((r) => r.path).filter(Boolean).slice(0, 3);
+          const suffix = unsupported.length > 3 ? ` (+${unsupported.length - 3} more)` : '';
+          throw new Error(`Unsupported file reference(s): ${items.join(', ')}${suffix}`);
+        }
+        if (localRefs.length) {
+          const bundle = await buildMuJoCoBundle(
+            file,
+            text,
+            async (relPath) => {
+              const refUrl = new URL(relPath, ASSET_BASE_URL);
+              const r = await fetch(refUrl, { cache: 'no-store' });
+              if (!r.ok) throw new Error(`fetch ${relPath} status ${r.status}`);
+              return r.arrayBuffer();
+            },
+          );
+          return { xmlText: text, xmlPath: `/mem/${bundle.xmlRel}`, files: bundle.files };
+        }
+      } catch (err) {
+        errors.push(`bundle ${file} error ${String(err)}`);
+        logWarn('[backend] failed to build xml bundle', { file, err });
+        strictCatch(err, 'backend:bundle_xml');
+        continue;
+      }
+      return { xmlText: text };
     } catch (err) {
       errors.push(`fetch ${file} error ${String(err)}`);
       logWarn('[backend] failed to fetch xml', { file, err });
@@ -626,9 +677,9 @@ export async function createBackend(options = {}) {
     }
   }
 
-  async function restartWorkerWithXml(xmlText) {
-    const payload = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
-    if (!payload || payload.trim().length === 0) {
+  async function restartWorkerWithLoadPayload(loadPayload) {
+    const xmlText = typeof loadPayload?.xmlText === 'string' ? loadPayload.xmlText : String(loadPayload?.xmlText ?? '');
+    if (!xmlText || xmlText.trim().length === 0) {
       return resolveSnapshot(lastSnapshot);
     }
     // Tear down old worker (if any).
@@ -659,7 +710,15 @@ export async function createBackend(options = {}) {
     resetAdaptiveSnapshotState();
     notifyListeners();
     try {
-      client.postMessage({ cmd: 'load', rate: loadRate, xmlText: payload });
+      const msg = { cmd: 'load', rate: loadRate, xmlText };
+      if (typeof loadPayload?.xmlPath === 'string' && loadPayload.xmlPath.trim().length) {
+        msg.xmlPath = loadPayload.xmlPath;
+      }
+      if (Array.isArray(loadPayload?.files) && loadPayload.files.length) {
+        msg.files = loadPayload.files;
+      }
+      const transfers = collectLoadTransfers(loadPayload?.files);
+      client.postMessage(msg, transfers);
       client.postMessage({ cmd: 'setSnapshotHz', hz: SNAPSHOT_ADAPT_DEFAULT_HZ });
       client.postMessage({ cmd: 'snapshot' });
     } catch (err) {
@@ -668,6 +727,11 @@ export async function createBackend(options = {}) {
       throw err;
     }
     return resolveSnapshot(lastSnapshot);
+  }
+
+  async function restartWorkerWithXml(xmlText) {
+    const payload = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
+    return restartWorkerWithLoadPayload({ xmlText: payload });
   }
 
   function formatCopyNumber(value, precision) {
@@ -808,6 +872,15 @@ export async function createBackend(options = {}) {
     const payload = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
     lastXmlText = payload;
     return restartWorkerWithXml(payload);
+  }
+
+  async function loadXmlBundle(loadPayload) {
+    if (!loadPayload || typeof loadPayload !== 'object') {
+      return resolveSnapshot(lastSnapshot);
+    }
+    const xmlText = typeof loadPayload.xmlText === 'string' ? loadPayload.xmlText : String(loadPayload.xmlText ?? '');
+    lastXmlText = xmlText;
+    return restartWorkerWithLoadPayload(loadPayload);
   }
 
   function applyVisualStatePayload(payload) {
@@ -1330,9 +1403,9 @@ export async function createBackend(options = {}) {
     }
   }
 
-  const initialXml = await loadDefaultXml();
-  lastXmlText = typeof initialXml === 'string' ? initialXml : String(initialXml ?? '');
-  await restartWorkerWithXml(initialXml);
+  const initialLoad = await loadDefaultXml();
+  lastXmlText = typeof initialLoad?.xmlText === 'string' ? initialLoad.xmlText : String(initialLoad?.xmlText ?? '');
+  await restartWorkerWithLoadPayload(initialLoad);
 
   const uiHandlers = new Map([
     ['simulation.history_scrubber', (value) => {
@@ -1692,9 +1765,9 @@ export async function createBackend(options = {}) {
         if (lastXmlText && typeof lastXmlText === 'string' && lastXmlText.trim().length > 0) {
           return restartWorkerWithXml(lastXmlText);
         }
-        const xmlText = await loadDefaultXml();
-        lastXmlText = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
-        return restartWorkerWithXml(xmlText);
+        const loadPayload = await loadDefaultXml();
+        lastXmlText = typeof loadPayload?.xmlText === 'string' ? loadPayload.xmlText : String(loadPayload?.xmlText ?? '');
+        return restartWorkerWithLoadPayload(loadPayload);
       }
       case 'simulation.align': {
         try {
@@ -1906,6 +1979,7 @@ export async function createBackend(options = {}) {
     selectAt: selectAtCommand,
     setVisualState: applyVisualStatePayload,
     loadXmlText,
+    loadXmlBundle,
     getStrictReport: async () => ({
       main: getStrictReport(),
       worker: await requestWorkerStrictReport(),

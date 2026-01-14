@@ -2,7 +2,7 @@
 
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
-import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, heapViewU8, readCString, MjSimLite } from './bridge.mjs';
+import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
 import {
   isVerboseDebug,
   logError,
@@ -115,6 +115,7 @@ let snapshotHz = 60;
 let snapshotIntervalMs = 1000 / snapshotHz;
 let snapshotAccumulatorMs = 0;
 let snapshotLastTickMs = 0;
+let flexSnapshotLastSentMs = 0;
 
 const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
 
@@ -169,6 +170,7 @@ function applyCtrlNoise() {
 }
 
 const HISTORY_DEFAULT_CAPTURE_HZ = 30;
+const HISTORY_MAX_CAPTURE_HZ = 60;
 const HISTORY_DEFAULT_CAPACITY = 900;
 const KEYFRAME_EXTRA_SLOTS = 5;
 const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata', 'xpos', 'xmat', 'body_xpos', 'body_xmat'];
@@ -1390,21 +1392,17 @@ async function loadModule() {
     // When forgeBase is provided (e.g. from GitHub Pages demo),
     // treat it as the canonical dist/<ver>/ base URL.
     try {
-      distBase = new URL(forgeBaseOverride);
+      // Resolve relative paths (e.g. "/dist/3.3.7/") against this worker URL so
+      // local dev + Playwright can pass forgeBase without needing an absolute URL.
+      distBase = new URL(forgeBaseOverride, import.meta.url);
     } catch (err) {
-      // Support origin-relative paths like "/dist/<ver>/" by resolving against this worker URL.
+      // Fallback to local dist layout if forgeBase is malformed.
       strictCatch(err, 'worker:forgeBase_url', { allow: true });
-      try {
-        distBase = new URL(forgeBaseOverride, import.meta.url);
-      } catch (innerErr) {
-        // Fallback to local dist layout if forgeBase is still malformed.
-        strictCatch(innerErr, 'worker:forgeBase_resolve', { allow: true });
-        distBase = compatFallback(
-          'forgeBase.malformed',
-          { forgeBase: forgeBaseOverride },
-          () => new URL(`../dist/${ver}/`, import.meta.url),
-        );
-      }
+      distBase = compatFallback(
+        'forgeBase.malformed',
+        { forgeBase: forgeBaseOverride },
+        () => new URL(`../dist/${ver}/`, import.meta.url),
+      );
     }
   } else {
     // Local dev: serve dist/<ver>/ from the same origin.
@@ -1534,7 +1532,7 @@ async function loadModule() {
 }
 
 
-async function loadXmlWithFallback(xmlText, options = null) {
+async function loadXmlWithFallback(xmlText, initOptions = null) {
   if (!mod) await loadModule();
   const ensureSim = () => {
     if (!sim || sim.mod !== mod) {
@@ -1552,12 +1550,8 @@ async function loadXmlWithFallback(xmlText, options = null) {
       const tInitStart = perfEnabled ? perfNowMs() : 0;
       ensureSim();
       sim.term();
-      sim.initFromXmlStrict(text, options);
+      sim.initFromXmlStrict(text, initOptions || undefined);
       h = sim.h | 0;
-      // MuJoCo-derived fields such as `d->light_xpos/light_xdir` are populated by `mj_forward`.
-      // Snapshots can be requested before the first `mj_step`, so run `mj_forward` once after
-      // loading to keep model-mode lighting/shadows aligned with MuJoCo Simulate.
-      sim.forward();
       if (perfEnabled) {
         perfStages.initFromXmlMs = perfNowMs() - tInitStart;
       }
@@ -1628,7 +1622,13 @@ function snapshot() {
   const gtypeView = sim.geomTypeView?.();
   const ctrlView = sim.ctrlView?.();
   const showFlex = !!(voptFlags?.[24] || voptFlags?.[25] || voptFlags?.[26] || voptFlags?.[27]);
-  const flexvertXposView = showFlex ? (sim.flexvertXposView?.() || null) : null;
+  const wantFlex = showFlex && (() => {
+    // Flex snapshots are large; throttle them to reduce contention with mj_step.
+    const hz = snapshotHz >= 120 ? 60 : 30;
+    const intervalMs = 1000 / hz;
+    return !(flexSnapshotLastSentMs > 0) || (tSnapshotStart - flexSnapshotLastSentMs) >= intervalMs;
+  })();
+  const flexvertXposView = wantFlex ? (sim.flexvertXposView?.() || null) : null;
   const eqTypeView = sim.eqTypeView?.();
   const eqObj1View = sim.eqObj1IdView?.();
   const eqObj2View = sim.eqObj2IdView?.();
@@ -1787,6 +1787,7 @@ function snapshot() {
     const fPos = new Float32Array(flexvertXposView.length | 0);
     fPos.set(flexvertXposView);
     msg.flexvert_xpos = fPos;
+    flexSnapshotLastSentMs = tSnapshotStart;
   }
   if (eqTypeView) {
     msg.eq_type = new Int32Array(eqTypeView);
@@ -2133,9 +2134,9 @@ setInterval(() => {
   // Advance sim by a bounded number of fixed steps.
   for (let i = 0; i < steps && sim && typeof sim.step === 'function'; i += 1) {
     try {
-      captureHistorySample(true);
+      captureHistorySample();
       applyCtrlNoise();
-      applySimulatePerturbPipeline({ paused: false });
+      if (mjvPerturbActive) applySimulatePerturbPipeline({ paused: false });
       sim.step(1);
     } catch (err) {
       strictCatch(err, 'worker:step_loop');
@@ -2192,7 +2193,7 @@ setInterval(() => {
   if (snapshotAccumulatorMs < intervalMs) return;
   snapshotAccumulatorMs -= intervalMs;
   if (snapshotAccumulatorMs > intervalMs) snapshotAccumulatorMs = intervalMs;
-  if (!running) {
+  if (!running && mjvPerturbActive) {
     applySimulatePerturbPipeline({ paused: true });
   }
   snapshot();
@@ -2216,10 +2217,17 @@ const commandHandlers = {
       try { mod._mjwf_helper_free(h); } catch (err) { strictCatch(err, 'worker:helper_free'); }
     }
     h = 0;
-    const result = await loadXmlWithFallback(payload.xmlText || '', {
-      xmlPath: payload.xmlPath,
-      files: payload.files,
-    });
+    const initOptions = (() => {
+      const opts = {};
+      if (typeof payload?.xmlPath === 'string' && payload.xmlPath.trim().length) {
+        opts.xmlPath = payload.xmlPath;
+      }
+      if (Array.isArray(payload?.files) && payload.files.length) {
+        opts.files = payload.files;
+      }
+      return Object.keys(opts).length ? opts : null;
+    })();
+    const result = await loadXmlWithFallback(payload.xmlText || '', initOptions);
     if (!result || !result.ok || !(result.handle > 0)) {
       const errMeta = {
         errno: result?.errno ?? 0,
@@ -2253,7 +2261,7 @@ const commandHandlers = {
     optionSupport = detectOptionSupport(mod);
     dt = sim?.timestep?.() || 0.002;
     if (Number.isFinite(dt) && dt > 0) {
-      const targetHz = clamp(Math.round(1 / dt), 5, 240);
+      const targetHz = clamp(Math.round(1 / dt), 5, HISTORY_MAX_CAPTURE_HZ);
       historyConfig = { ...historyConfig, captureHz: targetHz };
     }
     ngeom = sim?.ngeom?.() | 0;
@@ -2620,39 +2628,6 @@ const commandHandlers = {
       } catch (err) {
         logWarn('worker: setField (mjStatistic) failed', String(err || ''));
         strictCatch(err, 'worker:setField_mjStatistic');
-      }
-    } else if (target === 'mjModel') {
-      try {
-        const pathArr = Array.isArray(payload.path) ? payload.path : [];
-        const field = (pathArr.length === 1) ? pathArr[0] : '';
-        if (field === 'light_active') {
-          if (!sim || !mod || !(h > 0)) return;
-          const nlightLocal = sim.nlight?.() | 0;
-          if (!(nlightLocal > 0)) return;
-          const ptrFn = mod._mjwf_model_light_active_ptr;
-          if (typeof ptrFn !== 'function') {
-            throw new Error('[worker] mjModel.light_active unsupported (missing _mjwf_model_light_active_ptr)');
-          }
-          const ptr = ptrFn.call(mod, h) | 0;
-          if (!(ptr > 0)) {
-            throw new Error('[worker] mjModel.light_active missing pointer');
-          }
-          const dst = heapViewU8(mod, ptr, nlightLocal);
-          const src = payload.value;
-          const srcLen =
-            ArrayBuffer.isView(src) ? src.length
-            : Array.isArray(src) ? src.length
-            : 0;
-          if (!(srcLen > 0)) return;
-          const max = Math.min(dst.length, srcLen);
-          for (let i = 0; i < max; i += 1) {
-            dst[i] = (Number(src[i]) || 0) ? 1 : 0;
-          }
-          emitRenderAssets();
-        }
-      } catch (err) {
-        logWarn('worker: setField (mjModel) failed', String(err || ''));
-        strictCatch(err, 'worker:setField_mjModel');
       }
     }
   },

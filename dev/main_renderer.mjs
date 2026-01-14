@@ -1017,12 +1017,23 @@ function createMuJoCoDataTexture(THREE, pixels, width, height, nchannel, colorsp
   }
 
   const tex = new THREE.DataTexture(rgbaPixels, width, height, THREE.RGBAFormat);
-  tex.generateMipmaps = false;
+  // MuJoCo's GL renderer uses mipmaps for power-of-two textures; without them,
+  // high-frequency textures (e.g., playing cards) shimmer heavily when minified.
+  // Keep NPOT textures mipmap-free for broader WebGL compatibility.
+  const isPow2 = (n) => {
+    const v = n | 0;
+    return v > 0 && (v & (v - 1)) === 0;
+  };
+  const canMipmap = isPow2(width) && isPow2(height);
+  tex.generateMipmaps = canMipmap;
   tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearFilter;
+  tex.minFilter = canMipmap ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.flipY = true;
+  // MuJoCo's `tex_data` is stored in image row order (top-to-bottom), but MuJoCo
+  // mesh texcoords are already V-flipped (v = 1 - v) relative to OBJ/PNG image
+  // conventions. Keep `flipY=false` to avoid double-flipping and match simulate.
+  tex.flipY = false;
   tex.unpackAlignment = 1;
   // Follow MuJoCo's resolved m->tex_colorspace: only promote to sRGB when the
   // model requests it (mjCOLORSPACE_SRGB = 2). AUTO/LINEAR stay linear.
@@ -1122,6 +1133,15 @@ function getOrCreateMuJoCoTexture(ctx, assets, descriptor) {
   const texture = createMuJoCoDataTexture(THREE, pixels, width, height, nchannel, colorspace);
   if (!texture) return null;
   texture.repeat.set(1, 1);
+  // WebGL tends to show stronger minification shimmer on oblique surfaces than
+  // MuJoCo's desktop GL viewer. Use a conservative anisotropy setting to reduce
+  // directional aliasing without introducing any new mapping logic.
+  if (texture.generateMipmaps && ctx?.renderer?.capabilities?.getMaxAnisotropy) {
+    const max = ctx.renderer.capabilities.getMaxAnisotropy() | 0;
+    // Cap for perf predictability: cards.xml loads many 512x512 textures.
+    const target = Math.max(1, Math.min(max > 0 ? max : 1, 8));
+    if ('anisotropy' in texture) texture.anisotropy = target;
+  }
   cache.set(key, texture);
   return texture;
 }
@@ -3078,9 +3098,13 @@ function createMeshGeometryFromAssets(assets, dataId) {
     faceadr,
     facenum,
     normal,
+    normaladr,
+    normalnum,
+    facenormal,
     texcoord,
     texcoordadr,
     texcoordnum,
+    facetexcoord,
     graph,
     graphadr,
     graphnum,
@@ -3183,48 +3207,143 @@ function createMeshGeometryFromAssets(assets, dataId) {
     }
   }
 
+  const triCount = (face && faceadr && facenum && meshId < facenum.length) ? (facenum[meshId] | 0) : 0;
+  const faceStart = (triCount > 0 && faceadr && meshId < faceadr.length) ? ((faceadr[meshId] | 0) * 3) : -1;
+  const faceEnd = (triCount > 0 && faceStart >= 0) ? (faceStart + triCount * 3) : -1;
+
+  const tcCount = (texcoordnum && meshId < texcoordnum.length) ? (texcoordnum[meshId] | 0) : 0;
+  const tcBase = (tcCount > 0 && texcoordadr && meshId < texcoordadr.length) ? ((texcoordadr[meshId] | 0) * 2) : -1;
+  const tcEnd = (tcBase >= 0 && tcCount > 0) ? (tcBase + tcCount * 2) : -1;
+
+  const nCount = (normalnum && meshId < normalnum.length) ? (normalnum[meshId] | 0) : 0;
+  const nBase = (nCount > 0 && normaladr && meshId < normaladr.length) ? ((normaladr[meshId] | 0) * 3) : -1;
+  const nEnd = (nBase >= 0 && nCount > 0) ? (nBase + nCount * 3) : -1;
+
+  const hasFaceTexcoord =
+    !!facetexcoord &&
+    !!texcoord &&
+    triCount > 0 &&
+    faceStart >= 0 &&
+    faceEnd >= 0 &&
+    faceEnd <= facetexcoord.length &&
+    tcBase >= 0 &&
+    tcEnd >= 0 &&
+    tcEnd <= texcoord.length;
+  const hasFaceNormal =
+    !!facenormal &&
+    !!normal &&
+    triCount > 0 &&
+    faceStart >= 0 &&
+    faceEnd >= 0 &&
+    faceEnd <= facenormal.length &&
+    nBase >= 0 &&
+    nEnd >= 0 &&
+    nEnd <= normal.length;
+
+  // MuJoCo meshes can carry independent indices for vertex/normal/texcoord (OBJ-style).
+  // When texcoords/normals are not 1:1 with vertices, we must expand faces into a
+  // non-indexed BufferGeometry so each corner gets the correct (pos,nrm,uv) tuple.
+  const needsFaceExpansion =
+    (hasFaceTexcoord && tcCount > 0 && tcCount !== count) ||
+    (hasFaceNormal && nCount > 0 && nCount !== count);
+
+  if (needsFaceExpansion && face && faceStart >= 0 && faceEnd > faceStart && faceEnd <= face.length) {
+    const posOut = new Float32Array(triCount * 9);
+    const uvOut = hasFaceTexcoord ? new Float32Array(triCount * 6) : null;
+    const nrmOut = (hasFaceNormal || (normal && nCount === count && nBase >= 0 && nEnd <= normal.length)) ? new Float32Array(triCount * 9) : null;
+
+    for (let i = 0; i < triCount * 3; i += 1) {
+      const vi = face[faceStart + i] | 0;
+      const dstPos = i * 3;
+      const srcPos = start + vi * 3;
+      if (vi >= 0 && srcPos + 2 < end) {
+        posOut[dstPos + 0] = vert[srcPos + 0] ?? 0;
+        posOut[dstPos + 1] = vert[srcPos + 1] ?? 0;
+        posOut[dstPos + 2] = vert[srcPos + 2] ?? 0;
+      } else {
+        posOut[dstPos + 0] = 0;
+        posOut[dstPos + 1] = 0;
+        posOut[dstPos + 2] = 0;
+      }
+
+      if (uvOut) {
+        const ti = facetexcoord[faceStart + i] | 0;
+        const dstUv = i * 2;
+        const srcUv = tcBase + ti * 2;
+        if (ti >= 0 && srcUv + 1 < tcEnd) {
+          uvOut[dstUv + 0] = texcoord[srcUv + 0] ?? 0;
+          uvOut[dstUv + 1] = texcoord[srcUv + 1] ?? 0;
+        } else {
+          uvOut[dstUv + 0] = 0;
+          uvOut[dstUv + 1] = 0;
+        }
+      }
+
+      if (nrmOut) {
+        const dstNrm = i * 3;
+        let nx = 0, ny = 0, nz = 1;
+        if (hasFaceNormal) {
+          const ni = facenormal[faceStart + i] | 0;
+          const srcNrm = nBase + ni * 3;
+          if (ni >= 0 && srcNrm + 2 < nEnd) {
+            nx = normal[srcNrm + 0] ?? 0;
+            ny = normal[srcNrm + 1] ?? 0;
+            nz = normal[srcNrm + 2] ?? 1;
+          }
+        } else if (normal && nCount === count && nBase >= 0 && nEnd <= normal.length) {
+          const srcNrm = nBase + vi * 3;
+          if (vi >= 0 && srcNrm + 2 < nEnd) {
+            nx = normal[srcNrm + 0] ?? 0;
+            ny = normal[srcNrm + 1] ?? 0;
+            nz = normal[srcNrm + 2] ?? 1;
+          }
+        }
+        nrmOut[dstNrm + 0] = nx;
+        nrmOut[dstNrm + 1] = ny;
+        nrmOut[dstNrm + 2] = nz;
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(posOut, 3));
+    if (nrmOut) geometry.setAttribute('normal', new THREE.BufferAttribute(nrmOut, 3));
+    if (uvOut) geometry.setAttribute('uv', new THREE.BufferAttribute(uvOut, 2));
+    if (!geometry.getAttribute('normal')) {
+      geometry.computeVertexNormals();
+    }
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    return geometry;
+  }
+
   const positions = vert.slice(start, end);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-  if (normal && normal.length >= end) {
-    const normalSlice = normal.slice(start, end);
+  if (normal && nCount === count && nBase >= 0 && nEnd <= normal.length) {
+    const normalSlice = normal.slice(nBase, nEnd);
     geometry.setAttribute('normal', new THREE.BufferAttribute(normalSlice, 3));
   }
 
-  if (face && faceadr && facenum) {
-    const triCount = facenum[meshId] | 0;
-    if (triCount > 0) {
-      const faceStart = (faceadr[meshId] | 0) * 3;
-      const faceEnd = faceStart + triCount * 3;
-      if (faceStart >= 0 && faceEnd <= face.length) {
-        const rawFaces = face.slice(faceStart, faceEnd);
-        let needsUint32 = count > 65535;
-        if (!needsUint32) {
-          for (let i = 0; i < rawFaces.length; i += 1) {
-            if (rawFaces[i] > 65535) {
-              needsUint32 = true;
-              break;
-            }
-          }
+  if (triCount > 0 && face && faceStart >= 0 && faceEnd > faceStart && faceEnd <= face.length) {
+    const rawFaces = face.slice(faceStart, faceEnd);
+    let needsUint32 = count > 65535;
+    if (!needsUint32) {
+      for (let i = 0; i < rawFaces.length; i += 1) {
+        if (rawFaces[i] > 65535) {
+          needsUint32 = true;
+          break;
         }
-        const IndexCtor = needsUint32 ? Uint32Array : Uint16Array;
-        const indices = new IndexCtor(rawFaces);
-        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
       }
     }
+    const IndexCtor = needsUint32 ? Uint32Array : Uint16Array;
+    const indices = new IndexCtor(rawFaces);
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   }
 
-  if (texcoord && texcoordadr && texcoordnum) {
-    const tcCount = texcoordnum[meshId] | 0;
-    if (tcCount > 0) {
-      const tcStart = (texcoordadr[meshId] | 0) * 2;
-      const tcEnd = tcStart + tcCount * 2;
-      if (tcStart >= 0 && tcEnd <= texcoord.length) {
-        const uvSlice = texcoord.slice(tcStart, tcEnd);
-        geometry.setAttribute('uv', new THREE.BufferAttribute(uvSlice, 2));
-      }
-    }
+  if (texcoord && tcCount === count && tcBase >= 0 && tcEnd > tcBase && tcEnd <= texcoord.length) {
+    const uvSlice = texcoord.slice(tcBase, tcEnd);
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvSlice, 2));
   }
 
   if (!geometry.getAttribute('normal')) {

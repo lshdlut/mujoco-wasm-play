@@ -113,6 +113,7 @@ let snapshotHz = 60;
 let snapshotIntervalMs = 1000 / snapshotHz;
 let snapshotAccumulatorMs = 0;
 let snapshotLastTickMs = 0;
+let flexSnapshotLastSentMs = 0;
 
 const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
 
@@ -167,6 +168,7 @@ function applyCtrlNoise() {
 }
 
 const HISTORY_DEFAULT_CAPTURE_HZ = 30;
+const HISTORY_MAX_CAPTURE_HZ = 60;
 const HISTORY_DEFAULT_CAPACITY = 900;
 const KEYFRAME_EXTRA_SLOTS = 5;
 const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata', 'xpos', 'xmat', 'body_xpos', 'body_xmat'];
@@ -1388,7 +1390,9 @@ async function loadModule() {
     // When forgeBase is provided (e.g. from GitHub Pages demo),
     // treat it as the canonical dist/<ver>/ base URL.
     try {
-      distBase = new URL(forgeBaseOverride);
+      // Resolve relative paths (e.g. "/dist/3.3.7/") against this worker URL so
+      // local dev + Playwright can pass forgeBase without needing an absolute URL.
+      distBase = new URL(forgeBaseOverride, import.meta.url);
     } catch (err) {
       // Fallback to local dist layout if forgeBase is malformed.
       strictCatch(err, 'worker:forgeBase_url', { allow: true });
@@ -1526,7 +1530,7 @@ async function loadModule() {
 }
 
 
-async function loadXmlWithFallback(xmlText) {
+async function loadXmlWithFallback(xmlText, initOptions = null) {
   if (!mod) await loadModule();
   const ensureSim = () => {
     if (!sim || sim.mod !== mod) {
@@ -1544,7 +1548,7 @@ async function loadXmlWithFallback(xmlText) {
       const tInitStart = perfEnabled ? perfNowMs() : 0;
       ensureSim();
       sim.term();
-      sim.initFromXmlStrict(text);
+      sim.initFromXmlStrict(text, initOptions || undefined);
       h = sim.h | 0;
       if (perfEnabled) {
         perfStages.initFromXmlMs = perfNowMs() - tInitStart;
@@ -1616,7 +1620,13 @@ function snapshot() {
   const gtypeView = sim.geomTypeView?.();
   const ctrlView = sim.ctrlView?.();
   const showFlex = !!(voptFlags?.[24] || voptFlags?.[25] || voptFlags?.[26] || voptFlags?.[27]);
-  const flexvertXposView = showFlex ? (sim.flexvertXposView?.() || null) : null;
+  const wantFlex = showFlex && (() => {
+    // Flex snapshots are large; throttle them to reduce contention with mj_step.
+    const hz = snapshotHz >= 120 ? 60 : 30;
+    const intervalMs = 1000 / hz;
+    return !(flexSnapshotLastSentMs > 0) || (tSnapshotStart - flexSnapshotLastSentMs) >= intervalMs;
+  })();
+  const flexvertXposView = wantFlex ? (sim.flexvertXposView?.() || null) : null;
   const eqTypeView = sim.eqTypeView?.();
   const eqObj1View = sim.eqObj1IdView?.();
   const eqObj2View = sim.eqObj2IdView?.();
@@ -1775,6 +1785,7 @@ function snapshot() {
     const fPos = new Float32Array(flexvertXposView.length | 0);
     fPos.set(flexvertXposView);
     msg.flexvert_xpos = fPos;
+    flexSnapshotLastSentMs = tSnapshotStart;
   }
   if (eqTypeView) {
     msg.eq_type = new Int32Array(eqTypeView);
@@ -2121,9 +2132,9 @@ setInterval(() => {
   // Advance sim by a bounded number of fixed steps.
   for (let i = 0; i < steps && sim && typeof sim.step === 'function'; i += 1) {
     try {
-      captureHistorySample(true);
+      captureHistorySample();
       applyCtrlNoise();
-      applySimulatePerturbPipeline({ paused: false });
+      if (mjvPerturbActive) applySimulatePerturbPipeline({ paused: false });
       sim.step(1);
     } catch (err) {
       strictCatch(err, 'worker:step_loop');
@@ -2180,7 +2191,7 @@ setInterval(() => {
   if (snapshotAccumulatorMs < intervalMs) return;
   snapshotAccumulatorMs -= intervalMs;
   if (snapshotAccumulatorMs > intervalMs) snapshotAccumulatorMs = intervalMs;
-  if (!running) {
+  if (!running && mjvPerturbActive) {
     applySimulatePerturbPipeline({ paused: true });
   }
   snapshot();
@@ -2204,7 +2215,17 @@ const commandHandlers = {
       try { mod._mjwf_helper_free(h); } catch (err) { strictCatch(err, 'worker:helper_free'); }
     }
     h = 0;
-    const result = await loadXmlWithFallback(payload.xmlText || '');
+    const initOptions = (() => {
+      const opts = {};
+      if (typeof payload?.xmlPath === 'string' && payload.xmlPath.trim().length) {
+        opts.xmlPath = payload.xmlPath;
+      }
+      if (Array.isArray(payload?.files) && payload.files.length) {
+        opts.files = payload.files;
+      }
+      return Object.keys(opts).length ? opts : null;
+    })();
+    const result = await loadXmlWithFallback(payload.xmlText || '', initOptions);
     if (!result || !result.ok || !(result.handle > 0)) {
       const errMeta = {
         errno: result?.errno ?? 0,
@@ -2238,7 +2259,7 @@ const commandHandlers = {
     optionSupport = detectOptionSupport(mod);
     dt = sim?.timestep?.() || 0.002;
     if (Number.isFinite(dt) && dt > 0) {
-      const targetHz = clamp(Math.round(1 / dt), 5, 240);
+      const targetHz = clamp(Math.round(1 / dt), 5, HISTORY_MAX_CAPTURE_HZ);
       historyConfig = { ...historyConfig, captureHz: targetHz };
     }
     ngeom = sim?.ngeom?.() | 0;

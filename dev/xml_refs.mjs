@@ -152,54 +152,6 @@ function isOutsideRoot(relPath) {
   return relPath === '..' || relPath.startsWith('../');
 }
 
-function parseObjMtllib(objText) {
-  const out = [];
-  const text = typeof objText === 'string' ? objText : '';
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const parts = line.split(/\s+/);
-    if (!parts.length) continue;
-    if (parts[0].toLowerCase() !== 'mtllib') continue;
-    for (const token of parts.slice(1)) {
-      const t = token.trim();
-      if (t) out.push(t);
-    }
-  }
-  return out;
-}
-
-function parseMtlTextureRefs(mtlText) {
-  const keys = new Set([
-    'map_ka',
-    'map_kd',
-    'map_ks',
-    'map_ke',
-    'map_ns',
-    'map_d',
-    'bump',
-    'map_bump',
-    'disp',
-    'decal',
-    'norm',
-  ]);
-  const out = [];
-  const text = typeof mtlText === 'string' ? mtlText : '';
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const parts = line.split(/\s+/);
-    if (parts.length < 2) continue;
-    const key = parts[0].toLowerCase();
-    if (!keys.has(key)) continue;
-    const candidate = parts[parts.length - 1];
-    if (candidate && !candidate.startsWith('-')) {
-      out.push(candidate);
-    }
-  }
-  return out;
-}
-
 export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
   const rootRel = normaliseMuJoCoVirtualPath(xmlRel);
   if (!rootRel) throw new Error('buildMuJoCoBundle: missing xmlRel');
@@ -208,8 +160,6 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
   }
 
   const visitedXml = new Set();
-  const visitedObj = new Set();
-  const visitedMtl = new Set();
   const fileBuffers = new Map();
   const pending = [{ type: 'xml', rel: rootRel, text: String(xmlText ?? ''), compilerState: null }];
   const unsupported = [];
@@ -339,8 +289,6 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
         const resolvedRel = resolveRefPath(baseDir, compilerState, ref, rel);
         if (!resolvedRel) continue;
         await ensureFileBuffer(resolvedRel);
-
-        const lower = resolvedRel.toLowerCase();
         if (ref.kind === 'include') {
           // handled above (compiler propagation + queue)
           continue;
@@ -350,75 +298,9 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
           const modelText = decodeTextFromArrayBuffer(buf);
           // MuJoCo loads `<model file="...">` as a separate model asset; do not inherit compiler dirs.
           pending.push({ type: 'xml', rel: resolvedRel, text: modelText, compilerState: null });
-        } else if (ref.kind === 'mesh' && lower.endsWith('.obj')) {
-          pending.push({ type: 'obj', rel: resolvedRel });
         }
       }
       continue;
-    }
-
-    if (item.type === 'obj') {
-      if (visitedObj.has(rel)) continue;
-      visitedObj.add(rel);
-      const buf = await ensureFileBuffer(rel);
-      if (!(buf instanceof ArrayBuffer)) continue;
-      const objText = decodeTextFromArrayBuffer(buf);
-      const baseDir = dirnamePosix(rel);
-      for (const mtlName of parseObjMtllib(objText)) {
-        const raw = String(mtlName ?? '').trim();
-        if (!raw) continue;
-        if (isProbablyRemotePath(raw) || shouldTreatAsAbsolutePath(raw)) {
-          unsupported.push({
-            kind: 'mtllib',
-            path: raw,
-            from: rel,
-            remote: isProbablyRemotePath(raw),
-            absolute: shouldTreatAsAbsolutePath(raw),
-          });
-          continue;
-        }
-        const resolvedMtl = joinMuJoCoRelativePath(baseDir, raw);
-        if (!resolvedMtl) continue;
-        if (isOutsideRoot(resolvedMtl)) {
-          unsupported.push({ kind: 'mtllib', path: resolvedMtl, from: rel, outsideRoot: true });
-          continue;
-        }
-        await ensureFileBuffer(resolvedMtl);
-        if (resolvedMtl.toLowerCase().endsWith('.mtl')) {
-          pending.push({ type: 'mtl', rel: resolvedMtl });
-        }
-      }
-      continue;
-    }
-
-    if (item.type === 'mtl') {
-      if (visitedMtl.has(rel)) continue;
-      visitedMtl.add(rel);
-      const buf = await ensureFileBuffer(rel);
-      if (!(buf instanceof ArrayBuffer)) continue;
-      const mtlText = decodeTextFromArrayBuffer(buf);
-      const baseDir = dirnamePosix(rel);
-      for (const texName of parseMtlTextureRefs(mtlText)) {
-        const raw = String(texName ?? '').trim();
-        if (!raw) continue;
-        if (isProbablyRemotePath(raw) || shouldTreatAsAbsolutePath(raw)) {
-          unsupported.push({
-            kind: 'mtl:texture',
-            path: raw,
-            from: rel,
-            remote: isProbablyRemotePath(raw),
-            absolute: shouldTreatAsAbsolutePath(raw),
-          });
-          continue;
-        }
-        const resolvedTex = joinMuJoCoRelativePath(baseDir, raw);
-        if (!resolvedTex) continue;
-        if (isOutsideRoot(resolvedTex)) {
-          unsupported.push({ kind: 'mtl:texture', path: resolvedTex, from: rel, outsideRoot: true });
-          continue;
-        }
-        await ensureFileBuffer(resolvedTex);
-      }
     }
   }
 

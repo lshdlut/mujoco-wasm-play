@@ -95,7 +95,16 @@ function createHeapTypedArray(mod, ptr, length, Ctor) {
   return new Ctor(n);
 }
 
-function computeMeshElementCounts(vertAdr, vertNum, faceAdr, faceNum, texcoordAdr, texcoordNum) {
+function computeMeshElementCounts(
+  vertAdr,
+  vertNum,
+  faceAdr,
+  faceNum,
+  texcoordAdr,
+  texcoordNum,
+  normalAdr,
+  normalNum,
+) {
   const safeMax = (adrView, numView, scale) => {
     if (!adrView || !numView || !Number.isFinite(scale) || scale <= 0) return 0;
     const n = Math.min(adrView.length, numView.length) | 0;
@@ -113,6 +122,7 @@ function computeMeshElementCounts(vertAdr, vertNum, faceAdr, faceNum, texcoordAd
     vert: safeMax(vertAdr, vertNum, 3),
     face: safeMax(faceAdr, faceNum, 3),
     texcoord: safeMax(texcoordAdr, texcoordNum, 2),
+    normal: safeMax(normalAdr, normalNum, 3),
   };
 }
 
@@ -622,6 +632,8 @@ export function collectRenderAssetsFromModule(mod, handle) {
     const vertNum = readView(mod, ensureFunc('_mjwf_model_mesh_vertnum_ptr'), handle, nmesh, heapViewI32);
     const faceAdr = readView(mod, ensureFunc('_mjwf_model_mesh_faceadr_ptr'), handle, nmesh, heapViewI32);
     const faceNum = readView(mod, ensureFunc('_mjwf_model_mesh_facenum_ptr'), handle, nmesh, heapViewI32);
+    const normalAdr = readView(mod, ensureFunc('_mjwf_model_mesh_normaladr_ptr'), handle, nmesh, heapViewI32);
+    const normalNum = readView(mod, ensureFunc('_mjwf_model_mesh_normalnum_ptr'), handle, nmesh, heapViewI32);
     const texCoordAdr = readView(
       mod,
       ensureFunc('_mjwf_model_mesh_texcoordadr_ptr'),
@@ -642,6 +654,7 @@ export function collectRenderAssetsFromModule(mod, handle) {
     let vertElemCount = 0;
     let faceElemCount = 0;
     let texcoordElemCount = 0;
+    let normalElemCount = 0;
     if (vertCountFn) {
       const v = vertCountFn.call(mod, handle) | 0;
       if (v > 0) vertElemCount = v * 3;
@@ -654,7 +667,7 @@ export function collectRenderAssetsFromModule(mod, handle) {
       const t = texcoordCountFn.call(mod, handle) | 0;
       if (t > 0) texcoordElemCount = t * 2;
     }
-    if (!(vertElemCount > 0) || !(faceElemCount > 0) || !(texcoordElemCount > 0)) {
+    if (!(vertElemCount > 0) || !(faceElemCount > 0) || !(texcoordElemCount > 0) || !(normalElemCount > 0)) {
       const counts = computeMeshElementCounts(
         vertAdr,
         vertNum,
@@ -662,10 +675,13 @@ export function collectRenderAssetsFromModule(mod, handle) {
         faceNum,
         texCoordAdr,
         texCoordNum,
+        normalAdr,
+        normalNum,
       );
       if (!(vertElemCount > 0)) vertElemCount = counts.vert | 0;
       if (!(faceElemCount > 0)) faceElemCount = counts.face | 0;
       if (!(texcoordElemCount > 0)) texcoordElemCount = counts.texcoord | 0;
+      if (!(normalElemCount > 0)) normalElemCount = counts.normal | 0;
     }
     const vertView = readView(mod, ensureFunc('_mjwf_model_mesh_vert_ptr'), handle, Math.max(0, vertElemCount), heapViewF32);
     const faceView = readView(mod, ensureFunc('_mjwf_model_mesh_face_ptr'), handle, Math.max(0, faceElemCount), heapViewI32);
@@ -673,8 +689,15 @@ export function collectRenderAssetsFromModule(mod, handle) {
       mod,
       ensureFunc('_mjwf_model_mesh_normal_ptr'),
       handle,
-      Math.max(0, vertElemCount),
+      Math.max(0, normalElemCount > 0 ? normalElemCount : vertElemCount),
       heapViewF32,
+    );
+    const faceNormalView = readView(
+      mod,
+      ensureFunc('_mjwf_model_mesh_facenormal_ptr'),
+      handle,
+      Math.max(0, faceElemCount),
+      heapViewI32,
     );
     const texcoordView = readView(
       mod,
@@ -682,6 +705,13 @@ export function collectRenderAssetsFromModule(mod, handle) {
       handle,
       Math.max(0, texcoordElemCount),
       heapViewF32,
+    );
+    const faceTexcoordView = readView(
+      mod,
+      ensureFunc('_mjwf_model_mesh_facetexcoord_ptr'),
+      handle,
+      Math.max(0, faceElemCount),
+      heapViewI32,
     );
     const nmeshgraph = ensureFunc('_mjwf_model_nmeshgraph').call(mod, handle) | 0;
     const graphAdrView = readView(
@@ -751,12 +781,16 @@ export function collectRenderAssetsFromModule(mod, handle) {
       vertnum: cloneTyped(vertNum, Int32Array),
       faceadr: cloneTyped(faceAdr, Int32Array),
       facenum: cloneTyped(faceNum, Int32Array),
+      normaladr: cloneTyped(normalAdr, Int32Array),
+      normalnum: cloneTyped(normalNum, Int32Array),
       texcoordadr: cloneTyped(texCoordAdr, Int32Array),
       texcoordnum: cloneTyped(texCoordNum, Int32Array),
       vert: cloneTyped(vertView, Float32Array),
       face: cloneTyped(faceView, Int32Array),
       normal: cloneTyped(normalView, Float32Array),
+      facenormal: cloneTyped(faceNormalView, Int32Array),
       texcoord: cloneTyped(texcoordView, Float32Array),
+      facetexcoord: cloneTyped(faceTexcoordView, Int32Array),
       graphadr: cloneTyped(graphAdrView, Int32Array),
       graph: cloneTyped(graphView, Int32Array),
       polynum: cloneTyped(polyNumView, Int32Array),
