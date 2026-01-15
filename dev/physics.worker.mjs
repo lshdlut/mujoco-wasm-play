@@ -108,9 +108,10 @@ let mjvCameraFns = null;
 let lastSyncWallTime = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
 let lastSyncSimTime = 0;
 let simTimeApprox = 0;
-let stepDebt = 0;
 let hasLoggedNoSim = false;
 let measuredSlowdown = 1;
+let timingNeedsResync = true;
+let lastCpuTimerSnapshot = null;
 let snapshotHz = 60;
 let snapshotIntervalMs = 1000 / snapshotHz;
 let snapshotAccumulatorMs = 0;
@@ -120,6 +121,8 @@ let lastStepPerf = null;
 let lastSnapshotPostMessageMs = 0;
 
 const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
+const STEP_TICK_BUDGET_MS = 8; // cap stepping time per tick to keep snapshots/messages responsive
+const SYNC_MISALIGN_SIM_SEC = 0.1; // match MuJoCo simulate syncMisalign (simulation seconds)
 
 const WORKER_START_WALL_MS = Date.now();
 const WORKER_START_PERF_MS =
@@ -215,7 +218,7 @@ function resetTimingForCurrentSim(initialRate = null) {
   lastSyncWallTime = nowSec;
   lastSyncSimTime = tSim;
   simTimeApprox = tSim;
-  stepDebt = 0;
+  timingNeedsResync = true;
   if (initialRate != null && Number.isFinite(initialRate)) {
     rate = Math.max(0.0625, Math.min(16, Number(initialRate) || 1));
   }
@@ -725,11 +728,38 @@ function buildInfoStats(sim, tSim, nconLocal) {
       const durations = heapViewF64(moduleRef, durPtr, MJ_NTIMER);
       const numbers = heapViewI32(moduleRef, numPtr, MJ_NTIMER);
       const stepDur = Number(durations[MJ_TIMER_STEP]) || 0;
-      const stepNum = Math.max(1, Number(numbers[MJ_TIMER_STEP]) || 0);
+      const stepNum = Number(numbers[MJ_TIMER_STEP]) || 0;
       const fwdDur = Number(durations[MJ_TIMER_FORWARD]) || 0;
-      const fwdNum = Math.max(1, Number(numbers[MJ_TIMER_FORWARD]) || 0);
-      out.cpuStepMs = (stepDur / stepNum) * 1000;
-      out.cpuForwardMs = (fwdDur / fwdNum) * 1000;
+      const fwdNum = Number(numbers[MJ_TIMER_FORWARD]) || 0;
+      const prev = lastCpuTimerSnapshot;
+      if (
+        prev
+        && typeof prev.stepDur === 'number' && typeof prev.stepNum === 'number'
+        && stepDur >= prev.stepDur && stepNum >= prev.stepNum
+      ) {
+        const deltaDur = stepDur - prev.stepDur;
+        const deltaNum = stepNum - prev.stepNum;
+        out.cpuStepMs = (deltaDur / Math.max(1, deltaNum)) * 1000;
+      } else {
+        out.cpuStepMs = (stepDur / Math.max(1, stepNum)) * 1000;
+      }
+      if (
+        prev
+        && typeof prev.fwdDur === 'number' && typeof prev.fwdNum === 'number'
+        && fwdDur >= prev.fwdDur && fwdNum >= prev.fwdNum
+      ) {
+        const deltaDur = fwdDur - prev.fwdDur;
+        const deltaNum = fwdNum - prev.fwdNum;
+        out.cpuForwardMs = (deltaDur / Math.max(1, deltaNum)) * 1000;
+      } else {
+        out.cpuForwardMs = (fwdDur / Math.max(1, fwdNum)) * 1000;
+      }
+      lastCpuTimerSnapshot = {
+        stepDur,
+        stepNum,
+        fwdDur,
+        fwdNum,
+      };
     }
   }
 
@@ -2243,7 +2273,7 @@ function collectAssetBuffersForTransfer(assets) {
   return buffers;
 }
 
-// Physics fixed-step timer (decoupled from render, simulate-like time management)
+// Physics stepping timer (simulate-style walltime sync)
 setInterval(() => {
   if (!mod || !h || !running) return;
   if (!sim || typeof sim.step !== 'function') {
@@ -2278,13 +2308,6 @@ setInterval(() => {
   } catch (err) {
     strictCatch(err, 'worker:pending_ctrl_flush');
   }
-  const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
-  let wallDelta = nowSec - lastSyncWallTime;
-  if (!(wallDelta > 0)) return;
-  if (wallDelta > MAX_WALL_DELTA) {
-    wallDelta = MAX_WALL_DELTA;
-  }
-  // Accumulate desired simulation steps based on wall time and current rate.
   const currentDt = (() => {
     try {
       if (sim && typeof sim.timestep === 'function') {
@@ -2298,25 +2321,51 @@ setInterval(() => {
   })();
   if (Number.isFinite(currentDt) && currentDt > 0) {
     dt = currentDt;
-    stepDebt += (wallDelta * rate) / currentDt;
   }
+
+  const tickStartMs = perfNowMs();
+  const tickStartSec = tickStartMs / 1000;
+
+  const rateRaw = Number(rate);
+  const rateSafe = (Number.isFinite(rateRaw) && rateRaw > 0) ? rateRaw : 1.0;
+  const slowdown = 1 / rateSafe;
+
+  let tSimStart = simTimeApprox;
+  try {
+    if (sim && typeof sim.time === 'function') {
+      tSimStart = sim.time() || 0;
+    }
+  } catch (err) {
+    strictCatch(err, 'worker:sync_timer_time');
+    tSimStart = simTimeApprox || 0;
+  }
+
+  const elapsedCpuSec = tickStartSec - lastSyncWallTime;
+  const elapsedSimSec = tSimStart - lastSyncSimTime;
+  const misaligned =
+    Number.isFinite(elapsedCpuSec)
+    && Number.isFinite(elapsedSimSec)
+    && Math.abs(elapsedCpuSec * rateSafe - elapsedSimSec) > SYNC_MISALIGN_SIM_SEC;
+
+  const needsResync =
+    timingNeedsResync
+    || !(Number.isFinite(lastSyncWallTime) && lastSyncWallTime > 0)
+    || !(Number.isFinite(lastSyncSimTime) && lastSyncSimTime >= 0)
+    || !(Number.isFinite(elapsedCpuSec) && elapsedCpuSec >= 0)
+    || !(Number.isFinite(elapsedSimSec) && elapsedSimSec >= 0)
+    || misaligned;
+
   const maxStepsPerTick = 240;
-  let steps = stepDebt > 0 ? Math.floor(stepDebt) : 0;
-  if (steps > maxStepsPerTick) steps = maxStepsPerTick;
-  if (steps <= 0) {
-    lastSyncWallTime = nowSec;
-    return;
-  }
-  const tSimBefore = simTimeApprox;
-  let stepTickStartMs = 0;
+  let stepsDone = 0;
   let stepTickHistoryMs = 0;
   let stepTickPerturbMs = 0;
   let stepTickStepMs = 0;
-  if (perfEnabled) {
-    stepTickStartMs = perfNowMs();
-  }
-  // Advance sim by a bounded number of fixed steps.
-  for (let i = 0; i < steps && sim && typeof sim.step === 'function'; i += 1) {
+  let tSimNow = tSimStart;
+
+  if (needsResync) {
+    lastSyncWallTime = tickStartSec;
+    lastSyncSimTime = tSimStart;
+    timingNeedsResync = false;
     try {
       if (perfEnabled) {
         const tHist = perfNowMs();
@@ -2342,44 +2391,98 @@ setInterval(() => {
       } else {
         sim.step(1);
       }
+      stepsDone = 1;
+      try {
+        if (sim && typeof sim.time === 'function') {
+          tSimNow = sim.time() || tSimNow;
+        }
+      } catch (err) {
+        strictCatch(err, 'worker:sync_timer_time');
+      }
     } catch (err) {
       strictCatch(err, 'worker:step_loop');
-      break;
+      timingNeedsResync = true;
+    }
+  } else {
+    const deadlineMs = tickStartMs + STEP_TICK_BUDGET_MS;
+    let measured = false;
+    const slowdownSample = (() => {
+      if (!(elapsedCpuSec > 0) || !(elapsedSimSec > 0)) return null;
+      const value = elapsedCpuSec / elapsedSimSec;
+      return Number.isFinite(value) && value > 0 ? value : null;
+    })();
+    while (stepsDone < maxStepsPerTick && perfNowMs() < deadlineMs) {
+      const nowSec = perfNowMs() / 1000;
+      const cpuElapsed = nowSec - lastSyncWallTime;
+      const simElapsed = tSimNow - lastSyncSimTime;
+      if (!(Number.isFinite(cpuElapsed) && cpuElapsed >= 0) || !(Number.isFinite(simElapsed) && simElapsed >= 0)) {
+        timingNeedsResync = true;
+        break;
+      }
+      if ((simElapsed * slowdown) >= cpuElapsed) {
+        break;
+      }
+      if (!measured && slowdownSample != null) {
+        measuredSlowdown = slowdownSample;
+        measured = true;
+      }
+      const prevSim = tSimNow;
+      try {
+        if (perfEnabled) {
+          const tHist = perfNowMs();
+          captureHistorySample();
+          stepTickHistoryMs += perfNowMs() - tHist;
+        } else {
+          captureHistorySample();
+        }
+        applyCtrlNoise();
+        if (mjvPerturbActive) {
+          if (perfEnabled) {
+            const tPert = perfNowMs();
+            applySimulatePerturbPipeline({ paused: false });
+            stepTickPerturbMs += perfNowMs() - tPert;
+          } else {
+            applySimulatePerturbPipeline({ paused: false });
+          }
+        }
+        if (perfEnabled) {
+          const tStep = perfNowMs();
+          sim.step(1);
+          stepTickStepMs += perfNowMs() - tStep;
+        } else {
+          sim.step(1);
+        }
+      } catch (err) {
+        strictCatch(err, 'worker:step_loop');
+        timingNeedsResync = true;
+        break;
+      }
+      stepsDone += 1;
+      try {
+        if (sim && typeof sim.time === 'function') {
+          tSimNow = sim.time() || tSimNow;
+        }
+      } catch (err) {
+        strictCatch(err, 'worker:sync_timer_time');
+      }
+      if (tSimNow + 1e-12 < prevSim) {
+        timingNeedsResync = true;
+        break;
+      }
     }
   }
-  if (perfEnabled) {
+
+  if (stepsDone > 0) {
+    simTimeApprox = tSimNow;
+  }
+  if (perfEnabled && stepsDone > 0) {
     lastStepPerf = {
-      tickMs: perfNowMs() - stepTickStartMs,
-      steps,
+      tickMs: perfNowMs() - tickStartMs,
+      steps: stepsDone,
       stepMs: stepTickStepMs,
       historyMs: stepTickHistoryMs,
       perturbMs: stepTickPerturbMs,
     };
-  }
-  stepDebt -= steps;
-  if (stepDebt < 0) stepDebt = 0;
-  lastSyncWallTime = nowSec;
-  try {
-    if (sim && typeof sim.time === 'function') {
-      const tSim = sim.time() || 0;
-      lastSyncSimTime = tSim;
-      simTimeApprox = tSim;
-      const simDelta = Math.max(0, tSim - tSimBefore);
-      const theoretical = wallDelta * rate;
-      if (simDelta > 0 && theoretical > 0) {
-        const instSlowdown = theoretical / simDelta;
-        if (Number.isFinite(instSlowdown) && instSlowdown > 0) {
-          if (!(measuredSlowdown > 0)) {
-            measuredSlowdown = instSlowdown;
-          } else {
-            const alpha = 0.1;
-            measuredSlowdown = measuredSlowdown * (1 - alpha) + instSlowdown * alpha;
-          }
-        }
-      }
-    }
-  } catch (err) {
-    strictCatch(err, 'worker:sync_timer');
   }
 }, 8);
 
@@ -2430,6 +2533,7 @@ const commandHandlers = {
       try { mod._mjwf_helper_free(h); } catch (err) { strictCatch(err, 'worker:helper_free'); }
     }
     h = 0;
+    lastCpuTimerSnapshot = null;
     const initOptions = (() => {
       const opts = {};
       if (typeof payload?.xmlPath === 'string' && payload.xmlPath.trim().length) {
@@ -2470,6 +2574,7 @@ const commandHandlers = {
     }
     const { abi, handle } = result;
     h = handle | 0;
+    lastCpuTimerSnapshot = null;
     frameSeq = 0;
     optionSupport = detectOptionSupport(mod);
     dt = sim?.timestep?.() || 0.002;

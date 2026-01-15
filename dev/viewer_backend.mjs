@@ -415,6 +415,7 @@ export async function createBackend(options = {}) {
   let lastSnapshot = createInitialSnapshot();
   let lastFrameId = -1;
   let lastSnapshotRecvWallMs = 0;
+  let lastSnapshotSentWallMs = null;
   let lastLatencyProbeRecvWallMs = 0;
   let lastSnapshotTransferMs = null;
   let lastSnapshotTransferFrameId = null;
@@ -995,6 +996,7 @@ export async function createBackend(options = {}) {
       });
       lastFrameId = -1;
       lastSnapshotRecvWallMs = 0;
+      lastSnapshotSentWallMs = null;
       lastLatencyProbeRecvWallMs = 0;
       lastSnapshotTransferMs = null;
       lastSnapshotTransferFrameId = null;
@@ -1287,6 +1289,18 @@ export async function createBackend(options = {}) {
         if (cpuForwardMs != null && Number.isFinite(cpuForwardMs)) {
           perfSample('worker:cpu_forward_ms', cpuForwardMs, perfDetail);
         }
+        const ncon = payload?.info && typeof payload.info.ncon === 'number' ? payload.info.ncon : null;
+        if (ncon != null && Number.isFinite(ncon)) {
+          perfSample('worker:ncon', ncon, perfDetail);
+        }
+        const nefc = payload?.info && typeof payload.info.nefc === 'number' ? payload.info.nefc : null;
+        if (nefc != null && Number.isFinite(nefc)) {
+          perfSample('worker:nefc', nefc, perfDetail);
+        }
+        const nisland = payload?.info && typeof payload.info.nisland === 'number' ? payload.info.nisland : null;
+        if (nisland != null && Number.isFinite(nisland)) {
+          perfSample('worker:nisland', nisland, perfDetail);
+        }
         if (workerPerf) {
           sampleIfFinite('worker:snapshot_ms', workerPerf.snapshotMs, perfDetail);
           sampleIfFinite('worker:snapshot_sync_vopt_ms', workerPerf.snapshotSyncVoptMs, perfDetail);
@@ -1318,12 +1332,19 @@ export async function createBackend(options = {}) {
           }
           sampleIfFinite('worker:snapshot_transfer_bytes', workerPerf.transferBytes, perfDetail);
           sampleIfFinite('worker:snapshot_transfer_buffers', workerPerf.transferBuffers, perfDetail);
+          sampleIfFinite('worker:step_tick_ms', workerPerf.stepTickMs, perfDetail);
+          sampleIfFinite('worker:step_tick_steps', workerPerf.stepSteps, perfDetail);
           sampleIfFinite('worker:step_sim_ms_per_step', workerPerf.stepSimMsPerStep, perfDetail);
           sampleIfFinite('worker:step_history_ms_per_step', workerPerf.stepHistoryMsPerStep, perfDetail);
+          sampleIfFinite('worker:step_perturb_ms_per_step', workerPerf.stepPerturbMsPerStep, perfDetail);
           sampleIfFinite('worker:step_other_ms_per_step', workerPerf.stepOtherMsPerStep, perfDetail);
         }
         const sentWallMs = typeof payload?.perf?.sentWallMs === 'number' ? payload.perf.sentWallMs : null;
         if (sentWallMs != null) {
+          if (typeof lastSnapshotSentWallMs === 'number' && lastSnapshotSentWallMs > 0) {
+            sampleIfFinite('worker:snapshot_sent_interval_ms', sentWallMs - lastSnapshotSentWallMs);
+          }
+          lastSnapshotSentWallMs = sentWallMs;
           const transferMs = recvWallMs - sentWallMs;
           perfSample('worker_to_main:snapshot_transfer_ms', transferMs);
           const postMessageMsPrev =
