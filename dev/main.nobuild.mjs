@@ -619,13 +619,40 @@ function scheduleUiUpdate(state) {
 store.subscribe((state) => {
   const perfEnabled = isPerfEnabled();
   const tSubStart = perfEnabled ? perfNow() : 0;
-  scheduleRenderScene();
-  updateOverlay(overlayHelp, state.overlays.help);
-  updateOverlay(overlayInfo, state.overlays.info);
-  updateOverlay(overlayProfiler, state.overlays.profiler);
-  updateOverlay(overlaySensor, state.overlays.sensor);
-  updateRealtimeOverlay(state);
-  updatePanels(state);
+  if (perfEnabled) {
+    const tRenderQueueStart = perfNow();
+    scheduleRenderScene();
+    perfSample('main:subscriber_scheduleRenderScene_ms', perfNow() - tRenderQueueStart);
+  } else {
+    scheduleRenderScene();
+  }
+  if (perfEnabled) {
+    const tOverlaysStart = perfNow();
+    updateOverlay(overlayHelp, state.overlays.help);
+    updateOverlay(overlayInfo, state.overlays.info);
+    updateOverlay(overlayProfiler, state.overlays.profiler);
+    updateOverlay(overlaySensor, state.overlays.sensor);
+    perfSample('main:subscriber_updateOverlays_ms', perfNow() - tOverlaysStart);
+  } else {
+    updateOverlay(overlayHelp, state.overlays.help);
+    updateOverlay(overlayInfo, state.overlays.info);
+    updateOverlay(overlayProfiler, state.overlays.profiler);
+    updateOverlay(overlaySensor, state.overlays.sensor);
+  }
+  if (perfEnabled) {
+    const tRealtimeStart = perfNow();
+    updateRealtimeOverlay(state);
+    perfSample('main:subscriber_updateRealtimeOverlay_ms', perfNow() - tRealtimeStart);
+  } else {
+    updateRealtimeOverlay(state);
+  }
+  if (perfEnabled) {
+    const tPanelsStart = perfNow();
+    updatePanels(state);
+    perfSample('main:subscriber_updatePanels_ms', perfNow() - tPanelsStart);
+  } else {
+    updatePanels(state);
+  }
 
   const leftVisible = !!state.panels?.left;
   const rightVisible = !!state.panels?.right;
@@ -635,9 +662,21 @@ store.subscribe((state) => {
   if (layoutKey !== lastLayoutKey || fontIndex !== lastFontIndex) {
     lastLayoutKey = layoutKey;
     lastFontIndex = fontIndex;
-    queueResizeCanvas();
+    if (perfEnabled) {
+      const tResizeStart = perfNow();
+      queueResizeCanvas();
+      perfSample('main:subscriber_queueResizeCanvas_ms', perfNow() - tResizeStart);
+    } else {
+      queueResizeCanvas();
+    }
   }
-  scheduleUiUpdate(state);
+  if (perfEnabled) {
+    const tUiStart = perfNow();
+    scheduleUiUpdate(state);
+    perfSample('main:subscriber_scheduleUiUpdate_ms', perfNow() - tUiStart);
+  } else {
+    scheduleUiUpdate(state);
+  }
   // Dynamic: build actuator sliders when metadata arrives
   const acts = latestSnapshot && Array.isArray(latestSnapshot.actuators)
     ? latestSnapshot.actuators
@@ -647,7 +686,13 @@ store.subscribe((state) => {
     const ctrlValues = (latestSnapshot && latestSnapshot.ctrl != null)
       ? latestSnapshot.ctrl
       : (state.model && state.model.ctrl != null ? state.model.ctrl : []);
-    controlManager.ensureActuatorSliders(acts, ctrlValues);
+    if (perfEnabled) {
+      const tActsStart = perfNow();
+      controlManager.ensureActuatorSliders(acts, ctrlValues);
+      perfSample('main:subscriber_ensureActuatorSliders_ms', perfNow() - tActsStart);
+    } else {
+      controlManager.ensureActuatorSliders(acts, ctrlValues);
+    }
   }
   const tDofsStart = perfEnabled ? perfNow() : 0;
   const dofs = deriveJointDofs(latestSnapshot, state);
@@ -658,11 +703,27 @@ store.subscribe((state) => {
     });
   }
   if (typeof controlManager.ensureJointSliders === 'function') {
-    controlManager.ensureJointSliders(dofs);
+    if (perfEnabled) {
+      const tJointStart = perfNow();
+      controlManager.ensureJointSliders(dofs);
+      perfSample('main:subscriber_ensureJointSliders_ms', perfNow() - tJointStart);
+    } else {
+      controlManager.ensureJointSliders(dofs);
+    }
   }
+  const tEqStart = perfEnabled ? perfNow() : 0;
   const eqs = deriveEqualityList(latestSnapshot);
+  if (perfEnabled) {
+    perfSample('main:subscriber_deriveEqualityList_ms', perfNow() - tEqStart);
+  }
   if (typeof controlManager.ensureEqualityToggles === 'function') {
-    controlManager.ensureEqualityToggles(eqs);
+    if (perfEnabled) {
+      const tEqToggleStart = perfNow();
+      controlManager.ensureEqualityToggles(eqs);
+      perfSample('main:subscriber_ensureEqualityToggles_ms', perfNow() - tEqToggleStart);
+    } else {
+      controlManager.ensureEqualityToggles(eqs);
+    }
   }
   if (perfEnabled) {
     perfSample('main:store_subscriber_ms', perfNow() - tSubStart, {

@@ -20,12 +20,17 @@ export async function ensureSectionExpanded(page: Page, sectionId: string) {
   }, sectionId);
 }
 
-export async function waitForViewerReady(page: Page, url = '/index.html?model=demo_box.xml') {
+export async function waitForViewerReady(
+  page: Page,
+  url = '/index.html?model=demo_box.xml',
+  { timeoutMs = 60_000 }: { timeoutMs?: number } = {},
+) {
+  const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 60_000;
   const normalizedUrl =
     typeof url === 'string' && url.startsWith('/index.html')
       ? `/${url.slice('/index.html'.length)}`
       : url;
-  await page.goto(normalizedUrl as string, { waitUntil: 'load', timeout: 60_000 });
+  await page.goto(normalizedUrl as string, { waitUntil: 'load', timeout });
   await page.waitForFunction(() => {
     const store = (window as any).__viewerStore;
     const ctx = (window as any).__renderCtx;
@@ -33,7 +38,7 @@ export async function waitForViewerReady(page: Page, url = '/index.html?model=de
     const snap = (window as any).__lastSnapshot;
     const scnNgeom = Number(snap?.scn_ngeom) | 0;
     return !!ctx?.initialized && !!store?.get && !!controls && scnNgeom > 0;
-  }, { timeout: 60_000 });
+  }, { timeout });
 }
 
 export async function loadXmlFromFileInput(page: Page, filePath: string) {

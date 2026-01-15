@@ -4952,6 +4952,19 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
     entry.faces.visible = false;
     return;
   }
+  const ensureAttribute = (geom, name, array, itemSize) => {
+    if (!geom || !array) return null;
+    const existing = geom.getAttribute?.(name) || geom.attributes?.[name] || null;
+    if (existing && existing.array === array && existing.itemSize === itemSize) {
+      existing.needsUpdate = true;
+      return existing;
+    }
+    const attr = new THREE.BufferAttribute(array, itemSize);
+    if (typeof attr.setUsage === 'function') attr.setUsage(THREE.DynamicDrawUsage);
+    geom.setAttribute(name, attr);
+    attr.needsUpdate = true;
+    return attr;
+  };
   const flexLayerValue = Number.isFinite(flexLayer) ? (flexLayer | 0) : 0;
   const elemLayerArr = flexAssets?.elemlayer || null;
   const elemAdr = flexAssets?.elemadr && flexIndex < flexAssets.elemadr.length ? (flexAssets.elemadr[flexIndex] | 0) : 0;
@@ -5012,8 +5025,6 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
   let uvOut = entry._faceTexcoords;
   if (!uvOut || uvOut.length !== uvNeeded) {
     uvOut = new Float32Array(uvNeeded);
-  } else if (uvOut.length) {
-    uvOut.fill(0);
   }
   entry._faceTexcoords = uvOut;
 
@@ -5044,11 +5055,12 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
         const i2 = elemArr[off + 2] | 0;
         const texBase = baseElem + e * elemStride;
         const hasTexIndices = elemTexcoordArr && texBase + elemStride <= elemTexcoordArr.length;
-        const texIndices = hasTexIndices
-          ? Array.from({ length: elemStride }, (_, idx) => elemTexcoordArr[texBase + idx] | 0)
-          : null;
-        const getTexIndex = (idx, fallback) =>
-          texIndices && Number.isFinite(texIndices[idx]) ? texIndices[idx] : fallback;
+        const tex0Raw = hasTexIndices ? elemTexcoordArr[texBase + 0] : null;
+        const tex1Raw = hasTexIndices ? elemTexcoordArr[texBase + 1] : null;
+        const tex2Raw = hasTexIndices ? elemTexcoordArr[texBase + 2] : null;
+        const tex0 = (hasTexIndices && Number.isFinite(tex0Raw)) ? (tex0Raw | 0) : i0;
+        const tex1 = (hasTexIndices && Number.isFinite(tex1Raw)) ? (tex1Raw | 0) : i1;
+        const tex2 = (hasTexIndices && Number.isFinite(tex2Raw)) ? (tex2Raw | 0) : i2;
         flexMakeFace(posOut, nrmOut, cursor++, radius, vertxpos, i0, i1, i2);
         fillFlexFaceTexcoords(
           uvOut,
@@ -5056,9 +5068,9 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
           texcoordArr,
           texcoordBaseOffset,
           texcoordLength,
-          getTexIndex(0, i0),
-          getTexIndex(1, i1),
-          getTexIndex(2, i2),
+          tex0,
+          tex1,
+          tex2,
         );
         flexMakeFace(posOut, nrmOut, cursor++, radius, vertxpos, i0, i2, i1);
         fillFlexFaceTexcoords(
@@ -5067,9 +5079,9 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
           texcoordArr,
           texcoordBaseOffset,
           texcoordLength,
-          getTexIndex(0, i0),
-          getTexIndex(2, i2),
-          getTexIndex(1, i1),
+          tex0,
+          tex2,
+          tex1,
         );
       }
     } else if (dim === 3 && elemArr) {
@@ -5086,11 +5098,14 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
         const i3 = elemArr[off + 3] | 0;
         const texBase = baseElem + e * elemStride;
         const hasTexIndices = elemTexcoordArr && texBase + elemStride <= elemTexcoordArr.length;
-        const texIndices = hasTexIndices
-          ? Array.from({ length: elemStride }, (_, idx) => elemTexcoordArr[texBase + idx] | 0)
-          : null;
-        const getTexIndex = (idx, fallback) =>
-          texIndices && Number.isFinite(texIndices[idx]) ? texIndices[idx] : fallback;
+        const tex0Raw = hasTexIndices ? elemTexcoordArr[texBase + 0] : null;
+        const tex1Raw = hasTexIndices ? elemTexcoordArr[texBase + 1] : null;
+        const tex2Raw = hasTexIndices ? elemTexcoordArr[texBase + 2] : null;
+        const tex3Raw = hasTexIndices ? elemTexcoordArr[texBase + 3] : null;
+        const tex0 = (hasTexIndices && Number.isFinite(tex0Raw)) ? (tex0Raw | 0) : i0;
+        const tex1 = (hasTexIndices && Number.isFinite(tex1Raw)) ? (tex1Raw | 0) : i1;
+        const tex2 = (hasTexIndices && Number.isFinite(tex2Raw)) ? (tex2Raw | 0) : i2;
+        const tex3 = (hasTexIndices && Number.isFinite(tex3Raw)) ? (tex3Raw | 0) : i3;
         flexMakeFace(posOut, nrmOut, cursor++, radius, vertxpos, i0, i1, i2);
         fillFlexFaceTexcoords(
           uvOut,
@@ -5098,9 +5113,9 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
           texcoordArr,
           texcoordBaseOffset,
           texcoordLength,
-          getTexIndex(0, i0),
-          getTexIndex(1, i1),
-          getTexIndex(2, i2),
+          tex0,
+          tex1,
+          tex2,
         );
         flexMakeFace(posOut, nrmOut, cursor++, radius, vertxpos, i0, i2, i3);
         fillFlexFaceTexcoords(
@@ -5109,9 +5124,9 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
           texcoordArr,
           texcoordBaseOffset,
           texcoordLength,
-          getTexIndex(0, i0),
-          getTexIndex(2, i2),
-          getTexIndex(3, i3),
+          tex0,
+          tex2,
+          tex3,
         );
         flexMakeFace(posOut, nrmOut, cursor++, radius, vertxpos, i0, i3, i1);
         fillFlexFaceTexcoords(
@@ -5120,9 +5135,9 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
           texcoordArr,
           texcoordBaseOffset,
           texcoordLength,
-          getTexIndex(0, i0),
-          getTexIndex(3, i3),
-          getTexIndex(1, i1),
+          tex0,
+          tex3,
+          tex1,
         );
         flexMakeFace(posOut, nrmOut, cursor++, radius, vertxpos, i1, i3, i2);
         fillFlexFaceTexcoords(
@@ -5131,9 +5146,9 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
           texcoordArr,
           texcoordBaseOffset,
           texcoordLength,
-          getTexIndex(1, i1),
-          getTexIndex(3, i3),
-          getTexIndex(2, i2),
+          tex1,
+          tex3,
+          tex2,
         );
       }
     }
@@ -5180,11 +5195,12 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
         const i2 = elemArr[off + 2] | 0;
         const texBase = baseElem + e * elemStride;
         const hasTexIndices = elemTexcoordArr && texBase + elemStride <= elemTexcoordArr.length;
-        const texIndices = hasTexIndices
-          ? Array.from({ length: elemStride }, (_, idx) => elemTexcoordArr[texBase + idx] | 0)
-          : null;
-        const getTexIndex = (idx, fallback) =>
-          texIndices && Number.isFinite(texIndices[idx]) ? texIndices[idx] : fallback;
+        const tex0Raw = hasTexIndices ? elemTexcoordArr[texBase + 0] : null;
+        const tex1Raw = hasTexIndices ? elemTexcoordArr[texBase + 1] : null;
+        const tex2Raw = hasTexIndices ? elemTexcoordArr[texBase + 2] : null;
+        const tex0 = (hasTexIndices && Number.isFinite(tex0Raw)) ? (tex0Raw | 0) : i0;
+        const tex1 = (hasTexIndices && Number.isFinite(tex1Raw)) ? (tex1Raw | 0) : i1;
+        const tex2 = (hasTexIndices && Number.isFinite(tex2Raw)) ? (tex2Raw | 0) : i2;
         flexMakeSmooth(posOut, nrmOut, cursor++, radius, flgFlat, vertnorm, vertxpos, i0, i1, i2);
         fillFlexFaceTexcoords(
           uvOut,
@@ -5192,9 +5208,9 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
           texcoordArr,
           texcoordBaseOffset,
           texcoordLength,
-          getTexIndex(0, i0),
-          getTexIndex(1, i1),
-          getTexIndex(2, i2),
+          tex0,
+          tex1,
+          tex2,
         );
         flexMakeSmooth(posOut, nrmOut, cursor++, -radius, flgFlat, vertnorm, vertxpos, i0, i2, i1);
         fillFlexFaceTexcoords(
@@ -5203,9 +5219,9 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
           texcoordArr,
           texcoordBaseOffset,
           texcoordLength,
-          getTexIndex(0, i0),
-          getTexIndex(2, i2),
-          getTexIndex(1, i1),
+          tex0,
+          tex2,
+          tex1,
         );
       }
     } else if (dim === 3 && shellArr) {
@@ -5232,9 +5248,12 @@ function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, fle
   }
 
   const geom = entry.faces.geometry;
-  geom.setAttribute('position', new THREE.BufferAttribute(posOut, 3));
-  geom.setAttribute('normal', new THREE.BufferAttribute(nrmOut, 3));
-  geom.setAttribute('uv', new THREE.BufferAttribute(uvOut, 2));
+  ensureAttribute(geom, 'position', posOut, 3);
+  ensureAttribute(geom, 'normal', nrmOut, 3);
+  ensureAttribute(geom, 'uv', uvOut, 2);
+  if (typeof geom.setDrawRange === 'function') {
+    geom.setDrawRange(0, Math.max(0, cursor) * 3);
+  }
   entry.faces.visible = true;
 }
 

@@ -4789,8 +4789,10 @@ function shortcutFromEvent(event) {
     buildItem,
   }) {
     if (!rightPanel || !Array.isArray(items)) return;
+    if (rightPanel.classList.contains('is-hidden')) return;
     const section = rightPanel.querySelector(`[data-section-id="${sectionId}"]`);
     if (!section) return;
+    if (section.classList.contains('is-collapsed')) return;
     const body = section.querySelector('.section-body');
     if (!body) return;
     let container = body.querySelector(`[data-dynamic="${dynamicKey}"]`);
@@ -4856,10 +4858,26 @@ function shortcutFromEvent(event) {
       items,
       marginTop: '8px',
       updateExisting: (containerEl, entries) => {
+        let cached = containerEl.__playSliderCache;
+        const wantAttr = String(dataAttr || '');
+        if (!cached || cached.dataAttr !== wantAttr || !(cached.map instanceof Map)) {
+          cached = { dataAttr: wantAttr, map: new Map() };
+          containerEl.__playSliderCache = cached;
+        }
+        const sliderByIndex = cached.map;
+        if (sliderByIndex.size !== containerEl.childElementCount) {
+          sliderByIndex.clear();
+          const nodes = containerEl.querySelectorAll(`input[type="range"][${wantAttr}]`);
+          for (const node of nodes) {
+            const key = node.getAttribute(wantAttr);
+            if (!key) continue;
+            sliderByIndex.set(key, node);
+          }
+        }
         for (let fallback = 0; fallback < entries.length; fallback += 1) {
           const item = entries[fallback];
           const index = getIndex(item, fallback);
-          const slider = containerEl.querySelector(`input[type="range"][${dataAttr}="${index}"]`);
+          const slider = sliderByIndex.get(String(index));
           if (!slider) continue;
           if (!slider.dataset.editing) slider.dataset.editing = '0';
           if (slider.dataset.editing === '1') continue;

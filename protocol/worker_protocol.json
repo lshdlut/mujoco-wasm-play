@@ -53,6 +53,7 @@
     { "name": "copyState", "required": ["seq", "precision", "nq", "nv", "timestamp", "complete"] },
     { "name": "options", "required": ["voptFlags", "sceneFlags", "labelMode", "frameMode", "cameraMode", "groups", "options"] },
     { "name": "selection", "required": ["seq", "bodyId", "geomId", "flexId", "skinId", "point", "localpos", "timestamp"] },
+    { "name": "latency_probe", "required": ["sentWallMs"], "optional": ["frameId"] },
     { "name": "log", "required": ["message"] },
     { "name": "error", "required": ["message"] }
   ],

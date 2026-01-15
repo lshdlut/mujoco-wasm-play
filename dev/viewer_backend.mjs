@@ -405,20 +405,29 @@ export async function createBackend(options = {}) {
     const num = Number(value);
     return Number.isFinite(num) ? (num | 0) : fallback;
   };
+  const sampleIfFinite = (bucket, value, detail = null) => {
+    if (!perfEnabled) return null;
+    if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+    return perfSample(bucket, value, detail);
+  };
   let client = null;
   const kind = 'worker';
   let lastSnapshot = createInitialSnapshot();
   let lastFrameId = -1;
+  let lastSnapshotRecvWallMs = 0;
+  let lastLatencyProbeRecvWallMs = 0;
+  let lastSnapshotTransferMs = null;
+  let lastSnapshotTransferFrameId = null;
   let messageHandler = null;
   let lastXmlText = null;
   let strictRequestSeq = 0;
   const strictRequests = new Map();
   const SNAPSHOT_ADAPT_MAX_HZ = readNumericParam(
     'snapshot_hz_max',
-    60,
+    120,
     { parser: (value) => Number.parseInt(value, 10), min: 30, max: 120 }
   );
-  const SNAPSHOT_ADAPT_DEFAULT_HZ = Math.min(60, SNAPSHOT_ADAPT_MAX_HZ);
+  const SNAPSHOT_ADAPT_DEFAULT_HZ = SNAPSHOT_ADAPT_MAX_HZ;
   const SNAPSHOT_ADAPT_ALPHA = 0.2;
   const SNAPSHOT_ADAPT_UPGRADE_HOLD_MS = 180;
   const SNAPSHOT_ADAPT_MIN_CHANGE_MS = 200;
@@ -652,6 +661,7 @@ export async function createBackend(options = {}) {
   }
 
   function notifyListeners() {
+    const perfEnabled = isPerfEnabled();
     if (!Number.isFinite(lastSnapshot.rate)) {
       lastSnapshot.rate = 1;
     }
@@ -660,13 +670,23 @@ export async function createBackend(options = {}) {
     }
     if (!lastSnapshot.rateSource) lastSnapshot.rateSource = 'backend';
     if (!lastSnapshot.pausedSource) lastSnapshot.pausedSource = 'backend';
+    if (perfEnabled) {
+      perfSample('backend:listeners_count', listeners.size || 0);
+    }
     const snapshot = resolveSnapshot(lastSnapshot);
+    let listenerIndex = 0;
     for (const fn of listeners) {
+      const tListenerStart = perfEnabled ? perfNow() : 0;
       try {
         fn(snapshot);
       } catch (err) {
         logError(err);
         strictCatch(err, 'backend:listener');
+      } finally {
+        if (perfEnabled) {
+          perfSample('backend:listener_ms', perfNow() - tListenerStart, { index: listenerIndex });
+        }
+        listenerIndex += 1;
       }
     }
     return snapshot;
@@ -974,6 +994,10 @@ export async function createBackend(options = {}) {
         ngeom: typeof payload.ngeom === 'number' ? (payload.ngeom | 0) : null,
       });
       lastFrameId = -1;
+      lastSnapshotRecvWallMs = 0;
+      lastLatencyProbeRecvWallMs = 0;
+      lastSnapshotTransferMs = null;
+      lastSnapshotTransferFrameId = null;
       lastSnapshot.history = createDefaultHistoryState();
       lastSnapshot.keyframes = createDefaultKeyframeState();
       lastSnapshot.watch = createDefaultWatchState();
@@ -1023,6 +1047,18 @@ export async function createBackend(options = {}) {
       }
       applyOptionSnapshot(payload);
       notifyListeners();
+    },
+    latency_probe: (payload) => {
+      if (!perfEnabled) return;
+      const recvWallMs = Date.now();
+      if (lastLatencyProbeRecvWallMs > 0) {
+        sampleIfFinite('worker_to_main:probe_recv_interval_ms', recvWallMs - lastLatencyProbeRecvWallMs);
+      }
+      lastLatencyProbeRecvWallMs = recvWallMs;
+      const sentWallMs = typeof payload?.sentWallMs === 'number' ? payload.sentWallMs : null;
+      if (sentWallMs != null) {
+        perfSample('worker_to_main:probe_transfer_ms', recvWallMs - sentWallMs);
+      }
     },
     struct_state: (payload) => {
       if (payload.scope === 'mjVisual') {
@@ -1133,6 +1169,10 @@ export async function createBackend(options = {}) {
       const tDecodeStart = perfEnabled ? perfNow() : 0;
       const recvWallMs = Date.now();
       if (perfEnabled) {
+        if (lastSnapshotRecvWallMs > 0) {
+          sampleIfFinite('worker_to_main:snapshot_recv_interval_ms', recvWallMs - lastSnapshotRecvWallMs);
+        }
+        lastSnapshotRecvWallMs = recvWallMs;
         perfMarkOnce('play:backend:first_snapshot', {
           sentWallMs: (typeof payload?.perf?.sentWallMs === 'number') ? payload.perf.sentWallMs : null,
           transferMs: (typeof payload?.perf?.sentWallMs === 'number') ? (recvWallMs - payload.perf.sentWallMs) : null,
@@ -1231,23 +1271,79 @@ export async function createBackend(options = {}) {
         const workerPerf = payload?.perf && typeof payload.perf === 'object' ? payload.perf : null;
         const ngeomValue = typeof payload.ngeom === 'number' ? (payload.ngeom | 0) : null;
         const scnNgeomValue = typeof payload.scn_ngeom === 'number' ? (payload.scn_ngeom | 0) : null;
-        const decodeMs = perfNow() - tDecodeStart;
-        perfSample('backend:snapshot_decode_ms', decodeMs, {
+        const perfDetail = {
           frameId,
           ngeom: ngeomValue,
           scn_ngeom: scnNgeomValue,
-        });
+        };
+        const decodeMs = perfNow() - tDecodeStart;
+        perfSample('backend:snapshot_decode_ms', decodeMs, perfDetail);
+        const cpuStepMs = payload?.info && typeof payload.info.cpuStepMs === 'number' ? payload.info.cpuStepMs : null;
+        if (cpuStepMs != null && Number.isFinite(cpuStepMs)) {
+          perfSample('worker:cpu_step_ms', cpuStepMs, perfDetail);
+        }
+        const cpuForwardMs =
+          payload?.info && typeof payload.info.cpuForwardMs === 'number' ? payload.info.cpuForwardMs : null;
+        if (cpuForwardMs != null && Number.isFinite(cpuForwardMs)) {
+          perfSample('worker:cpu_forward_ms', cpuForwardMs, perfDetail);
+        }
         if (workerPerf) {
-          if (typeof workerPerf.snapshotMs === 'number' && Number.isFinite(workerPerf.snapshotMs)) {
-            perfSample('worker:snapshot_ms', workerPerf.snapshotMs, {
-              ngeom: ngeomValue,
-              scn_ngeom: scnNgeomValue,
-            });
+          sampleIfFinite('worker:snapshot_ms', workerPerf.snapshotMs, perfDetail);
+          sampleIfFinite('worker:snapshot_sync_vopt_ms', workerPerf.snapshotSyncVoptMs, perfDetail);
+          sampleIfFinite('worker:snapshot_scene_pack_ms', workerPerf.snapshotScenePackMs, perfDetail);
+          sampleIfFinite('worker:snapshot_copy_geom_ms', workerPerf.snapshotCopyGeomMs, perfDetail);
+          sampleIfFinite('worker:snapshot_copy_body_ms', workerPerf.snapshotCopyBodyMs, perfDetail);
+          sampleIfFinite('worker:snapshot_copy_ctrl_ms', workerPerf.snapshotCopyCtrlMs, perfDetail);
+          sampleIfFinite('worker:snapshot_copy_qpos_ms', workerPerf.snapshotCopyQposMs, perfDetail);
+          sampleIfFinite('worker:snapshot_copy_gsize_ms', workerPerf.snapshotCopyGsizeMs, perfDetail);
+          sampleIfFinite('worker:snapshot_copy_gtype_ms', workerPerf.snapshotCopyGtypeMs, perfDetail);
+          if ((scnNgeomValue | 0) > 0) {
+            sampleIfFinite('worker:snapshot_copy_scene_ms', workerPerf.snapshotCopySceneMs, perfDetail);
+            sampleIfFinite('worker:snapshot_scene_bytes', workerPerf.sceneBytes, perfDetail);
           }
+          if (typeof workerPerf.flexBytes === 'number' && workerPerf.flexBytes > 0) {
+            sampleIfFinite('worker:snapshot_copy_flex_ms', workerPerf.snapshotCopyFlexMs, perfDetail);
+            sampleIfFinite('worker:snapshot_flex_bytes', workerPerf.flexBytes, perfDetail);
+          }
+          if (typeof workerPerf.snapshotCopyEqMs === 'number' && workerPerf.snapshotCopyEqMs > 0) {
+            sampleIfFinite('worker:snapshot_copy_eq_ms', workerPerf.snapshotCopyEqMs, perfDetail);
+          }
+          if (typeof workerPerf.snapshotCopyLightMs === 'number' && workerPerf.snapshotCopyLightMs > 0) {
+            sampleIfFinite('worker:snapshot_copy_light_ms', workerPerf.snapshotCopyLightMs, perfDetail);
+          }
+          sampleIfFinite('worker:snapshot_meta_ms', workerPerf.snapshotMetaMs, perfDetail);
+          sampleIfFinite('worker:snapshot_collect_transfers_ms', workerPerf.snapshotCollectTransfersMs, perfDetail);
+          if (typeof workerPerf.snapshotPostMessageMsPrev === 'number' && workerPerf.snapshotPostMessageMsPrev > 0) {
+            sampleIfFinite('worker:snapshot_post_message_prev_ms', workerPerf.snapshotPostMessageMsPrev, perfDetail);
+          }
+          sampleIfFinite('worker:snapshot_transfer_bytes', workerPerf.transferBytes, perfDetail);
+          sampleIfFinite('worker:snapshot_transfer_buffers', workerPerf.transferBuffers, perfDetail);
+          sampleIfFinite('worker:step_sim_ms_per_step', workerPerf.stepSimMsPerStep, perfDetail);
+          sampleIfFinite('worker:step_history_ms_per_step', workerPerf.stepHistoryMsPerStep, perfDetail);
+          sampleIfFinite('worker:step_other_ms_per_step', workerPerf.stepOtherMsPerStep, perfDetail);
         }
         const sentWallMs = typeof payload?.perf?.sentWallMs === 'number' ? payload.perf.sentWallMs : null;
         if (sentWallMs != null) {
-          perfSample('worker_to_main:snapshot_transfer_ms', recvWallMs - sentWallMs);
+          const transferMs = recvWallMs - sentWallMs;
+          perfSample('worker_to_main:snapshot_transfer_ms', transferMs);
+          const postMessageMsPrev =
+            workerPerf && typeof workerPerf.snapshotPostMessageMsPrev === 'number'
+              ? workerPerf.snapshotPostMessageMsPrev
+              : null;
+          if (
+            frameId != null
+            && typeof postMessageMsPrev === 'number'
+            && typeof lastSnapshotTransferMs === 'number'
+            && lastSnapshotTransferFrameId === frameId - 1
+          ) {
+            sampleIfFinite('worker_to_main:snapshot_queue_after_post_ms', lastSnapshotTransferMs - postMessageMsPrev, {
+              frameId: frameId - 1,
+            });
+          }
+          if (frameId != null) {
+            lastSnapshotTransferMs = transferMs;
+            lastSnapshotTransferFrameId = frameId;
+          }
         }
         if ((payload?.scn_ngeom | 0) > 0) {
           perfMarkOnce('play:backend:first_scene_snapshot', {
@@ -1268,6 +1364,9 @@ export async function createBackend(options = {}) {
           : null;
       if (snapshotMs != null && sentWallMs != null) {
         maybeUpdateAdaptiveSnapshotHz(snapshotMs, recvWallMs - sentWallMs);
+      }
+      if (perfEnabled) {
+        perfSample('backend:adaptive_snapshot_hz', adaptiveSnapshotHz);
       }
       const tNotifyStart = perfEnabled ? perfNow() : 0;
       notifyListeners();

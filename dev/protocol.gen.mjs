@@ -73,6 +73,7 @@ export const WORKER_EVENTS = [
   "copyState",
   "options",
   "selection",
+  "latency_probe",
   "log",
   "error"
 ];
@@ -131,6 +132,7 @@ export const EVENT_FIELDS = {
   "copyState": { required: ["seq","precision","nq","nv","timestamp","complete"], optional: [] },
   "options": { required: ["voptFlags","sceneFlags","labelMode","frameMode","cameraMode","groups","options"], optional: [] },
   "selection": { required: ["seq","bodyId","geomId","flexId","skinId","point","localpos","timestamp"], optional: [] },
+  "latency_probe": { required: ["sentWallMs"], optional: ["frameId"] },
   "log": { required: ["message"], optional: [] },
   "error": { required: ["message"], optional: [] },
 };

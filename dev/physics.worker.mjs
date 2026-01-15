@@ -116,6 +116,8 @@ let snapshotIntervalMs = 1000 / snapshotHz;
 let snapshotAccumulatorMs = 0;
 let snapshotLastTickMs = 0;
 let flexSnapshotLastSentMs = 0;
+let lastStepPerf = null;
+let lastSnapshotPostMessageMs = 0;
 
 const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
 
@@ -1591,10 +1593,42 @@ async function loadXmlWithFallback(xmlText, initOptions = null) {
 function snapshot() {
   if (!sim || !(sim.h > 0)) return;
   const tSnapshotStart = perfNowMs();
-  syncVoptToWasm();
+  let snapshotSyncVoptMs = 0;
+  let snapshotScenePackMs = 0;
+  let snapshotCopyGeomMs = 0;
+  let snapshotCopyBodyMs = 0;
+  let snapshotCopyCtrlMs = 0;
+  let snapshotCopyQposMs = 0;
+  let snapshotCopyGsizeMs = 0;
+  let snapshotCopyGtypeMs = 0;
+  let snapshotCopySceneMs = 0;
+  let snapshotCopyFlexMs = 0;
+  let snapshotCopyEqMs = 0;
+  let snapshotCopyLightMs = 0;
+  let snapshotMetaMs = 0;
+  let snapshotCollectTransfersMs = 0;
+  let snapshotPostMessageMsPrev = lastSnapshotPostMessageMs;
+  let transferBytes = 0;
+  let transferBuffers = 0;
+  let sceneBytes = 0;
+  let flexBytes = 0;
+
+  if (perfEnabled) {
+    const tSync = perfNowMs();
+    syncVoptToWasm();
+    snapshotSyncVoptMs = perfNowMs() - tSync;
+  } else {
+    syncVoptToWasm();
+  }
   const catmask = 7; // mjCAT_ALL = mjCAT_STATIC|mjCAT_DYNAMIC|mjCAT_DECOR
   if (typeof sim.sceneUpdateAndPack === 'function') {
-    sim.sceneUpdateAndPack(catmask);
+    if (perfEnabled) {
+      const tScene = perfNowMs();
+      sim.sceneUpdateAndPack(catmask);
+      snapshotScenePackMs = perfNowMs() - tScene;
+    } else {
+      sim.sceneUpdateAndPack(catmask);
+    }
   }
   const scnNgeom = (typeof sim.sceneNgeom === 'function') ? (sim.sceneNgeom() | 0) : 0;
   const scnTypeView = scnNgeom > 0 ? (sim.sceneGeomTypeView?.() || null) : null;
@@ -1616,8 +1650,17 @@ function snapshot() {
   const lightXdirView = nlightLocal > 0 ? (sim.lightXdirView?.() || null) : null;
   const xposView = sim.geomXposView?.();
   const xmatView = sim.geomXmatView?.();
-  const xpos = xposView ? new Float64Array(xposView) : new Float64Array(0);
-  const xmat = xmatView ? new Float64Array(xmatView) : new Float64Array(0);
+  let xpos = null;
+  let xmat = null;
+  if (perfEnabled) {
+    const tCopy = perfNowMs();
+    xpos = xposView ? new Float64Array(xposView) : new Float64Array(0);
+    xmat = xmatView ? new Float64Array(xmatView) : new Float64Array(0);
+    snapshotCopyGeomMs = perfNowMs() - tCopy;
+  } else {
+    xpos = xposView ? new Float64Array(xposView) : new Float64Array(0);
+    xmat = xmatView ? new Float64Array(xmatView) : new Float64Array(0);
+  }
   const gsizeView = sim.geomSizeView?.();
   const gtypeView = sim.geomTypeView?.();
   const ctrlView = sim.ctrlView?.();
@@ -1636,6 +1679,19 @@ function snapshot() {
   const eqActiveView = sim.eqActiveView?.();
   const bodyXposView = sim.bodyXposView?.();
   const bodyXmatView = sim.bodyXmatView?.();
+  let bxpos = null;
+  let bxmat = null;
+  if (bodyXposView || bodyXmatView) {
+    if (perfEnabled) {
+      const tBody = perfNowMs();
+      bxpos = bodyXposView ? new Float64Array(bodyXposView) : null;
+      bxmat = bodyXmatView ? new Float64Array(bodyXmatView) : null;
+      snapshotCopyBodyMs = perfNowMs() - tBody;
+    } else {
+      bxpos = bodyXposView ? new Float64Array(bodyXposView) : null;
+      bxmat = bodyXmatView ? new Float64Array(bodyXmatView) : null;
+    }
+  }
   const tSim = sim.time?.() || 0;
   lastBounds = computeBoundsFromPositions(xpos, n);
   const nq = sim.nq?.() | 0;
@@ -1643,14 +1699,26 @@ function snapshot() {
   const nuLocal = sim.nu?.() | 0;
   let ctrl = null;
   if (nuLocal > 0 && ctrlView) {
-    ctrl = new Float64Array(ctrlView);
+    if (perfEnabled) {
+      const tCtrl = perfNowMs();
+      ctrl = new Float64Array(ctrlView);
+      snapshotCopyCtrlMs = perfNowMs() - tCtrl;
+    } else {
+      ctrl = new Float64Array(ctrlView);
+    }
   }
   let qpos = null;
   const qposView = sim.qposView?.();
   if (qposView && nq > 0) {
     // Avoid shipping huge buffers; cap to moderate size while keeping simulate parity for typical models
     if (nq <= 512) {
-      qpos = new Float64Array(qposView);
+      if (perfEnabled) {
+        const tQpos = perfNowMs();
+        qpos = new Float64Array(qposView);
+        snapshotCopyQposMs = perfNowMs() - tQpos;
+      } else {
+        qpos = new Float64Array(qposView);
+      }
     }
   }
 
@@ -1689,8 +1757,8 @@ function snapshot() {
     nbody: nbodyLocal,
     xpos,
     xmat,
-    bxpos: bodyXposView ? new Float64Array(bodyXposView) : null,
-    bxmat: bodyXmatView ? new Float64Array(bodyXmatView) : null,
+    bxpos,
+    bxmat,
     gesture,
     drag,
     viewerCamera,
@@ -1729,6 +1797,10 @@ function snapshot() {
   } else {
     msg.options = { flex_layer: flexLayer, bvh_depth: bvhDepth };
   }
+  let metaStartMs = 0;
+  if (perfEnabled) {
+    metaStartMs = perfNowMs();
+  }
   msg.history = serializeHistoryMeta();
   msg.keyframes = serializeKeyframeMeta();
   const watchPayload = sampleWatch();
@@ -1739,77 +1811,125 @@ function snapshot() {
   if (Number.isFinite(keySliderIndex)) {
     msg.keyIndex = keySliderIndex | 0;
   }
+  if (perfEnabled) {
+    snapshotMetaMs = perfNowMs() - metaStartMs;
+  }
   if (gsizeView) {
-    msg.gsize = new Float64Array(gsizeView);
+    if (perfEnabled) {
+      const tGsize = perfNowMs();
+      msg.gsize = new Float64Array(gsizeView);
+      snapshotCopyGsizeMs = perfNowMs() - tGsize;
+    } else {
+      msg.gsize = new Float64Array(gsizeView);
+    }
   }
   if (gtypeView) {
-    msg.gtype = new Int32Array(gtypeView);
+    if (perfEnabled) {
+      const tGtype = perfNowMs();
+      msg.gtype = new Int32Array(gtypeView);
+      snapshotCopyGtypeMs = perfNowMs() - tGtype;
+    } else {
+      msg.gtype = new Int32Array(gtypeView);
+    }
   }
   if (scnNgeom > 0) {
+    let tScnCopy = 0;
+    if (perfEnabled) {
+      tScnCopy = perfNowMs();
+    }
     if (scnTypeView) {
       msg.scn_type = new Int32Array(scnTypeView);
+      if (perfEnabled) sceneBytes += msg.scn_type.byteLength;
     }
     if (scnPosView) {
       msg.scn_pos = new Float32Array(scnPosView);
+      if (perfEnabled) sceneBytes += msg.scn_pos.byteLength;
     }
     if (scnMatView) {
       msg.scn_mat = new Float32Array(scnMatView);
+      if (perfEnabled) sceneBytes += msg.scn_mat.byteLength;
     }
     if (scnSizeView) {
       msg.scn_size = new Float32Array(scnSizeView);
+      if (perfEnabled) sceneBytes += msg.scn_size.byteLength;
     }
     if (scnRgbaView) {
       msg.scn_rgba = new Float32Array(scnRgbaView);
+      if (perfEnabled) sceneBytes += msg.scn_rgba.byteLength;
     }
     if (scnMatIdView) {
       msg.scn_matid = new Int32Array(scnMatIdView);
+      if (perfEnabled) sceneBytes += msg.scn_matid.byteLength;
     }
     if (scnDataIdView) {
       msg.scn_dataid = new Int32Array(scnDataIdView);
+      if (perfEnabled) sceneBytes += msg.scn_dataid.byteLength;
     }
     if (scnObjTypeView) {
       msg.scn_objtype = new Int32Array(scnObjTypeView);
+      if (perfEnabled) sceneBytes += msg.scn_objtype.byteLength;
     }
     if (scnObjIdView) {
       msg.scn_objid = new Int32Array(scnObjIdView);
+      if (perfEnabled) sceneBytes += msg.scn_objid.byteLength;
     }
     if (scnCategoryView) {
       msg.scn_category = new Int32Array(scnCategoryView);
+      if (perfEnabled) sceneBytes += msg.scn_category.byteLength;
     }
     if (scnGeomOrderView) {
       msg.scn_geomorder = new Int32Array(scnGeomOrderView);
+      if (perfEnabled) sceneBytes += msg.scn_geomorder.byteLength;
     }
     if (scnLabelView) {
       msg.scn_label = new Uint8Array(scnLabelView);
+      if (perfEnabled) sceneBytes += msg.scn_label.byteLength;
+    }
+    if (perfEnabled) {
+      snapshotCopySceneMs = perfNowMs() - tScnCopy;
     }
   }
   if (flexvertXposView) {
-    const fPos = new Float32Array(flexvertXposView.length | 0);
-    fPos.set(flexvertXposView);
-    msg.flexvert_xpos = fPos;
+    if (perfEnabled) {
+      const tFlex = perfNowMs();
+      const fPos = new Float32Array(flexvertXposView.length | 0);
+      fPos.set(flexvertXposView);
+      msg.flexvert_xpos = fPos;
+      flexBytes = fPos.byteLength;
+      snapshotCopyFlexMs = perfNowMs() - tFlex;
+    } else {
+      const fPos = new Float32Array(flexvertXposView.length | 0);
+      fPos.set(flexvertXposView);
+      msg.flexvert_xpos = fPos;
+    }
     flexSnapshotLastSentMs = tSnapshotStart;
   }
-  if (eqTypeView) {
-    msg.eq_type = new Int32Array(eqTypeView);
-  }
-  if (eqObj1View) {
-    msg.eq_obj1id = new Int32Array(eqObj1View);
-  }
-  if (eqObj2View) {
-    msg.eq_obj2id = new Int32Array(eqObj2View);
-  }
-  if (eqObjTypeView) {
-    msg.eq_objtype = new Int32Array(eqObjTypeView);
-  }
-  if (eqActiveView) {
-    msg.eq_active = new Uint8Array(eqActiveView);
-  }
-  if (nlightLocal > 0) {
-    if (lightXposView) {
-      msg.light_xpos = new Float32Array(lightXposView);
+  if (eqTypeView || eqObj1View || eqObj2View || eqObjTypeView || eqActiveView) {
+    if (perfEnabled) {
+      const tEq = perfNowMs();
+      if (eqTypeView) msg.eq_type = new Int32Array(eqTypeView);
+      if (eqObj1View) msg.eq_obj1id = new Int32Array(eqObj1View);
+      if (eqObj2View) msg.eq_obj2id = new Int32Array(eqObj2View);
+      if (eqObjTypeView) msg.eq_objtype = new Int32Array(eqObjTypeView);
+      if (eqActiveView) msg.eq_active = new Uint8Array(eqActiveView);
+      snapshotCopyEqMs = perfNowMs() - tEq;
+    } else {
+      if (eqTypeView) msg.eq_type = new Int32Array(eqTypeView);
+      if (eqObj1View) msg.eq_obj1id = new Int32Array(eqObj1View);
+      if (eqObj2View) msg.eq_obj2id = new Int32Array(eqObj2View);
+      if (eqObjTypeView) msg.eq_objtype = new Int32Array(eqObjTypeView);
+      if (eqActiveView) msg.eq_active = new Uint8Array(eqActiveView);
     }
-    if (lightXdirView) {
-      msg.light_xdir = new Float32Array(lightXdirView);
+  }
+  if (nlightLocal > 0 && (lightXposView || lightXdirView)) {
+    if (perfEnabled) {
+      const tLight = perfNowMs();
+      if (lightXposView) msg.light_xpos = new Float32Array(lightXposView);
+      if (lightXdirView) msg.light_xdir = new Float32Array(lightXdirView);
+      snapshotCopyLightMs = perfNowMs() - tLight;
+    } else {
+      if (lightXposView) msg.light_xpos = new Float32Array(lightXposView);
+      if (lightXdirView) msg.light_xdir = new Float32Array(lightXdirView);
     }
   }
   // Equality names: match simulate's equality_names_ = m->names + m->name_eqadr[i]
@@ -1830,21 +1950,78 @@ function snapshot() {
     msg.ctrl = ctrl;
   }
   msg.contacts = nconLocal > 0 ? { n: nconLocal } : null;
+  const transfers = (() => {
+    if (!perfEnabled) return collectSnapshotTransfers(msg);
+    const tTransfers = perfNowMs();
+    const out = collectSnapshotTransfers(msg);
+    snapshotCollectTransfersMs = perfNowMs() - tTransfers;
+    if (Array.isArray(out) && out.length) {
+      transferBuffers = out.length | 0;
+      for (const buf of out) {
+        if (buf && typeof buf.byteLength === 'number') {
+          transferBytes += buf.byteLength;
+        }
+      }
+    }
+    return out;
+  })();
   const snapshotMs = perfNowMs() - tSnapshotStart;
   const sentWallMs = Date.now();
   msg.snapshotMs = snapshotMs;
   msg.sentWallMs = sentWallMs;
   if (perfEnabled) {
+    const stepPerf = (lastStepPerf && typeof lastStepPerf === 'object') ? lastStepPerf : null;
     msg.perf = buildPerf({
       snapshotMs,
       sentWallMs,
       ngeom: n | 0,
       scn_ngeom: scnNgeom | 0,
+      snapshotSyncVoptMs,
+      snapshotScenePackMs,
+      snapshotCopyGeomMs,
+      snapshotCopyBodyMs,
+      snapshotCopyCtrlMs,
+      snapshotCopyQposMs,
+      snapshotCopyGsizeMs,
+      snapshotCopyGtypeMs,
+      snapshotCopySceneMs,
+      snapshotCopyFlexMs,
+      snapshotCopyEqMs,
+      snapshotCopyLightMs,
+      snapshotMetaMs,
+      snapshotCollectTransfersMs,
+      snapshotPostMessageMsPrev,
+      transferBytes,
+      transferBuffers,
+      sceneBytes,
+      flexBytes,
+      ...(stepPerf
+        ? {
+            stepTickMs: stepPerf.tickMs,
+            stepSteps: stepPerf.steps,
+            stepSimMsPerStep: stepPerf.steps > 0 ? (stepPerf.stepMs / stepPerf.steps) : null,
+            stepHistoryMsPerStep: stepPerf.steps > 0 ? (stepPerf.historyMs / stepPerf.steps) : null,
+            stepPerturbMsPerStep: stepPerf.steps > 0 ? (stepPerf.perturbMs / stepPerf.steps) : null,
+            stepOtherMsPerStep: stepPerf.steps > 0
+              ? (Math.max(0, stepPerf.tickMs - stepPerf.stepMs - stepPerf.historyMs - stepPerf.perturbMs) / stepPerf.steps)
+              : null,
+          }
+        : null),
     });
   }
-  const transfers = collectSnapshotTransfers(msg);
+  if (perfEnabled && ((frameId | 0) % 4 === 0)) {
+    try {
+      postMessage({ kind: 'latency_probe', sentWallMs: Date.now(), frameId });
+    } catch (err) {
+      strictCatch(err, 'worker:latency_probe_post');
+    }
+  }
   try {
+    const tPostStart = perfEnabled ? perfNowMs() : 0;
     postMessage(msg, transfers);
+    if (perfEnabled) {
+      lastSnapshotPostMessageMs = perfNowMs() - tPostStart;
+    }
   } catch (err) {
     try {
       postMessage({ kind:'error', message: `snapshot postMessage failed: ${err}` });
@@ -2131,17 +2308,53 @@ setInterval(() => {
     return;
   }
   const tSimBefore = simTimeApprox;
+  let stepTickStartMs = 0;
+  let stepTickHistoryMs = 0;
+  let stepTickPerturbMs = 0;
+  let stepTickStepMs = 0;
+  if (perfEnabled) {
+    stepTickStartMs = perfNowMs();
+  }
   // Advance sim by a bounded number of fixed steps.
   for (let i = 0; i < steps && sim && typeof sim.step === 'function'; i += 1) {
     try {
-      captureHistorySample();
+      if (perfEnabled) {
+        const tHist = perfNowMs();
+        captureHistorySample();
+        stepTickHistoryMs += perfNowMs() - tHist;
+      } else {
+        captureHistorySample();
+      }
       applyCtrlNoise();
-      if (mjvPerturbActive) applySimulatePerturbPipeline({ paused: false });
-      sim.step(1);
+      if (mjvPerturbActive) {
+        if (perfEnabled) {
+          const tPert = perfNowMs();
+          applySimulatePerturbPipeline({ paused: false });
+          stepTickPerturbMs += perfNowMs() - tPert;
+        } else {
+          applySimulatePerturbPipeline({ paused: false });
+        }
+      }
+      if (perfEnabled) {
+        const tStep = perfNowMs();
+        sim.step(1);
+        stepTickStepMs += perfNowMs() - tStep;
+      } else {
+        sim.step(1);
+      }
     } catch (err) {
       strictCatch(err, 'worker:step_loop');
       break;
     }
+  }
+  if (perfEnabled) {
+    lastStepPerf = {
+      tickMs: perfNowMs() - stepTickStartMs,
+      steps,
+      stepMs: stepTickStepMs,
+      historyMs: stepTickHistoryMs,
+      perturbMs: stepTickPerturbMs,
+    };
   }
   stepDebt -= steps;
   if (stepDebt < 0) stepDebt = 0;
