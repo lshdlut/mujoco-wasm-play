@@ -6554,7 +6554,6 @@ function createRendererManager({
   ctx.cameraTarget = ctx.cameraTarget || new THREE.Vector3(0, 0, 0);
   ctx.meshes = ctx.meshes || [];
   ctx.assetCache = ctx.assetCache || { meshGeometries: new Map(), mjTextures: new Map() };
-  ctx._shadow = ctx._shadow || { lastCenter: null, lastRadius: 0 };
   ctx._frameCounter = ctx._frameCounter || 0;
   ctx.boundsEvery = typeof ctx.boundsEvery === 'number' && ctx.boundsEvery > 0 ? ctx.boundsEvery : 2;
   ctx.currentCameraMode = typeof ctx.currentCameraMode === 'number' ? ctx.currentCameraMode : 0;
@@ -6698,6 +6697,7 @@ function createRendererManager({
     sceneWorld.add(ambient);
     const hemi = new THREE.HemisphereLight(0xffffff, 0x10131c, 0);
     hemi.visible = false;
+    hemi.position.set(0, 0, 1);
     sceneWorld.add(hemi);
     const keyLight = new THREE.DirectionalLight(0xffffff, 0);
     keyLight.position.set(6, -8, 8);
@@ -7184,94 +7184,14 @@ function createRendererManager({
         cam.near = Math.max(0.01, r * 0.03);
         cam.far = Math.max(40, r * 8);
         if (typeof cam.updateProjectionMatrix === 'function') cam.updateProjectionMatrix();
-        // Texel snapping stabilization
-        const mapSizeX = context.light.shadow?.mapSize?.x || 2048;
-        const mapSizeY = context.light.shadow?.mapSize?.y || mapSizeX;
-        const texelX = (cam.right - cam.left) / mapSizeX;
-        const texelY = (cam.top - cam.bottom) / mapSizeY;
-        const desiredCenter = tempVecA.set(
-          context.bounds.center[0],
-          context.bounds.center[1],
-          context.bounds.center[2]
-        );
-        // Ensure matrices are up to date
-        context.light.updateMatrixWorld?.(true);
-        context.light.target?.updateMatrixWorld?.(true);
-        cam.updateMatrixWorld?.(true);
-        const toLight = tempVecB.copy(desiredCenter).applyMatrix4(cam.matrixWorldInverse);
-        const snappedLS = tempVecC.copy(toLight);
-        snappedLS.x = Math.round(snappedLS.x / texelX) * texelX;
-        snappedLS.y = Math.round(snappedLS.y / texelY) * texelY;
-        const snappedWS = tempVecD.copy(snappedLS).applyMatrix4(cam.matrixWorld);
-        const lastC = context._shadow.lastCenter;
-        const needUpdate =
-          !lastC ||
-          Math.abs(snappedWS.x - lastC.x) > texelX * 0.5 ||
-          Math.abs(snappedWS.y - lastC.y) > texelY * 0.5 ||
-          Math.abs(r - context._shadow.lastRadius) > r * 0.02;
-        if (needUpdate) {
-          if (context.lightTarget) {
-            context.lightTarget.position.copy(snappedWS);
-            context.light.target?.updateMatrixWorld?.();
-          }
-          if (!context._shadow.lastCenter) {
-            context._shadow.lastCenter = new THREE.Vector3();
-          }
-          context._shadow.lastCenter.copy(snappedWS);
-          context._shadow.lastRadius = r;
-        }
       }
     }
 
     const bounds = nextBounds;
     if (bounds) {
       context.bounds = bounds;
-      if (
-        context.currentCameraMode === 0 &&
-        !context.autoAligned &&
-        context.camera
-      ) {
-        const radius = Math.max(bounds.radius || 0, 0.6);
-        const focus = tempVecA.set(bounds.center[0], bounds.center[1], bounds.center[2]);
-        const offset = tempVecB.set(radius * 2.6, -radius * 2.6, radius * 1.7);
-        context.camera.position.copy(focus).add(offset);
-        context.camera.lookAt(focus);
-        context.cameraTarget.copy(focus);
-        const minFar = Math.max(GROUND_DISTANCE * 2.5, 400);
-        const desiredFar = Math.max(minFar, Math.max(radius, ctx.trackingRadius || radius) * 10);
-        if (context.camera.far < desiredFar) {
-          context.camera.far = desiredFar;
-          if (typeof context.camera.updateProjectionMatrix === 'function') {
-            context.camera.updateProjectionMatrix();
-          }
-        }
-        context.autoAligned = true;
-      }
       if (context.currentCameraMode === 0) {
         cacheTrackingPoseFromCurrent(context, bounds);
-      }
-      if (context.light) {
-        const radius = Math.max(bounds.radius || 0, 0.6);
-        const focus = tempVecC.set(bounds.center[0], bounds.center[1], bounds.center[2]);
-        const horiz = radius * 3.0;
-        const alt = Math.tan(20 * Math.PI / 180) * horiz;
-        const lightOffset = tempVecD.set(horiz, -horiz * 0.9, Math.max(0.6, alt));
-        // If we have a snapped center from previous step, prefer it to reduce jitter
-        const baseCenter = context._shadow.lastCenter ? context._shadow.lastCenter : focus;
-        context.light.position.copy(baseCenter).add(lightOffset);
-        if (context.lightTarget) {
-          context.lightTarget.position.copy(baseCenter);
-          context.light.target?.updateMatrixWorld?.();
-        }
-        context.envDirty = true;
-      }
-      if (context.hemi) {
-        const radius = Math.max(bounds.radius || 0, 0.6);
-        context.hemi.position.set(
-          bounds.center[0],
-          bounds.center[1],
-          bounds.center[2] + radius * 2.8
-        );
       }
     }
 

@@ -2049,7 +2049,8 @@ function createControlManager({
     }
   };
 
-  const addModelEntry = (entry) => {
+  const addModelEntry = (entry, options = null) => {
+    const select = options?.select !== false;
     const existingIndex = modelLibrary.findIndex((item) => item.id === entry.id);
     if (existingIndex >= 0) {
       modelLibrary[existingIndex] = entry;
@@ -2057,7 +2058,7 @@ function createControlManager({
       modelLibrary.push(entry);
     }
     refreshModelSelectOptions();
-    if (modelSelectEl && entry.id) {
+    if (select && modelSelectEl && entry.id) {
       modelSelectEl.value = entry.id;
     }
     const label = entry.label || entry.file || entry.id || '';
@@ -3308,6 +3309,25 @@ function shortcutFromEvent(event) {
         file,
       };
       addModelEntry(entry);
+    }
+
+    const builtinModels = typeof backend?.getBuiltinModels === 'function'
+      ? backend.getBuiltinModels()
+      : null;
+    if (Array.isArray(builtinModels) && builtinModels.length) {
+      for (const model of builtinModels) {
+        if (!model?.file) continue;
+        const file = String(model.file);
+        const id = `builtin_${file}`;
+        if (modelLibrary.some((entry) => entry.id === id)) continue;
+        const entry = {
+          id,
+          label: model.label || file,
+          kind: 'builtinUrl',
+          file,
+        };
+        addModelEntry(entry, { select: false });
+      }
     }
 
     const loadXmlFileImpl = async (file, fileHandle = null) => {

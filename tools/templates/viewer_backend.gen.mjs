@@ -9,11 +9,20 @@ import { parseMuJoCoDirectFileRefs, buildMuJoCoBundle } from './xml_refs.mjs';
 const ASSET_BASE_URL = new URL('./', import.meta.url);
 const WORKER_URL = new URL('physics.worker.mjs', ASSET_BASE_URL);
 const MODEL_ALIASES = {
-  rkob: 'mujoco_Rajagopal2015_simple.xml',
-  raj: 'mujoco_Rajagopal2015_simple.xml',
+  rkob: 'model/mujoco_Rajagopal2015_simple.xml',
+  raj: 'model/mujoco_Rajagopal2015_simple.xml',
+  'mujoco_rajagopal2015_simple.xml': 'model/mujoco_Rajagopal2015_simple.xml',
+  humanoid: 'model/humanoid/humanoid.xml',
+  humanoid100: 'model/humanoid/humanoid100.xml',
+  cards: 'model/cards/cards.xml',
+  sensor: 'model/plugin/sensor/touch_grid.xml',
 };
 const MODEL_POOL = [
-  'mujoco_Rajagopal2015_simple.xml',
+  'model/mujoco_Rajagopal2015_simple.xml',
+  'model/humanoid/humanoid.xml',
+  'model/humanoid/humanoid100.xml',
+  'model/cards/cards.xml',
+  'model/plugin/sensor/touch_grid.xml',
 ];
 
 function applyViewFields(target, source, fields, viewFn, options = {}) {
@@ -2105,6 +2114,10 @@ export async function createBackend(options = {}) {
       worker: await requestWorkerStrictReport(),
     }),
     getInitialModelInfo: () => initialModelInfo,
+    getBuiltinModels: () => MODEL_POOL.map((file) => ({
+      file,
+      label: String(file).replace(/^model\//, '').replace(/\.xml$/i, ''),
+    })),
     dispose,
   };
 }

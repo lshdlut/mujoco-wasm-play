@@ -4,9 +4,10 @@ dist/
 build/
 local_temp/
 coverage/
-dev/model
+dev/local_model/
 tmp/
 *.log
+tests/
 
 # Local notes (ignored)
 local/

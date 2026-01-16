@@ -8,6 +8,7 @@ const repoRoot = path.resolve(__dirname, '..');
 
 const scanRoots = [
   path.join(repoRoot, 'dev'),
+  path.join(repoRoot, 'tools'),
   path.join(repoRoot, 'src'),
   path.join(repoRoot, 'tests'),
 ];
@@ -221,7 +222,13 @@ function findCatchViolations(text) {
 
 const files = [];
 for (const root of scanRoots) {
-  await walk(root, files);
+  try {
+    // Some repos keep optional trees (e.g. `src/`, `tests/`) local-only.
+    await walk(root, files);
+  } catch (err) {
+    if (err && typeof err === 'object' && err.code === 'ENOENT') continue;
+    throw err;
+  }
 }
 
 const issues = [];

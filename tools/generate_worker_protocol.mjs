@@ -10,7 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 
-const specPath = path.join(repoRoot, 'protocol', 'worker_protocol.json');
+const specPath = path.join(repoRoot, 'tools', 'worker_protocol.json');
 const outDir = path.join(repoRoot, 'dev');
 const protocolOutPath = path.join(outDir, 'protocol.gen.mjs');
 const dispatchOutPath = path.join(outDir, 'dispatch.gen.mjs');
@@ -241,4 +241,3 @@ console.log(`Wrote ${protocolOutPath}`);
 console.log(`Wrote ${dispatchOutPath}`);
 console.log(`Wrote ${workerOutPath}`);
 console.log(`Wrote ${backendOutPath}`);
-
