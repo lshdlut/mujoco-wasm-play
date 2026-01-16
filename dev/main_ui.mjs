@@ -2254,6 +2254,7 @@ function createControlManager({
             resolve(null);
             return;
           }
+          strictCatch(err, 'main:pickDirectoryHandle', { allow: true });
           reject(err);
         }
       });

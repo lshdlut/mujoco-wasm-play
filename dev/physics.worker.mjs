@@ -4,7 +4,8 @@
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
 import {
-  isVerboseDebug,
+  isPerfEnabled,
+  perfNow as perfNowMs,
   logError,
   logStatus,
   logWarn,
@@ -33,24 +34,6 @@ const MJ_NTIMER = 15;
 const MJ_NSOLVER = 50;
 const SOLVER_LOG_EPS = 1e-15;
 const MJ_STATE_SIG = 0x1fff;
-// Minimal local getView to avoid path issues in buildless mode
-function getView(mod, ptr, dtype, len) {
-  if (!ptr || !len) {
-    if (dtype === 'f64') return new Float64Array(0);
-    if (dtype === 'f32') return new Float32Array(0);
-    return new Int32Array(0);
-  }
-  switch (dtype) {
-    case 'f64':
-      return heapViewF64(mod, ptr, len);
-    case 'f32':
-      return heapViewF32(mod, ptr, len);
-    case 'i32':
-      return heapViewI32(mod, ptr, len);
-    default:
-      return new Float64Array(0);
-  }
-}
 
 let mod = null;
 let sim = null;
@@ -61,9 +44,6 @@ let running = false;
 let ngeom = 0;
 let nu = 0;
 let pendingCtrl = new Map(); // index -> value (clamped later)
-let ctrlNoiseStd = 0;
-let ctrlNoiseRate = 0;
-let ctrlNoiseSpare = null;
 let gestureState = { mode: 'idle', phase: 'idle', pointer: null };
 let dragState = { dx: 0, dy: 0 };
 let voptFlags = DEFAULT_VOPT_FLAGS_NUMERIC.slice();
@@ -105,7 +85,7 @@ let mjvPerturbBodyId = -1;
 let mjvPerturbPtrs = { modelPtr: 0, dataPtr: 0, camPtr: 0, scnPtr: 0, pertPtr: 0 };
 let mjvPerturbFns = null;
 let mjvCameraFns = null;
-let lastSyncWallTime = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+let lastSyncWallTime = perfNowMs() / 1000;
 let lastSyncSimTime = 0;
 let simTimeApprox = 0;
 let hasLoggedNoSim = false;
@@ -125,18 +105,9 @@ const STEP_TICK_BUDGET_MS = 8; // cap stepping time per tick to keep snapshots/m
 const SYNC_MISALIGN_SIM_SEC = 0.1; // match MuJoCo simulate syncMisalign (simulation seconds)
 
 const WORKER_START_WALL_MS = Date.now();
-const WORKER_START_PERF_MS =
-  (typeof performance !== 'undefined' && typeof performance.now === 'function')
-    ? performance.now()
-    : Date.now();
+const WORKER_START_PERF_MS = perfNowMs();
 
-function perfNowMs() {
-  return (typeof performance !== 'undefined' && typeof performance.now === 'function')
-    ? performance.now()
-    : Date.now();
-}
-
-const perfEnabled = isVerboseDebug();
+const perfEnabled = isPerfEnabled();
 
 const perfStages = {
   loadModuleMs: null,
@@ -160,19 +131,19 @@ function buildPerf(extra = null, { includeStages = false } = {}) {
   return payload;
 }
 
+function safePost(message, transfers, context) {
+  try {
+    if (Array.isArray(transfers)) {
+      postMessage(message, transfers);
+    } else {
+      postMessage(message);
+    }
+  } catch (err) {
+    strictCatch(err, context || 'worker:postMessage');
+  }
+}
 
 // Log minimal status lines to the main thread, keep the rest in the worker console.
-
-// Noise controls are currently disabled in the web build.
-// Keep the helpers defined as no-ops so the message wiring stays intact
-// without affecting underlying MuJoCo control values.
-function standardNormalNoise() {
-  return 0;
-}
-
-function applyCtrlNoise() {
-  // Intentionally left blank: ctrl noise is disabled.
-}
 
 const HISTORY_DEFAULT_CAPTURE_HZ = 30;
 const HISTORY_MAX_CAPTURE_HZ = 60;
@@ -194,16 +165,12 @@ function setRunning(next, source = 'backend', notify = true) {
     resetTimingForCurrentSim();
   }
   if (notify && changed) {
-    try {
-      postMessage({ kind: 'run_state', running: target, source });
-    } catch (err) {
-      strictCatch(err, 'worker:run_state_post');
-    }
+    safePost({ kind: 'run_state', running: target, source }, null, 'worker:run_state_post');
   }
 }
 
 function resetTimingForCurrentSim(initialRate = null) {
-  const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+  const nowSec = perfNowMs() / 1000;
   let tSim = 0;
   try {
     if (sim && typeof sim.time === 'function') {
@@ -222,18 +189,18 @@ function resetTimingForCurrentSim(initialRate = null) {
   if (initialRate != null && Number.isFinite(initialRate)) {
     rate = Math.max(0.0625, Math.min(16, Number(initialRate) || 1));
   }
-  }
+}
 
-  function readStructState(scope) {
-    if (!mod || !(h > 0)) return null;
-    try {
-      if (scope === 'mjVisual') return readVisualStruct(mod, h);
-      if (scope === 'mjStatistic') return readStatisticStruct(mod, h);
-    } catch (err) {
-      strictCatch(err, 'worker:read_struct_state');
-    }
-    return null;
+function readStructState(scope) {
+  if (!mod || !(h > 0)) return null;
+  try {
+    if (scope === 'mjVisual') return readVisualStruct(mod, h);
+    if (scope === 'mjStatistic') return readStatisticStruct(mod, h);
+  } catch (err) {
+    strictCatch(err, 'worker:read_struct_state');
   }
+  return null;
+}
 
 function createGroupState() {
   // Match MuJoCo mjv_defaultOption: first 3 groups enabled, remaining disabled.
@@ -520,11 +487,7 @@ function applySimulatePerturbPipeline({ paused }) {
 function emitStructState(scope) {
   const value = readStructState(scope);
   if (!value) return;
-  try {
-    postMessage({ kind: 'struct_state', scope, value });
-  } catch (err) {
-    strictCatch(err, 'worker:emitStructState');
-  }
+  safePost({ kind: 'struct_state', scope, value }, null, 'worker:emitStructState');
 }
 
 function collectCameraMeta() {
@@ -686,11 +649,7 @@ function serializeHistoryMeta() {
 }
 
 function emitHistoryMeta() {
-  try {
-    postMessage({ kind: 'history', ...serializeHistoryMeta() });
-  } catch (err) {
-    strictCatch(err, 'worker:emitHistoryMeta');
-  }
+  safePost({ kind: 'history', ...serializeHistoryMeta() }, null, 'worker:emitHistoryMeta');
 }
 
 function buildInfoStats(sim, tSim, nconLocal) {
@@ -878,7 +837,7 @@ function captureHistorySample(force = false) {
   if (!historyState || !historyState.enabled || !sim) return;
   if (!(historyState.samples?.length > 0)) return;
   if (!force && (!running || historyState.scrubActive)) return;
-  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const now = perfNowMs();
   if (!force && historyState.captureIntervalMs > 0) {
     if ((now - historyState.lastCaptureTs) < historyState.captureIntervalMs) return;
   }
@@ -1010,11 +969,7 @@ function serializeKeyframeMeta() {
   };
 }
 function emitKeyframeMeta() {
-  try {
-    postMessage({ kind: 'keyframes', ...serializeKeyframeMeta(), keyIndex: keySliderIndex });
-  } catch (err) {
-    strictCatch(err, 'worker:emitKeyframeMeta');
-  }
+  safePost({ kind: 'keyframes', ...serializeKeyframeMeta(), keyIndex: keySliderIndex }, null, 'worker:emitKeyframeMeta');
 }
 
 function ensureKeySlot(index) {
@@ -1158,11 +1113,7 @@ function sampleWatch() {
 function emitWatchState() {
   const payload = sampleWatch();
   if (!payload) return;
-  try {
-    postMessage({ kind: 'watch', ...payload });
-  } catch (err) {
-    strictCatch(err, 'worker:emitWatchState');
-  }
+  safePost({ kind: 'watch', ...payload }, null, 'worker:emitWatchState');
 }
 
 function collectWatchSources() {
@@ -1319,7 +1270,7 @@ function captureBounds() {
 }
 
 function captureCopyState(precision) {
-  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const now = Date.now();
   const nq = readModelCount('nq');
   const nv = readModelCount('nv');
   const nuLocal = readModelCount('nu');
@@ -1510,11 +1461,7 @@ async function loadModule() {
       `[forge] Missing viewer ABI exports (${missing.length}): ${missing.join(', ')}. ` +
       `This repo now requires a forge build with viewer extensions (scene + vopt pointers). ` +
       `distBase=${distBase.href}`;
-    try {
-      postMessage({ kind: 'error', message, distBase: distBase.href, missing });
-    } catch (err) {
-      strictCatch(err, 'worker:abi_missing_notify');
-    }
+    safePost({ kind: 'error', message, distBase: distBase.href, missing }, null, 'worker:abi_missing_notify');
     throw new Error(message);
   };
 
@@ -2040,11 +1987,7 @@ function snapshot() {
     });
   }
   if (perfEnabled && ((frameId | 0) % 4 === 0)) {
-    try {
-      postMessage({ kind: 'latency_probe', sentWallMs: Date.now(), frameId });
-    } catch (err) {
-      strictCatch(err, 'worker:latency_probe_post');
-    }
+    safePost({ kind: 'latency_probe', sentWallMs: Date.now(), frameId }, null, 'worker:latency_probe_post');
   }
   try {
     const tPostStart = perfEnabled ? perfNowMs() : 0;
@@ -2374,7 +2317,6 @@ setInterval(() => {
       } else {
         captureHistorySample();
       }
-      applyCtrlNoise();
       if (mjvPerturbActive) {
         if (perfEnabled) {
           const tPert = perfNowMs();
@@ -2435,7 +2377,6 @@ setInterval(() => {
         } else {
           captureHistorySample();
         }
-        applyCtrlNoise();
         if (mjvPerturbActive) {
           if (perfEnabled) {
             const tPert = perfNowMs();
@@ -2492,9 +2433,7 @@ setInterval(() => {
   const intervalMs = (Number.isFinite(snapshotIntervalMs) && snapshotIntervalMs > 0)
     ? snapshotIntervalMs
     : 16;
-  const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-    ? performance.now()
-    : Date.now();
+  const now = perfNowMs();
   if (!(snapshotLastTickMs > 0)) {
     snapshotLastTickMs = now;
     return;
@@ -2558,18 +2497,14 @@ const commandHandlers = {
         messageParts.push(`helper: ${errMeta.helperErrmsg}`);
       }
       const summary = messageParts.length ? messageParts.join(' | ') : 'Unable to create handle';
-      try {
-        postMessage({
-          kind: 'error',
-          message: `XML load failed: ${summary}`,
-          errno: errMeta.errno,
-          errmsg: errMeta.errmsg,
-          helperErrno: errMeta.helperErrno,
-          helperErrmsg: errMeta.helperErrmsg,
-        });
-      } catch (err) {
-        strictCatch(err, 'worker:load_error_post');
-      }
+      safePost({
+        kind: 'error',
+        message: `XML load failed: ${summary}`,
+        errno: errMeta.errno,
+        errmsg: errMeta.errmsg,
+        helperErrno: errMeta.helperErrno,
+        helperErrmsg: errMeta.helperErrmsg,
+      }, null, 'worker:load_error_post');
       return;
     }
     const { abi, handle } = result;
@@ -2798,7 +2733,7 @@ const commandHandlers = {
         }
       }
     }
-    try { postMessage({ kind: 'gesture', gesture: gestureState, drag: dragState }); } catch (err) { strictCatch(err, 'worker:gesture_post'); }
+    safePost({ kind: 'gesture', gesture: gestureState, drag: dragState }, null, 'worker:gesture_post');
   },
   setVoptFlag: (payload) => {
     const idx = Number(payload.index) | 0;
@@ -3217,51 +3152,40 @@ const commandHandlers = {
       localpos = [0, 0, 0];
     }
 
-    try {
-      postMessage({
-        kind: 'selection',
-        seq: ++selectionSeq,
-        bodyId: selectedBody,
-        geomId: geomId | 0,
-        flexId: flexId | 0,
-        skinId: skinId | 0,
-        point: selpnt,
-        localpos,
-        timestamp: Date.now(),
-      });
-    } catch (err) {
-      strictCatch(err, 'worker:selection_post');
-    }
+    safePost({
+      kind: 'selection',
+      seq: ++selectionSeq,
+      bodyId: selectedBody,
+      geomId: geomId | 0,
+      flexId: flexId | 0,
+      skinId: skinId | 0,
+      point: selpnt,
+      localpos,
+      timestamp: Date.now(),
+    }, null, 'worker:selection_post');
 
     snapshot();
   },
   align: (payload) => {
     const info = captureBounds();
     if (info) lastBounds = info;
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    try {
-      postMessage({
-        kind: 'align',
-        seq: ++alignSeq,
-        center: (info && info.center) || [0, 0, 0],
-        radius: (info && info.radius) || 0,
-        timestamp: now,
-        source: payload.source || 'backend',
-      });
-    } catch (err) {
-      strictCatch(err, 'worker:align_post');
-    }
+    const now = Date.now();
+    safePost({
+      kind: 'align',
+      seq: ++alignSeq,
+      center: (info && info.center) || [0, 0, 0],
+      radius: (info && info.radius) || 0,
+      timestamp: now,
+      source: payload.source || 'backend',
+    }, null, 'worker:align_post');
   },
   copyState: (payload) => {
     const precision = payload.precision === 'full' ? 'full' : 'standard';
     const nextPayload = captureCopyState(precision);
     nextPayload.source = payload.source || 'backend';
-    try { postMessage(nextPayload); } catch (err) { strictCatch(err, 'worker:copy_state_post'); }
+    safePost(nextPayload, null, 'worker:copy_state_post');
   },
-  setCtrlNoise: (payload) => {
-    ctrlNoiseStd = +payload.std || 0;
-    ctrlNoiseRate = +payload.rate || 0;
-  },
+  setCtrlNoise: () => {},
   setCtrl: (payload) => {
     // Write a single actuator control value if pointers available
     try { const i = payload.index|0; pendingCtrl.set(i, +payload.value||0); } catch (err) { strictCatch(err, 'worker:set_ctrl'); }
@@ -3347,11 +3271,7 @@ onmessage = async (ev) => {
   try {
     await dispatchCommandMessage(msg);
   } catch (e) {
-    try {
-      postMessage({ kind:'error', message: String(e) });
-    } catch (innerErr) {
-      strictCatch(innerErr, 'worker:post_error');
-    }
+    safePost({ kind:'error', message: String(e) }, null, 'worker:post_error');
     strictCatch(e, 'worker:onmessage');
   }
 };

@@ -68,9 +68,7 @@ let latestSnapshot = null;
 let renderStats = { drawn: 0, hidden: 0 };
 let fpsEstimate = 0;
 let lastFpsFrameSample = 0;
-let lastFpsSampleTimeMs = (typeof performance !== 'undefined' && performance.now)
-  ? performance.now()
-  : Date.now();
+let lastFpsSampleTimeMs = perfNow();
 
 
 function formatArenaBytes(bytes) {
@@ -213,9 +211,7 @@ const rendererManager = createRendererManager({
   setRenderStats: (stats) => {
     renderStats = { ...renderStats, ...stats };
     const frame = Number(stats?.frame);
-    const now = (typeof performance !== 'undefined' && performance.now)
-      ? performance.now()
-      : Date.now();
+    const now = perfNow();
     if (Number.isFinite(frame) && frame > lastFpsFrameSample) {
       const deltaFrame = frame - lastFpsFrameSample;
       const deltaMs = Math.max(1, now - lastFpsSampleTimeMs);
@@ -590,7 +586,7 @@ function scheduleUiUpdate(state) {
   pendingUiFrame = true;
   const tick = () => {
     pendingUiFrame = false;
-    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const now = perfNow();
     if ((now - lastUiUpdateMs) < UI_UPDATE_INTERVAL_MS) {
       pendingUiFrame = true;
       setTimeout(() => {

@@ -18,6 +18,7 @@ const excludeDirs = new Set([
   'dist',
   'build',
   'scripts',
+  'local_temp',
   'local',
   'local_tools',
   'release_assets',
@@ -180,6 +181,7 @@ async function walk(dir, out) {
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name);
       if (includeExt.has(ext)) {
+        if (entry.name.includes('.local.')) continue;
         out.push(full);
       }
     }

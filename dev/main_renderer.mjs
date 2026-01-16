@@ -18,16 +18,6 @@ import {
   strictOverride,
 } from './viewer_runtime.mjs';
 import { compatFallback } from './fallbacks.mjs';
-// TODO: delete unused viewer defaults and shared helpers once confirmed not needed.
-// import { DEFAULT_VOPT_FLAGS, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
-// import {
-//   assignStructPath,
-//   bool,
-//   cloneStruct,
-//   resolveStructPath,
-//   toNumber,
-// } from './viewer_shared.mjs';
-// import { STAT_FIELD_DESCRIPTORS, VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
 import { pushSkyDebug } from './main_environment.mjs';
 import { applySpecAction } from './main_ui.mjs';
 
@@ -97,79 +87,6 @@ function onBeforeShadowMuJoCo(renderer, object, camera, shadowCamera, geometry, 
     depthMaterial.polygonOffsetUnits = MUJOCO_SHADOW_POLYGON_OFFSET_UNITS;
   }
 }
-
-/* TODO delete unused helper once confirmed not needed.
-function createInfiniteGridHelper({
-  size1 = 1.0,
-  size2 = 10.0,
-  color = 0xffffff,
-  distance = 400.0,
-  axes = 'xyz',
-  renderOrder = -5,
-} = {}) {
-  const colorObj = color instanceof THREE.Color ? color.clone() : new THREE.Color(color);
-  const planeAxes = axes.slice(0, 2);
-  const geometry = new THREE.PlaneGeometry(2, 2, 1, 1);
-  const material = new THREE.ShaderMaterial({
-    side: THREE.DoubleSide,
-    transparent: true,
-    depthWrite: true,
-    depthTest: true,
-    uniforms: {
-      uSize1: { value: size1 },
-      uSize2: { value: size2 },
-      uColor: { value: colorObj },
-      uDistance: { value: distance },
-    },
-    vertexShader: `
-      varying vec3 worldPosition;
-      uniform float uDistance;
-      void main() {
-        vec3 pos = position.${axes} * uDistance;
-        pos.${planeAxes} += cameraPosition.${planeAxes};
-        worldPosition = pos;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-      }
-    `,
-    fragmentShader: `
-      varying vec3 worldPosition;
-      uniform float uSize1;
-      uniform float uSize2;
-      uniform vec3 uColor;
-      uniform float uDistance;
-
-      float getGrid(float size) {
-        vec2 r = worldPosition.${planeAxes} / size;
-        vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
-        float line = min(grid.x, grid.y);
-        return 1.0 - min(line, 1.0);
-      }
-
-      void main() {
-        float d = 1.0 - min(distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes}) / uDistance, 1.0);
-        float g1 = getGrid(uSize1);
-        float g2 = getGrid(uSize2);
-        float strength = mix(g2, g1, g1) * pow(d, 3.0);
-        vec4 color = vec4(uColor.rgb, strength);
-        color.a = mix(0.5 * color.a, color.a, g2);
-        if (color.a <= 0.0) discard;
-        gl_FragColor = color;
-      }
-    `,
-    extensions: {
-      derivatives: true,
-    },
-  });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.frustumCulled = false;
-  mesh.renderOrder = renderOrder;
-  mesh.userData.infiniteGrid = {
-    uniforms: material.uniforms,
-    baseDistance: distance,
-  };
-  return mesh;
-}
-*/
 
 function createInfiniteGroundHelper({
   color = 0xffffff,
@@ -447,7 +364,6 @@ const __TMP_VEC3 = new THREE.Vector3();
 const __TMP_VEC3_A = new THREE.Vector3();
 const __TMP_VEC3_B = new THREE.Vector3();
 const __TMP_VEC3_C = new THREE.Vector3();
-const __TMP_VEC3_D = new THREE.Vector3();
 const __TMP_QUAT_A = new THREE.Quaternion();
 
 // MuJoCo uses `mju_round` (half away from zero), which differs from
@@ -461,37 +377,46 @@ function mjuRound(value) {
 // MuJoCo constant from mjmodel.h; used by engine_vis_visualize.c when
 // re-centering infinite planes.
 const MJ_MAXPLANEGRID = 11;
-const __TMP_COLOR = new THREE.Color();
 const LABEL_DPR_CAP = 2;
 const LABEL_GEOM_LIMIT = 120;
-// TODO delete unused temporary matrix after confirming no haze helper use.
-// const TEMP_MAT4 = new THREE.Matrix4();
 const DEFAULT_CLEAR_HEX = 0xd6dce4;
 const GROUND_DISTANCE = 2000;
 const PLANE_SIZE_EPS = 1e-9;
 const RENDER_ORDER = Object.freeze({
   GROUND: -50,
 });
-// TODO delete these haze temporaries when haze support is removed.
-// const HAZE_TMP_HEAD = new THREE.Vector3();
-// const HAZE_TMP_PLANE_POS = new THREE.Vector3();
-// const HAZE_TMP_NORMAL = new THREE.Vector3();
-// const HAZE_TMP_DELTA = new THREE.Vector3();
-// const HAZE_TMP_MAT_HEAD = new THREE.Matrix4();
-// const HAZE_TMP_MAT_SCALE = new THREE.Matrix4();
-// const HAZE_TMP_MAT_ROT = new THREE.Matrix4();
-// const HAZE_TMP_MAT_LOCAL_T = new THREE.Matrix4();
-// const HAZE_TMP_MAT_LOCAL_S = new THREE.Matrix4();
-// const HAZE_TMP_MAT_FINAL = new THREE.Matrix4();
 const TRANSPARENT_BIN_CAM_POS = new THREE.Vector3();
 const TRANSPARENT_BIN_CAM_DIR = new THREE.Vector3();
-const TRANSPARENT_BIN_WORLD_POS = new THREE.Vector3();
 
-/* TODO delete unused helper once camera controller cleanup finishes.
-function isMatrixLike(value) {
-  return value && typeof value.copy === 'function';
+function depthFromSoAPos(posView, posBase, rootElements, camX, camY, camZ, dirX, dirY, dirZ) {
+  const lx = posView[posBase + 0] || 0;
+  const ly = posView[posBase + 1] || 0;
+  const lz = posView[posBase + 2] || 0;
+  let wx = lx;
+  let wy = ly;
+  let wz = lz;
+  if (rootElements) {
+    wx = rootElements[0] * lx + rootElements[4] * ly + rootElements[8] * lz + rootElements[12];
+    wy = rootElements[1] * lx + rootElements[5] * ly + rootElements[9] * lz + rootElements[13];
+    wz = rootElements[2] * lx + rootElements[6] * ly + rootElements[10] * lz + rootElements[14];
+  }
+  const dx = wx - camX;
+  const dy = wy - camY;
+  const dz = wz - camZ;
+  return dx * dirX + dy * dirY + dz * dirZ;
 }
-*/
+
+function transparentDepthNorm01(depth, depthMin, depthInvSpan) {
+  const depthNorm = depthInvSpan > 1e-12 ? ((depth - depthMin) * depthInvSpan) : 0;
+  return Math.max(0, Math.min(1, depthNorm));
+}
+
+function transparentBinFromDepthNorm(depthNorm, transparentBins) {
+  const bins = transparentBins | 0;
+  if (bins <= 1) return 0;
+  const k = Math.floor(depthNorm * transparentBins);
+  return Math.max(0, Math.min(bins - 1, k | 0));
+}
 
 function getWorldScene(ctx, override = null) {
   if (override) return override;
@@ -532,11 +457,20 @@ function createGeomNameLookup(sourceList) {
   return lookup;
 }
 
-function geomNameFromLookup(lookup, index) {
-  if (lookup && lookup.has(index)) {
-    return lookup.get(index);
+function getOrCreateGeomNameLookup(ctx, sourceList) {
+  if (!ctx) return createGeomNameLookup(sourceList);
+  const nextSource = sourceList || null;
+  let lookup = ctx._geomNameLookup || null;
+  if (ctx._geomNameLookupSource !== nextSource || !lookup) {
+    lookup = createGeomNameLookup(nextSource);
+    ctx._geomNameLookup = lookup;
+    ctx._geomNameLookupSource = nextSource;
   }
-  return `Geom ${index}`;
+  return lookup;
+}
+
+function geomNameFromLookup(lookup, index) {
+  return lookup?.get(index) ?? `Geom ${index}`;
 }
 
 function isInfinitePlaneSize(sizeVec) {
@@ -664,50 +598,6 @@ function applySkyboxVisibility(ctx, enabled, options = {}) {
   pushSkyDebug(ctx, { mode: 'fallback' });
 }
 
-
-function mat3ToQuat(m) {
-  const m00 = m[0] ?? 1;
-  const m01 = m[1] ?? 0;
-  const m02 = m[2] ?? 0;
-  const m10 = m[3] ?? 0;
-  const m11 = m[4] ?? 1;
-  const m12 = m[5] ?? 0;
-  const m20 = m[6] ?? 0;
-  const m21 = m[7] ?? 0;
-  const m22 = m[8] ?? 1;
-  const t = m00 + m11 + m22;
-  let w = 1;
-  let x = 0;
-  let y = 0;
-  let z = 0;
-  if (t > 0) {
-    const s = Math.sqrt(t + 1.0) * 2;
-    w = 0.25 * s;
-    x = (m21 - m12) / s;
-    y = (m02 - m20) / s;
-    z = (m10 - m01) / s;
-  } else if (m00 > m11 && m00 > m22) {
-    const s = Math.sqrt(1.0 + m00 - m11 - m22) * 2;
-    w = (m21 - m12) / s;
-    x = 0.25 * s;
-    y = (m01 + m10) / s;
-    z = (m02 + m20) / s;
-  } else if (m11 > m22) {
-    const s = Math.sqrt(1.0 + m11 - m00 - m22) * 2;
-    w = (m02 - m20) / s;
-    x = (m01 + m10) / s;
-    y = 0.25 * s;
-    z = (m12 + m21) / s;
-  } else {
-    const s = Math.sqrt(1.0 + m22 - m00 - m11) * 2;
-    w = (m10 - m01) / s;
-    x = (m02 + m20) / s;
-    y = (m12 + m21) / s;
-    z = 0.25 * s;
-  }
-  return new THREE.Quaternion(x, y, z, w);
-}
-
 function setQuatFromMat3(out, m00, m01, m02, m10, m11, m12, m20, m21, m22) {
   if (!out || typeof out.set !== 'function') return;
   const t = m00 + m11 + m22;
@@ -805,119 +695,71 @@ function rgbFromArray(arr, fallback = [1, 1, 1]) {
   return fallback.slice();
 }
 
-function alphaFromArray(color, fallback = 1) {
-  const source = parseVectorLike(color);
-  if (Array.isArray(source) && source.length >= 4) {
-    const a = Number(source[3]);
-    if (Number.isFinite(a)) {
-      return clampUnit(a);
-    }
-  }
-  return clampUnit(fallback);
-}
-
 function applyAppearanceToMaterial(mesh, appearance) {
   if (!mesh || !mesh.material || !appearance) return;
-  const { color, opacity } = appearance;
   const mat = mesh.material;
-  if (color && mat.color && typeof mat.color.setRGB === 'function') {
-    const r = Math.max(0, Number(color[0]) || 0);
-    const g = Math.max(0, Number(color[1]) || 0);
-    const b = Math.max(0, Number(color[2]) || 0);
+  const r = Number(appearance.r) || 0;
+  const g = Number(appearance.g) || 0;
+  const b = Number(appearance.b) || 0;
+  const a = Number(appearance.a) || 0;
+  if (mat.color && typeof mat.color.setRGB === 'function') {
     if ((mat.color.r !== r) || (mat.color.g !== g) || (mat.color.b !== b)) {
       mat.color.setRGB(r, g, b);
     }
   }
-  if ('opacity' in mat && opacity != null) {
-    const nextOpacity = Number(opacity) || 0;
+  if ('opacity' in mat) {
+    const nextOpacity = a;
     const nextTransparent = nextOpacity < 0.999;
     if (mat.opacity !== nextOpacity) mat.opacity = nextOpacity;
     if (mat.transparent !== nextTransparent) mat.transparent = nextTransparent;
   }
   const userData = mesh.userData || (mesh.userData = {});
-  if (appearance.rgba) {
-    const src = appearance.rgba;
+  if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) && Number.isFinite(a)) {
     let rgba = userData.geomRgba;
     if (!Array.isArray(rgba) || rgba.length < 4) {
       rgba = [0, 0, 0, 1];
       userData.geomRgba = rgba;
     }
-    rgba[0] = Number(src[0]) || 0;
-    rgba[1] = Number(src[1]) || 0;
-    rgba[2] = Number(src[2]) || 0;
-    rgba[3] = Number(src[3]) || 0;
-    userData.geomOpacity = opacity;
+    rgba[0] = r;
+    rgba[1] = g;
+    rgba[2] = b;
+    rgba[3] = a;
+    userData.geomOpacity = a;
   }
+}
+
+function resolveIndexedRgbaAppearance(index, group, materials) {
+  const matIdView = group?.matid || null;
+  const matIndex = matIdView && index < matIdView.length ? (matIdView[index] | 0) : -1;
+  const matRgbaView = materials?.rgba || null;
+  if (matIndex >= 0 && matRgbaView && matRgbaView.length >= (matIndex * 4 + 4)) {
+    const base = matIndex * 4;
+    return {
+      r: clampUnit(Number(matRgbaView[base + 0]) || 0),
+      g: clampUnit(Number(matRgbaView[base + 1]) || 0),
+      b: clampUnit(Number(matRgbaView[base + 2]) || 0),
+      a: clampUnit(Number(matRgbaView[base + 3]) || 0),
+    };
+  }
+  const rgbaView = group?.rgba || null;
+  if (matIndex < 0 && rgbaView && rgbaView.length >= (index * 4 + 4)) {
+    const base = index * 4;
+    return {
+      r: clampUnit(Number(rgbaView[base + 0]) || 0),
+      g: clampUnit(Number(rgbaView[base + 1]) || 0),
+      b: clampUnit(Number(rgbaView[base + 2]) || 0),
+      a: clampUnit(Number(rgbaView[base + 3]) || 0),
+    };
+  }
+  return null;
 }
 
 function resolveFlexAppearance(index, assets) {
-  const matIdView = assets?.flexes?.matid || null;
-  const matIndex = matIdView && index < matIdView.length ? matIdView[index] : -1;
-  const matRgbaView = assets?.materials?.rgba || null;
-  const flexRgbaView = assets?.flexes?.rgba || null;
-  if (matIndex >= 0 && matRgbaView && matRgbaView.length >= (matIndex * 4 + 4)) {
-    const rgba = [
-      matRgbaView[matIndex * 4 + 0],
-      matRgbaView[matIndex * 4 + 1],
-      matRgbaView[matIndex * 4 + 2],
-      matRgbaView[matIndex * 4 + 3],
-    ];
-    return {
-      rgba,
-      color: rgbFromArray(rgba),
-      opacity: alphaFromArray(rgba),
-    };
-  }
-  if (matIndex < 0 && flexRgbaView && flexRgbaView.length >= (index * 4 + 4)) {
-    const base = index * 4;
-    const rgba = [
-      flexRgbaView[base + 0],
-      flexRgbaView[base + 1],
-      flexRgbaView[base + 2],
-      flexRgbaView[base + 3],
-    ];
-    return {
-      rgba,
-      color: rgbFromArray(rgba),
-      opacity: alphaFromArray(rgba),
-    };
-  }
-  return { rgba: null, color: null, opacity: null };
+  return resolveIndexedRgbaAppearance(index, assets?.flexes || null, assets?.materials || null);
 }
 
 function resolveSkinAppearance(index, assets) {
-  const matIdView = assets?.skins?.matid || null;
-  const matIndex = matIdView && index < matIdView.length ? matIdView[index] : -1;
-  const matRgbaView = assets?.materials?.rgba || null;
-  const skinRgbaView = assets?.skins?.rgba || null;
-  if (matIndex >= 0 && matRgbaView && matRgbaView.length >= (matIndex * 4 + 4)) {
-    const rgba = [
-      matRgbaView[matIndex * 4 + 0],
-      matRgbaView[matIndex * 4 + 1],
-      matRgbaView[matIndex * 4 + 2],
-      matRgbaView[matIndex * 4 + 3],
-    ];
-    return {
-      rgba,
-      color: rgbFromArray(rgba),
-      opacity: alphaFromArray(rgba),
-    };
-  }
-  if (matIndex < 0 && skinRgbaView && skinRgbaView.length >= (index * 4 + 4)) {
-    const base = index * 4;
-    const rgba = [
-      skinRgbaView[base + 0],
-      skinRgbaView[base + 1],
-      skinRgbaView[base + 2],
-      skinRgbaView[base + 3],
-    ];
-    return {
-      rgba,
-      color: rgbFromArray(rgba),
-      opacity: alphaFromArray(rgba),
-    };
-  }
-  return { rgba: null, color: null, opacity: null };
+  return resolveIndexedRgbaAppearance(index, assets?.skins || null, assets?.materials || null);
 }
 
 function resolveMaterialTextureDescriptor(matId, assets) {
@@ -1545,146 +1387,6 @@ function applyMuJoCoTextureToMesh(mesh, matId, ctx, assets, textureEnabled, opti
   applyMuJoCoCubeAlbedo(mesh, cube, scaleVec, true);
 }
 
-function averageRGB(arr) {
-  if (!Array.isArray(arr) || arr.length === 0) return 0;
-  return arr.reduce((acc, v) => acc + (Number(v) || 0), 0) / arr.length;
-}
-
-function isDisabledFlag(mask, bitIndex) {
-  const m = Number(mask) || 0;
-  const bit = bitIndex | 0;
-  if (bit < 0 || bit >= 31) return false;
-  return (m & (1 << bit)) !== 0;
-}
-
-function vec3Norm(x, y, z) {
-  return Math.sqrt(x * x + y * y + z * z);
-}
-
-function vec3NormalizeInPlace(v) {
-  const x = v[0] || 0;
-  const y = v[1] || 0;
-  const z = v[2] || 0;
-  const n = vec3Norm(x, y, z);
-  if (!(n > 1e-12)) {
-    v[0] = 0; v[1] = 0; v[2] = 0;
-    return 0;
-  }
-  const inv = 1 / n;
-  v[0] = x * inv;
-  v[1] = y * inv;
-  v[2] = z * inv;
-  return n;
-}
-
-function vec3Dot(ax, ay, az, bx, by, bz) {
-  return ax * bx + ay * by + az * bz;
-}
-
-function coshSinh(x) {
-  const expx = Math.exp(x);
-  const inv = 1 / expx;
-  return {
-    cosh: 0.5 * (expx + inv),
-    sinh: 0.5 * (expx - inv),
-  };
-}
-
-function catenaryIntercept(v, h, length) {
-  const term = Math.sqrt(Math.max(0, length * length - v * v)) / Math.max(1e-12, h) - 1;
-  if (!(term > 0)) return 0;
-  return 1 / Math.sqrt(Math.sqrt(term));
-}
-
-function catenaryResidual(b, intercept) {
-  const a = 0.5 / b;
-  const { cosh, sinh } = coshSinh(a);
-  const denom = 2 * b * sinh - 1;
-  if (!(denom > 0)) {
-    return { res: Number.POSITIVE_INFINITY, grad: 0 };
-  }
-  const invSqrt = 1 / Math.sqrt(denom);
-  const res = invSqrt - intercept;
-  const grad = (a * cosh - sinh) * Math.pow(denom, -1.5);
-  return { res, grad };
-}
-
-function solveCatenary(v, h, length) {
-  const intercept = catenaryIntercept(v, h, length);
-  let b = intercept / Math.sqrt(24);
-  const tol = 1e-9;
-  for (let i = 0; i < 50; i += 1) {
-    const { res, grad } = catenaryResidual(b, intercept);
-    if (Math.abs(res) < tol) break;
-    let step = -res / (grad || 1e-12);
-    for (let j = 0; j < 10; j += 1) {
-      const next = catenaryResidual(b + step, intercept).res;
-      if (Math.abs(next) < Math.abs(res)) break;
-      step *= 0.5;
-    }
-    b += step;
-  }
-  return b;
-}
-
-function computeCatenaryPoints(x0, x1, gravity, length, ncatenary) {
-  const dx = (x1[0] || 0) - (x0[0] || 0);
-  const dy = (x1[1] || 0) - (x0[1] || 0);
-  const dz = (x1[2] || 0) - (x0[2] || 0);
-  const dist = vec3Norm(dx, dy, dz);
-  if (!(dist > 0) || dist > length) {
-    return { points: [x0.slice(), x1.slice()], npoints: 2 };
-  }
-
-  const up = [-(gravity?.[0] || 0), -(gravity?.[1] || 0), -(gravity?.[2] || 0)];
-  vec3NormalizeInPlace(up);
-
-  const across = [dx, dy, dz];
-  const proj = vec3Dot(up[0], up[1], up[2], across[0], across[1], across[2]);
-  across[0] -= up[0] * proj;
-  across[1] -= up[1] * proj;
-  across[2] -= up[2] * proj;
-  const acrossNorm = vec3NormalizeInPlace(across);
-  if (acrossNorm < 1e-12) {
-    across[0] = 0; across[1] = 0; across[2] = 0;
-  }
-
-  const h = vec3Dot(dx, dy, dz, across[0], across[1], across[2]);
-  const v = vec3Dot(dx, dy, dz, up[0], up[1], up[2]);
-
-  if (length > 100 * h) {
-    const dUp = -0.5 * (Math.sqrt(Math.max(0, length * length - h * h)) - v);
-    const denom = 2 * dUp - v;
-    const dAcross = Math.abs(denom) > 1e-12 ? (h * dUp) / denom : 0;
-    const mid = [
-      (x0[0] || 0) + up[0] * dUp + across[0] * dAcross,
-      (x0[1] || 0) + up[1] * dUp + across[1] * dAcross,
-      (x0[2] || 0) + up[2] * dUp + across[2] * dAcross,
-    ];
-    return { points: [x0.slice(), mid, x1.slice()], npoints: 3 };
-  }
-
-  const n = Math.max(2, Math.min(100, ncatenary | 0));
-  const bh = solveCatenary(v, h, length) * h;
-  const ratio = (length + v) / Math.max(1e-12, (length - v));
-  const hOffset = -0.5 * (Math.log(Math.max(1e-12, ratio)) * bh - h);
-  const vOffset = -coshSinh(hOffset / bh).cosh * bh;
-  const points = [];
-  points.push(x0.slice());
-  for (let i = 1; i < n - 1; i += 1) {
-    const horizontal = (i * h) / n;
-    const t = (horizontal - hOffset) / bh;
-    const vertical = bh * coshSinh(t).cosh + vOffset;
-    points.push([
-      (x0[0] || 0) + across[0] * horizontal + up[0] * vertical,
-      (x0[1] || 0) + across[1] * horizontal + up[1] * vertical,
-      (x0[2] || 0) + across[2] * horizontal + up[2] * vertical,
-    ]);
-  }
-  points.push(x1.slice());
-  return { points, npoints: points.length };
-}
-
 function computeSceneExtent(bounds, statStruct) {
   const fromBounds = Number(bounds?.radius);
   const fromStat = Number(statStruct?.extent);
@@ -1981,32 +1683,6 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
     return;
   }
   ctx.fixedCameraActive = false;
-}
-
-function applyVisualLighting(ctx, vis) {
-  if (!vis || !ctx) return;
-  const head = vis.headlight || {};
-  const diffuseRGB = rgbFromArray(head.diffuse, [1, 1, 1]);
-  const ambientRGB = rgbFromArray(head.ambient, [0.2, 0.2, 0.2]);
-  const active = (head.active ?? 1) !== 0;
-  if (ctx.light) {
-    ctx.light.intensity = active ? Math.max(0.05, averageRGB(diffuseRGB) * 3) : 0;
-    ctx.light.color.setRGB(diffuseRGB[0], diffuseRGB[1], diffuseRGB[2]);
-  }
-  if (ctx.fill) {
-    ctx.fill.intensity = active ? Math.max(0.05, averageRGB(diffuseRGB) * 1.0) : 0;
-    ctx.fill.color.setRGB(diffuseRGB[0], diffuseRGB[1], diffuseRGB[2]);
-  }
-  if (ctx.ambient) {
-    ctx.ambient.intensity = active ? Math.max(0.0, averageRGB(ambientRGB)) : 0;
-    ctx.ambient.color.setRGB(ambientRGB[0], ambientRGB[1], ambientRGB[2]);
-  }
-  if (ctx.hemi) {
-    const hemiStrength = Math.max(0.0, averageRGB(ambientRGB));
-    ctx.hemi.intensity = active ? hemiStrength : 0;
-    ctx.hemi.color.setRGB(diffuseRGB[0], diffuseRGB[1], diffuseRGB[2]);
-    ctx.hemi.groundColor.setRGB(ambientRGB[0], ambientRGB[1], ambientRGB[2]);
-  }
 }
 
 function ensureMjLightRig(ctx) {
@@ -2478,12 +2154,16 @@ function applyViewerCameraSnapshot(ctx, snapshot, state, bounds, { tempVecA, tem
   return true;
 }
 
-function computeBoundsFromSnapshot(snapshot, { ignoreStatic = false } = {}) {
-  const n = snapshot?.ngeom | 0;
-  const xpos = snapshot?.xpos;
-  if (!xpos || n <= 0) return null;
-  const gsize = snapshot?.gsize;
-  const gtype = snapshot?.gtype;
+function computeBoundsFromSceneSoA(snapshot, { ignoreStatic = false } = {}) {
+  const scnNgeom = Number.isFinite(snapshot?.scn_ngeom) ? (snapshot.scn_ngeom | 0) : -1;
+  if (scnNgeom <= 0) return null;
+  const pos = snapshot?.scn_pos || null;
+  const size = snapshot?.scn_size || null;
+  const type = snapshot?.scn_type || null;
+  const objType = snapshot?.scn_objtype || null;
+  if (!pos || !size || !type || !objType) return null;
+  if (pos.length < scnNgeom * 3 || size.length < scnNgeom * 3 || type.length < scnNgeom || objType.length < scnNgeom) return null;
+
   let minx = Number.POSITIVE_INFINITY;
   let miny = Number.POSITIVE_INFINITY;
   let minz = Number.POSITIVE_INFINITY;
@@ -2491,19 +2171,20 @@ function computeBoundsFromSnapshot(snapshot, { ignoreStatic = false } = {}) {
   let maxy = Number.NEGATIVE_INFINITY;
   let maxz = Number.NEGATIVE_INFINITY;
   let used = 0;
-  for (let i = 0; i < n; i += 1) {
-    const base = 3 * i;
-    const x = Number(xpos[base + 0]) || 0;
-    const y = Number(xpos[base + 1]) || 0;
-    const z = Number(xpos[base + 2]) || 0;
-    const sx = gsize?.[base + 0] ?? 0.1;
-    const sy = gsize?.[base + 1] ?? sx;
-    const sz = gsize?.[base + 2] ?? sx;
-    const type = gtype?.[i] ?? MJ_GEOM.BOX;
-    if (ignoreStatic && (type === MJ_GEOM.PLANE || type === MJ_GEOM.HFIELD)) {
+  for (let si = 0; si < scnNgeom; si += 1) {
+    if ((objType[si] | 0) !== MJ_OBJ.GEOM) continue;
+    const base = si * 3;
+    const x = Number(pos[base + 0]) || 0;
+    const y = Number(pos[base + 1]) || 0;
+    const z = Number(pos[base + 2]) || 0;
+    const sx = Number(size[base + 0]) || 0.1;
+    const sy = Number(size[base + 1]) || sx;
+    const sz = Number(size[base + 2]) || sx;
+    const gtype = type[si] ?? MJ_GEOM.BOX;
+    if (ignoreStatic && (gtype === MJ_GEOM.PLANE || gtype === MJ_GEOM.HFIELD)) {
       continue;
     }
-    const radius = computeGeomRadius(type, sx, sy, sz);
+    const radius = computeGeomRadius(gtype, sx, sy, sz);
     const pxMin = x - radius;
     const pyMin = y - radius;
     const pzMin = z - radius;
@@ -2527,10 +2208,7 @@ function computeBoundsFromSnapshot(snapshot, { ignoreStatic = false } = {}) {
   const dz = maxz - minz;
   const radius = Math.max(dx, dy, dz) / 2;
   const fallback = Math.max(Math.abs(cx), Math.abs(cy), Math.abs(cz), 0.6);
-  return {
-    center: [cx, cy, cz],
-    radius: Number.isFinite(radius) && radius > 0 ? radius : fallback,
-  };
+  return { center: [cx, cy, cz], radius: Number.isFinite(radius) && radius > 0 ? radius : fallback };
 }
 
   function overlayScale(radius, factor, min = 0.05, max = 2) {
@@ -2562,11 +2240,11 @@ function meanSizeFromState(state, context = null) {
     return { meanSize, scaleAll };
   }
 
-  function computeScenePolicy(snapshot, state, context) {
-    const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
-    const voptFlags = Array.isArray(state.rendering?.voptFlags)
-      ? state.rendering.voptFlags
-      : (Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : (getDefaultVopt(context, state) || []));
+function computeScenePolicy(snapshot, state, context) {
+  const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
+  const voptFlags = Array.isArray(state.rendering?.voptFlags)
+    ? state.rendering.voptFlags
+    : (Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : (getDefaultVopt(context, state) || []));
     const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
     const skyboxFlag = sceneFlags[4] !== false;
     const shadowEnabled = segmentEnabled ? false : sceneFlags[0] !== false;
@@ -2587,20 +2265,6 @@ function meanSizeFromState(state, context = null) {
       hideAllGeometry,
     };
   }
-
-function shouldDisplayGeom(index, options = {}) {
-  if (!Number.isFinite(index) || index < 0) return false;
-  if (options.hideAllGeometry) return false;
-  const mask = options.geomGroupMask;
-  const ids = options.geomGroupIds;
-  if (mask && ids && index < ids.length) {
-    const rawGroup = Number(ids[index]) || 0;
-    if (rawGroup >= 0 && rawGroup < mask.length && !mask[rawGroup]) {
-      return false;
-    }
-  }
-  return true;
-}
 
 function getLabelTexture(text, quality = 1) {
   if (typeof document === 'undefined') return null;
@@ -2756,6 +2420,11 @@ function updateSceneLabelOverlays(context, snapshot, state, options = {}) {
   labelGroup.visible = used > 0;
 }
 
+function computeGeometryBounds(geometry) {
+  geometry?.computeBoundingBox?.();
+  geometry?.computeBoundingSphere?.();
+}
+
 function createPrimitiveGeometry(gtype, sizeVec) {
   let geometry;
   let materialOpts = {
@@ -2908,8 +2577,7 @@ function createPrimitiveGeometry(gtype, sizeVec) {
       break;
     }
   }
-  if (geometry?.computeBoundingBox) geometry.computeBoundingBox();
-  if (geometry?.computeBoundingSphere) geometry.computeBoundingSphere();
+  computeGeometryBounds(geometry);
   return { geometry, materialOpts, postCreate, objectKind };
 }
 
@@ -3194,8 +2862,7 @@ function createMeshGeometryFromAssets(assets, dataId) {
           const usedNormals = t === triCount ? normals : normals.subarray(0, t * 9);
           geometry.setAttribute('position', new THREE.BufferAttribute(usedPositions, 3));
           geometry.setAttribute('normal', new THREE.BufferAttribute(usedNormals, 3));
-          geometry.computeBoundingBox();
-          geometry.computeBoundingSphere();
+          computeGeometryBounds(geometry);
           return geometry;
         }
       }
@@ -3311,8 +2978,7 @@ function createMeshGeometryFromAssets(assets, dataId) {
     if (!geometry.getAttribute('normal')) {
       geometry.computeVertexNormals();
     }
-    geometry.computeBoundingBox();
-    geometry.computeBoundingSphere();
+    computeGeometryBounds(geometry);
     return geometry;
   }
 
@@ -3349,8 +3015,7 @@ function createMeshGeometryFromAssets(assets, dataId) {
   if (!geometry.getAttribute('normal')) {
     geometry.computeVertexNormals();
   }
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
+  computeGeometryBounds(geometry);
   return geometry;
 }
 
@@ -3458,7 +3123,7 @@ class MaterialPool {
   }
   _key(spec) {
     const kind = spec.kind || 'standard';
-    const color = (spec.color >>> 0).toString(16);
+    const color = ((spec.color ?? 0xffffff) >>> 0).toString(16);
     const rough = Math.round(((spec.roughness ?? 0.55) + Number.EPSILON) * 1000) / 1000;
     const metal = Math.round(((spec.metalness ?? 0.0) + Number.EPSILON) * 1000) / 1000;
     const wire = !!spec.wireframe;
@@ -3469,27 +3134,17 @@ class MaterialPool {
     const key = this._key(spec);
     if (this.cache.has(key)) return this.cache.get(key);
     const T = this.THREE;
-    let mat;
+    const color = spec.color ?? 0xffffff;
+    const wireframe = !!spec.wireframe;
     const forceBasic = !!spec.forceBasic;
-    if (spec.kind === 'standard') {
-      mat = forceBasic
-        ? new T.MeshBasicMaterial({ color: spec.color ?? 0xffffff, wireframe: !!spec.wireframe })
-        : new T.MeshStandardMaterial({
-            color: spec.color ?? 0xffffff,
-            roughness: spec.roughness ?? 0.55,
-            metalness: spec.metalness ?? 0.0,
-            wireframe: !!spec.wireframe,
-          });
-    } else {
-      mat = forceBasic
-        ? new T.MeshBasicMaterial({ color: spec.color ?? 0xffffff, wireframe: !!spec.wireframe })
-        : new T.MeshStandardMaterial({
-            color: spec.color ?? 0xffffff,
-            roughness: spec.roughness ?? 0.55,
-            metalness: spec.metalness ?? 0.0,
-            wireframe: !!spec.wireframe,
-          });
-    }
+    const mat = forceBasic
+      ? new T.MeshBasicMaterial({ color, wireframe })
+      : new T.MeshStandardMaterial({
+          color,
+          roughness: spec.roughness ?? 0.55,
+          metalness: spec.metalness ?? 0.0,
+          wireframe,
+        });
     mat.userData = mat.userData || {};
     mat.userData.pooled = true;
     this.cache.set(key, mat);
@@ -3599,8 +3254,7 @@ function ensureInstancedGeometry(inst, gtype) {
     default:
       return null;
   }
-  if (geometry?.computeBoundingBox) geometry.computeBoundingBox();
-  if (geometry?.computeBoundingSphere) geometry.computeBoundingSphere();
+  computeGeometryBounds(geometry);
   inst.geometries.set(key, geometry);
   strictEnsure('ensureInstancedGeometry', { reason: 'create', geomType: key });
   return geometry;
@@ -3762,126 +3416,6 @@ function ensureInstancedBatch(ctx, inst, batchKey, geometry, material, capacity)
   inst.batches.set(key, batch);
   strictEnsure('ensureInstancedBatch', { reason: 'create', key, capacity: cap });
   return batch;
-}
-
-function sortTransparentInstancedBatch(ctx, inst, batch, camera) {
-  const used = batch?.used | 0;
-  const mesh = batch?.mesh || null;
-  if (!mesh || used <= 1) return false;
-  if (!camera || typeof camera.getWorldPosition !== 'function' || typeof camera.getWorldDirection !== 'function') return false;
-  const matrixAttr = mesh.instanceMatrix || null;
-  const matrixArr = matrixAttr?.array || null;
-  const colorAttr = mesh.instanceColor || null;
-  const colorArr = colorAttr?.array || null;
-  const geomIndexArr = batch.instanceToGeomIndex || null;
-  if (!matrixArr || matrixArr.length < used * 16) return false;
-  if (!geomIndexArr || geomIndexArr.length < used) return false;
-
-  const cap = batch.capacity | 0;
-  if (!(cap > 0)) return false;
-  if (!Array.isArray(batch.sortOrder)) batch.sortOrder = [];
-  if (!(batch.sortKeys instanceof Float32Array) || batch.sortKeys.length !== cap) {
-    batch.sortKeys = new Float32Array(cap);
-  }
-  if (!(batch.sortTmpMatrix instanceof Float32Array) || batch.sortTmpMatrix.length !== cap * 16) {
-    batch.sortTmpMatrix = new Float32Array(cap * 16);
-  }
-  if (colorArr && (!(batch.sortTmpColor instanceof Float32Array) || batch.sortTmpColor.length !== cap * 3)) {
-    batch.sortTmpColor = new Float32Array(cap * 3);
-  }
-  if (!(batch.sortTmpGeomIndex instanceof Int32Array) || batch.sortTmpGeomIndex.length !== cap) {
-    batch.sortTmpGeomIndex = new Int32Array(cap);
-  }
-
-  const order = batch.sortOrder;
-  order.length = used;
-  const keys = batch.sortKeys;
-  camera.getWorldPosition(inst.tmpCamPos);
-  camera.getWorldDirection(inst.tmpCamDir);
-  const camX = inst.tmpCamPos.x;
-  const camY = inst.tmpCamPos.y;
-  const camZ = inst.tmpCamPos.z;
-  const dirX = inst.tmpCamDir.x;
-  const dirY = inst.tmpCamDir.y;
-  const dirZ = inst.tmpCamDir.z;
-  const world = mesh.matrixWorld?.elements || null;
-
-  for (let i = 0; i < used; i += 1) {
-    order[i] = i;
-    const base = i * 16;
-    const lx = matrixArr[base + 12] || 0;
-    const ly = matrixArr[base + 13] || 0;
-    const lz = matrixArr[base + 14] || 0;
-    let wx = lx;
-    let wy = ly;
-    let wz = lz;
-    if (world) {
-      wx = world[0] * lx + world[4] * ly + world[8] * lz + world[12];
-      wy = world[1] * lx + world[5] * ly + world[9] * lz + world[13];
-      wz = world[2] * lx + world[6] * ly + world[10] * lz + world[14];
-    }
-    const dx = wx - camX;
-    const dy = wy - camY;
-    const dz = wz - camZ;
-    keys[i] = dx * dirX + dy * dirY + dz * dirZ;
-  }
-
-  order.sort((a, b) => {
-    const da = keys[a];
-    const db = keys[b];
-    const d = db - da;
-    if (d) return d;
-    return a - b;
-  });
-
-  const tmpMatrix = batch.sortTmpMatrix;
-  const tmpColor = batch.sortTmpColor || null;
-  const tmpGeomIndex = batch.sortTmpGeomIndex;
-  for (let newIdx = 0; newIdx < used; newIdx += 1) {
-    const oldIdx = order[newIdx] | 0;
-    const srcMatBase = oldIdx * 16;
-    const dstMatBase = newIdx * 16;
-    for (let j = 0; j < 16; j += 1) {
-      tmpMatrix[dstMatBase + j] = matrixArr[srcMatBase + j];
-    }
-    if (colorArr && tmpColor) {
-      const srcColorBase = oldIdx * 3;
-      const dstColorBase = newIdx * 3;
-      tmpColor[dstColorBase + 0] = colorArr[srcColorBase + 0];
-      tmpColor[dstColorBase + 1] = colorArr[srcColorBase + 1];
-      tmpColor[dstColorBase + 2] = colorArr[srcColorBase + 2];
-    }
-    tmpGeomIndex[newIdx] = geomIndexArr[oldIdx] | 0;
-  }
-
-  for (let i = 0; i < used * 16; i += 1) {
-    matrixArr[i] = tmpMatrix[i];
-  }
-  if (colorArr && tmpColor) {
-    for (let i = 0; i < used * 3; i += 1) {
-      colorArr[i] = tmpColor[i];
-    }
-  }
-  for (let i = 0; i < used; i += 1) {
-    geomIndexArr[i] = tmpGeomIndex[i] | 0;
-  }
-
-  if (inst?.geomRefs) {
-    for (let instanceId = 0; instanceId < used; instanceId += 1) {
-      const geomIndex = geomIndexArr[instanceId] | 0;
-      if (!(geomIndex >= 0)) continue;
-      const ref = inst.geomRefs[geomIndex] || null;
-      if (ref && ref.kind === 'instance' && ref.mesh === mesh) {
-        ref.instanceId = instanceId;
-      }
-    }
-  }
-
-  if (matrixAttr) matrixAttr.needsUpdate = true;
-  if (colorAttr) colorAttr.needsUpdate = true;
-  mesh.userData = mesh.userData || {};
-  mesh.userData.instanceToGeomIndex = geomIndexArr;
-  return true;
 }
 
 function sortInstancedBatchByOrderRank(inst, batch) {
@@ -4084,41 +3618,34 @@ function applyMaterialFlags(mesh, index, state, sceneFlagsOverride = null) {
   mesh.material.wireframe = !!sceneFlags[1];
 }
 
+function resolveMaterialScalar(matIndex, assets, field) {
+  if (!(matIndex >= 0)) return null;
+  const arr = assets?.materials?.[field] || null;
+  if (!arr) return null;
+  const value = arr[matIndex];
+  return Number.isFinite(value) ? Number(value) : null;
+}
+
 function resolveMaterialReflectance(matIndex, assets) {
-  if (!(matIndex >= 0)) return 0;
-  const reflectArr = assets?.materials?.reflectance || null;
-  if (!reflectArr) return 0;
-  const value = reflectArr[matIndex];
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Number(value));
+  const value = resolveMaterialScalar(matIndex, assets, 'reflectance');
+  if (value == null) return 0;
+  return Math.max(0, value);
 }
 
 function resolveMaterialMetallic(matIndex, assets) {
-  if (!(matIndex >= 0)) return null;
-  const metallicArr = assets?.materials?.metallic || null;
-  if (!metallicArr) return null;
-  const value = metallicArr[matIndex];
-  if (!Number.isFinite(value)) return null;
-  return clampUnit(Number(value));
+  const value = resolveMaterialScalar(matIndex, assets, 'metallic');
+  return value == null ? null : clampUnit(value);
 }
 
 function resolveMaterialRoughness(matIndex, assets) {
-  if (!(matIndex >= 0)) return null;
-  const roughnessArr = assets?.materials?.roughness || null;
-  if (!roughnessArr) return null;
-  const value = roughnessArr[matIndex];
-  if (!Number.isFinite(value)) return null;
-  return clampUnit(Number(value));
+  const value = resolveMaterialScalar(matIndex, assets, 'roughness');
+  return value == null ? null : clampUnit(value);
 }
 
 function resolveMaterialEmission(matIndex, assets) {
-  if (!(matIndex >= 0)) return null;
-  const emissionArr = assets?.materials?.emission || null;
-  if (!emissionArr) return null;
-  const value = emissionArr[matIndex];
-  if (!Number.isFinite(value)) return null;
-  const scalar = Number(value);
-  return scalar > 0 ? scalar : 0;
+  const value = resolveMaterialScalar(matIndex, assets, 'emission');
+  if (value == null) return null;
+  return value > 0 ? value : 0;
 }
 
 function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
@@ -5639,18 +5166,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     ? (state.rendering.flexLayer | 0)
     : 0;
   const baseNgeom = snapshot?.ngeom | 0;
-  const geomNameSource = state?.model?.geoms || null;
-  let geomNameLookup = ctx._geomNameLookup || null;
-  if (ctx._geomNameLookupSource !== geomNameSource) {
-    geomNameLookup = createGeomNameLookup(geomNameSource);
-    ctx._geomNameLookup = geomNameLookup;
-    ctx._geomNameLookupSource = geomNameSource;
-  }
-  if (!geomNameLookup) {
-    geomNameLookup = createGeomNameLookup(geomNameSource);
-    ctx._geomNameLookup = geomNameLookup;
-    ctx._geomNameLookupSource = geomNameSource;
-  }
+  const geomNameLookup = getOrCreateGeomNameLookup(ctx, state?.model?.geoms || null);
   const geomBodyIdView = state?.model?.geomBodyId || null;
   const weldIdView =
     assets?.bodies?.weldid ||
@@ -5706,14 +5222,26 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   const transparentBins = transparentSortMode === 'strict' ? 1 : transparentBinsRequested;
   const transparentOrderingEnabled = transparentBins > 0;
   const sortTransparentInstances = transparentOrderingEnabled && transparentSortMode === 'strict';
-  const transparentBinningEnabled = transparentBins > 1;
 
   const camera = ctx?.camera || null;
   const rootMatWorld = ctx?.root?.matrixWorld || null;
+  const rootElements = rootMatWorld?.elements || null;
   let transparentCameraReady = false;
+  let camX = 0;
+  let camY = 0;
+  let camZ = 0;
+  let dirX = 0;
+  let dirY = 0;
+  let dirZ = 0;
   if (transparentOrderingEnabled && camera && typeof camera.getWorldDirection === 'function' && typeof camera.getWorldPosition === 'function') {
     camera.getWorldPosition(TRANSPARENT_BIN_CAM_POS);
     camera.getWorldDirection(TRANSPARENT_BIN_CAM_DIR);
+    camX = TRANSPARENT_BIN_CAM_POS.x;
+    camY = TRANSPARENT_BIN_CAM_POS.y;
+    camZ = TRANSPARENT_BIN_CAM_POS.z;
+    dirX = TRANSPARENT_BIN_CAM_DIR.x;
+    dirY = TRANSPARENT_BIN_CAM_DIR.y;
+    dirZ = TRANSPARENT_BIN_CAM_DIR.z;
     transparentCameraReady = true;
   }
 
@@ -5751,14 +5279,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       const a0 = Number(rgbaView[si * 4 + 3]) || 0;
       if (!(a0 < 0.999)) continue;
       const posBase = si * 3;
-      TRANSPARENT_BIN_WORLD_POS.set(
-        posView[posBase + 0] || 0,
-        posView[posBase + 1] || 0,
-        posView[posBase + 2] || 0,
-      );
-      if (rootMatWorld) TRANSPARENT_BIN_WORLD_POS.applyMatrix4(rootMatWorld);
-      TRANSPARENT_BIN_WORLD_POS.sub(TRANSPARENT_BIN_CAM_POS);
-      const depth = TRANSPARENT_BIN_WORLD_POS.dot(TRANSPARENT_BIN_CAM_DIR);
+      const depth = depthFromSoAPos(posView, posBase, rootElements, camX, camY, camZ, dirX, dirY, dirZ);
       if (count === 0) {
         min = depth;
         max = depth;
@@ -5840,18 +5361,24 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   // Flex/skin are special: their geometry comes from separate buffers, so they are
   // rendered via their dedicated pools but are still *enumerated* by mjvScene.
   if (!hideAllGeometry && (showFlexAny || showSkin)) {
-    if (showFlexAny) {
-      const flexAssets = assets?.flexes || null;
-      const count = flexAssets?.count | 0;
-      if (count > 0) {
-        let used = 0;
-        const seen = new Set();
-        for (let si = 0; si < scnNgeom; si += 1) {
-          if ((objTypeView[si] | 0) !== MJ_OBJ.FLEX) continue;
+    const flexAssets = showFlexAny ? (assets?.flexes || null) : null;
+    const flexCount = flexAssets?.count | 0;
+    const skinAssets = showSkin ? (assets?.skins || null) : null;
+    const skinCount = skinAssets?.count | 0;
+
+    let flexUsed = 0;
+    let skinUsed = 0;
+    const seenFlex = (showFlexAny && flexCount > 0) ? new Set() : null;
+    const seenSkin = (showSkin && skinCount > 0) ? new Set() : null;
+
+    if (seenFlex || seenSkin) {
+      for (let si = 0; si < scnNgeom; si += 1) {
+        const objType = objTypeView[si] | 0;
+        if (objType === MJ_OBJ.FLEX && seenFlex) {
           const flexIndex = objIdView[si] | 0;
-          if (flexIndex < 0 || flexIndex >= count) continue;
-          if (seen.has(flexIndex)) continue;
-          seen.add(flexIndex);
+          if (flexIndex < 0 || flexIndex >= flexCount) continue;
+          if (seenFlex.has(flexIndex)) continue;
+          seenFlex.add(flexIndex);
           const entry = ensureFlexEntry(ctx, flexIndex, assets, state);
           if (!entry) continue;
           entry.group.visible = true;
@@ -5886,35 +5413,29 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
           } else {
             entry.faces.visible = false;
           }
-          used += 1;
-        }
-        const group = ensureFlexGroup(ctx);
-        if (group) group.visible = used > 0;
-      }
-    }
-
-    if (showSkin) {
-      const skinAssets = assets?.skins || null;
-      const count = skinAssets?.count | 0;
-      if (count > 0) {
-        let used = 0;
-        const seen = new Set();
-        for (let si = 0; si < scnNgeom; si += 1) {
-          if ((objTypeView[si] | 0) !== MJ_OBJ.SKIN) continue;
+          flexUsed += 1;
+        } else if (objType === MJ_OBJ.SKIN && seenSkin) {
           const skinIndex = objIdView[si] | 0;
-          if (skinIndex < 0 || skinIndex >= count) continue;
-          if (seen.has(skinIndex)) continue;
-          seen.add(skinIndex);
+          if (skinIndex < 0 || skinIndex >= skinCount) continue;
+          if (seenSkin.has(skinIndex)) continue;
+          seenSkin.add(skinIndex);
           const entry = ensureSkinEntry(ctx, skinIndex, assets, state);
           if (!entry) continue;
           applySkinAppearance(entry, skinIndex, assets, ctx, textureEnabled);
           const ok = updateSkinMesh(entry, skinIndex, snapshot, assets);
           entry.mesh.visible = ok;
-          if (ok) used += 1;
+          if (ok) skinUsed += 1;
         }
-        const group = ensureSkinGroup(ctx);
-        if (group) group.visible = used > 0;
       }
+    }
+
+    if (showFlexAny && flexCount > 0) {
+      const group = ensureFlexGroup(ctx);
+      if (group) group.visible = flexUsed > 0;
+    }
+    if (showSkin && skinCount > 0) {
+      const group = ensureSkinGroup(ctx);
+      if (group) group.visible = skinUsed > 0;
     }
   }
 
@@ -6112,22 +5633,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       let transparentDepthNorm = 0;
       if (transparentCameraReady && transparentOrderingEnabled && isTransparent) {
         const posBase = si * 3;
-        TRANSPARENT_BIN_WORLD_POS.set(
-          posView[posBase + 0] || 0,
-          posView[posBase + 1] || 0,
-          posView[posBase + 2] || 0,
-        );
-        if (rootMatWorld) TRANSPARENT_BIN_WORLD_POS.applyMatrix4(rootMatWorld);
-        TRANSPARENT_BIN_WORLD_POS.sub(TRANSPARENT_BIN_CAM_POS);
-        const depth = TRANSPARENT_BIN_WORLD_POS.dot(TRANSPARENT_BIN_CAM_DIR);
-        const depthNorm = transparentDepthInvSpan > 1e-12 ? ((depth - transparentDepthMin) * transparentDepthInvSpan) : 0;
-        transparentDepthNorm = Math.max(0, Math.min(1, depthNorm));
-        if (transparentBinningEnabled) {
-          const k = Math.floor(transparentDepthNorm * transparentBins);
-          transparentBin = Math.max(0, Math.min((transparentBins | 0) - 1, k | 0));
-        } else {
-          transparentBin = 0;
-        }
+        const depth = depthFromSoAPos(posView, posBase, rootElements, camX, camY, camZ, dirX, dirY, dirZ);
+        transparentDepthNorm = transparentDepthNorm01(depth, transparentDepthMin, transparentDepthInvSpan);
+        transparentBin = transparentBinFromDepthNorm(transparentDepthNorm, transparentBins);
         transparentOrder = (transparentBins | 0) - 1 - (transparentBin | 0);
         if (transparentBinsUsed && transparentBin >= 0 && transparentBin < transparentBinsUsed.length) {
           transparentBinsUsed[transparentBin] = 1;
@@ -6549,22 +6057,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
         let order = 0;
         if (transparentCameraReady) {
           const posBase = si * 3;
-          TRANSPARENT_BIN_WORLD_POS.set(
-            posView[posBase + 0] || 0,
-            posView[posBase + 1] || 0,
-            posView[posBase + 2] || 0,
-          );
-          if (rootMatWorld) TRANSPARENT_BIN_WORLD_POS.applyMatrix4(rootMatWorld);
-          TRANSPARENT_BIN_WORLD_POS.sub(TRANSPARENT_BIN_CAM_POS);
-          const depth = TRANSPARENT_BIN_WORLD_POS.dot(TRANSPARENT_BIN_CAM_DIR);
-          const depthNorm = transparentDepthInvSpan > 1e-12 ? ((depth - transparentDepthMin) * transparentDepthInvSpan) : 0;
-          const depthNormClamped = Math.max(0, Math.min(1, depthNorm));
-          if (transparentBinningEnabled) {
-            const k = Math.floor(depthNormClamped * transparentBins);
-            bin = Math.max(0, Math.min((transparentBins | 0) - 1, k | 0));
-          } else {
-            bin = 0;
-          }
+          const depth = depthFromSoAPos(posView, posBase, rootElements, camX, camY, camZ, dirX, dirY, dirZ);
+          const depthNormClamped = transparentDepthNorm01(depth, transparentDepthMin, transparentDepthInvSpan);
+          bin = transparentBinFromDepthNorm(depthNormClamped, transparentBins);
         }
         transparentBinKey = bin | 0;
         order = (transparentBins | 0) - 1 - transparentBinKey;
@@ -6721,7 +6216,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   // extra-geom construction across frames while always updating existing ones.
   const createBudget = 8;
   let createdThisFrame = 0;
-  const tCreateStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : null;
+  const tCreateStart = perfNow();
   const createTimeBudgetMs = 6;
   for (let k = 0; k < extras.length; k += 1) {
     const meshIndex = baseNgeom + k;
@@ -6729,7 +6224,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     const existing = Array.isArray(ctx.meshes) ? ctx.meshes[meshIndex] : null;
     let allowCreate = true;
     if (!existing) {
-      if (tCreateStart != null && (performance.now() - tCreateStart) > createTimeBudgetMs) {
+      if ((perfNow() - tCreateStart) > createTimeBudgetMs) {
         allowCreate = false;
       }
       if (createdThisFrame >= createBudget) {
@@ -6960,20 +6455,12 @@ function createRendererManager({
             perfSample('renderer:program_count', programs.length | 0);
           }
         }
-      }
-      if (perfEnabled) {
         perfMarkOnce('play:renderer:first_draw');
         perfSample('renderer:draw_ms', perfNow() - tDrawStart);
       }
       // Expose a simple frame counter for headless readiness checks
-      try {
-        ctx._frameCounter = (ctx._frameCounter || 0) + 1;
-        if (typeof window !== 'undefined') {
-          window.__frameCounter = ctx._frameCounter;
-        }
-      } catch (err) {
-        strictCatch(err, 'main:render_loop_frame_counter');
-      }
+      ctx._frameCounter = (ctx._frameCounter || 0) + 1;
+      window.__frameCounter = ctx._frameCounter;
     };
     ctx.frameId = window.requestAnimationFrame(step);
     if (!ctx.loopCleanup) {
@@ -7157,6 +6644,7 @@ function createRendererManager({
       hazeEnabled,
     } = policy;
     context.reflectionActive = reflectionEnabled;
+    const ngeom = snapshot?.ngeom | 0;
 
     const assets = state.rendering?.assets || null;
     const tAssetsStart = perfEnabled ? perfNow() : 0;
@@ -7302,30 +6790,49 @@ function createRendererManager({
 
     const hideAllGeometry = !!policy.hideAllGeometry;
 
-    const ngeom = snapshot.ngeom | 0;
-    const nextBounds = ngeom > 0 ? computeBoundsFromSnapshot(snapshot) : null;
-    const trackingBounds = ngeom > 0 ? (computeBoundsFromSnapshot(snapshot, { ignoreStatic: true }) || nextBounds) : nextBounds;
+    const nextBounds = computeBoundsFromSceneSoA(snapshot);
+    const trackingBounds = computeBoundsFromSceneSoA(snapshot, { ignoreStatic: true }) || nextBounds;
     const trackingGeomSelection = Number.isFinite(state.runtime?.trackingGeom) ? (state.runtime.trackingGeom | 0) : -1;
     const trackingOverride = (() => {
-      if (!(trackingGeomSelection >= 0) || !(ngeom > 0)) return null;
-      if (!snapshot.xpos || trackingGeomSelection >= ngeom) return null;
-      const base = trackingGeomSelection * 3;
-      const px = Number(snapshot.xpos[base + 0]);
-      const py = Number(snapshot.xpos[base + 1]);
-      const pz = Number(snapshot.xpos[base + 2]);
-      if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return null;
-      let radius = null;
-      try {
-        const sizeView = snapshot.gsize || null;
-        const typeView = snapshot.gtype || null;
-        const sx = sizeView ? Number(sizeView[base + 0]) : 0.1;
-        const sy = sizeView ? Number(sizeView[base + 1]) : sx;
-        const sz = sizeView ? Number(sizeView[base + 2]) : sx;
-        const gType = typeView ? (typeView[trackingGeomSelection] ?? MJ_GEOM.BOX) : MJ_GEOM.BOX;
-        radius = computeGeomRadius(gType, sx, sy, sz);
-      } catch (err) {
-        strictCatch(err, 'main:tracking_override_radius');
+      if (!(trackingGeomSelection >= 0)) return null;
+      const scnNgeom = Number.isFinite(snapshot?.scn_ngeom) ? (snapshot.scn_ngeom | 0) : -1;
+      if (scnNgeom <= 0) return null;
+      const posView = snapshot?.scn_pos || null;
+      const sizeView = snapshot?.scn_size || null;
+      const typeView = snapshot?.scn_type || null;
+      const objTypeView = snapshot?.scn_objtype || null;
+      const objIdView = snapshot?.scn_objid || null;
+      if (!posView || !sizeView || !typeView || !objTypeView || !objIdView) return null;
+
+      let scnIndex = -1;
+      const geomToScn = context?._geomToScn || null;
+      if (geomToScn && trackingGeomSelection < geomToScn.length) {
+        const candidate = geomToScn[trackingGeomSelection] | 0;
+        if (candidate >= 0 && candidate < scnNgeom &&
+          ((objTypeView[candidate] | 0) === MJ_OBJ.GEOM) &&
+          ((objIdView[candidate] | 0) === trackingGeomSelection)
+        ) {
+          scnIndex = candidate;
+        }
       }
+      if (scnIndex < 0) {
+        for (let si = 0; si < scnNgeom; si += 1) {
+          if ((objTypeView[si] | 0) !== MJ_OBJ.GEOM) continue;
+          if ((objIdView[si] | 0) === trackingGeomSelection) { scnIndex = si; break; }
+        }
+      }
+      if (scnIndex < 0) return null;
+
+      const base = scnIndex * 3;
+      const px = Number(posView[base + 0]);
+      const py = Number(posView[base + 1]);
+      const pz = Number(posView[base + 2]);
+      if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return null;
+      const sx = Number(sizeView[base + 0]) || 0.1;
+      const sy = Number(sizeView[base + 1]) || sx;
+      const sz = Number(sizeView[base + 2]) || sx;
+      const gType = typeView[scnIndex] ?? MJ_GEOM.BOX;
+      const radius = computeGeomRadius(gType, sx, sy, sz);
       return {
         index: trackingGeomSelection,
         position: [px, py, pz],
@@ -7361,8 +6868,9 @@ function createRendererManager({
     }
     let drawn = 0;
 
+    const scnNgeom = Number.isFinite(snapshot?.scn_ngeom) ? (snapshot.scn_ngeom | 0) : -1;
     const hasSceneSoA =
-      (snapshot?.scn_ngeom | 0) > 0 &&
+      scnNgeom >= 0 &&
       !!snapshot?.scn_type &&
       !!snapshot?.scn_pos &&
       !!snapshot?.scn_mat &&
@@ -7374,11 +6882,6 @@ function createRendererManager({
       !!snapshot?.scn_objid &&
       !!snapshot?.scn_category;
 
-    const sizeView = snapshot.gsize || assets?.geoms?.size || null;
-    const typeView = snapshot.gtype || assets?.geoms?.type || null;
-    const dataIdView = snapshot.gdataid || assets?.geoms?.dataid || null;
-    const matIdView = snapshot.gmatid || assets?.geoms?.matid || null;
-    const bodyIdView = state?.model?.geomBodyId || null;
     // Scene-first: decor/debug visuals come from mjvScene; JS overlay builders removed.
     updateSceneLabelOverlays(context, snapshot, state, { hideAllGeometry });
 
@@ -8153,12 +7656,13 @@ function createPickingController({
   }
 
   function clearSelection({ toast = false } = {}) {
+    const ts = Date.now();
     store.update((draft) => {
-      if (!draft.runtime) draft.runtime = {};
-      draft.runtime.selection = { ...defaultSelection(), seq: 0, timestamp: Date.now() };
-      draft.runtime.lastAction = 'select-none';
+      const runtime = draft.runtime || (draft.runtime = {});
+      runtime.selection = { ...defaultSelection(), seq: 0, timestamp: ts };
+      runtime.lastAction = 'select-none';
       if (toast) {
-        draft.toast = { message: 'Selection cleared', ts: Date.now() };
+        draft.toast = { message: 'Selection cleared', ts };
       }
     });
     dragState.bodyId = -1;
@@ -8183,9 +7687,9 @@ function createPickingController({
       anchor = [dragState.anchorLocal.x, dragState.anchorLocal.y, dragState.anchorLocal.z];
     }
     store.update((draft) => {
-      if (!draft.runtime) draft.runtime = {};
-      const seq = (draft.runtime.selection?.seq || 0) + 1;
-      draft.runtime.selection = {
+      const runtime = draft.runtime || (draft.runtime = {});
+      const seq = (runtime.selection?.seq || 0) + 1;
+      runtime.selection = {
         geom: pick.geomIndex,
         body: pick.bodyId,
         joint: pick.jointId,
@@ -8198,7 +7702,7 @@ function createPickingController({
         seq,
         timestamp: ts,
       };
-      draft.runtime.lastAction = 'select';
+      runtime.lastAction = 'select';
       draft.toast = { message: `Selected ${pick.geomName}`, ts };
     });
     if (anchor) {
@@ -8254,13 +7758,8 @@ function createPickingController({
       return mesh.userData.geomName;
     }
     const state = store.get();
-    const geoms = Array.isArray(state?.model?.geoms) ? state.model.geoms : [];
-    for (const geom of geoms) {
-      if ((geom?.index | 0) === index) {
-        return (geom?.name || `Geom ${index}`).trim();
-      }
-    }
-    return `Geom ${index}`;
+    const lookup = getOrCreateGeomNameLookup(renderCtx, state?.model?.geoms || null);
+    return geomNameFromLookup(lookup, index);
   }
 
   function bodyIdFor(index) {
@@ -8268,15 +7767,10 @@ function createPickingController({
     if (Number.isFinite(mesh?.userData?.geomBodyId)) {
       return mesh.userData.geomBodyId | 0;
     }
-    const state = store.get();
-    const arr = state?.model?.geomBodyId;
-    if (!arr) return -1;
-    try {
-      return arr[index] ?? -1;
-    } catch (err) {
-      strictCatch(err, 'main:bodyIdFor');
-      return -1;
-    }
+    const arr = store.get()?.model?.geomBodyId || null;
+    if (!arr || !(index >= 0) || index >= arr.length) return -1;
+    const bodyId = arr[index];
+    return Number.isFinite(bodyId) ? (bodyId | 0) : -1;
   }
 
   function jointIdFor(bodyId) {
@@ -8299,8 +7793,8 @@ function createPickingController({
     if (!event) return;
     if (event.shiftKey) {
       store.update((draft) => {
-        if (!draft.runtime) draft.runtime = {};
-        draft.runtime.trackingGeom = pick.geomIndex;
+        const runtime = draft.runtime || (draft.runtime = {});
+        runtime.trackingGeom = pick.geomIndex;
       });
       const trackingCtrl = { item_id: 'simulation.tracking_geom', type: 'select' };
       const cameraCtrl = { item_id: 'simulation.camera', type: 'select' };
@@ -8443,13 +7937,11 @@ function createPickingController({
       localpos: [dragState.anchorLocal.x, dragState.anchorLocal.y, dragState.anchorLocal.z],
     });
     store.update((draft) => {
-      if (!draft.runtime) draft.runtime = {};
-      if (!draft.runtime.perturb) {
-        draft.runtime.perturb = { mode: 'idle', active: false };
-      }
-      draft.runtime.perturb.mode = dragState.mode;
-      draft.runtime.perturb.active = true;
-      draft.runtime.lastAction = dragState.mode === 'translate' ? 'translate' : 'rotate';
+      const runtime = draft.runtime || (draft.runtime = {});
+      const perturb = runtime.perturb || (runtime.perturb = { mode: 'idle', active: false });
+      perturb.mode = dragState.mode;
+      perturb.active = true;
+      runtime.lastAction = dragState.mode === 'translate' ? 'translate' : 'rotate';
     });
   }
 
