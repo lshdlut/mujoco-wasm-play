@@ -1467,14 +1467,25 @@ async function loadModule() {
 
   // Optional cache tag from version.json (sha8) to avoid stale caching
   let vTag = '';
+  if (distBase && typeof distBase.href === 'string') {
+    const href = distBase.href;
+    const jsdelivrMatch = href.match(/\/gh\/[^/]+\/[^/]+@([^/]+)\//);
+    const rawMatch = href.match(/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/([^/]+)\//);
+    const ref = jsdelivrMatch?.[1] || rawMatch?.[1] || '';
+    if (ref) {
+      vTag = ref.length > 32 ? ref.slice(0, 8) : ref;
+    }
+  }
   try {
-    const vinfoUrl = new URL('version.json', distBase);
-    vinfoUrl.searchParams.set('cb', String(Date.now()));
-    const r = await fetch(vinfoUrl.href, { cache: 'no-store' });
-    if (r.ok) {
-      const j = await r.json();
-      const s = String(j.sha256 || j.git_sha || j.mujoco_git_sha || '');
-      vTag = s.slice(0, 8);
+    if (!vTag) {
+      const vinfoUrl = new URL('version.json', distBase);
+      vinfoUrl.searchParams.set('cb', String(Date.now()));
+      const r = await fetch(vinfoUrl.href, { cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        const s = String(j.sha256 || j.git_sha || j.mujoco_git_sha || '');
+        vTag = s.slice(0, 8);
+      }
     }
   } catch (err) {
     strictCatch(err, 'worker:version_json', { allow: true });

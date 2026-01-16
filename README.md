@@ -1,13 +1,16 @@
 # mujoco-wasm-play
 
-[**Live Demo (Rajagopal2015, MuJoCo 3.3.7)**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.7-r1/dist/3.3.7/)
+![mujoco-wasm-play](mujoco-wasm-play-cards.png)
+
+[**Live Demo (Rajagopal2015, MuJoCo 3.3.7)**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/)
 
 > Active development: APIs, query parameters, and file layout may change without notice; expect breaking changes between revisions.
 
 Glue-layer and playground for consuming MuJoCo WASM artifacts produced by 'mujoco-wasm-forge'.
 
-- Status: scaffolded; TODO: add JS/TS API, zero-copy typed array accessors, and examples.
-- Upstream artifacts: see Releases of mujoco-wasm-forge (forge-<ver>-r<rev>).
+- Forge repo: https://github.com/lshdlut/mujoco-wasm-forge
+- Status: active development (expect breaking changes).
+- Upstream artifacts: see mujoco-wasm-forge (dist bundles may differ between tags and main).
 - Note: `dev/package.json` scripts reference `../tests/...`, but `tests/` is intentionally local-only (ignored and not tracked). If you do not have a local `tests/` folder, those scripts will fail.
 
 ## Online Demo / Forge Dist
@@ -16,19 +19,18 @@ Glue-layer and playground for consuming MuJoCo WASM artifacts produced by 'mujoc
 - At runtime, `viewer_runtime.mjs#getForgeDistBase(ver)` resolves the dist base either as:
   - a local path `/dist/<ver>/` (same origin), or
   - an override from `window.__FORGE_DIST_BASE__` or the `forgeBase` query parameter. These strings are treated as templates: if they include `{ver}`, it is replaced by the normalized version (for example `3.3.7`).
-- A typical remote base template (for jsDelivr + forge tag) looks like:
-  - `https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-{ver}-r1/dist/{ver}/`
-- When sharing a public demo link (for example from GitHub Pages), include a `forgeBase=` parameter pointing at your forge dist base so the viewer can fetch `mujoco.js`, `mujoco.wasm`, and `version.json` directly from the forge release.
+- This viewer requires a forge build with viewer extensions (scene + vopt pointers). Some forge tags (for example `forge-3.3.7-r1`) ship a minimal MuJoCo build and are not compatible.
+- A typical remote base template (for jsDelivr + pinned forge commit) looks like:
+  - `https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
+- When sharing a public demo link (for example from GitHub Pages), include a `forgeBase=` parameter pointing at your forge dist base so the viewer can fetch `mujoco.js` and `mujoco.wasm`.
 
 ### Example URLs
 
 - Local dev (serve from `dev/` with `dev_server.py` on port 4173):
   - `python dev/dev_server.py --root dev --port 4173`
-  - `http://127.0.0.1:4173/index.html?model=raj&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.7-r1/dist/3.3.7/`
+  - `http://127.0.0.1:4173/index.html?model=raj&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/`
 - Public demo (GitHub Pages, stable MuJoCo 3.3.7, Rajagopal2015 model):
-  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.7-r1/dist/3.3.7/`
-- Optional prerelease demo (MuJoCo 3.3.8-alpha, Rajagopal2015 model):
-  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@forge-3.3.8-alpha1/dist/3.3.8-alpha/`
+  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/`
 
 For the full upstream surface and version/tag mapping, see `https://github.com/lshdlut/mujoco-wasm-forge`.
 
@@ -41,10 +43,3 @@ For the full upstream surface and version/tag mapping, see `https://github.com/l
 ## Built-in Models
 
 - `model=` accepts either a `.xml` path under `dev/` or one of: `raj`, `humanoid`, `humanoid100`, `cards`, `sensor`.
-
-## TODO
-- Define stable JS/TS API surface
-- Add TypeScript types / d.ts
-- Implement XML-in-memory loader (no FS)
-- Add zero-copy HEAP views (qpos/qvel/...)
-- Multi-instance handles (no globals)
