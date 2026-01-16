@@ -238,12 +238,6 @@ body.fullscreen {
     right: 12px;
     min-width: 90px;
   }
-  .overlay-card[data-testid="overlay-simtime"] {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    min-width: 96px;
-  }
   .overlay-card[data-testid="overlay-info"] {
     position: absolute;
     left: 12px;
@@ -778,9 +772,6 @@ body.layout-main {
     <canvas data-testid="viewer-canvas">
     </canvas>
     <div class="overlay-stack">
-      <div class="overlay-card visible" data-testid="overlay-simtime">
-       <div data-testid="sim-time">t = 0.000</div>
-      </div>
       <div class="overlay-card" data-testid="overlay-realtime">
        <div data-testid="overlay-realtime-desired">Speed : 100%</div>
        <div data-testid="overlay-realtime-actual">Physics: 100%</div>

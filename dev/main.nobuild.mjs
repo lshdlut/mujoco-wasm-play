@@ -61,8 +61,8 @@ const overlayInfo = document.querySelector('[data-testid="overlay-info"]');
 const overlayProfiler = document.querySelector('[data-testid="overlay-profiler"]');
 const overlaySensor = document.querySelector('[data-testid="overlay-sensor"]');
 const toastEl = document.querySelector('[data-testid="toast"]');
-const simTimeEl = document.querySelector('[data-testid="sim-time"]');
 let viewerStoreRef = null;
+let infoTimeEl = null;
 
 let latestSnapshot = null;
 let renderStats = { drawn: 0, hidden: 0 };
@@ -257,12 +257,6 @@ function updateOverlay(card, visible) {
   card.classList.toggle('visible', !!visible);
 }
 
-function updateSimTime(state) {
-  if (!simTimeEl) return;
-  const displayTime = typeof state?.hud?.time === 'number' ? state.hud.time : 0;
-  simTimeEl.textContent = `t = ${displayTime.toFixed(3)}`;
-}
-
 function updateRealtimeOverlay(state) {
   if (!overlayRealtime) return;
   const sim = state?.simulation || {};
@@ -340,6 +334,19 @@ function updateToast(state) {
   }
 }
 
+function updateInfoOverlayTime(state) {
+  if (!overlayInfo) return;
+  if (!state?.overlays?.info) return;
+  const time = Number(state?.hud?.time);
+  if (!Number.isFinite(time)) return;
+  if (!infoTimeEl || !infoTimeEl.isConnected) {
+    const grid = overlayInfo.querySelector('.info-grid');
+    infoTimeEl = grid ? grid.querySelector('.info-value[data-info-field="time"]') : null;
+    if (!infoTimeEl) return;
+  }
+  infoTimeEl.textContent = `${time.toFixed(3)} s`;
+}
+
 
 function updateInfoOverlayCard(state) {
   if (!overlayInfo) return;
@@ -407,6 +414,7 @@ function updateInfoOverlayCard(state) {
   if (stateEl) stateEl.textContent = simRun ? 'Running' : 'Paused';
   const timeEl = getFieldEl('time');
   if (timeEl) timeEl.textContent = `${time.toFixed(3)} s`;
+  infoTimeEl = timeEl || infoTimeEl;
   const sizeEl = getFieldEl('size');
   if (sizeEl) sizeEl.textContent = nefc ? `${nefc}  (${ncon} con)` : `${ncon} con`;
   const cpuEl = getFieldEl('cpu');
@@ -603,7 +611,6 @@ function scheduleUiUpdate(state) {
     updateControls(snapshot);
     updateInfoOverlayCard(snapshot);
     updateToast(snapshot);
-    updateSimTime(snapshot);
   };
   if (typeof window !== 'undefined' && window.requestAnimationFrame) {
     window.requestAnimationFrame(tick);
@@ -635,6 +642,7 @@ store.subscribe((state) => {
     updateOverlay(overlayProfiler, state.overlays.profiler);
     updateOverlay(overlaySensor, state.overlays.sensor);
   }
+  updateInfoOverlayTime(state);
   if (perfEnabled) {
     const tRealtimeStart = perfNow();
     updateRealtimeOverlay(state);

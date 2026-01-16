@@ -353,6 +353,7 @@ const MJ_LIGHT_TYPE = {
 const MJ_MAXLIGHT = 128;
 const LABEL_TEXTURE_CACHE = new Map();
 const LABEL_TEXTURE_VERSION = 3;
+const LABEL_TEXTURE_CACHE_LIMIT = 256;
 const LABEL_DEFAULT_HEIGHT = 0.08;
 const LABEL_DEFAULT_OFFSET = 0.04;
 const MJ_LABEL_STRIDE = 100;
@@ -380,6 +381,7 @@ const MJ_MAXPLANEGRID = 11;
 const LABEL_DPR_CAP = 2;
 const LABEL_GEOM_LIMIT = 120;
 const DEFAULT_CLEAR_HEX = 0xd6dce4;
+const DEFAULT_CLEAR_COLOR = new THREE.Color(DEFAULT_CLEAR_HEX);
 const GROUND_DISTANCE = 2000;
 const PLANE_SIZE_EPS = 1e-9;
 const RENDER_ORDER = Object.freeze({
@@ -552,11 +554,21 @@ function applySkyboxVisibility(ctx, enabled, options = {}) {
   if (!worldScene) return;
   const useBlackBackground = options.useBlackOnDisable !== false;
   const baseClear = typeof ctx.baseClearHex === 'number' ? ctx.baseClearHex : DEFAULT_CLEAR_HEX;
+  const setSolidBackground = (hex) => {
+    let bgColor = ctx._solidBackgroundColor || null;
+    if (!bgColor) {
+      bgColor = new THREE.Color(hex);
+      ctx._solidBackgroundColor = bgColor;
+    } else {
+      bgColor.setHex(hex);
+    }
+    worldScene.background = bgColor;
+  };
   const skyEnabled = enabled !== false;
   if (!skyEnabled) {
     if (ctx.skyShader) ctx.skyShader.visible = false;
     worldScene.environment = null;
-    worldScene.background = new THREE.Color(useBlackBackground ? 0x000000 : baseClear);
+    setSolidBackground(useBlackBackground ? 0x000000 : baseClear);
     pushSkyDebug(ctx, { mode: 'disable', useBlack: useBlackBackground });
     return;
   }
@@ -594,7 +606,7 @@ function applySkyboxVisibility(ctx, enabled, options = {}) {
   }
   // Preset fallback: keep a solid background so the scene is readable even if
   // HDRI/sky resources are unavailable.
-  worldScene.background = new THREE.Color(baseClear);
+  setSolidBackground(baseClear);
   pushSkyDebug(ctx, { mode: 'fallback' });
 }
 
@@ -1076,8 +1088,8 @@ function resolveMuJoCoTexcoordScale3(geomType, geomSize, out = null) {
 
 function ensureMuJoCo2DGeneratedTexcoords(mesh, geomType, geomSize, geomDataId, matId, descriptor) {
   if (!mesh || !mesh.geometry) return 0;
-  const geometry = mesh.geometry;
-  const positionAttr = geometry.getAttribute?.('position') || null;
+  let geometry = mesh.geometry;
+  let positionAttr = geometry.getAttribute?.('position') || null;
   if (!positionAttr || !(positionAttr.count > 0)) return 0;
 
   const repeatX = Number.isFinite(descriptor?.repeatX) ? descriptor.repeatX : 1;
@@ -1150,18 +1162,36 @@ function ensureMuJoCo2DGeneratedTexcoords(mesh, geomType, geomSize, geomDataId, 
     const cloned = geometry.clone();
     mesh.geometry = cloned;
     userData.ownGeometry = true;
+    geometry = cloned;
+    positionAttr = geometry.getAttribute?.('position') || null;
+    if (!positionAttr || !(positionAttr.count > 0)) return 0;
   }
 
-  const uv = new Float32Array(vcount * 2);
-  for (let i = 0; i < vcount; i += 1) {
-    const x = positionAttr.getX(i);
-    const y = positionAttr.getY(i);
-    const x0 = x * invScaleX;
-    const y0 = y * invScaleY;
-    uv[i * 2 + 0] = 0.5 * scl0 * x0 - 0.5;
-    uv[i * 2 + 1] = -0.5 * scl1 * y0 - 0.5;
+  let uvAttr = geometry.getAttribute?.('uv') || null;
+  let uv = uvAttr?.array instanceof Float32Array ? uvAttr.array : null;
+  if (!uv || uv.length !== vcount * 2) {
+    uv = new Float32Array(vcount * 2);
+    uvAttr = new THREE.BufferAttribute(uv, 2);
+    geometry.setAttribute('uv', uvAttr);
   }
-  mesh.geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  const posArray = positionAttr?.array || null;
+  const stride = positionAttr?.itemSize | 0;
+  if (posArray && stride >= 2 && !positionAttr.isInterleavedBufferAttribute) {
+    for (let i = 0, p = 0, u = 0; i < vcount; i += 1, p += stride, u += 2) {
+      const x0 = (posArray[p + 0] || 0) * invScaleX;
+      const y0 = (posArray[p + 1] || 0) * invScaleY;
+      uv[u + 0] = 0.5 * scl0 * x0 - 0.5;
+      uv[u + 1] = -0.5 * scl1 * y0 - 0.5;
+    }
+  } else {
+    for (let i = 0; i < vcount; i += 1) {
+      const x0 = (positionAttr.getX(i) || 0) * invScaleX;
+      const y0 = (positionAttr.getY(i) || 0) * invScaleY;
+      uv[i * 2 + 0] = 0.5 * scl0 * x0 - 0.5;
+      uv[i * 2 + 1] = -0.5 * scl1 * y0 - 0.5;
+    }
+  }
+  if (uvAttr) uvAttr.needsUpdate = true;
   strictEnsure('ensureMuJoCo2DGeneratedTexcoords', {
     reason: 'generated_texcoords',
     geomType: geomType | 0,
@@ -1395,7 +1425,7 @@ function computeSceneExtent(bounds, statStruct) {
   return 1;
 }
 
-function resolveFogConfig(vis, statStruct, bounds, enabled) {
+function resolveFogConfig(vis, statStruct, bounds, enabled, ctx = null) {
   if (!enabled || !vis?.map) {
     return { enabled: false };
   }
@@ -1413,7 +1443,12 @@ function resolveFogConfig(vis, statStruct, bounds, enabled) {
   let fogColor = null;
   if (vis?.rgba?.fog != null) {
     const colorArr = rgbFromArray(vis.rgba.fog);
-    fogColor = new THREE.Color().setRGB(colorArr[0], colorArr[1], colorArr[2]);
+    if (ctx) {
+      fogColor = ctx._fogColor || (ctx._fogColor = new THREE.Color());
+      fogColor.setRGB(colorArr[0], colorArr[1], colorArr[2]);
+    } else {
+      fogColor = new THREE.Color().setRGB(colorArr[0], colorArr[1], colorArr[2]);
+    }
   }
   return {
     enabled: true,
@@ -1454,7 +1489,7 @@ function applySceneFog(scene, config) {
     scene.fog = null;
     return;
   }
-  const fogColor = config.color || new THREE.Color(DEFAULT_CLEAR_HEX);
+  const fogColor = config.color || DEFAULT_CLEAR_COLOR;
   const fogNear = Math.max(0, config.start ?? 10);
   const fogFar = Math.max(fogNear + 0.1, config.end ?? fogNear + 30);
   if (!scene.fog || !scene.fog.isFog) {
@@ -1622,7 +1657,7 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
     ctx.trackingOffset = new THREE.Vector3(radius * 2.6, -radius * 2.6, radius * 1.2);
     ctx.trackingRadius = ctx.trackingOffset.length();
   }
-  ctx.camera.position.copy(center.clone().add(ctx.trackingOffset));
+  ctx.camera.position.copy(center).add(ctx.trackingOffset);
   ctx.trackingRadius = ctx.trackingOffset.length();
   ctx.camera.lookAt(center);
   target.copy(center);
@@ -2226,6 +2261,13 @@ function voptEnabled(flags, idx) {
   return Array.isArray(flags) && idx >= 0 && !!flags[idx];
 }
 
+function normalizeDeltaByViewportHeight(canvas, dx, dy, invertY = false) {
+  const elementHeight = canvas?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 1) || 1;
+  const heightDen = Math.max(1, elementHeight);
+  const dyEff = invertY ? -dy : dy;
+  return { reldx: dx / heightDen, reldy: dyEff / heightDen };
+}
+
 function meanSizeFromState(state, context = null) {
   const statSize = Number(state?.model?.stat?.meansize);
   if (Number.isFinite(statSize) && statSize > 0) return statSize;
@@ -2266,6 +2308,19 @@ function computeScenePolicy(snapshot, state, context) {
     };
   }
 
+function disposeLabelTextureCache() {
+  for (const tex of LABEL_TEXTURE_CACHE.values()) {
+    if (tex && typeof tex.dispose === 'function') {
+      try {
+        tex.dispose();
+      } catch (err) {
+        strictCatch(err, 'main:labelTex_dispose');
+      }
+    }
+  }
+  LABEL_TEXTURE_CACHE.clear();
+}
+
 function getLabelTexture(text, quality = 1) {
   if (typeof document === 'undefined') return null;
   const label = (text || '').toString();
@@ -2273,7 +2328,12 @@ function getLabelTexture(text, quality = 1) {
   const q = Math.max(1, quality);
   const cacheKey = `${LABEL_TEXTURE_VERSION}::${label}::q${q.toFixed(2)}::${dpr.toFixed(2)}`;
   if (LABEL_TEXTURE_CACHE.has(cacheKey)) {
-    return LABEL_TEXTURE_CACHE.get(cacheKey);
+    const cached = LABEL_TEXTURE_CACHE.get(cacheKey);
+    if (cached) {
+      LABEL_TEXTURE_CACHE.delete(cacheKey);
+      LABEL_TEXTURE_CACHE.set(cacheKey, cached);
+    }
+    return cached;
   }
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -2306,6 +2366,19 @@ function getLabelTexture(text, quality = 1) {
   texture.userData = texture.userData || {};
   texture.userData.aspect = canvas.width / Math.max(1, canvas.height);
   LABEL_TEXTURE_CACHE.set(cacheKey, texture);
+  while (LABEL_TEXTURE_CACHE.size > LABEL_TEXTURE_CACHE_LIMIT) {
+    const oldest = LABEL_TEXTURE_CACHE.entries().next().value;
+    if (!oldest) break;
+    const [oldKey, oldTex] = oldest;
+    LABEL_TEXTURE_CACHE.delete(oldKey);
+    if (oldTex && typeof oldTex.dispose === 'function') {
+      try {
+        oldTex.dispose();
+      } catch (err) {
+        strictCatch(err, 'main:labelTex_dispose');
+      }
+    }
+  }
   return texture;
 }
 
@@ -3044,11 +3117,12 @@ function disposeMeshObject(mesh) {
   }
 
   if (!mesh) return;
+  const userData = mesh.userData || null;
   const parent = mesh.parent;
   if (parent && typeof parent.remove === 'function') {
     parent.remove(mesh);
   }
-  const ownGeometry = mesh.userData?.ownGeometry !== false;
+  const ownGeometry = userData?.ownGeometry !== false;
   if (ownGeometry && mesh.geometry && typeof mesh.geometry.dispose === 'function') {
     try {
       mesh.geometry.dispose();
@@ -3074,6 +3148,64 @@ function disposeMeshObject(mesh) {
       strictCatch(err, 'main:dispose_mesh');
     }
   }
+  const segMat = userData?.segmentMaterial || null;
+  if (segMat) {
+    let disposed = false;
+    if (Array.isArray(material)) disposed = material.includes(segMat);
+    else disposed = material === segMat;
+    if (!disposed && typeof segMat.dispose === 'function') {
+      try {
+        segMat.dispose();
+      } catch (err) {
+        strictCatch(err, 'main:dispose_mesh');
+      }
+    }
+    userData.segmentMaterial = null;
+    userData.segmentOriginalMaterial = null;
+  }
+}
+
+function disposeObject3DTree(root) {
+  if (!root) return;
+  try {
+    const parent = root.parent;
+    if (parent && typeof parent.remove === 'function') {
+      parent.remove(root);
+    }
+  } catch (err) {
+    strictCatch(err, 'main:dispose_tree');
+  }
+  if (typeof root.traverse !== 'function') return;
+  root.traverse((obj) => {
+    if (!obj) return;
+    const userData = obj.userData || null;
+    const ownGeometry = userData?.ownGeometry !== false;
+    if (ownGeometry && !obj.isSprite && obj.geometry && typeof obj.geometry.dispose === 'function') {
+      try {
+        obj.geometry.dispose();
+      } catch (err) {
+        strictCatch(err, 'main:dispose_tree');
+      }
+    }
+    const material = obj.material;
+    if (Array.isArray(material)) {
+      for (const mat of material) {
+        if (mat && !mat.userData?.pooled && typeof mat.dispose === 'function') {
+          try {
+            mat.dispose();
+          } catch (err) {
+            strictCatch(err, 'main:dispose_tree');
+          }
+        }
+      }
+    } else if (material && !material.userData?.pooled && typeof material.dispose === 'function') {
+      try {
+        material.dispose();
+      } catch (err) {
+        strictCatch(err, 'main:dispose_tree');
+      }
+    }
+  });
 }
 
 function disposeInstancing(ctx) {
@@ -3173,6 +3305,16 @@ function syncRendererAssets(ctx, assets) {
     }
   }
   ctx.meshes = [];
+  if (ctx.flexGroup) {
+    disposeObject3DTree(ctx.flexGroup);
+    ctx.flexGroup = null;
+    ctx.flexPool = [];
+  }
+  if (ctx.skinGroup) {
+    disposeObject3DTree(ctx.skinGroup);
+    ctx.skinGroup = null;
+    ctx.skinPool = [];
+  }
   if (ctx.assetCache && ctx.assetCache.meshGeometries instanceof Map) {
     for (const geometry of ctx.assetCache.meshGeometries.values()) {
       if (geometry && typeof geometry.dispose === 'function') {
@@ -3185,8 +3327,21 @@ function syncRendererAssets(ctx, assets) {
     }
     ctx.assetCache.meshGeometries.clear();
   }
+  if (ctx.assetCache && ctx.assetCache.mjTextures instanceof Map) {
+    for (const texture of ctx.assetCache.mjTextures.values()) {
+      if (texture && typeof texture.dispose === 'function') {
+        try {
+          texture.dispose();
+        } catch (err) {
+          strictCatch(err, 'main:assetCache_dispose');
+        }
+      }
+    }
+    ctx.assetCache.mjTextures.clear();
+  }
   ctx.assetCache = {
     meshGeometries: new Map(),
+    mjTextures: new Map(),
   };
 }
 
@@ -3552,6 +3707,7 @@ function getSharedMeshGeometry(ctx, assets, dataId) {
   if (!ctx.assetCache || !(ctx.assetCache.meshGeometries instanceof Map)) {
     ctx.assetCache = {
       meshGeometries: new Map(),
+      mjTextures: new Map(),
     };
   }
   const cache = ctx.assetCache.meshGeometries;
@@ -3575,10 +3731,6 @@ function segmentColorForIndex(index) {
   const palette = SEGMENT_PALETTE;
   if (!(index >= 0)) return palette[0];
   return palette[index % palette.length];
-}
-
-function segmentBackgroundColor() {
-  return 0x000000;
 }
 
 function restoreSegmentMaterial(mesh) {
@@ -4219,7 +4371,7 @@ function ensureFlexEntry(ctx, index, assets, state) {
   const needsRebuild = !entry || entry.vertnum !== vertnum || entry.edgenum !== edgenum || entry.dim !== dim;
   if (needsRebuild) {
     if (entry?.group) {
-      try { group.remove(entry.group); } catch (err) { strictCatch(err, 'main:flex_group_remove'); }
+      disposeObject3DTree(entry.group);
     }
     const entryGroup = new THREE.Group();
     entryGroup.name = `flex:${index}`;
@@ -4823,7 +4975,7 @@ function ensureSkinEntry(ctx, index, assets, state) {
   const needsRebuild = !entry || entry.vertnum !== vertnum || entry.facenum !== facenum;
   if (needsRebuild) {
     if (entry?.mesh) {
-      try { group.remove(entry.mesh); } catch (err) { strictCatch(err, 'main:skin_group_remove'); }
+      disposeMeshObject(entry.mesh);
     }
     const geometry = new THREE.BufferGeometry();
     const positions = vertnum > 0 ? new Float32Array(vertnum * 3) : new Float32Array(0);
@@ -5086,6 +5238,8 @@ function updateSkinMesh(entry, skinIndex, snapshot, assets) {
 
 function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   sceneFlags,
+  voptFlags,
+  segmentEnabled: segmentEnabledOverride,
   reflectionEnabled,
   hideAllGeometry,
 }) {
@@ -5150,8 +5304,12 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   }
 
   const flags = Array.isArray(sceneFlags) ? sceneFlags : state?.rendering?.sceneFlags || [];
-  const segmentEnabled = !!flags[SEGMENT_FLAG_INDEX];
-  const vopt = Array.isArray(state?.rendering?.voptFlags) ? state.rendering.voptFlags : [];
+  const segmentEnabled = typeof segmentEnabledOverride === 'boolean'
+    ? segmentEnabledOverride
+    : !!flags[SEGMENT_FLAG_INDEX];
+  const vopt = Array.isArray(voptFlags)
+    ? voptFlags
+    : (Array.isArray(state?.rendering?.voptFlags) ? state.rendering.voptFlags : []);
   const showStatic = voptEnabled(vopt, MJ_VIS.STATIC);
   const transparentDynamic = voptEnabled(vopt, MJ_VIS.TRANSPARENT);
   const alphaScale = transparentDynamic ? clampUnit(Number(state?.model?.vis?.map?.alpha)) : 1;
@@ -5368,8 +5526,14 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
 
     let flexUsed = 0;
     let skinUsed = 0;
-    const seenFlex = (showFlexAny && flexCount > 0) ? new Set() : null;
-    const seenSkin = (showSkin && skinCount > 0) ? new Set() : null;
+    const seenFlex = (showFlexAny && flexCount > 0)
+      ? (ctx._seenFlexSet || (ctx._seenFlexSet = new Set()))
+      : null;
+    const seenSkin = (showSkin && skinCount > 0)
+      ? (ctx._seenSkinSet || (ctx._seenSkinSet = new Set()))
+      : null;
+    if (seenFlex) seenFlex.clear();
+    if (seenSkin) seenSkin.clear();
 
     if (seenFlex || seenSkin) {
       for (let si = 0; si < scnNgeom; si += 1) {
@@ -6389,7 +6553,7 @@ function createRendererManager({
   if (!ctx) throw new Error('renderCtx is required');
   ctx.cameraTarget = ctx.cameraTarget || new THREE.Vector3(0, 0, 0);
   ctx.meshes = ctx.meshes || [];
-  ctx.assetCache = ctx.assetCache || { meshGeometries: new Map() };
+  ctx.assetCache = ctx.assetCache || { meshGeometries: new Map(), mjTextures: new Map() };
   ctx._shadow = ctx._shadow || { lastCenter: null, lastRadius: 0 };
   ctx._frameCounter = ctx._frameCounter || 0;
   ctx.boundsEvery = typeof ctx.boundsEvery === 'number' && ctx.boundsEvery > 0 ? ctx.boundsEvery : 2;
@@ -6663,13 +6827,12 @@ function createRendererManager({
       ensureEnvIfNeeded(context, state, { skyboxEnabled });
     }
     const worldScene = getWorldScene(context);
-      if (segmentEnabled) {
-        if (!context._segmentEnvBackup && worldScene) {
-          context._segmentEnvBackup = {
-            background: worldScene.background,
-            environment: worldScene.environment,
+    if (segmentEnabled) {
+      if (!context._segmentEnvBackup && worldScene) {
+        context._segmentEnvBackup = {
+          background: worldScene.background,
+          environment: worldScene.environment,
           shadowEnabled: context.renderer?.shadowMap?.enabled ?? null,
-          toneExposure: context.renderer?.toneMappingExposure ?? null,
           light: context.light ? context.light.intensity : null,
           fill: context.fill ? context.fill.intensity : null,
           ambient: context.ambient ? context.ambient.intensity : null,
@@ -6678,7 +6841,8 @@ function createRendererManager({
       }
       if (worldScene) {
         worldScene.environment = null;
-        worldScene.background = new THREE.Color(segmentBackgroundColor());
+        context._segmentBgColor = context._segmentBgColor || new THREE.Color(0x000000);
+        worldScene.background = context._segmentBgColor;
       }
       if (context.sky) context.sky.visible = false;
       if (context.renderer?.shadowMap) context.renderer.shadowMap.enabled = false;
@@ -6763,14 +6927,16 @@ function createRendererManager({
         if (groundUniforms.uFadeEnd) groundUniforms.uFadeEnd.value = 0;
       }
     }
-    const fogConfig = resolveFogConfig(visStruct, statStruct, context.bounds, fogEnabled);
+    const fogConfig = resolveFogConfig(visStruct, statStruct, context.bounds, fogEnabled, context);
     if (fogConfig.enabled && !fogConfig.color) {
       const presetFogRaw = state?.rendering?.appearance?.fogColor;
       const presetFog = (typeof presetFogRaw === 'number' && Number.isFinite(presetFogRaw))
         ? presetFogRaw
         : null;
       if (presetFog != null) {
-        fogConfig.color = new THREE.Color(presetFog);
+        const fogPresetColor = context._fogPresetColor || (context._fogPresetColor = new THREE.Color());
+        fogPresetColor.setHex(presetFog);
+        fogConfig.color = fogPresetColor;
       }
     }
     const worldSceneForFog = getWorldScene(context);
@@ -6891,6 +7057,8 @@ function createRendererManager({
       const tSceneGeomsStart = perfEnabled ? perfNow() : 0;
       drawn = applyMjvSceneSoAGeoms(context, snapshot, state, assets, {
         sceneFlags,
+        voptFlags,
+        segmentEnabled,
         reflectionEnabled,
         hideAllGeometry,
       });
@@ -7030,11 +7198,11 @@ function createRendererManager({
         context.light.updateMatrixWorld?.(true);
         context.light.target?.updateMatrixWorld?.(true);
         cam.updateMatrixWorld?.(true);
-        const toLight = desiredCenter.clone().applyMatrix4(cam.matrixWorldInverse);
-        const snappedLS = toLight.clone();
+        const toLight = tempVecB.copy(desiredCenter).applyMatrix4(cam.matrixWorldInverse);
+        const snappedLS = tempVecC.copy(toLight);
         snappedLS.x = Math.round(snappedLS.x / texelX) * texelX;
         snappedLS.y = Math.round(snappedLS.y / texelY) * texelY;
-        const snappedWS = snappedLS.clone().applyMatrix4(cam.matrixWorld);
+        const snappedWS = tempVecD.copy(snappedLS).applyMatrix4(cam.matrixWorld);
         const lastC = context._shadow.lastCenter;
         const needUpdate =
           !lastC ||
@@ -7046,7 +7214,10 @@ function createRendererManager({
             context.lightTarget.position.copy(snappedWS);
             context.light.target?.updateMatrixWorld?.();
           }
-          context._shadow.lastCenter = snappedWS.clone();
+          if (!context._shadow.lastCenter) {
+            context._shadow.lastCenter = new THREE.Vector3();
+          }
+          context._shadow.lastCenter.copy(snappedWS);
           context._shadow.lastRadius = r;
         }
       }
@@ -7063,7 +7234,7 @@ function createRendererManager({
         const radius = Math.max(bounds.radius || 0, 0.6);
         const focus = tempVecA.set(bounds.center[0], bounds.center[1], bounds.center[2]);
         const offset = tempVecB.set(radius * 2.6, -radius * 2.6, radius * 1.7);
-        context.camera.position.copy(focus.clone().add(offset));
+        context.camera.position.copy(focus).add(offset);
         context.camera.lookAt(focus);
         context.cameraTarget.copy(focus);
         const minFar = Math.max(GROUND_DISTANCE * 2.5, 400);
@@ -7087,7 +7258,7 @@ function createRendererManager({
         const lightOffset = tempVecD.set(horiz, -horiz * 0.9, Math.max(0.6, alt));
         // If we have a snapped center from previous step, prefer it to reduce jitter
         const baseCenter = context._shadow.lastCenter ? context._shadow.lastCenter : focus;
-        context.light.position.copy(baseCenter.clone().add(lightOffset));
+        context.light.position.copy(baseCenter).add(lightOffset);
         if (context.lightTarget) {
           context.lightTarget.position.copy(baseCenter);
           context.light.target?.updateMatrixWorld?.();
@@ -7118,9 +7289,8 @@ function createRendererManager({
         0.6
       );
       const target = tempVecA.set(center[0], center[1], center[2]);
-      context.camera.position.copy(
-        target.clone().add(new THREE.Vector3(radius * 0.8, -radius * 0.8, radius * 0.6))
-      );
+      const alignOffset = tempVecB.set(radius * 0.8, -radius * 0.8, radius * 0.6);
+      context.camera.position.copy(target).add(alignOffset);
       context.camera.lookAt(target);
       context.cameraTarget.copy(target);
       cacheTrackingPoseFromCurrent(context, { radius, center });
@@ -7153,13 +7323,112 @@ function createRendererManager({
   function dispose() {
     if (!ctx) return;
     ctx.loopActive = false;
+    while (cleanup.length) {
+      const fn = cleanup.pop();
+      try { fn(); } catch (err) { strictCatch(err, 'main:renderer_cleanup'); }
+    }
+    ctx._visibilityInstalled = false;
     if (ctx.frameId != null && typeof window !== 'undefined' && window.cancelAnimationFrame) {
       try { window.cancelAnimationFrame(ctx.frameId); } catch (err) { strictCatch(err, 'main:renderer_cancel'); }
-      ctx.frameId = null;
     }
+    ctx.frameId = null;
+    ctx.loopCleanup = null;
+
+    disposeInstancing(ctx);
+
+    if (Array.isArray(ctx.meshes)) {
+      for (const mesh of ctx.meshes) {
+        if (mesh) disposeMeshObject(mesh);
+      }
+      ctx.meshes.length = 0;
+    }
+
+    if (ctx.flexGroup) {
+      disposeObject3DTree(ctx.flexGroup);
+      ctx.flexGroup = null;
+      ctx.flexPool = [];
+    }
+    if (ctx.skinGroup) {
+      disposeObject3DTree(ctx.skinGroup);
+      ctx.skinGroup = null;
+      ctx.skinPool = [];
+    }
+    if (ctx.labelGroup) {
+      disposeObject3DTree(ctx.labelGroup);
+      ctx.labelGroup = null;
+      ctx.labelPool = [];
+    }
+
+    if (ctx.materialPool && typeof ctx.materialPool.disposeAll === 'function') {
+      try { ctx.materialPool.disposeAll(); } catch (err) { strictCatch(err, 'main:materialPool_dispose'); }
+      ctx.materialPool = null;
+    }
+    disposeLabelTextureCache();
+
+    if (ctx.assetCache && ctx.assetCache.meshGeometries instanceof Map) {
+      for (const geometry of ctx.assetCache.meshGeometries.values()) {
+        if (geometry && typeof geometry.dispose === 'function') {
+          try { geometry.dispose(); } catch (err) { strictCatch(err, 'main:assetCache_dispose'); }
+        }
+      }
+      ctx.assetCache.meshGeometries.clear();
+    }
+    if (ctx.assetCache && ctx.assetCache.mjTextures instanceof Map) {
+      for (const texture of ctx.assetCache.mjTextures.values()) {
+        if (texture && typeof texture.dispose === 'function') {
+          try { texture.dispose(); } catch (err) { strictCatch(err, 'main:assetCache_dispose'); }
+        }
+      }
+      ctx.assetCache.mjTextures.clear();
+    }
+
+    const disposeResource = (resource) => {
+      if (resource && typeof resource.dispose === 'function') {
+        try { resource.dispose(); } catch (err) { strictCatch(err, 'main:env_dispose'); }
+      }
+    };
+    disposeResource(ctx.envRT);
+    disposeResource(ctx.pmrem);
+    disposeResource(ctx.hdriBackground);
+    disposeResource(ctx.skyBackground);
+    disposeResource(ctx.skyCube);
+    if (ctx.skyShader) {
+      disposeObject3DTree(ctx.skyShader);
+      ctx.skyShader = null;
+    }
+    const skyCache = ctx.skyCache || null;
+    if (skyCache) {
+      const entries = [skyCache.model, skyCache.preset, skyCache.none];
+      for (const entry of entries) {
+        if (!entry) continue;
+        disposeResource(entry.envRT);
+        disposeResource(entry.background);
+      }
+      skyCache.model = null;
+      skyCache.preset = null;
+      skyCache.none = null;
+    }
+    ctx.envRT = null;
+    ctx.pmrem = null;
+    ctx.hdriBackground = null;
+    ctx.skyBackground = null;
+    ctx.skyCube = null;
+    ctx.assetCache = { meshGeometries: new Map(), mjTextures: new Map() };
+
     if (ctx.renderer && typeof ctx.renderer.dispose === 'function') {
       try { ctx.renderer.dispose(); } catch (err) { strictCatch(err, 'main:renderer_dispose'); }
     }
+    ctx.renderer = null;
+    ctx.sceneWorld = null;
+    ctx.scene = null;
+    ctx.camera = null;
+    ctx.root = null;
+    ctx.light = null;
+    ctx.lightTarget = null;
+    ctx.fill = null;
+    ctx.hemi = null;
+    ctx.ambient = null;
+    ctx.initialized = false;
   }
 
   return {
@@ -7278,13 +7547,6 @@ function createCameraController({
 
   const ZOOM_INCREMENT = 0.02;
 
-  function computeGestureRels(dx, dy) {
-    const elementHeight = canvas?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 1) || 1;
-    const dyEff = invertY ? -dy : dy;
-    const heightDen = Math.max(1, elementHeight);
-    return { reldx: dx / heightDen, reldy: dyEff / heightDen };
-  }
-
   function computeWheelReldy(dy) {
     const dyLines = dy / wheelLineFactor;
     return ZOOM_INCREMENT * dyLines;
@@ -7330,7 +7592,7 @@ function createCameraController({
     }
 
     const elementWidth = canvas?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 1) || 1;
-    const { reldx: relDx, reldy: relDy } = computeGestureRels(dx, dy);
+    const { reldx: relDx, reldy: relDy } = normalizeDeltaByViewportHeight(canvas, dx, dy, invertY);
     const fovRad = THREE_NS.MathUtils.degToRad(typeof camera.fov === 'number' ? camera.fov : 45);
     const isOrtho = !!camera.isOrthographicCamera;
 
@@ -7445,7 +7707,7 @@ function createCameraController({
     pointerState.lastX = event.clientX;
     pointerState.lastY = event.clientY;
     if (!dx && !dy) return;
-    const { reldx, reldy } = computeGestureRels(dx, dy);
+    const { reldx, reldy } = normalizeDeltaByViewportHeight(canvas, dx, dy, invertY);
     if (!useWasmCamera) {
       applyCameraGesture(pointerState.mode, dx, dy);
     }
@@ -7712,24 +7974,25 @@ function createPickingController({
     }
   }
 
+  const meshList = [];
   function getMeshList() {
-    const list = [];
+    meshList.length = 0;
     const batches = renderCtx?._instancing?.batches || null;
     if (batches instanceof Map) {
       for (const batch of batches.values()) {
         const mesh = batch?.mesh || null;
         const count = typeof mesh?.count === 'number' ? (mesh.count | 0) : 0;
         if (mesh && mesh.visible !== false && count > 0) {
-          list.push(mesh);
+          meshList.push(mesh);
         }
       }
     }
     if (Array.isArray(renderCtx.meshes)) {
       for (const mesh of renderCtx.meshes) {
-        if (mesh && mesh.visible !== false) list.push(mesh);
+        if (mesh && mesh.visible !== false) meshList.push(mesh);
       }
     }
-    return list;
+    return meshList;
   }
 
   function projectPointer(event) {
@@ -7882,12 +8145,21 @@ function createPickingController({
     if (!list.length) return null;
     const hits = raycaster.intersectObjects(list, true);
     if (!hits.length) return null;
-    const hit = hits.find((entry) => entry?.object && entry?.point);
-    if (!hit) return null;
-    const mesh = resolveGeomMesh(hit.object);
-    if (!mesh) return null;
-    const geomIndex = mesh.userData?.geomIndex ?? -1;
-    if (!(geomIndex >= 0)) return null;
+    let hit = null;
+    let mesh = null;
+    let geomIndex = -1;
+    for (const entry of hits) {
+      if (!entry?.object || !entry?.point) continue;
+      const resolved = resolveGeomMesh(entry.object);
+      const idx = resolved?.userData?.geomIndex ?? -1;
+      if (resolved && idx >= 0) {
+        hit = entry;
+        mesh = resolved;
+        geomIndex = idx;
+        break;
+      }
+    }
+    if (!hit || !mesh || geomIndex < 0) return null;
     const geomName = mesh.userData?.geomName || geomNameFor(geomIndex);
     const bodyId = bodyIdFor(geomIndex);
     if (mesh.userData?.geomStatic) {
@@ -7918,14 +8190,6 @@ function createPickingController({
     return pick;
   }
 
-  function computePerturbRels(dx, dy) {
-    const elementHeight = canvas?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 1) || 1;
-    const heightDen = Math.max(1, elementHeight);
-    // MuJoCo/simulate normalizes by viewport height, using the UI "y-down" convention:
-    // dy > 0 means pointer moved down (browser `clientY` increases).
-    return { reldx: dx / heightDen, reldy: dy / heightDen };
-  }
-
   function beginPerturb(event) {
     const bodyId = dragState.bodyId;
     if (!(bodyId > 0)) return;
@@ -7952,7 +8216,9 @@ function createPickingController({
     dragState.lastX = event.clientX;
     dragState.lastY = event.clientY;
     if (!dragState.perturbBegun) return;
-    const { reldx, reldy } = computePerturbRels(dx, dy);
+    // MuJoCo/simulate normalizes by viewport height, using the UI "y-down" convention:
+    // dy > 0 means pointer moved down (browser `clientY` increases).
+    const { reldx, reldy } = normalizeDeltaByViewportHeight(canvas, dx, dy);
     backend.applyPerturb?.({
       phase: 'move',
       mode: dragState.mode,
