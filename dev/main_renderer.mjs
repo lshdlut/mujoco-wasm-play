@@ -7404,6 +7404,14 @@ function createRendererManager({
         disposeResource(entry.envRT);
         disposeResource(entry.background);
       }
+      if (skyCache.presetMap instanceof Map) {
+        for (const entry of skyCache.presetMap.values()) {
+          if (!entry) continue;
+          disposeResource(entry.envRT);
+          disposeResource(entry.background);
+        }
+        skyCache.presetMap.clear();
+      }
       skyCache.model = null;
       skyCache.preset = null;
       skyCache.none = null;

@@ -126,12 +126,14 @@ const FALLBACK_PRESET_ALIASES = {
 const SKY_MODE_NONE = 'none';
 const SKY_MODE_PRESET = 'preset-hdri';
 const SKY_MODE_MODEL = 'mj-sky';
+const SKY_PRESET_CACHE_LIMIT = 2;
 
 function ensureSkyCache(ctx) {
   if (!ctx) return null;
   if (!ctx.skyCache) {
     ctx.skyCache = {
       preset: null,
+      presetMap: new Map(),
       model: null,
       none: null,
     };
@@ -924,19 +926,21 @@ function createEnvironmentManager({
     if (hdrReady) {
       return;
     }
-    const cachedPreset = cache?.preset;
-    if (
-      allowHDRI &&
-      cachedPreset?.envRT &&
-      cachedPreset.background &&
-      cachedPreset.key === url
-    ) {
+    const presetMap = cache?.presetMap instanceof Map ? cache.presetMap : null;
+    const cachedPreset = allowHDRI && presetMap ? presetMap.get(url) : null;
+    if (cachedPreset?.envRT && cachedPreset.background) {
+      if (ctx.hdriLoading && ctx.hdriLoadPromise) {
+        ctx.hdriLoadGen = (ctx.hdriLoadGen || 0) + 1;
+        ctx.hdriLoading = false;
+      }
+      presetMap.delete(url);
+      presetMap.set(url, cachedPreset);
       ctx.envRT = cachedPreset.envRT;
       ctx.hdriBackground = cachedPreset.background;
       ctx.envIntensity = preset?.envIntensity ?? 1.6;
       ctx.envFromHDRI = true;
       ctx.hdriReady = true;
-      ctx.hdriActiveKey = cachedPreset.key || null;
+      ctx.hdriActiveKey = url;
       ctx.envDirty = false;
       worldScene.environment = cachedPreset.envRT.texture;
       worldScene.background = cachedPreset.background;
@@ -951,11 +955,11 @@ function createEnvironmentManager({
         mode: 'preset-cache',
         presetMode: true,
         allowHDRI: true,
-        key: cachedPreset.key || 'cache',
+        key: url || 'cache',
       });
       strictEnsure('ensureOutdoorSkyEnv', {
         reason: 'apply_cached_preset',
-        key: cachedPreset.key || null,
+        key: url || null,
       });
       return;
     }
@@ -1012,8 +1016,6 @@ function createEnvironmentManager({
             ctx.hdriLoading = false;
             return false;
           }
-          const prevEnvRT = ctx.envRT;
-          const prevHdr = ctx.hdriBackground;
           ctx.envRT = envRT;
           ctx.hdriBackground = hdr;
           ctx.envFromHDRI = true;
@@ -1027,12 +1029,23 @@ function createEnvironmentManager({
           if ('backgroundBlurriness' in worldScene) {
             worldScene.backgroundBlurriness = 0.0;
           }
-          if (cache) {
-            cache.preset = {
-              key: hdriUrl,
-              envRT,
-              background: hdr,
-            };
+          if (cache?.presetMap instanceof Map) {
+            const map = cache.presetMap;
+            const entry = { key: hdriUrl, envRT, background: hdr };
+            const existing = map.get(hdriUrl);
+            if (existing && existing !== entry) {
+              try { existing.envRT?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_cache_dispose'); }
+              try { existing.background?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_cache_dispose'); }
+            }
+            map.delete(hdriUrl);
+            map.set(hdriUrl, entry);
+            while (map.size > SKY_PRESET_CACHE_LIMIT) {
+              const evictKey = map.keys().next().value;
+              const evicted = map.get(evictKey);
+              map.delete(evictKey);
+              try { evicted?.envRT?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_cache_dispose'); }
+              try { evicted?.background?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_cache_dispose'); }
+            }
           }
           const intensity = typeof preset?.envIntensity === 'number' ? preset.envIntensity : 1.0;
           ctx.envIntensity = intensity;
@@ -1111,13 +1124,6 @@ function createEnvironmentManager({
       ctx.envFromHDRI = false;
       ctx.hdriReady = true;
       ctx.envDirty = false;
-      if (cache) {
-        cache.preset = {
-          key: modelCached?.key || 'preset-fallback',
-          envRT,
-          background,
-        };
-      }
       pushSkyDebug(ctx, {
         mode: 'preset-gradient-fallback',
         allowHDRI,
@@ -1228,15 +1234,6 @@ function createEnvironmentManager({
       ctx.hdriFailed = false;
       ctx.hdriLoadGen = (ctx.hdriLoadGen || 0) + 1;
       ctx.envDirty = true;
-      // Initialize preset cache: if the model cache exists, clone it as the baseline.
-      const modelCached = cache?.model || null;
-      if (cache && modelCached && modelCached.envRT && modelCached.background) {
-        cache.preset = {
-          key: modelCached.key || preset?.hdri || 'preset-hdri',
-          envRT: modelCached.envRT,
-          background: modelCached.background,
-        };
-      }
     }
     const hasEnv = hasModelEnvironment(state);
     const allowHDRI = skyMode === SKY_MODE_PRESET && fallbackEnabledDefault;
