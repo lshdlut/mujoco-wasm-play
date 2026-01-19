@@ -668,12 +668,22 @@ function scheduleUiUpdate(state) {
       updateInfoOverlayCard(uiState);
     }
 
+    const snapshot = latestSnapshot || null;
+    if (uiTickSubscribers.size) {
+      for (const fn of uiTickSubscribers) {
+        try {
+          fn({ snapshot, state: uiState, nowMs: now });
+        } catch (err) {
+          logWarn('[clock] ui tick subscriber error', err);
+          strictCatch(err, 'main:clock_ui_subscriber');
+        }
+      }
+    }
+
     // Dynamic panel elements (actuator/joint/equality lists) can involve lots of DOM writes.
     // Keep them on the UI tick so snapshotHz (30/60/120) does not directly scale UI costs.
     const rightVisible = !!uiState?.panels?.right && !uiState?.overlays?.fullscreen;
-    if (!rightVisible) return;
-    const snapshot = latestSnapshot;
-    if (!snapshot) return;
+    if (!rightVisible || !snapshot) return;
     const perfEnabled = isPerfEnabled();
 
     // Dynamic: build actuator sliders when metadata arrives
@@ -725,16 +735,6 @@ function scheduleUiUpdate(state) {
       }
     }
 
-    if (uiTickSubscribers.size) {
-      for (const fn of uiTickSubscribers) {
-        try {
-          fn({ snapshot, state: uiState, nowMs: now });
-        } catch (err) {
-          logWarn('[clock] ui tick subscriber error', err);
-          strictCatch(err, 'main:clock_ui_subscriber');
-        }
-      }
-    }
   };
   if (typeof window !== 'undefined' && window.requestAnimationFrame) {
     window.requestAnimationFrame(tick);
@@ -1231,7 +1231,10 @@ async function loadPlayPlugins(host) {
 }
 
 if (typeof window !== 'undefined') {
-  await loadPlayPlugins(window.__PLAY_HOST__);
+  loadPlayPlugins(window.__PLAY_HOST__).catch((err) => {
+    logError('[plugins] load failed (uncaught)', err);
+    strictCatch(err, 'main:plugins_load_uncaught', { allow: true });
+  });
 }
 
 // Keep canvas resized to container.
