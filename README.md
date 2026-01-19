@@ -46,34 +46,4 @@ For the full upstream surface and version/tag mapping, see `https://github.com/l
 
 ## Plugins (Experimental)
 
-This repo can optionally load external UI/plugins without forking. Plugins are loaded via dynamic `import()` and must be ESM modules.
-
-### Loading
-
-- Query parameter: `?plugins=<url1>,<url2>`
-- Global (must be set before the main module runs): `globalThis.PLAY_PLUGINS = ['<url1>', '<url2>']`
-
-Plugin load failures are reported via `logError`/`strictCatch(allow: true)` and do not stop the main app.
-
-### Host API
-
-At runtime, the viewer exposes `window.__PLAY_HOST__` and passes the same object into each plugin's register function.
-
-- `host.mounts.leftPanelPlugin` / `host.mounts.rightPanelPlugin`: stable containers for plugin UI.
-- `host.mounts.overlayRoot`: overlay-stack root (progress bars / status cards / HUDs).
-- `host.store`: `get()` / `update()` / `subscribe()`.
-- `host.backend`: backend instance (worker/direct). Supports core methods like `apply(...)`, `loadXmlText(...)`, and `subscribe(...)`.
-- `host.controls`: control helpers (`toggleControl`, `listIds`, `getControl`, `loadXmlTextAsModel`).
-- `host.renderer`: renderer helpers (`getContext`, `ensureLoop`, `renderScene`).
-- `host.clock.onUiTick(fn)`: throttled UI tick (default `ui_ms=120`).
-- `host.clock.onFrame(fn)`: per-frame hook (RAF render loop).
-
-### Plugin Shape
-
-A plugin module should export either:
-
-- `export function registerPlayPlugin(host) { ... }`, or
-- `export default function (host) { ... }`
-
-To tune UI tick rates:
-- `ui_ms=<16..2000>` and `ui_slow_ms=<200..10000>` (milliseconds).
+This repo can optionally load external UI/plugins without forking. See `PLUGIN_GUIDE.md` for the full contract (mounts, Host API, clocks, and cleanup).
