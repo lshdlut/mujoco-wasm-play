@@ -183,6 +183,12 @@ body.fullscreen {
 .panel.is-hidden {
   display: none !important;
 }
+.panel-mount {
+  display: contents;
+}
+.overlay-mount {
+  display: contents;
+}
 .panel-left::-webkit-scrollbar, .panel-right::-webkit-scrollbar {
   width: 8px;
 }
@@ -777,17 +783,20 @@ body.layout-main {
 }
 </style>
  </head>
- <body class="layout-3col">
-  <aside class="panel panel-left" data-testid="panel-left">
-  </aside>
-  <main class="viewer">
-    <canvas data-testid="viewer-canvas">
-    </canvas>
-    <div class="overlay-stack">
-      <div class="overlay-card" data-testid="overlay-realtime">
-       <div data-testid="overlay-realtime-desired">Speed : 100%</div>
-       <div data-testid="overlay-realtime-actual">Physics: 100%</div>
-      </div>
+  <body class="layout-3col">
+   <aside class="panel panel-left" data-testid="panel-left">
+    <div class="panel-mount" data-play-mount="leftPanel"></div>
+    <div class="panel-mount" data-play-mount="leftPanelPlugin"></div>
+   </aside>
+   <main class="viewer">
+     <canvas data-testid="viewer-canvas">
+     </canvas>
+     <div class="overlay-stack">
+      <div class="overlay-mount" data-play-mount="overlayRoot"></div>
+       <div class="overlay-card" data-testid="overlay-realtime">
+        <div data-testid="overlay-realtime-desired">Speed : 100%</div>
+        <div data-testid="overlay-realtime-actual">Physics: 100%</div>
+       </div>
      <div class="overlay-card" data-testid="overlay-help">
       <div class="help-title">Help</div>
       <div class="help-subtitle">Keyboard & mouse shortcuts (Simulate parity)</div>
@@ -854,9 +863,11 @@ body.layout-main {
    <div class="toast" data-testid="toast">
    </div>
   </main>
-  <aside class="panel panel-right" data-testid="panel-right">
-  </aside>
-  <script src="./main.nobuild.mjs" type="module">
-  </script>
- </body>
+   <aside class="panel panel-right" data-testid="panel-right">
+    <div class="panel-mount" data-play-mount="rightPanel"></div>
+    <div class="panel-mount" data-play-mount="rightPanelPlugin"></div>
+   </aside>
+   <script src="./main.nobuild.mjs" type="module">
+   </script>
+  </body>
 </html>

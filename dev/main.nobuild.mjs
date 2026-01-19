@@ -55,6 +55,11 @@ const CAMERA_PRESETS = ['Free', 'Tracking'];
 
 const leftPanel = document.querySelector('[data-testid="panel-left"]');
 const rightPanel = document.querySelector('[data-testid="panel-right"]');
+const leftPanelMount = document.querySelector('[data-play-mount="leftPanel"]') || leftPanel;
+const rightPanelMount = document.querySelector('[data-play-mount="rightPanel"]') || rightPanel;
+const leftPanelPluginMount = document.querySelector('[data-play-mount="leftPanelPlugin"]') || null;
+const rightPanelPluginMount = document.querySelector('[data-play-mount="rightPanelPlugin"]') || null;
+const overlayRootMount = document.querySelector('[data-play-mount="overlayRoot"]') || document.querySelector('.overlay-stack');
 const canvas = document.querySelector('[data-testid="viewer-canvas"]');
 const overlayRealtime = document.querySelector('[data-testid="overlay-realtime"]');
 const overlayHelp = document.querySelector('[data-testid="overlay-help"]');
@@ -253,8 +258,8 @@ const controlManager = createControlManager({
   backend,
   applySpecAction,
   readControlValue,
-  leftPanel,
-  rightPanel,
+  leftPanel: leftPanelMount,
+  rightPanel: rightPanelMount,
   cameraPresets: CAMERA_PRESETS,
 });
 const { loadUiSpec, renderPanels, updateControls, toggleControl, cycleCamera, registerGlobalShortcut } = controlManager;
@@ -1134,43 +1139,100 @@ if (typeof registerGlobalShortcut === 'function') {
     await adjustRealtime(-1);
   });
 }
-  if (typeof window !== 'undefined') {
-    window.__viewerStore = store;
-    window.__viewerControls = {
-      getBinding: (id) => controlManager.getBinding(id),
-      listIds: (prefix) => controlManager.listIds(prefix),
-      toggleControl: (id, value) => controlManager.toggleControl(id, value),
-      getControl: (id) => controlManager.getControl(id),
-      loadXmlTextAsModel: (xmlText, label) => controlManager.loadXmlTextAsModel?.(xmlText, label),
-    };
-    window.__viewerRenderer = {
-      getStats: () => ({ ...renderStats }),
-      getContext: () => (rendererManager.getContext ? rendererManager.getContext() : (renderCtx.initialized ? renderCtx : null)),
-      ensureLoop: () => rendererManager.ensureRenderLoop(),
-      renderScene: (snapshot, state) => rendererManager.renderScene(snapshot, state),
-    };
-    window.__PLAY_HOST__ = {
-      apiVersion: 1,
-      mounts: {
-        leftPanel,
-        rightPanel,
-        overlayRoot: document.querySelector('.overlay-stack'),
-      },
-      store,
-      backend,
-      controls: window.__viewerControls,
-      renderer: window.__viewerRenderer,
-      getSnapshot: () => latestSnapshot,
-      clock: {
-        onUiTick: (fn) => subscribeClock(uiTickSubscribers, fn),
-        onFrame: (fn) => subscribeClock(frameSubscribers, fn),
-      },
-      logStatus,
-      logWarn,
-      logError,
-      strictCatch,
-    };
+if (typeof window !== 'undefined') {
+  window.__viewerStore = store;
+  window.__viewerControls = {
+    getBinding: (id) => controlManager.getBinding(id),
+    listIds: (prefix) => controlManager.listIds(prefix),
+    toggleControl: (id, value) => controlManager.toggleControl(id, value),
+    getControl: (id) => controlManager.getControl(id),
+    loadXmlTextAsModel: (xmlText, label) => controlManager.loadXmlTextAsModel?.(xmlText, label),
+  };
+  window.__viewerRenderer = {
+    getStats: () => ({ ...renderStats }),
+    getContext: () => (rendererManager.getContext ? rendererManager.getContext() : (renderCtx.initialized ? renderCtx : null)),
+    ensureLoop: () => rendererManager.ensureRenderLoop(),
+    renderScene: (snapshot, state) => rendererManager.renderScene(snapshot, state),
+  };
+  window.__PLAY_HOST__ = {
+    apiVersion: 1,
+    mounts: {
+      leftPanel: leftPanelMount,
+      rightPanel: rightPanelMount,
+      overlayRoot: overlayRootMount,
+      leftPanelPlugin: leftPanelPluginMount,
+      rightPanelPlugin: rightPanelPluginMount,
+    },
+    store,
+    backend,
+    controls: window.__viewerControls,
+    renderer: window.__viewerRenderer,
+    getSnapshot: () => latestSnapshot,
+    clock: {
+      onUiTick: (fn) => subscribeClock(uiTickSubscribers, fn),
+      onFrame: (fn) => subscribeClock(frameSubscribers, fn),
+    },
+    logStatus,
+    logWarn,
+    logError,
+    strictCatch,
+  };
+}
+
+async function loadPlayPlugins(host) {
+  if (!host) return;
+  const urls = [];
+  try {
+    const rawList = (typeof globalThis !== 'undefined' && Array.isArray(globalThis.PLAY_PLUGINS))
+      ? globalThis.PLAY_PLUGINS
+      : [];
+    for (const entry of rawList) {
+      const s = String(entry || '').trim();
+      if (s) urls.push(s);
+    }
+  } catch (err) {
+    logWarn('[plugins] PLAY_PLUGINS parse failed', err);
+    strictCatch(err, 'main:plugins_parse_global', { allow: true });
   }
+  try {
+    if (typeof location !== 'undefined' && location?.search != null) {
+      const params = new URLSearchParams(location.search);
+      const token = params.get('plugins');
+      if (token) {
+        for (const raw of token.split(',')) {
+          const s = String(raw || '').trim();
+          if (s) urls.push(s);
+        }
+      }
+    }
+  } catch (err) {
+    logWarn('[plugins] query parse failed', err);
+    strictCatch(err, 'main:plugins_parse_query', { allow: true });
+  }
+  if (!urls.length) return;
+  const unique = Array.from(new Set(urls));
+  for (const url of unique) {
+    try {
+      const mod = await import(url);
+      const register = (mod && typeof mod.registerPlayPlugin === 'function')
+        ? mod.registerPlayPlugin
+        : (mod && typeof mod.default === 'function' ? mod.default : null);
+      if (!register) {
+        logWarn('[plugins] missing registerPlayPlugin/default export', { url });
+        continue;
+      }
+      await register(host);
+      logStatus('[plugins] loaded', { url });
+    } catch (err) {
+      logError('[plugins] load failed', { url, err });
+      strictCatch(err, 'main:plugins_load', { allow: true });
+    }
+  }
+}
+
+if (typeof window !== 'undefined') {
+  await loadPlayPlugins(window.__PLAY_HOST__);
+}
 
 // Keep canvas resized to container.
 function resizeCanvas() {
