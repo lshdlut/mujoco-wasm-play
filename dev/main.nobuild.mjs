@@ -3,6 +3,7 @@ import {
   consumeViewerParams,
   isPerfEnabled,
   isStrictEnabled,
+  readNumericParam,
   perfMarkOnce,
   perfNow,
   perfSample,
@@ -69,6 +70,16 @@ let renderStats = { drawn: 0, hidden: 0 };
 let fpsEstimate = 0;
 let lastFpsFrameSample = 0;
 let lastFpsSampleTimeMs = perfNow();
+const uiTickSubscribers = new Set();
+const frameSubscribers = new Set();
+
+function subscribeClock(set, fn) {
+  if (typeof fn !== 'function') {
+    return () => {};
+  }
+  set.add(fn);
+  return () => set.delete(fn);
+}
 
 
 function formatArenaBytes(bytes) {
@@ -88,6 +99,12 @@ const panelStateCache = {
   left: null,
   right: null,
   fullscreen: null,
+};
+const overlayStateCache = {
+  help: null,
+  info: null,
+  profiler: null,
+  sensor: null,
 };
 const renderCtx = {
   initialized: false,
@@ -564,6 +581,16 @@ function scheduleRenderScene() {
     const perfEnabled = isPerfEnabled();
     const tRenderStart = perfEnabled ? perfNow() : 0;
     rendererManager.renderScene(latestSnapshot, store.get());
+    if (frameSubscribers.size) {
+      for (const fn of frameSubscribers) {
+        try {
+          fn({ snapshot: latestSnapshot, state: store.get() });
+        } catch (err) {
+          logWarn('[clock] frame subscriber error', err);
+          strictCatch(err, 'main:clock_frame_subscriber');
+        }
+      }
+    }
     if (perfEnabled) {
       perfSample('main:raf_renderScene_ms', perfNow() - tRenderStart, {
         frameId: Number.isFinite(latestSnapshot?.frameId) ? (latestSnapshot.frameId | 0) : null,
@@ -586,7 +613,18 @@ let lastFontIndex = null;
 let pendingUiFrame = false;
 let pendingUiState = null;
 let lastUiUpdateMs = 0;
-const UI_UPDATE_INTERVAL_MS = 120;
+let lastUiSlowUpdateMs = 0;
+let lastInfoOverlayVisible = false;
+const UI_UPDATE_INTERVAL_MS = readNumericParam(
+  'ui_ms',
+  120,
+  { parser: (value) => Number.parseInt(value, 10), min: 16, max: 2000 },
+);
+const UI_SLOW_UPDATE_INTERVAL_MS = readNumericParam(
+  'ui_slow_ms',
+  1000,
+  { parser: (value) => Number.parseInt(value, 10), min: 200, max: 10000 },
+);
 
 function scheduleUiUpdate(state) {
   pendingUiState = state;
@@ -609,8 +647,21 @@ function scheduleUiUpdate(state) {
     lastUiUpdateMs = now;
     const uiState = pendingUiState || state;
     updateControls(uiState);
-    updateInfoOverlayCard(uiState);
     updateToast(uiState);
+    updateRealtimeOverlay(uiState);
+    updateInfoOverlayTime(uiState);
+
+    const infoVisible = !!uiState?.overlays?.info;
+    if (infoVisible && !lastInfoOverlayVisible) {
+      updateInfoOverlayCard(uiState);
+      lastUiSlowUpdateMs = now;
+      lastInfoOverlayVisible = true;
+    } else if (!infoVisible) {
+      lastInfoOverlayVisible = false;
+    } else if ((now - lastUiSlowUpdateMs) >= UI_SLOW_UPDATE_INTERVAL_MS) {
+      lastUiSlowUpdateMs = now;
+      updateInfoOverlayCard(uiState);
+    }
 
     // Dynamic panel elements (actuator/joint/equality lists) can involve lots of DOM writes.
     // Keep them on the UI tick so snapshotHz (30/60/120) does not directly scale UI costs.
@@ -668,6 +719,17 @@ function scheduleUiUpdate(state) {
         controlManager.ensureEqualityToggles(eqs);
       }
     }
+
+    if (uiTickSubscribers.size) {
+      for (const fn of uiTickSubscribers) {
+        try {
+          fn({ snapshot, state: uiState, nowMs: now });
+        } catch (err) {
+          logWarn('[clock] ui tick subscriber error', err);
+          strictCatch(err, 'main:clock_ui_subscriber');
+        }
+      }
+    }
   };
   if (typeof window !== 'undefined' && window.requestAnimationFrame) {
     window.requestAnimationFrame(tick);
@@ -686,26 +748,26 @@ store.subscribe((state) => {
   } else {
     scheduleRenderScene();
   }
-  if (perfEnabled) {
-    const tOverlaysStart = perfNow();
-    updateOverlay(overlayHelp, state.overlays.help);
-    updateOverlay(overlayInfo, state.overlays.info);
-    updateOverlay(overlayProfiler, state.overlays.profiler);
-    updateOverlay(overlaySensor, state.overlays.sensor);
-    perfSample('main:subscriber_updateOverlays_ms', perfNow() - tOverlaysStart);
-  } else {
-    updateOverlay(overlayHelp, state.overlays.help);
-    updateOverlay(overlayInfo, state.overlays.info);
-    updateOverlay(overlayProfiler, state.overlays.profiler);
-    updateOverlay(overlaySensor, state.overlays.sensor);
+  const tOverlaysStart = perfEnabled ? perfNow() : 0;
+  const overlays = state.overlays || {};
+  if (overlays.help !== overlayStateCache.help) {
+    updateOverlay(overlayHelp, overlays.help);
+    overlayStateCache.help = overlays.help;
   }
-  updateInfoOverlayTime(state);
+  if (overlays.info !== overlayStateCache.info) {
+    updateOverlay(overlayInfo, overlays.info);
+    overlayStateCache.info = overlays.info;
+  }
+  if (overlays.profiler !== overlayStateCache.profiler) {
+    updateOverlay(overlayProfiler, overlays.profiler);
+    overlayStateCache.profiler = overlays.profiler;
+  }
+  if (overlays.sensor !== overlayStateCache.sensor) {
+    updateOverlay(overlaySensor, overlays.sensor);
+    overlayStateCache.sensor = overlays.sensor;
+  }
   if (perfEnabled) {
-    const tRealtimeStart = perfNow();
-    updateRealtimeOverlay(state);
-    perfSample('main:subscriber_updateRealtimeOverlay_ms', perfNow() - tRealtimeStart);
-  } else {
-    updateRealtimeOverlay(state);
+    perfSample('main:subscriber_updateOverlays_ms', perfNow() - tOverlaysStart);
   }
   if (perfEnabled) {
     const tPanelsStart = perfNow();
@@ -1086,6 +1148,27 @@ if (typeof registerGlobalShortcut === 'function') {
       getContext: () => (rendererManager.getContext ? rendererManager.getContext() : (renderCtx.initialized ? renderCtx : null)),
       ensureLoop: () => rendererManager.ensureRenderLoop(),
       renderScene: (snapshot, state) => rendererManager.renderScene(snapshot, state),
+    };
+    window.__PLAY_HOST__ = {
+      apiVersion: 1,
+      mounts: {
+        leftPanel,
+        rightPanel,
+        overlayRoot: document.querySelector('.overlay-stack'),
+      },
+      store,
+      backend,
+      controls: window.__viewerControls,
+      renderer: window.__viewerRenderer,
+      getSnapshot: () => latestSnapshot,
+      clock: {
+        onUiTick: (fn) => subscribeClock(uiTickSubscribers, fn),
+        onFrame: (fn) => subscribeClock(frameSubscribers, fn),
+      },
+      logStatus,
+      logWarn,
+      logError,
+      strictCatch,
     };
   }
 
