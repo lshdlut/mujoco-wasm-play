@@ -461,6 +461,16 @@ function recordStrictEvent(kind, name, detail = null, options = {}) {
   const entry = state.counts[key] || (state.counts[key] = { kind, name, count: 0, lastDetail: null });
   entry.count += 1;
   entry.lastDetail = detail;
+  // Keep strict bookkeeping cheap when strict is disabled. In normal (non-debug)
+  // runs we only track counts + lastDetail, avoiding per-event allocations.
+  const shouldRecordEvent = state.enabled || isVerboseDebug();
+  if (!shouldRecordEvent) {
+    if (options.allowlisted) {
+      const allowCount = state.allowlistCounts[name] || 0;
+      state.allowlistCounts[name] = allowCount + 1;
+    }
+    return null;
+  }
   const record = {
     id: (state.seq += 1),
     kind,

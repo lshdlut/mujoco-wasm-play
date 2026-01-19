@@ -709,31 +709,34 @@ function cameraLabelFromIndex(index, cameras = []) {
 
 function mergeBackendSnapshot(draft, snapshot) {
   if (!snapshot) return;
-  const snapshotSummary = (state) => ({
-    hud: {
-      time: state?.hud?.time ?? null,
-      rate: state?.hud?.rate ?? null,
-      measuredSlowdown: state?.hud?.measuredSlowdown ?? null,
-      ngeom: state?.hud?.ngeom ?? null,
-      contacts: state?.hud?.contacts ?? null,
-      pausedSource: state?.hud?.pausedSource ?? null,
-      rateSource: state?.hud?.rateSource ?? null,
-    },
-    simulation: {
-      run: state?.simulation?.run ?? null,
-      realTimeIndex: state?.simulation?.realTimeIndex ?? null,
-      scrubIndex: state?.simulation?.scrubIndex ?? null,
-    },
-    runtime: {
-      gesture: state?.runtime?.gesture ? { ...state.runtime.gesture } : null,
-      drag: state?.runtime?.drag ? { ...state.runtime.drag } : null,
-      cameraIndex: state?.runtime?.cameraIndex ?? null,
-    },
-  });
-  const before = snapshotSummary(draft);
-  const snapshotKeys = Object.keys(snapshot || {});
-  const applied = [];
-  const structDiffs = {};
+  const strictEnabled = isStrictEnabled();
+  const snapshotSummary = strictEnabled
+    ? (state) => ({
+        hud: {
+          time: state?.hud?.time ?? null,
+          rate: state?.hud?.rate ?? null,
+          measuredSlowdown: state?.hud?.measuredSlowdown ?? null,
+          ngeom: state?.hud?.ngeom ?? null,
+          contacts: state?.hud?.contacts ?? null,
+          pausedSource: state?.hud?.pausedSource ?? null,
+          rateSource: state?.hud?.rateSource ?? null,
+        },
+        simulation: {
+          run: state?.simulation?.run ?? null,
+          realTimeIndex: state?.simulation?.realTimeIndex ?? null,
+          scrubIndex: state?.simulation?.scrubIndex ?? null,
+        },
+        runtime: {
+          gesture: state?.runtime?.gesture ? { ...state.runtime.gesture } : null,
+          drag: state?.runtime?.drag ? { ...state.runtime.drag } : null,
+          cameraIndex: state?.runtime?.cameraIndex ?? null,
+        },
+      })
+    : null;
+  const before = snapshotSummary ? snapshotSummary(draft) : null;
+  const snapshotKeys = strictEnabled ? Object.keys(snapshot || {}) : null;
+  const applied = strictEnabled ? [] : null;
+  const structDiffs = strictEnabled ? {} : null;
   const visualVersion = Number.isFinite(snapshot.visualVersion) ? snapshot.visualVersion : null;
   const visualDefaultsVersion = Number.isFinite(snapshot.visualDefaultsVersion) ? snapshot.visualDefaultsVersion : null;
   const statisticVersion = Number.isFinite(snapshot.statisticVersion) ? snapshot.statisticVersion : null;
@@ -1050,10 +1053,12 @@ function mergeBackendSnapshot(draft, snapshot) {
     const shouldApplyVisual = visualVersion == null || visualVersion !== lastVisualVersion;
     if (shouldApplyVisual) {
       const nextVisual = cloneStruct(snapshot.visual) || {};
-      structDiffs.visual = diffStruct(model.vis, nextVisual, VISUAL_FIELD_DESCRIPTORS);
+      if (structDiffs) {
+        structDiffs.visual = diffStruct(model.vis, nextVisual, VISUAL_FIELD_DESCRIPTORS);
+      }
       model.vis = nextVisual;
       lastVisualVersion = visualVersion;
-      applied.push('visual');
+      applied?.push('visual');
     }
   }
   const baselines = ensureVisualCache(draft, 'visualBaselines');
@@ -1062,7 +1067,9 @@ function mergeBackendSnapshot(draft, snapshot) {
       !baselines.model || (visualDefaultsVersion != null && visualDefaultsVersion !== lastVisualDefaultsVersion);
     if (shouldApplyDefaults) {
       const nextDefaults = cloneStruct(snapshot.visualDefaults) || {};
-      structDiffs.visualDefaults = diffStruct(model.visDefaults, nextDefaults, VISUAL_FIELD_DESCRIPTORS);
+      if (structDiffs) {
+        structDiffs.visualDefaults = diffStruct(model.visDefaults, nextDefaults, VISUAL_FIELD_DESCRIPTORS);
+      }
       model.visDefaults = nextDefaults;
       baselines.model = cloneStruct(nextDefaults);
       baselines.sceneFlagsModel = normaliseSceneFlagArray(snapshot.sceneFlags);
@@ -1071,7 +1078,7 @@ function mergeBackendSnapshot(draft, snapshot) {
       baselines.presetMoon = null;
       baselines.sceneFlagsPresetMoon = null;
       lastVisualDefaultsVersion = visualDefaultsVersion;
-      applied.push('visualDefaults');
+      applied?.push('visualDefaults');
     }
   } else if (!baselines.model && snapshot.visual) {
     baselines.model = cloneStruct(snapshot.visual);
@@ -1119,10 +1126,12 @@ function mergeBackendSnapshot(draft, snapshot) {
     const shouldApplyStatistic = statisticVersion == null || statisticVersion !== lastStatisticVersion;
     if (shouldApplyStatistic) {
       const nextStat = cloneStruct(snapshot.statistic) || {};
-      structDiffs.statistic = diffStruct(model.stat, nextStat, STAT_FIELD_DESCRIPTORS);
+      if (structDiffs) {
+        structDiffs.statistic = diffStruct(model.stat, nextStat, STAT_FIELD_DESCRIPTORS);
+      }
       model.stat = nextStat;
       lastStatisticVersion = statisticVersion;
-      applied.push('statistic');
+      applied?.push('statistic');
     }
   }
   if (snapshot.optionSupport && typeof snapshot.optionSupport === 'object') {
@@ -1139,15 +1148,17 @@ function mergeBackendSnapshot(draft, snapshot) {
     draft.runtime.cameraIndex = mode;
     draft.runtime.cameraLabel = cameraLabelFromIndex(mode, model?.cameras);
   }
-  const after = snapshotSummary(draft);
-  strictOverride('mergeBackendSnapshot', {
-    source: 'backend_snapshot',
-    snapshotKeys,
-    before,
-    after,
-    applied,
-    structDiffs,
-  });
+  if (strictEnabled && snapshotSummary) {
+    const after = snapshotSummary(draft);
+    strictOverride('mergeBackendSnapshot', {
+      source: 'backend_snapshot',
+      snapshotKeys,
+      before,
+      after,
+      applied,
+      structDiffs,
+    });
+  }
 }
 
 function ensureRenderingState(target) {
