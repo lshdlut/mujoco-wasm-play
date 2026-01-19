@@ -52,6 +52,22 @@ export function resolveHeapBuffer(mod) {
 
 const MJ_STATE_INTEGRATION = 0x1fff;
 
+function ensureHeapViewCache(mod, buffer) {
+  if (!mod || !(buffer instanceof ArrayBuffer)) return null;
+  const existing = mod.__heapViewCache;
+  if (existing && existing.buffer === buffer && existing.map instanceof Map) {
+    return existing;
+  }
+  const next = { buffer, map: new Map() };
+  try {
+    mod.__heapViewCache = next;
+  } catch (err) {
+    strictCatch(err, 'bridge:heapViewCache_assign');
+    return null;
+  }
+  return next;
+}
+
 function createHeapTypedArray(mod, ptr, length, Ctor) {
   const n = length | 0;
   if (!(n > 0) || !(ptr > 0)) {
@@ -61,7 +77,19 @@ function createHeapTypedArray(mod, ptr, length, Ctor) {
   if (buffer instanceof ArrayBuffer) {
     mod.__heapBuffer = buffer;
     try {
-      return new Ctor(buffer, ptr >>> 0, n);
+      const cacheState = ensureHeapViewCache(mod, buffer);
+      const key = cacheState ? `${Ctor.name}:${ptr >>> 0}` : null;
+      if (cacheState && key) {
+        const cached = cacheState.map.get(key);
+        if (cached && cached.len === n && cached.view && cached.view.buffer === buffer) {
+          return cached.view;
+        }
+      }
+      const view = new Ctor(buffer, ptr >>> 0, n);
+      if (cacheState && key && view && view.buffer === buffer) {
+        cacheState.map.set(key, { len: n, view });
+      }
+      return view;
     } catch (err) {
       try {
         const bytes = Ctor.BYTES_PER_ELEMENT * n;
@@ -897,6 +925,12 @@ export class MjSimLite {
     this.modId = tagForgeModule(mod);
     this.h = 0;
     this.contactForceScratch = null;
+    this._countCache = null;
+    this._countCacheHandle = 0;
+    this._ptrCache = new Map();
+    this._ptrCacheHandle = 0;
+    this._sceneNgeomCache = null;
+    this._sceneNgeomCacheHandle = 0;
     const heapBuf = resolveHeapBuffer(mod);
     if (heapBuf) {
       mod.__heapBuffer = heapBuf;
@@ -1126,6 +1160,81 @@ export class MjSimLite {
     }
     this._validateHandleOrThrow(h);
     this.h = h;
+    this._invalidateCaches();
+  }
+
+  _invalidateCaches(){
+    this._countCache = null;
+    this._countCacheHandle = 0;
+    this._sceneNgeomCache = null;
+    this._sceneNgeomCacheHandle = 0;
+    this._ptrCacheHandle = 0;
+    if (this._ptrCache) this._ptrCache.clear();
+    else this._ptrCache = new Map();
+    try {
+      const state = this.mod?.__heapViewCache;
+      if (state?.map instanceof Map) state.map.clear();
+    } catch (err) {
+      strictCatch(err, 'bridge:invalidate_heapViewCache');
+    }
+  }
+
+  _ensurePtrCache(){
+    const h = this.h | 0;
+    if (!(h > 0)) return null;
+    if (this._ptrCacheHandle !== h) {
+      this._ptrCacheHandle = h;
+      if (this._ptrCache) this._ptrCache.clear();
+      else this._ptrCache = new Map();
+    }
+    return this._ptrCache;
+  }
+
+  _cachedPtr(fnName){
+    const cache = this._ensurePtrCache();
+    if (!cache) return 0;
+    if (cache.has(fnName)) return cache.get(fnName) | 0;
+    const m = this.mod;
+    const fn = m?.[fnName];
+    const ptr = typeof fn === 'function' ? (fn.call(m, this.h | 0) | 0) : 0;
+    cache.set(fnName, ptr);
+    return ptr | 0;
+  }
+
+  _ensureCountCache(){
+    const h = this.h | 0;
+    if (!(h > 0)) return null;
+    if (this._countCache && this._countCacheHandle === h) return this._countCache;
+    const m = this.mod;
+    const call = (name) => {
+      const fn = m?.[name];
+      if (typeof fn !== 'function') return 0;
+      return (fn.call(m, h) | 0) || 0;
+    };
+    const cache = {
+      nq: call('_mjwf_model_nq'),
+      nv: call('_mjwf_model_nv'),
+      nu: call('_mjwf_model_nu'),
+      njnt: call('_mjwf_model_njnt'),
+      ncam: call('_mjwf_model_ncam'),
+      nlight: call('_mjwf_model_nlight'),
+      nsite: call('_mjwf_model_nsite'),
+      nflex: call('_mjwf_model_nflex'),
+      nflexvert: call('_mjwf_model_nflexvert'),
+      ntendon: call('_mjwf_model_ntendon'),
+      nwrap: call('_mjwf_model_nwrap'),
+      nsensor: call('_mjwf_model_nsensor'),
+      nsensordata: call('_mjwf_model_nsensordata'),
+      neq: call('_mjwf_model_neq'),
+      ngeom: call('_mjwf_model_ngeom'),
+      nbody: call('_mjwf_model_nbody'),
+      nkey: call('_mjwf_model_nkey'),
+      nbvh: call('_mjwf_model_nbvh'),
+      nbvhdynamic: call('_mjwf_model_nbvhdynamic'),
+    };
+    this._countCache = cache;
+    this._countCacheHandle = h;
+    return cache;
   }
 
   ensurePointers(){
@@ -1150,44 +1259,38 @@ export class MjSimLite {
   }
 
   // --- Basic counts ---
-  nq(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nq']; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
-  nv(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nv']; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
-  nu(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nu']; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
-  njnt(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_njnt; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
-  ncam(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_ncam; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
-  nlight(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_nlight; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
-  nsite(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_nsite; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
-  nflex(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nflex']; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
-  nflexvert(){ const m=this.mod; const h=this.h|0; const d=m['_mjwf_model_nflexvert']; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
-  ntendon(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_ntendon; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
-  nwrap(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_nwrap; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
-  nsensor(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_nsensor; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
-  nsensordata(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_nsensordata; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
-  neq(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_neq; if (typeof d==='function') return (d.call(m,h)|0)||0; return 0; }
+  nq(){ const c=this._ensureCountCache(); return c ? (c.nq|0) : 0; }
+  nv(){ const c=this._ensureCountCache(); return c ? (c.nv|0) : 0; }
+  nu(){ const c=this._ensureCountCache(); return c ? (c.nu|0) : 0; }
+  njnt(){ const c=this._ensureCountCache(); return c ? (c.njnt|0) : 0; }
+  ncam(){ const c=this._ensureCountCache(); return c ? (c.ncam|0) : 0; }
+  nlight(){ const c=this._ensureCountCache(); return c ? (c.nlight|0) : 0; }
+  nsite(){ const c=this._ensureCountCache(); return c ? (c.nsite|0) : 0; }
+  nflex(){ const c=this._ensureCountCache(); return c ? (c.nflex|0) : 0; }
+  nflexvert(){ const c=this._ensureCountCache(); return c ? (c.nflexvert|0) : 0; }
+  ntendon(){ const c=this._ensureCountCache(); return c ? (c.ntendon|0) : 0; }
+  nwrap(){ const c=this._ensureCountCache(); return c ? (c.nwrap|0) : 0; }
+  nsensor(){ const c=this._ensureCountCache(); return c ? (c.nsensor|0) : 0; }
+  nsensordata(){ const c=this._ensureCountCache(); return c ? (c.nsensordata|0) : 0; }
+  neq(){ const c=this._ensureCountCache(); return c ? (c.neq|0) : 0; }
 
   // --- State views ---
   qposView(){
-    const m=this.mod; const h=this.h|0; const n=this.nq(); if(!n)return;
-    const d=m._mjwf_data_qpos_ptr;
-    if (typeof d!=='function') return;
-    const p=d.call(m,h)|0; if(!p)return;
+    const m=this.mod; const n=this.nq(); if(!n)return;
+    const p=this._cachedPtr('_mjwf_data_qpos_ptr')|0; if(!p)return;
     return heapViewF64(m,p,n);
   }
   qvelView(){
-    const m=this.mod; const h=this.h|0; const n=this.nv(); if(!n)return;
-    const d=m._mjwf_data_qvel_ptr;
-    if (typeof d!=='function') return;
-    const p=d.call(m,h)|0; if(!p)return;
+    const m=this.mod; const n=this.nv(); if(!n)return;
+    const p=this._cachedPtr('_mjwf_data_qvel_ptr')|0; if(!p)return;
     return heapViewF64(m,p,n);
   }
   ctrlView(){
-    const m=this.mod; const h=this.h|0; const n=this.nu(); if(!n)return;
-    const d=m._mjwf_data_ctrl_ptr;
-    if (typeof d!=='function') return;
-    const p=d.call(m,h)|0; if(!p)return;
+    const m=this.mod; const n=this.nu(); if(!n)return;
+    const p=this._cachedPtr('_mjwf_data_ctrl_ptr')|0; if(!p)return;
     return heapViewF64(m,p,n);
   }
-  actuatorCtrlRangeView(){ const m=this.mod; const h=this.h|0; const n=this.nu(); if(!(n>0)) return; const d=m._mjwf_model_actuator_ctrlrange_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*2); }
+  actuatorCtrlRangeView(){ const m=this.mod; const n=this.nu(); if(!(n>0)) return; const p=this._cachedPtr('_mjwf_model_actuator_ctrlrange_ptr')|0; if(!p) return; return heapViewF64(m,p,n*2); }
   jntQposAdrView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_qposadr_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,nj); }
   jntRangeView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_range_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,nj*2); }
   jntTypeView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_type_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,nj); }
@@ -1206,21 +1309,21 @@ export class MjSimLite {
   tenWrapNumView(){ const m=this.mod; const h=this.h|0; const n=this.ntendon()|0; if(!(n>0)) return null; const d=m['_mjwf_data_ten_wrapnum_ptr']; if (typeof d!=='function') return null; const p=d.call(m,h)|0; if(!p) return null; return heapViewI32(m,p,n); }
   wrapObjView(){ const m=this.mod; const h=this.h|0; const n=this.nwrap()|0; if(!(n>0)) return null; const d=m['_mjwf_data_wrap_obj_ptr']; if (typeof d!=='function') return null; const p=d.call(m,h)|0; if(!p) return null; return heapViewI32(m,p,n*2); }
   wrapXposView(){ const m=this.mod; const h=this.h|0; const n=this.nwrap()|0; if(!(n>0)) return null; const d=m['_mjwf_data_wrap_xpos_ptr']; if (typeof d!=='function') return null; const p=d.call(m,h)|0; if(!p) return null; return heapViewF64(m,p,n*6); }
-  flexvertXposView(){ const m=this.mod; const h=this.h|0; const n=this.nflexvert()|0; if(!(n>0)) return null; const d=m['_mjwf_data_flexvert_xpos_ptr']; if (typeof d!=='function') return null; const p=d.call(m,h)|0; if(!p) return null; return heapViewF64(m,p,n*3); }
+  flexvertXposView(){ const m=this.mod; const n=this.nflexvert()|0; if(!(n>0)) return null; const p=this._cachedPtr('_mjwf_data_flexvert_xpos_ptr')|0; if(!p) return null; return heapViewF64(m,p,n*3); }
   sensorTypeView(){ const m=this.mod; const h=this.h|0; const n=this.nsensor()|0; if(!n)return; const d=m._mjwf_model_sensor_type_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
   sensorObjIdView(){ const m=this.mod; const h=this.h|0; const n=this.nsensor()|0; if(!n)return; const d=m._mjwf_model_sensor_objid_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  eqTypeView(){ const m=this.mod; const h=this.h|0; const n=this.neq()|0; if(!n)return; const d=m._mjwf_model_eq_type_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  eqObj1IdView(){ const m=this.mod; const h=this.h|0; const n=this.neq()|0; if(!n)return; const d=m._mjwf_model_eq_obj1id_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  eqObj2IdView(){ const m=this.mod; const h=this.h|0; const n=this.neq()|0; if(!n)return; const d=m._mjwf_model_eq_obj2id_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  eqObjTypeView(){ const m=this.mod; const h=this.h|0; const n=this.neq()|0; if(!n)return; const d=m._mjwf_model_eq_objtype_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  eqDataView(){ const m=this.mod; const h=this.h|0; const n=this.neq()|0; if(!n)return; const d=m._mjwf_model_eq_data_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*11); }
-  eqActiveView(){ const m=this.mod; const h=this.h|0; const n=this.neq()|0; if(!n)return; const d=m['_mjwf_data_eq_active_ptr']; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewU8(m,p,n); }
-  eqActive0View(){ const m=this.mod; const h=this.h|0; const n=this.neq()|0; if(!n)return; const d=m._mjwf_model_eq_active0_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewU8(m,p,n); }
+  eqTypeView(){ const m=this.mod; const n=this.neq()|0; if(!n)return; const p=this._cachedPtr('_mjwf_model_eq_type_ptr')|0; if(!p)return; return heapViewI32(m,p,n); }
+  eqObj1IdView(){ const m=this.mod; const n=this.neq()|0; if(!n)return; const p=this._cachedPtr('_mjwf_model_eq_obj1id_ptr')|0; if(!p)return; return heapViewI32(m,p,n); }
+  eqObj2IdView(){ const m=this.mod; const n=this.neq()|0; if(!n)return; const p=this._cachedPtr('_mjwf_model_eq_obj2id_ptr')|0; if(!p)return; return heapViewI32(m,p,n); }
+  eqObjTypeView(){ const m=this.mod; const n=this.neq()|0; if(!n)return; const p=this._cachedPtr('_mjwf_model_eq_objtype_ptr')|0; if(!p)return; return heapViewI32(m,p,n); }
+  eqDataView(){ const m=this.mod; const n=this.neq()|0; if(!n)return; const p=this._cachedPtr('_mjwf_model_eq_data_ptr')|0; if(!p)return; return heapViewF64(m,p,n*11); }
+  eqActiveView(){ const m=this.mod; const n=this.neq()|0; if(!n)return; const p=this._cachedPtr('_mjwf_data_eq_active_ptr')|0; if(!p)return; return heapViewU8(m,p,n); }
+  eqActive0View(){ const m=this.mod; const n=this.neq()|0; if(!n)return; const p=this._cachedPtr('_mjwf_model_eq_active0_ptr')|0; if(!p)return; return heapViewU8(m,p,n); }
   id2name(objtype, objid){ const m=this.mod; const h=this.h|0; const fn = m['_mjwf_mj_id2name']; if (typeof fn!=='function') return ''; const p=fn.call(m,h, objtype|0, objid|0)|0; if(!p) return ''; return this._cstr(p); }
   camXposView(){ const m=this.mod; const h=this.h|0; const n=this.ncam(); if(!(n>0)) return; const d=m._mjwf_data_cam_xpos_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*3); }
   camXmatView(){ const m=this.mod; const h=this.h|0; const n=this.ncam(); if(!(n>0)) return; const d=m._mjwf_data_cam_xmat_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*9); }
-  lightXposView(){ const m=this.mod; const h=this.h|0; const n=this.nlight(); if(!(n>0)) return; const d=m._mjwf_data_light_xpos_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*3); }
-  lightXdirView(){ const m=this.mod; const h=this.h|0; const n=this.nlight(); if(!(n>0)) return; const d=m._mjwf_data_light_xdir_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*3); }
+  lightXposView(){ const m=this.mod; const n=this.nlight(); if(!(n>0)) return; const p=this._cachedPtr('_mjwf_data_light_xpos_ptr')|0; if(!p) return; return heapViewF64(m,p,n*3); }
+  lightXdirView(){ const m=this.mod; const n=this.nlight(); if(!(n>0)) return; const p=this._cachedPtr('_mjwf_data_light_xdir_ptr')|0; if(!p) return; return heapViewF64(m,p,n*3); }
   stateSize(sig = MJ_STATE_INTEGRATION){
     const mod = this.mod;
     if (!mod) return 0;
@@ -1273,11 +1376,8 @@ export class MjSimLite {
     return false;
   }
   nkey(){
-    const m = this.mod;
-    const h = this.h | 0;
-    const fn = m?._mjwf_model_nkey;
-    if (typeof fn !== 'function') return 0;
-    return (fn.call(m, h) | 0) || 0;
+    const c=this._ensureCountCache();
+    return c ? (c.nkey|0) : 0;
   }
   setKeyframe(index){
     const m = this.mod;
@@ -1356,7 +1456,11 @@ export class MjSimLite {
     return 0;
   }
 
-  _readPtr(owner,name){ const m=this.mod; const h=this.h|0; const fn=m && m[`_mjwf_${owner}_${name}_ptr`]; if (typeof fn!=='function') return 0; return fn.call(m,h)|0; }
+  _readPtr(owner,name){
+    const h = this.h | 0;
+    if (!(h > 0)) return 0;
+    return this._cachedPtr(`_mjwf_${owner}_${name}_ptr`) | 0;
+  }
   _readModelPtr(name){ return this._readPtr('model', name); }
   _readDataPtr(name){ return this._readPtr('data', name); }
 
@@ -1508,16 +1612,16 @@ export class MjSimLite {
     return diag;
   }
 
-  ngeom(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_ngeom; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
-  nbody(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_nbody; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
+  ngeom(){ const c=this._ensureCountCache(); return c ? (c.ngeom|0) : 0; }
+  nbody(){ const c=this._ensureCountCache(); return c ? (c.nbody|0) : 0; }
   bodyJntAdrView(){ const m=this.mod; const h=this.h|0; const n=this.nbody()|0; if(!(n>0)) return null; const fn=m?._mjwf_model_body_jntadr_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
   bodyJntNumView(){ const m=this.mod; const h=this.h|0; const n=this.nbody()|0; if(!(n>0)) return null; const fn=m?._mjwf_model_body_jntnum_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
   bodyParentIdView(){ const m=this.mod; const h=this.h|0; const n=this.nbody()|0; if(!(n>0)) return null; const fn=m?._mjwf_model_body_parentid_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
 
-  geomXposView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const d=m._mjwf_data_geom_xpos_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*3); }
-  geomXmatView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const d=m._mjwf_data_geom_xmat_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*9); }
-  bodyXposView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const d=m._mjwf_data_xpos_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*3); }
-  bodyXmatView(){ const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return; const d=m._mjwf_data_xmat_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*9); }
+  geomXposView(){ const m=this.mod; const n=this.ngeom(); if(!n)return; const p=this._cachedPtr('_mjwf_data_geom_xpos_ptr')|0; if(!p)return; return heapViewF64(m,p,n*3); }
+  geomXmatView(){ const m=this.mod; const n=this.ngeom(); if(!n)return; const p=this._cachedPtr('_mjwf_data_geom_xmat_ptr')|0; if(!p)return; return heapViewF64(m,p,n*9); }
+  bodyXposView(){ const m=this.mod; const n=this.nbody(); if(!n)return; const p=this._cachedPtr('_mjwf_data_xpos_ptr')|0; if(!p)return; return heapViewF64(m,p,n*3); }
+  bodyXmatView(){ const m=this.mod; const n=this.nbody(); if(!n)return; const p=this._cachedPtr('_mjwf_data_xmat_ptr')|0; if(!p)return; return heapViewF64(m,p,n*9); }
   bodyXiposView(){
     const m=this.mod; const h=this.h|0; const n=this.nbody(); if(!n)return;
     const d = m._mjwf_data_xipos_ptr;
@@ -1557,16 +1661,12 @@ export class MjSimLite {
     return d.call(m,h)|0;
   }
   nbvh(){
-    const m=this.mod; const h=this.h|0;
-    const d = m._mjwf_model_nbvh;
-    if (typeof d!=='function') return 0;
-    return d.call(m,h)|0;
+    const c=this._ensureCountCache();
+    return c ? (c.nbvh|0) : 0;
   }
   nbvhdynamic(){
-    const m=this.mod; const h=this.h|0;
-    const d = m._mjwf_model_nbvhdynamic;
-    if (typeof d!=='function') return 0;
-    return d.call(m,h)|0;
+    const c=this._ensureCountCache();
+    return c ? (c.nbvhdynamic|0) : 0;
   }
   bvhActiveView(){
     const m=this.mod; const h=this.h|0; const nbvh=this.nbvh()|0; if(!(nbvh>0)) return;
@@ -1762,29 +1862,29 @@ export class MjSimLite {
     return (typeof result === 'number' && result > 0 && Number.isFinite(result)) ? result : null;
   }
   // Optional getters: direct exports only.
-  geomSizeView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const d=m._mjwf_model_geom_size_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*3); }
-  geomTypeView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const d=m._mjwf_model_geom_type_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  geomMatIdView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const d=m._mjwf_model_geom_matid_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  geomDataidView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom(); if(!n)return; const d=m._mjwf_model_geom_dataid_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  geomBodyIdView(){ const m=this.mod; const h=this.h|0; const n=this.ngeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_model_geom_bodyid_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  geomSizeView(){ const m=this.mod; const n=this.ngeom(); if(!n)return; const p=this._cachedPtr('_mjwf_model_geom_size_ptr')|0; if(!p)return; return heapViewF64(m,p,n*3); }
+  geomTypeView(){ const m=this.mod; const n=this.ngeom(); if(!n)return; const p=this._cachedPtr('_mjwf_model_geom_type_ptr')|0; if(!p)return; return heapViewI32(m,p,n); }
+  geomMatIdView(){ const m=this.mod; const n=this.ngeom(); if(!n)return; const p=this._cachedPtr('_mjwf_model_geom_matid_ptr')|0; if(!p)return; return heapViewI32(m,p,n); }
+  geomDataidView(){ const m=this.mod; const n=this.ngeom(); if(!n)return; const p=this._cachedPtr('_mjwf_model_geom_dataid_ptr')|0; if(!p)return; return heapViewI32(m,p,n); }
+  geomBodyIdView(){ const m=this.mod; const n=this.ngeom()|0; if(!(n>0)) return null; const p=this._cachedPtr('_mjwf_model_geom_bodyid_ptr')|0; if(!(p>0)) return null; return heapViewI32(m, p, n); }
   // mjvScene SoA (forge scene API; SoA packed in wasm, copied by worker)
-  sceneUpdateAndPack(catmask = 7){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_scene_update_and_pack; if (typeof fn!=='function' || !(h>0)) return 0; return fn.call(m, h, catmask|0) | 0; }
-  sceneNgeom(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_scene_ngeom; if (typeof fn!=='function' || !(h>0)) return 0; return fn.call(m, h) | 0; }
-  sceneGeomOrderView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geomorder_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomCamDistView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_camdist_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n); }
-  sceneGeomTypeView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_type_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomPosView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_pos_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*3); }
-  sceneGeomMatView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_mat_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*9); }
-  sceneGeomSizeView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_size_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*3); }
-  sceneGeomRgbaView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_rgba_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*4); }
-  sceneGeomMatIdView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_matid_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomDataIdView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_dataid_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomObjTypeView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_objtype_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomObjIdView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_objid_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomCategoryView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_category_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomSegIdView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_segid_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomTransparentView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_transparent_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewU8(m, ptr, n); }
-  sceneGeomLabelView(){ const m=this.mod; const h=this.h|0; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const fn=m?._mjwf_scene_geoms_label_ptr; if (typeof fn!=='function') return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; const stride=100; return heapViewU8(m, ptr, n*stride); }
+  sceneUpdateAndPack(catmask = 7){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_scene_update_and_pack; if (typeof fn!=='function' || !(h>0)) return 0; const out=fn.call(m, h, catmask|0) | 0; this._sceneNgeomCache=null; this._sceneNgeomCacheHandle=0; return out; }
+  sceneNgeom(){ const h=this.h|0; if(!(h>0)) return 0; if (this._sceneNgeomCache != null && this._sceneNgeomCacheHandle === h) return this._sceneNgeomCache | 0; const m=this.mod; const fn=m?._mjwf_scene_ngeom; if (typeof fn!=='function') return 0; const out=fn.call(m, h) | 0; this._sceneNgeomCache=out|0; this._sceneNgeomCacheHandle=h; return out | 0; }
+  sceneGeomOrderView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geomorder_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomCamDistView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_camdist_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n); }
+  sceneGeomTypeView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_type_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomPosView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_pos_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*3); }
+  sceneGeomMatView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_mat_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*9); }
+  sceneGeomSizeView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_size_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*3); }
+  sceneGeomRgbaView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_rgba_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*4); }
+  sceneGeomMatIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_matid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomDataIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_dataid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomObjTypeView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_objtype_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomObjIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_objid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomCategoryView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_category_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomSegIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_segid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomTransparentView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_transparent_ptr')|0; if(!(ptr>0)) return null; return heapViewU8(m, ptr, n); }
+  sceneGeomLabelView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_label_ptr')|0; if(!(ptr>0)) return null; const stride=100; return heapViewU8(m, ptr, n*stride); }
   // mjvOption views (writeable)
   voptFlagsPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_vopt_flags_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewU8(m, ptr, 31); }
   voptLabelPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_vopt_label_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }

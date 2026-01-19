@@ -24,7 +24,7 @@ import {
   writeVisualField,
 } from './viewer_structs.mjs';
 import { dispatchCommand } from './dispatch.gen.mjs';
-import { collectSnapshotTransfers } from './protocol.gen.mjs';
+import { collectSnapshotTransfersInto } from './protocol.gen.mjs';
 
 const MJ_TIMER_STEP = 0;
 const MJ_TIMER_FORWARD = 1;
@@ -51,6 +51,13 @@ let frameMode = 0;
 let cameraMode = 0;
 let groupState = createGroupState();
 let lastBounds = { center: [0, 0, 0], radius: 0 };
+let cachedWatchSources = null;
+let cachedEqNames = null;
+let eqNamesSent = false;
+let cachedOptionStruct = null;
+let cachedHistoryMeta = null;
+let cachedKeyframeMeta = null;
+let cachedInfoStats = null;
 let alignSeq = 0;
 let copySeq = 0;
 let selectionSeq = 0;
@@ -94,9 +101,11 @@ let snapshotHz = 60;
 let snapshotIntervalMs = 1000 / snapshotHz;
 let snapshotAccumulatorMs = 0;
 let snapshotLastTickMs = 0;
-let flexSnapshotLastSentMs = 0;
 let lastStepPerf = null;
 let lastSnapshotPostMessageMs = 0;
+let cachedScnNgeom = 0;
+const snapshotTransferScratch = [];
+const snapshotTransferSeen = new Set();
 
 const MAX_WALL_DELTA = 0.25; // clamp wall delta to avoid huge catch-up after tab suspension
 const STEP_TICK_BUDGET_MS = 8; // cap stepping time per tick to keep snapshots/messages responsive
@@ -112,6 +121,112 @@ const perfStages = {
   initFromXmlMs: null,
   collectRenderAssetsMs: null,
 };
+
+const SNAPSHOT_POOL = {
+  VOPT_SYNC: 0,
+  OPTIONS_STRUCT: 1,
+  HISTORY_META: 2,
+  KEYFRAMES_META: 3,
+  WATCH_SOURCES: 4,
+  INFO_STATS: 5,
+  EQ_NAMES: 6,
+  BODY_POSE: 7,
+  SCENE_PACK: 8,
+  CTRL_QPOS: 9,
+  EQ_FIELDS: 10,
+  LIGHT_FIELDS: 11,
+  GEOM_CONST: 12,
+  FLEX_VERT: 13,
+};
+const SNAPSHOT_POOL_COUNT = 14;
+const snapshotPoolDirty = new Uint8Array(SNAPSHOT_POOL_COUNT);
+const snapshotPoolLastMs = new Float64Array(SNAPSHOT_POOL_COUNT);
+const snapshotPoolIntervalMs = new Float64Array(SNAPSHOT_POOL_COUNT);
+
+function snapshotPoolMarkDirtyMany(...poolIds) {
+  for (let i = 0; i < poolIds.length; i += 1) {
+    snapshotPoolDirty[poolIds[i]] = 1;
+  }
+}
+
+const DIRTY_REASON = {
+  VOPT_CHANGED: 0,
+  SCENE_ONLY_CHANGED: 1,
+  OPTIONS_STRUCT_CHANGED: 2,
+  EQ_ACTIVE_CHANGED: 3,
+  FLEX_CHANGED: 4,
+};
+
+const DIRTY_REASON_POOLS = [];
+DIRTY_REASON_POOLS[DIRTY_REASON.VOPT_CHANGED] = [SNAPSHOT_POOL.VOPT_SYNC, SNAPSHOT_POOL.SCENE_PACK];
+DIRTY_REASON_POOLS[DIRTY_REASON.SCENE_ONLY_CHANGED] = [SNAPSHOT_POOL.SCENE_PACK];
+DIRTY_REASON_POOLS[DIRTY_REASON.OPTIONS_STRUCT_CHANGED] = [SNAPSHOT_POOL.OPTIONS_STRUCT, SNAPSHOT_POOL.SCENE_PACK];
+DIRTY_REASON_POOLS[DIRTY_REASON.EQ_ACTIVE_CHANGED] = [SNAPSHOT_POOL.EQ_FIELDS];
+DIRTY_REASON_POOLS[DIRTY_REASON.FLEX_CHANGED] = [SNAPSHOT_POOL.FLEX_VERT];
+
+function markDirty(reason, { affectsFlex = false } = {}) {
+  const pools = DIRTY_REASON_POOLS[reason];
+  if (!pools || !pools.length) {
+    throw new Error(`Unknown dirty reason: ${String(reason)}`);
+  }
+  snapshotPoolMarkDirtyMany(...pools);
+  if (affectsFlex) snapshotPoolMarkDirty(SNAPSHOT_POOL.FLEX_VERT);
+}
+
+function snapshotPoolSetHz(poolId, hz) {
+  const rate = Number(hz);
+  if (rate === 0) {
+    snapshotPoolIntervalMs[poolId] = 0;
+    return;
+  }
+  snapshotPoolIntervalMs[poolId] = Number.isFinite(rate) && rate > 0 ? (1000 / rate) : Number.POSITIVE_INFINITY;
+}
+
+function snapshotPoolMarkDirty(poolId) {
+  snapshotPoolDirty[poolId] = 1;
+}
+
+function snapshotPoolMarkAllDirty() {
+  snapshotPoolDirty.fill(1);
+}
+
+function snapshotPoolResetTimers() {
+  snapshotPoolLastMs.fill(0);
+}
+
+function snapshotPoolShouldUpdate(poolId, nowMs) {
+  if (snapshotPoolDirty[poolId]) return true;
+  const intervalMs = snapshotPoolIntervalMs[poolId];
+  if (intervalMs === 0) return true;
+  if (!(intervalMs > 0) || intervalMs === Number.POSITIVE_INFINITY) return false;
+  return (nowMs - snapshotPoolLastMs[poolId]) >= intervalMs;
+}
+
+function snapshotPoolDidUpdate(poolId, nowMs) {
+  snapshotPoolDirty[poolId] = 0;
+  snapshotPoolLastMs[poolId] = nowMs;
+}
+
+for (const [poolId, hz] of [
+  [SNAPSHOT_POOL.VOPT_SYNC, 1],
+  [SNAPSHOT_POOL.OPTIONS_STRUCT, 1],
+  [SNAPSHOT_POOL.HISTORY_META, 30],
+  [SNAPSHOT_POOL.KEYFRAMES_META, Number.POSITIVE_INFINITY],
+  [SNAPSHOT_POOL.WATCH_SOURCES, Number.POSITIVE_INFINITY],
+  [SNAPSHOT_POOL.INFO_STATS, 10],
+  [SNAPSHOT_POOL.EQ_NAMES, Number.POSITIVE_INFINITY],
+  [SNAPSHOT_POOL.BODY_POSE, 0],
+  [SNAPSHOT_POOL.SCENE_PACK, 0],
+  [SNAPSHOT_POOL.CTRL_QPOS, 0],
+  [SNAPSHOT_POOL.EQ_FIELDS, 1],
+  [SNAPSHOT_POOL.LIGHT_FIELDS, 0],
+  [SNAPSHOT_POOL.GEOM_CONST, Number.POSITIVE_INFINITY],
+  [SNAPSHOT_POOL.FLEX_VERT, 30],
+]) {
+  snapshotPoolSetHz(poolId, hz);
+}
+snapshotPoolMarkAllDirty();
+snapshotPoolResetTimers();
 
 function buildPerf(extra = null, { includeStages = false } = {}) {
   if (!perfEnabled) return null;
@@ -231,11 +346,24 @@ function cloneSceneFlags(source = sceneFlags) {
   return out;
 }
 
+function maybeSyncTimestepFromOptions(optionsState) {
+  const rawDt = Number(optionsState?.timestep);
+  if (!Number.isFinite(rawDt) || !(rawDt > 0)) return;
+  if (Math.abs(rawDt - dt) <= 1e-12) return;
+  dt = rawDt;
+  const targetHz = clamp(Math.round(1 / dt), 5, HISTORY_MAX_CAPTURE_HZ);
+  historyConfig = { ...historyConfig, captureHz: targetHz };
+  resetTimingForCurrentSim(rate);
+}
+
 function emitOptionState() {
   try {
     const optionsState = readOptionStruct(mod, h) || {};
     optionsState.flex_layer = flexLayer;
     optionsState.bvh_depth = bvhDepth;
+    maybeSyncTimestepFromOptions(optionsState);
+    cachedOptionStruct = optionsState;
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.OPTIONS_STRUCT, perfNowMs());
     postMessage({
       kind: 'options',
       voptFlags: Array.isArray(voptFlags) ? [...voptFlags] : [],
@@ -248,6 +376,30 @@ function emitOptionState() {
     });
   } catch (err) {
     strictCatch(err, 'worker:emitOptionState');
+  }
+}
+
+function getOptionsForSnapshot(nowMs) {
+  if (cachedOptionStruct && !snapshotPoolShouldUpdate(SNAPSHOT_POOL.OPTIONS_STRUCT, nowMs)) {
+    cachedOptionStruct.flex_layer = flexLayer;
+    cachedOptionStruct.bvh_depth = bvhDepth;
+    return cachedOptionStruct;
+  }
+  if (!mod || !(h > 0)) {
+    return { flex_layer: flexLayer, bvh_depth: bvhDepth };
+  }
+  try {
+    const optionsState = readOptionStruct(mod, h) || {};
+    optionsState.flex_layer = flexLayer;
+    optionsState.bvh_depth = bvhDepth;
+    maybeSyncTimestepFromOptions(optionsState);
+    cachedOptionStruct = optionsState;
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.OPTIONS_STRUCT, nowMs);
+    return optionsState;
+  } catch (err) {
+    strictCatch(err, 'worker:getOptionsForSnapshot');
+    snapshotPoolMarkDirty(SNAPSHOT_POOL.OPTIONS_STRUCT);
+    return { flex_layer: flexLayer, bvh_depth: bvhDepth };
   }
 }
 
@@ -434,11 +586,15 @@ function readViewerFreeCameraState() {
   };
 }
 
+const ZERO_VEC3 = [0, 0, 0];
+const PERTURB_PIPELINE_PAYLOAD_RUNNING = { paused: false };
+const PERTURB_PIPELINE_PAYLOAD_PAUSED = { paused: true };
+
 function clearPerturbXfrcIfNeeded() {
   if (!sim) return;
   const bodyId = mjvPerturbBodyId | 0;
   if (!(bodyId > 0)) return;
-  const zero = [0, 0, 0];
+  const zero = ZERO_VEC3;
   const ok = typeof sim.applyXfrcByBody === 'function' ? sim.applyXfrcByBody(bodyId, zero, zero) : false;
   if (!ok && typeof sim.clearAllXfrc === 'function') {
     sim.clearAllXfrc();
@@ -458,16 +614,21 @@ function applyMjvPerturbForceIfActive() {
 
 function applySimulatePerturbPipeline({ paused }) {
   if (!sim || !mod || !(h > 0)) return;
-  const fns = ensureMjvPerturbAbi();
-  let modelPtr = 0;
-  let dataPtr = 0;
-  try {
-    ({ modelPtr, dataPtr } = sim.ensurePointers());
-  } catch (err) {
-    strictCatch(err, 'worker:perturb_ensure_pointers');
-    return;
+  const fns = mjvPerturbFns || ensureMjvPerturbAbi();
+  let modelPtr = mjvPerturbPtrs.modelPtr | 0;
+  let dataPtr = mjvPerturbPtrs.dataPtr | 0;
+  let pertPtr = mjvPerturbPtrs.pertPtr | 0;
+  if (!(modelPtr > 0) || !(dataPtr > 0)) {
+    try {
+      ({ modelPtr, dataPtr } = sim.ensurePointers());
+    } catch (err) {
+      strictCatch(err, 'worker:perturb_ensure_pointers');
+      return;
+    }
   }
-  const pertPtr = typeof sim.pertPtr === 'function' ? (sim.pertPtr() | 0) : 0;
+  if (!(pertPtr > 0)) {
+    pertPtr = typeof sim.pertPtr === 'function' ? (sim.pertPtr() | 0) : 0;
+  }
   if (!(modelPtr > 0) || !(dataPtr > 0) || !(pertPtr > 0)) return;
 
   const isPaused = !!paused;
@@ -647,7 +808,10 @@ function serializeHistoryMeta() {
 }
 
 function emitHistoryMeta() {
-  safePost({ kind: 'history', ...serializeHistoryMeta() }, null, 'worker:emitHistoryMeta');
+  const meta = serializeHistoryMeta();
+  cachedHistoryMeta = meta;
+  snapshotPoolDidUpdate(SNAPSHOT_POOL.HISTORY_META, perfNowMs());
+  safePost({ kind: 'history', ...meta }, null, 'worker:emitHistoryMeta');
 }
 
 function buildInfoStats(sim, tSim, nconLocal) {
@@ -831,11 +995,11 @@ function buildInfoStats(sim, tSim, nconLocal) {
   return out;
 }
 
-function captureHistorySample(force = false) {
+function captureHistorySample(force = false, nowMs = null) {
   if (!historyState || !historyState.enabled || !sim) return;
   if (!(historyState.samples?.length > 0)) return;
   if (!force && (!running || historyState.scrubActive)) return;
-  const now = perfNowMs();
+  const now = (nowMs != null && Number.isFinite(nowMs)) ? nowMs : perfNowMs();
   if (!force && historyState.captureIntervalMs > 0) {
     if ((now - historyState.lastCaptureTs) < historyState.captureIntervalMs) return;
   }
@@ -967,7 +1131,10 @@ function serializeKeyframeMeta() {
   };
 }
 function emitKeyframeMeta() {
-  safePost({ kind: 'keyframes', ...serializeKeyframeMeta(), keyIndex: keySliderIndex }, null, 'worker:emitKeyframeMeta');
+  const meta = serializeKeyframeMeta();
+  cachedKeyframeMeta = meta;
+  snapshotPoolDidUpdate(SNAPSHOT_POOL.KEYFRAMES_META, perfNowMs());
+  safePost({ kind: 'keyframes', ...meta, keyIndex: keySliderIndex }, null, 'worker:emitKeyframeMeta');
 }
 
 function ensureKeySlot(index) {
@@ -1568,6 +1735,7 @@ async function loadXmlWithFallback(xmlText, initOptions = null) {
 function snapshot() {
   if (!sim || !(sim.h > 0)) return;
   const tSnapshotStart = perfNowMs();
+  const nowMs = tSnapshotStart;
   let snapshotSyncVoptMs = 0;
   let snapshotScenePackMs = 0;
   let snapshotCopyGeomMs = 0;
@@ -1588,36 +1756,62 @@ function snapshot() {
   let sceneBytes = 0;
   let flexBytes = 0;
 
-  if (perfEnabled) {
-    const tSync = perfNowMs();
-    syncVoptToWasm();
-    snapshotSyncVoptMs = perfNowMs() - tSync;
-  } else {
-    syncVoptToWasm();
-  }
-  const catmask = 7; // mjCAT_ALL = mjCAT_STATIC|mjCAT_DYNAMIC|mjCAT_DECOR
-  if (typeof sim.sceneUpdateAndPack === 'function') {
+  if (snapshotPoolShouldUpdate(SNAPSHOT_POOL.VOPT_SYNC, nowMs)) {
     if (perfEnabled) {
-      const tScene = perfNowMs();
-      sim.sceneUpdateAndPack(catmask);
-      snapshotScenePackMs = perfNowMs() - tScene;
+      const tSync = perfNowMs();
+      const ok = syncVoptToWasm();
+      snapshotSyncVoptMs = perfNowMs() - tSync;
+      if (ok) snapshotPoolDidUpdate(SNAPSHOT_POOL.VOPT_SYNC, nowMs);
+      else snapshotPoolMarkDirty(SNAPSHOT_POOL.VOPT_SYNC);
     } else {
-      sim.sceneUpdateAndPack(catmask);
+      const ok = syncVoptToWasm();
+      if (ok) snapshotPoolDidUpdate(SNAPSHOT_POOL.VOPT_SYNC, nowMs);
+      else snapshotPoolMarkDirty(SNAPSHOT_POOL.VOPT_SYNC);
     }
   }
-  const scnNgeom = (typeof sim.sceneNgeom === 'function') ? (sim.sceneNgeom() | 0) : 0;
-  const scnTypeView = scnNgeom > 0 ? (sim.sceneGeomTypeView?.() || null) : null;
-  const scnPosView = scnNgeom > 0 ? (sim.sceneGeomPosView?.() || null) : null;
-  const scnMatView = scnNgeom > 0 ? (sim.sceneGeomMatView?.() || null) : null;
-  const scnSizeView = scnNgeom > 0 ? (sim.sceneGeomSizeView?.() || null) : null;
-  const scnRgbaView = scnNgeom > 0 ? (sim.sceneGeomRgbaView?.() || null) : null;
-  const scnMatIdView = scnNgeom > 0 ? (sim.sceneGeomMatIdView?.() || null) : null;
-  const scnDataIdView = scnNgeom > 0 ? (sim.sceneGeomDataIdView?.() || null) : null;
-  const scnObjTypeView = scnNgeom > 0 ? (sim.sceneGeomObjTypeView?.() || null) : null;
-  const scnObjIdView = scnNgeom > 0 ? (sim.sceneGeomObjIdView?.() || null) : null;
-  const scnCategoryView = scnNgeom > 0 ? (sim.sceneGeomCategoryView?.() || null) : null;
-  const scnGeomOrderView = scnNgeom > 0 ? (sim.sceneGeomOrderView?.() || null) : null;
-  const scnLabelView = scnNgeom > 0 ? (sim.sceneGeomLabelView?.() || null) : null;
+  const wantsScene = snapshotPoolShouldUpdate(SNAPSHOT_POOL.SCENE_PACK, nowMs);
+  let scnNgeom = cachedScnNgeom | 0;
+  let scnTypeView = null;
+  let scnPosView = null;
+  let scnMatView = null;
+  let scnSizeView = null;
+  let scnRgbaView = null;
+  let scnMatIdView = null;
+  let scnDataIdView = null;
+  let scnObjTypeView = null;
+  let scnObjIdView = null;
+  let scnCategoryView = null;
+  let scnGeomOrderView = null;
+  let scnLabelView = null;
+  if (wantsScene) {
+    const catmask = 7; // mjCAT_ALL = mjCAT_STATIC|mjCAT_DYNAMIC|mjCAT_DECOR
+    if (typeof sim.sceneUpdateAndPack === 'function') {
+      if (perfEnabled) {
+        const tScene = perfNowMs();
+        sim.sceneUpdateAndPack(catmask);
+        snapshotScenePackMs = perfNowMs() - tScene;
+      } else {
+        sim.sceneUpdateAndPack(catmask);
+      }
+    }
+    scnNgeom = (typeof sim.sceneNgeom === 'function') ? (sim.sceneNgeom() | 0) : 0;
+    cachedScnNgeom = scnNgeom | 0;
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.SCENE_PACK, nowMs);
+    if (scnNgeom > 0) {
+      scnTypeView = sim.sceneGeomTypeView?.() || null;
+      scnPosView = sim.sceneGeomPosView?.() || null;
+      scnMatView = sim.sceneGeomMatView?.() || null;
+      scnSizeView = sim.sceneGeomSizeView?.() || null;
+      scnRgbaView = sim.sceneGeomRgbaView?.() || null;
+      scnMatIdView = sim.sceneGeomMatIdView?.() || null;
+      scnDataIdView = sim.sceneGeomDataIdView?.() || null;
+      scnObjTypeView = sim.sceneGeomObjTypeView?.() || null;
+      scnObjIdView = sim.sceneGeomObjIdView?.() || null;
+      scnCategoryView = sim.sceneGeomCategoryView?.() || null;
+      scnGeomOrderView = sim.sceneGeomOrderView?.() || null;
+      scnLabelView = sim.sceneGeomLabelView?.() || null;
+    }
+  }
   const n = sim.ngeom?.() | 0;
   const nbodyLocal = sim.nbody?.() | 0;
   const nlightLocal = sim.nlight?.() | 0;
@@ -1636,24 +1830,32 @@ function snapshot() {
     xpos = xposView ? new Float64Array(xposView) : new Float64Array(0);
     xmat = xmatView ? new Float64Array(xmatView) : new Float64Array(0);
   }
-  const gsizeView = sim.geomSizeView?.();
-  const gtypeView = sim.geomTypeView?.();
+  const wantsGeomConst = snapshotPoolShouldUpdate(SNAPSHOT_POOL.GEOM_CONST, nowMs);
+  const gsizeView = wantsGeomConst ? sim.geomSizeView?.() : null;
+  const gtypeView = wantsGeomConst ? sim.geomTypeView?.() : null;
   const ctrlView = sim.ctrlView?.();
   const showFlex = !!(voptFlags?.[24] || voptFlags?.[25] || voptFlags?.[26] || voptFlags?.[27]);
-  const wantFlex = showFlex && (() => {
-    // Flex snapshots are large; throttle them to reduce contention with mj_step.
-    const hz = snapshotHz >= 120 ? 60 : 30;
-    const intervalMs = 1000 / hz;
-    return !(flexSnapshotLastSentMs > 0) || (tSnapshotStart - flexSnapshotLastSentMs) >= intervalMs;
-  })();
-  const flexvertXposView = wantFlex ? (sim.flexvertXposView?.() || null) : null;
-  const eqTypeView = sim.eqTypeView?.();
-  const eqObj1View = sim.eqObj1IdView?.();
-  const eqObj2View = sim.eqObj2IdView?.();
-  const eqObjTypeView = sim.eqObjTypeView?.();
-  const eqActiveView = sim.eqActiveView?.();
-  const bodyXposView = sim.bodyXposView?.();
-  const bodyXmatView = sim.bodyXmatView?.();
+  const wantsFlex = showFlex && snapshotPoolShouldUpdate(SNAPSHOT_POOL.FLEX_VERT, nowMs);
+  const flexvertXposView = wantsFlex ? (sim.flexvertXposView?.() || null) : null;
+  const wantsEqFields = snapshotPoolShouldUpdate(SNAPSHOT_POOL.EQ_FIELDS, nowMs);
+  const wantsEqNames = !eqNamesSent && snapshotPoolShouldUpdate(SNAPSHOT_POOL.EQ_NAMES, nowMs);
+  let eqTypeView = null;
+  let eqObj1View = null;
+  let eqObj2View = null;
+  let eqObjTypeView = null;
+  let eqActiveView = null;
+  if (wantsEqFields || wantsEqNames) {
+    eqTypeView = sim.eqTypeView?.() || null;
+    if (wantsEqFields) {
+      eqObj1View = sim.eqObj1IdView?.() || null;
+      eqObj2View = sim.eqObj2IdView?.() || null;
+      eqObjTypeView = sim.eqObjTypeView?.() || null;
+      eqActiveView = sim.eqActiveView?.() || null;
+    }
+  }
+  const wantsBodyPose = snapshotPoolShouldUpdate(SNAPSHOT_POOL.BODY_POSE, nowMs);
+  const bodyXposView = wantsBodyPose ? sim.bodyXposView?.() : null;
+  const bodyXmatView = wantsBodyPose ? sim.bodyXmatView?.() : null;
   let bxpos = null;
   let bxmat = null;
   if (bodyXposView || bodyXmatView) {
@@ -1666,14 +1868,15 @@ function snapshot() {
       bxpos = bodyXposView ? new Float64Array(bodyXposView) : null;
       bxmat = bodyXmatView ? new Float64Array(bodyXmatView) : null;
     }
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.BODY_POSE, nowMs);
   }
   const tSim = sim.time?.() || 0;
-  lastBounds = computeBoundsFromPositions(xpos, n);
   const nq = sim.nq?.() | 0;
   const nv = sim.nv?.() | 0;
   const nuLocal = sim.nu?.() | 0;
+  const wantsCtrlQpos = snapshotPoolShouldUpdate(SNAPSHOT_POOL.CTRL_QPOS, nowMs);
   let ctrl = null;
-  if (nuLocal > 0 && ctrlView) {
+  if (wantsCtrlQpos && nuLocal > 0 && ctrlView) {
     if (perfEnabled) {
       const tCtrl = perfNowMs();
       ctrl = new Float64Array(ctrlView);
@@ -1683,8 +1886,8 @@ function snapshot() {
     }
   }
   let qpos = null;
-  const qposView = sim.qposView?.();
-  if (qposView && nq > 0) {
+  const qposView = wantsCtrlQpos ? sim.qposView?.() : null;
+  if (wantsCtrlQpos && qposView && nq > 0) {
     // Avoid shipping huge buffers; cap to moderate size while keeping simulate parity for typical models
     if (nq <= 512) {
       if (perfEnabled) {
@@ -1696,32 +1899,15 @@ function snapshot() {
       }
     }
   }
+  if (wantsCtrlQpos) {
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.CTRL_QPOS, nowMs);
+  }
 
-  const gesture = gestureState
-    ? {
-        mode: gestureState.mode,
-        phase: gestureState.phase,
-        pointer: gestureState.pointer
-          ? {
-              x: Number(gestureState.pointer.x) || 0,
-              y: Number(gestureState.pointer.y) || 0,
-              dx: Number(gestureState.pointer.dx) || 0,
-              dy: Number(gestureState.pointer.dy) || 0,
-              buttons: Number(gestureState.pointer.buttons ?? 0),
-              pressure: Number(gestureState.pointer.pressure ?? 0),
-            }
-          : null,
-      }
-    : { mode: 'idle', phase: 'idle', pointer: null };
-  const drag = dragState
-    ? { dx: Number(dragState.dx) || 0, dy: Number(dragState.dy) || 0 }
-    : { dx: 0, dy: 0 };
+  const gesture = gestureState;
+  const drag = dragState;
   const viewerCamera = readViewerFreeCameraState();
   const frameId = frameSeq++;
-  const slowdownSafe = (() => {
-    if (!Number.isFinite(measuredSlowdown) || measuredSlowdown <= 0) return 1;
-    return measuredSlowdown;
-  })();
+  const slowdownSafe = Number.isFinite(measuredSlowdown) && measuredSlowdown > 0 ? measuredSlowdown : 1;
   const msg = {
     kind: 'snapshot',
     tSim,
@@ -1737,8 +1923,8 @@ function snapshot() {
     gesture,
     drag,
     viewerCamera,
-    voptFlags: Array.isArray(voptFlags) ? [...voptFlags] : [],
-    sceneFlags: cloneSceneFlags(),
+    voptFlags: Array.isArray(voptFlags) ? voptFlags : [],
+    sceneFlags: Array.isArray(sceneFlags) ? sceneFlags : SCENE_FLAG_DEFAULTS_NUMERIC,
     labelMode,
     frameMode,
     cameraMode,
@@ -1756,33 +1942,51 @@ function snapshot() {
   } catch (err) {
     strictCatch(err, 'worker:ncon_read');
   }
-  try {
-    const info = buildInfoStats(sim, tSim, nconLocal);
-    if (info) {
-      msg.info = info;
+  if (snapshotPoolShouldUpdate(SNAPSHOT_POOL.INFO_STATS, nowMs) || !cachedInfoStats) {
+    try {
+      const info = buildInfoStats(sim, tSim, nconLocal);
+      cachedInfoStats = info || null;
+      snapshotPoolDidUpdate(SNAPSHOT_POOL.INFO_STATS, nowMs);
+    } catch (err) {
+      strictCatch(err, 'worker:build_info_stats');
+      snapshotPoolMarkDirty(SNAPSHOT_POOL.INFO_STATS);
     }
-  } catch (err) {
-    strictCatch(err, 'worker:build_info_stats');
   }
-  const optionsStruct = readOptionStruct(mod, h);
-  if (optionsStruct) {
-    optionsStruct.flex_layer = flexLayer;
-    optionsStruct.bvh_depth = bvhDepth;
-    msg.options = optionsStruct;
-  } else {
-    msg.options = { flex_layer: flexLayer, bvh_depth: bvhDepth };
+  if (cachedInfoStats) {
+    msg.info = cachedInfoStats;
   }
+
+  msg.options = getOptionsForSnapshot(nowMs);
   let metaStartMs = 0;
   if (perfEnabled) {
     metaStartMs = perfNowMs();
   }
-  msg.history = serializeHistoryMeta();
-  msg.keyframes = serializeKeyframeMeta();
+  if (snapshotPoolShouldUpdate(SNAPSHOT_POOL.HISTORY_META, nowMs) || !cachedHistoryMeta) {
+    cachedHistoryMeta = serializeHistoryMeta();
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.HISTORY_META, nowMs);
+  }
+  msg.history = cachedHistoryMeta || serializeHistoryMeta();
+
+  if (snapshotPoolShouldUpdate(SNAPSHOT_POOL.KEYFRAMES_META, nowMs) || !cachedKeyframeMeta) {
+    cachedKeyframeMeta = serializeKeyframeMeta();
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.KEYFRAMES_META, nowMs);
+  }
+  msg.keyframes = cachedKeyframeMeta || serializeKeyframeMeta();
+
   const watchPayload = sampleWatch();
   if (watchPayload) {
     msg.watch = watchPayload;
   }
-  msg.watchSources = collectWatchSources();
+  if (snapshotPoolShouldUpdate(SNAPSHOT_POOL.WATCH_SOURCES, nowMs) || !cachedWatchSources) {
+    try {
+      cachedWatchSources = collectWatchSources();
+      snapshotPoolDidUpdate(SNAPSHOT_POOL.WATCH_SOURCES, nowMs);
+    } catch (err) {
+      strictCatch(err, 'worker:collectWatchSources_snapshot');
+      snapshotPoolMarkDirty(SNAPSHOT_POOL.WATCH_SOURCES);
+    }
+  }
+  msg.watchSources = cachedWatchSources || collectWatchSources();
   if (Number.isFinite(keySliderIndex)) {
     msg.keyIndex = keySliderIndex | 0;
   }
@@ -1807,7 +2011,10 @@ function snapshot() {
       msg.gtype = new Int32Array(gtypeView);
     }
   }
-  if (scnNgeom > 0) {
+  if (wantsGeomConst && (gsizeView || gtypeView)) {
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.GEOM_CONST, nowMs);
+  }
+  if (wantsScene && scnNgeom > 0) {
     let tScnCopy = 0;
     if (perfEnabled) {
       tScnCopy = perfNowMs();
@@ -1877,9 +2084,9 @@ function snapshot() {
       fPos.set(flexvertXposView);
       msg.flexvert_xpos = fPos;
     }
-    flexSnapshotLastSentMs = tSnapshotStart;
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.FLEX_VERT, nowMs);
   }
-  if (eqTypeView || eqObj1View || eqObj2View || eqObjTypeView || eqActiveView) {
+  if (wantsEqFields && (eqTypeView || eqObj1View || eqObj2View || eqObjTypeView || eqActiveView)) {
     if (perfEnabled) {
       const tEq = perfNowMs();
       if (eqTypeView) msg.eq_type = new Int32Array(eqTypeView);
@@ -1895,8 +2102,10 @@ function snapshot() {
       if (eqObjTypeView) msg.eq_objtype = new Int32Array(eqObjTypeView);
       if (eqActiveView) msg.eq_active = new Uint8Array(eqActiveView);
     }
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.EQ_FIELDS, nowMs);
   }
-  if (nlightLocal > 0 && (lightXposView || lightXdirView)) {
+  const wantsLightFields = snapshotPoolShouldUpdate(SNAPSHOT_POOL.LIGHT_FIELDS, nowMs);
+  if (wantsLightFields && nlightLocal > 0 && (lightXposView || lightXdirView)) {
     if (perfEnabled) {
       const tLight = perfNowMs();
       if (lightXposView) msg.light_xpos = new Float32Array(lightXposView);
@@ -1906,29 +2115,39 @@ function snapshot() {
       if (lightXposView) msg.light_xpos = new Float32Array(lightXposView);
       if (lightXdirView) msg.light_xdir = new Float32Array(lightXdirView);
     }
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.LIGHT_FIELDS, nowMs);
   }
   // Equality names: match simulate's equality_names_ = m->names + m->name_eqadr[i]
   // via mj_id2name(mjOBJ_EQUALITY, i).
-  if (eqTypeView && typeof sim.id2name === 'function') {
-    const names = [];
-    const eqCount = eqTypeView.length | 0;
-    const MJOBJ_EQUALITY = 17; // from mjOBJ_EQUALITY enum
-    for (let i = 0; i < eqCount; i += 1) {
-      const nm = sim.id2name(MJOBJ_EQUALITY, i) || '';
-      names.push(nm || `equality ${i}`);
+  if (wantsEqNames) {
+    if (eqTypeView && (eqTypeView.length | 0) > 0 && typeof sim.id2name === 'function') {
+      const names = [];
+      const eqCount = eqTypeView.length | 0;
+      const MJOBJ_EQUALITY = 17; // from mjOBJ_EQUALITY enum
+      for (let i = 0; i < eqCount; i += 1) {
+        const nm = sim.id2name(MJOBJ_EQUALITY, i) || '';
+        names.push(nm || `equality ${i}`);
+      }
+      if (names.length === eqCount) {
+        cachedEqNames = names;
+        msg.eq_names = names;
+      }
     }
-    if (names.length === eqCount) {
-      msg.eq_names = names;
+    if (!eqTypeView || !(eqTypeView.length > 0)) {
+      eqNamesSent = true;
+    } else if (Array.isArray(cachedEqNames) && cachedEqNames.length) {
+      eqNamesSent = true;
     }
+    snapshotPoolDidUpdate(SNAPSHOT_POOL.EQ_NAMES, nowMs);
   }
   if (ctrl) {
     msg.ctrl = ctrl;
   }
   msg.contacts = nconLocal > 0 ? { n: nconLocal } : null;
   const transfers = (() => {
-    if (!perfEnabled) return collectSnapshotTransfers(msg);
+    if (!perfEnabled) return collectSnapshotTransfersInto(msg, snapshotTransferScratch, snapshotTransferSeen);
     const tTransfers = perfNowMs();
-    const out = collectSnapshotTransfers(msg);
+    const out = collectSnapshotTransfersInto(msg, snapshotTransferScratch, snapshotTransferSeen);
     snapshotCollectTransfersMs = perfNowMs() - tTransfers;
     if (Array.isArray(out) && out.length) {
       transferBuffers = out.length | 0;
@@ -1985,7 +2204,7 @@ function snapshot() {
     });
   }
   if (perfEnabled && ((frameId | 0) % 4 === 0)) {
-    safePost({ kind: 'latency_probe', sentWallMs: Date.now(), frameId }, null, 'worker:latency_probe_post');
+    safePost({ kind: 'latency_probe', sentWallMs, frameId }, null, 'worker:latency_probe_post');
   }
   try {
     const tPostStart = perfEnabled ? perfNowMs() : 0;
@@ -2249,20 +2468,6 @@ setInterval(() => {
   } catch (err) {
     strictCatch(err, 'worker:pending_ctrl_flush');
   }
-  const currentDt = (() => {
-    try {
-      if (sim && typeof sim.timestep === 'function') {
-        const raw = sim.timestep();
-        if (Number.isFinite(raw) && raw > 0) return raw;
-      }
-    } catch (err) {
-      strictCatch(err, 'worker:read_timestep');
-    }
-    return dt;
-  })();
-  if (Number.isFinite(currentDt) && currentDt > 0) {
-    dt = currentDt;
-  }
 
   const tickStartMs = perfNowMs();
   const tickStartSec = tickStartMs / 1000;
@@ -2302,6 +2507,7 @@ setInterval(() => {
   let stepTickPerturbMs = 0;
   let stepTickStepMs = 0;
   let tSimNow = tSimStart;
+  const dtStep = Number.isFinite(dt) && dt > 0 ? dt : null;
 
   if (needsResync) {
     lastSyncWallTime = tickStartSec;
@@ -2310,18 +2516,18 @@ setInterval(() => {
     try {
       if (perfEnabled) {
         const tHist = perfNowMs();
-        captureHistorySample();
+        captureHistorySample(false, tHist);
         stepTickHistoryMs += perfNowMs() - tHist;
       } else {
-        captureHistorySample();
+        captureHistorySample(false, tickStartMs);
       }
       if (mjvPerturbActive) {
         if (perfEnabled) {
           const tPert = perfNowMs();
-          applySimulatePerturbPipeline({ paused: false });
+          applySimulatePerturbPipeline(PERTURB_PIPELINE_PAYLOAD_RUNNING);
           stepTickPerturbMs += perfNowMs() - tPert;
         } else {
-          applySimulatePerturbPipeline({ paused: false });
+          applySimulatePerturbPipeline(PERTURB_PIPELINE_PAYLOAD_RUNNING);
         }
       }
       if (perfEnabled) {
@@ -2332,13 +2538,7 @@ setInterval(() => {
         sim.step(1);
       }
       stepsDone = 1;
-      try {
-        if (sim && typeof sim.time === 'function') {
-          tSimNow = sim.time() || tSimNow;
-        }
-      } catch (err) {
-        strictCatch(err, 'worker:sync_timer_time');
-      }
+      tSimNow = dtStep != null ? (tSimStart + dtStep) : tSimStart;
     } catch (err) {
       strictCatch(err, 'worker:step_loop');
       timingNeedsResync = true;
@@ -2346,42 +2546,50 @@ setInterval(() => {
   } else {
     const deadlineMs = tickStartMs + STEP_TICK_BUDGET_MS;
     let measured = false;
-    const slowdownSample = (() => {
-      if (!(elapsedCpuSec > 0) || !(elapsedSimSec > 0)) return null;
+    let slowdownSample = null;
+    if (elapsedCpuSec > 0 && elapsedSimSec > 0) {
       const value = elapsedCpuSec / elapsedSimSec;
-      return Number.isFinite(value) && value > 0 ? value : null;
-    })();
-    while (stepsDone < maxStepsPerTick && perfNowMs() < deadlineMs) {
-      const nowSec = perfNowMs() / 1000;
-      const cpuElapsed = nowSec - lastSyncWallTime;
-      const simElapsed = tSimNow - lastSyncSimTime;
-      if (!(Number.isFinite(cpuElapsed) && cpuElapsed >= 0) || !(Number.isFinite(simElapsed) && simElapsed >= 0)) {
-        timingNeedsResync = true;
-        break;
-      }
-      if ((simElapsed * slowdown) >= cpuElapsed) {
-        break;
-      }
-      if (!measured && slowdownSample != null) {
-        measuredSlowdown = slowdownSample;
-        measured = true;
-      }
-      const prevSim = tSimNow;
-      try {
-        if (perfEnabled) {
-          const tHist = perfNowMs();
-          captureHistorySample();
-          stepTickHistoryMs += perfNowMs() - tHist;
-        } else {
-          captureHistorySample();
+      slowdownSample = Number.isFinite(value) && value > 0 ? value : null;
+    }
+    try {
+      while (stepsDone < maxStepsPerTick) {
+        const nowMs = perfNowMs();
+        if (nowMs >= deadlineMs) break;
+        const nowSec = nowMs / 1000;
+        const cpuElapsed = nowSec - lastSyncWallTime;
+        const simElapsed = tSimNow - lastSyncSimTime;
+        if (!(cpuElapsed >= 0) || !(simElapsed >= 0)) {
+          timingNeedsResync = true;
+          break;
+        }
+        if ((simElapsed * slowdown) >= cpuElapsed) {
+          break;
+        }
+        if (!measured && slowdownSample != null) {
+          measuredSlowdown = slowdownSample;
+          measured = true;
+        }
+        // Avoid calling captureHistorySample() every step when throttled; only invoke when due.
+        const history = historyState;
+        if (history?.enabled && !history.scrubActive && (history.samples?.length > 0)) {
+          const intervalMs = history.captureIntervalMs;
+          if (!(intervalMs > 0) || ((nowMs - history.lastCaptureTs) >= intervalMs)) {
+            if (perfEnabled) {
+              const tHist = perfNowMs();
+              captureHistorySample(false, tHist);
+              stepTickHistoryMs += perfNowMs() - tHist;
+            } else {
+              captureHistorySample(false, nowMs);
+            }
+          }
         }
         if (mjvPerturbActive) {
           if (perfEnabled) {
             const tPert = perfNowMs();
-            applySimulatePerturbPipeline({ paused: false });
+            applySimulatePerturbPipeline(PERTURB_PIPELINE_PAYLOAD_RUNNING);
             stepTickPerturbMs += perfNowMs() - tPert;
           } else {
-            applySimulatePerturbPipeline({ paused: false });
+            applySimulatePerturbPipeline(PERTURB_PIPELINE_PAYLOAD_RUNNING);
           }
         }
         if (perfEnabled) {
@@ -2391,23 +2599,16 @@ setInterval(() => {
         } else {
           sim.step(1);
         }
-      } catch (err) {
-        strictCatch(err, 'worker:step_loop');
-        timingNeedsResync = true;
-        break;
-      }
-      stepsDone += 1;
-      try {
-        if (sim && typeof sim.time === 'function') {
-          tSimNow = sim.time() || tSimNow;
+        stepsDone += 1;
+        if (dtStep == null) {
+          timingNeedsResync = true;
+          break;
         }
-      } catch (err) {
-        strictCatch(err, 'worker:sync_timer_time');
+        tSimNow += dtStep;
       }
-      if (tSimNow + 1e-12 < prevSim) {
-        timingNeedsResync = true;
-        break;
-      }
+    } catch (err) {
+      strictCatch(err, 'worker:step_loop');
+      timingNeedsResync = true;
     }
   }
 
@@ -2447,7 +2648,7 @@ setInterval(() => {
   snapshotAccumulatorMs -= intervalMs;
   if (snapshotAccumulatorMs > intervalMs) snapshotAccumulatorMs = intervalMs;
   if (!running && mjvPerturbActive) {
-    applySimulatePerturbPipeline({ paused: true });
+    applySimulatePerturbPipeline(PERTURB_PIPELINE_PAYLOAD_PAUSED);
   }
   snapshot();
 }, 8);
@@ -2522,6 +2723,15 @@ const commandHandlers = {
     resetKeyframes();
     resetWatchState();
     keySliderIndex = -1;
+    cachedWatchSources = null;
+    cachedEqNames = null;
+    eqNamesSent = false;
+    cachedOptionStruct = null;
+    cachedHistoryMeta = null;
+    cachedKeyframeMeta = null;
+    cachedInfoStats = null;
+    snapshotPoolMarkAllDirty();
+    snapshotPoolResetTimers();
     captureHistorySample(true);
     emitHistoryMeta();
     emitKeyframeMeta();
@@ -2539,6 +2749,13 @@ const commandHandlers = {
     cameraMode = 0;
     flexLayer = 0;
     bvhDepth = 1;
+    try {
+      cachedWatchSources = collectWatchSources();
+      snapshotPoolDidUpdate(SNAPSHOT_POOL.WATCH_SOURCES, perfNowMs());
+    } catch (err) {
+      strictCatch(err, 'worker:collectWatchSources_load');
+      cachedWatchSources = null;
+    }
     const visualState = readStructState('mjVisual');
     const statisticState = readStructState('mjStatistic');
     postMessage({
@@ -2641,17 +2858,14 @@ const commandHandlers = {
   step: (payload) => {
     if (sim) {
       const n = Math.max(1, Math.min(10000, (payload.n | 0) || 1));
-      let steps = 0;
-      while (steps < n) {
-        try { captureHistorySample(true); } catch (err) { strictCatch(err, 'worker:step_history'); }
-        try {
-          applySimulatePerturbPipeline({ paused: true });
+      try {
+        for (let steps = 0; steps < n; steps += 1) {
+          captureHistorySample(true);
+          applySimulatePerturbPipeline(PERTURB_PIPELINE_PAYLOAD_PAUSED);
           sim.step(1);
-        } catch (err) {
-          strictCatch(err, 'worker:step_sim');
-          break;
         }
-        steps += 1;
+      } catch (err) {
+        strictCatch(err, 'worker:step_sim');
       }
       try {
         const tSim = (sim && typeof sim.time === 'function') ? (sim.time() || 0) : simTimeApprox;
@@ -2739,6 +2953,7 @@ const commandHandlers = {
     if (!Array.isArray(voptFlags)) voptFlags = DEFAULT_VOPT_FLAGS_NUMERIC.slice();
     if (idx >= 0 && idx < voptFlags.length) {
       voptFlags[idx] = enabled ? 1 : 0;
+      markDirty(DIRTY_REASON.VOPT_CHANGED, { affectsFlex: idx >= 24 && idx <= 27 });
       emitOptionState();
     }
   },
@@ -2750,17 +2965,20 @@ const commandHandlers = {
     }
     if (idx >= 0 && idx < sceneFlags.length) {
       sceneFlags[idx] = enabled ? 1 : 0;
+      markDirty(DIRTY_REASON.SCENE_ONLY_CHANGED);
       emitOptionState();
     }
   },
   setLabelMode: (payload) => {
     const modeVal = Number(payload.mode) || 0;
     labelMode = modeVal | 0;
+    markDirty(DIRTY_REASON.VOPT_CHANGED);
     emitOptionState();
   },
   setFrameMode: (payload) => {
     const modeVal = Number(payload.mode) || 0;
     frameMode = modeVal | 0;
+    markDirty(DIRTY_REASON.VOPT_CHANGED);
     emitOptionState();
   },
   setCameraMode: (payload) => {
@@ -2777,6 +2995,7 @@ const commandHandlers = {
         groupState[type] = Array.from({ length: MJ_GROUP_COUNT }, () => 1);
       }
       groupState[type][idx] = enabled ? 1 : 0;
+      markDirty(DIRTY_REASON.VOPT_CHANGED);
       emitOptionState();
     }
   },
@@ -2828,9 +3047,11 @@ const commandHandlers = {
     const normalized = Math.max(0, Math.trunc(rawValue));
     if (field === 'flex_layer') {
       flexLayer = normalized;
+      markDirty(DIRTY_REASON.VOPT_CHANGED, { affectsFlex: true });
       emitOptionState();
     } else if (field === 'bvh_depth') {
       bvhDepth = normalized;
+      markDirty(DIRTY_REASON.VOPT_CHANGED);
       emitOptionState();
     }
   },
@@ -2841,6 +3062,7 @@ const commandHandlers = {
         const pathArr = Array.isArray(payload.path) ? payload.path : [];
         const ok = writeOptionField(mod, h, pathArr, payload.kind, payload.value);
         if (ok) {
+          markDirty(DIRTY_REASON.OPTIONS_STRUCT_CHANGED);
           if (Array.isArray(pathArr) && pathArr.length === 1 && pathArr[0] === 'timestep') {
             try {
               const rawDt = sim?.timestep?.() || dt;
@@ -2854,6 +3076,7 @@ const commandHandlers = {
               strictCatch(err, 'worker:setField_timestep');
             }
           }
+          emitOptionState();
           snapshot();
         }
       } catch (err) {
@@ -3215,6 +3438,7 @@ const commandHandlers = {
       if (!eqActive || idx >= eqActive.length) throw new Error('eq_active view missing');
       eqActive[idx] = active ? 1 : 0;
       try { sim.forward?.(); } catch (err) { strictCatch(err, 'worker:setEqualityActive_forward'); }
+      markDirty(DIRTY_REASON.EQ_ACTIVE_CHANGED);
     } catch (err) {
       logWarn('worker: setEqualityActive failed', String(err || ''));
       strictCatch(err, 'worker:setEqualityActive');
@@ -3241,6 +3465,9 @@ const commandHandlers = {
     snapshotIntervalMs = 1000 / best;
     snapshotAccumulatorMs = 0;
     snapshotLastTickMs = 0;
+    const flexHz = snapshotHz >= 120 ? 60 : 30;
+    snapshotPoolSetHz(SNAPSHOT_POOL.FLEX_VERT, flexHz);
+    markDirty(DIRTY_REASON.FLEX_CHANGED);
   },
   setPaused: (payload) => {
     const nextRunning = !payload.paused;

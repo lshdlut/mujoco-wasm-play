@@ -976,7 +976,7 @@ export async function createBackend(options = {}) {
     applyViewFields(lastSnapshot, data, GEOM_VIEW_FIELDS_OPTIONAL, makeViewOrNull, { skipMissing: true });
     if (typeof data.nisland === 'number' && Number.isFinite(data.nisland)) lastSnapshot.nisland = data.nisland | 0;
     if (Array.isArray(data.eq_names)) lastSnapshot.eq_names = data.eq_names.slice();
-    applyViewFields(lastSnapshot, data, GEOM_VIEW_FIELDS_ALWAYS, makeViewOrNull);
+    applyViewFields(lastSnapshot, data, GEOM_VIEW_FIELDS_ALWAYS, makeViewOrNull, { skipMissing: true });
     lastSnapshot.contacts = data.contacts && typeof data.contacts === 'object' ? data.contacts : null;
   }
 
@@ -1029,6 +1029,33 @@ export async function createBackend(options = {}) {
         lastSnapshot.statistic = cloneStruct(payload.statistic);
         lastSnapshot.statisticVersion = (lastSnapshot.statisticVersion | 0) + 1;
       }
+      lastSnapshot.scn_ngeom = 0;
+      lastSnapshot.gsize = null;
+      lastSnapshot.gtype = null;
+      lastSnapshot.bxpos = null;
+      lastSnapshot.bxmat = null;
+      lastSnapshot.qpos = null;
+      lastSnapshot.scn_type = null;
+      lastSnapshot.scn_pos = null;
+      lastSnapshot.scn_mat = null;
+      lastSnapshot.scn_size = null;
+      lastSnapshot.scn_rgba = null;
+      lastSnapshot.scn_matid = null;
+      lastSnapshot.scn_dataid = null;
+      lastSnapshot.scn_objtype = null;
+      lastSnapshot.scn_objid = null;
+      lastSnapshot.scn_category = null;
+      lastSnapshot.scn_geomorder = null;
+      lastSnapshot.scn_label = null;
+      lastSnapshot.flexvert_xpos = null;
+      lastSnapshot.eq_type = null;
+      lastSnapshot.eq_obj1id = null;
+      lastSnapshot.eq_obj2id = null;
+      lastSnapshot.eq_objtype = null;
+      lastSnapshot.eq_active = null;
+      lastSnapshot.eq_names = [];
+      lastSnapshot.light_xpos = null;
+      lastSnapshot.light_xdir = null;
       updateGeometryCaches(payload);
       if (payload.gesture) {
         lastSnapshot.gesture = {
