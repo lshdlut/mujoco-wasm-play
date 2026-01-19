@@ -607,10 +607,67 @@ function scheduleUiUpdate(state) {
       return;
     }
     lastUiUpdateMs = now;
-    const snapshot = pendingUiState || state;
-    updateControls(snapshot);
-    updateInfoOverlayCard(snapshot);
-    updateToast(snapshot);
+    const uiState = pendingUiState || state;
+    updateControls(uiState);
+    updateInfoOverlayCard(uiState);
+    updateToast(uiState);
+
+    // Dynamic panel elements (actuator/joint/equality lists) can involve lots of DOM writes.
+    // Keep them on the UI tick so snapshotHz (30/60/120) does not directly scale UI costs.
+    const rightVisible = !!uiState?.panels?.right && !uiState?.overlays?.fullscreen;
+    if (!rightVisible) return;
+    const snapshot = latestSnapshot;
+    if (!snapshot) return;
+    const perfEnabled = isPerfEnabled();
+
+    // Dynamic: build actuator sliders when metadata arrives
+    const acts = Array.isArray(snapshot.actuators) ? snapshot.actuators : null;
+    if (acts && acts.length > 0 && typeof controlManager.ensureActuatorSliders === 'function') {
+      // Prefer freshest ctrl values from the latest backend snapshot; fallback to state
+      const ctrlValues = snapshot.ctrl != null
+        ? snapshot.ctrl
+        : (uiState.model && uiState.model.ctrl != null ? uiState.model.ctrl : []);
+      if (perfEnabled) {
+        const tActsStart = perfNow();
+        controlManager.ensureActuatorSliders(acts, ctrlValues);
+        perfSample('main:subscriber_ensureActuatorSliders_ms', perfNow() - tActsStart);
+      } else {
+        controlManager.ensureActuatorSliders(acts, ctrlValues);
+      }
+    }
+
+    const tDofsStart = perfEnabled ? perfNow() : 0;
+    const dofs = deriveJointDofs(snapshot, uiState);
+    if (perfEnabled) {
+      perfSample('main:subscriber_deriveJointDofs_ms', perfNow() - tDofsStart, {
+        ngeom: typeof snapshot?.ngeom === 'number' ? (snapshot.ngeom | 0) : null,
+        hasDofs: Array.isArray(dofs) ? dofs.length : null,
+      });
+    }
+    if (typeof controlManager.ensureJointSliders === 'function') {
+      if (perfEnabled) {
+        const tJointStart = perfNow();
+        controlManager.ensureJointSliders(dofs);
+        perfSample('main:subscriber_ensureJointSliders_ms', perfNow() - tJointStart);
+      } else {
+        controlManager.ensureJointSliders(dofs);
+      }
+    }
+
+    const tEqStart = perfEnabled ? perfNow() : 0;
+    const eqs = deriveEqualityList(snapshot);
+    if (perfEnabled) {
+      perfSample('main:subscriber_deriveEqualityList_ms', perfNow() - tEqStart);
+    }
+    if (typeof controlManager.ensureEqualityToggles === 'function') {
+      if (perfEnabled) {
+        const tEqToggleStart = perfNow();
+        controlManager.ensureEqualityToggles(eqs);
+        perfSample('main:subscriber_ensureEqualityToggles_ms', perfNow() - tEqToggleStart);
+      } else {
+        controlManager.ensureEqualityToggles(eqs);
+      }
+    }
   };
   if (typeof window !== 'undefined' && window.requestAnimationFrame) {
     window.requestAnimationFrame(tick);
@@ -680,54 +737,6 @@ store.subscribe((state) => {
     perfSample('main:subscriber_scheduleUiUpdate_ms', perfNow() - tUiStart);
   } else {
     scheduleUiUpdate(state);
-  }
-  // Dynamic: build actuator sliders when metadata arrives
-  const acts = latestSnapshot && Array.isArray(latestSnapshot.actuators)
-    ? latestSnapshot.actuators
-    : null;
-  if (acts && acts.length > 0 && typeof controlManager.ensureActuatorSliders === 'function') {
-    // Prefer freshest ctrl values from the latest backend snapshot; fallback to state
-    const ctrlValues = (latestSnapshot && latestSnapshot.ctrl != null)
-      ? latestSnapshot.ctrl
-      : (state.model && state.model.ctrl != null ? state.model.ctrl : []);
-    if (perfEnabled) {
-      const tActsStart = perfNow();
-      controlManager.ensureActuatorSliders(acts, ctrlValues);
-      perfSample('main:subscriber_ensureActuatorSliders_ms', perfNow() - tActsStart);
-    } else {
-      controlManager.ensureActuatorSliders(acts, ctrlValues);
-    }
-  }
-  const tDofsStart = perfEnabled ? perfNow() : 0;
-  const dofs = deriveJointDofs(latestSnapshot, state);
-  if (perfEnabled) {
-    perfSample('main:subscriber_deriveJointDofs_ms', perfNow() - tDofsStart, {
-      ngeom: typeof latestSnapshot?.ngeom === 'number' ? (latestSnapshot.ngeom | 0) : null,
-      hasDofs: Array.isArray(dofs) ? dofs.length : null,
-    });
-  }
-  if (typeof controlManager.ensureJointSliders === 'function') {
-    if (perfEnabled) {
-      const tJointStart = perfNow();
-      controlManager.ensureJointSliders(dofs);
-      perfSample('main:subscriber_ensureJointSliders_ms', perfNow() - tJointStart);
-    } else {
-      controlManager.ensureJointSliders(dofs);
-    }
-  }
-  const tEqStart = perfEnabled ? perfNow() : 0;
-  const eqs = deriveEqualityList(latestSnapshot);
-  if (perfEnabled) {
-    perfSample('main:subscriber_deriveEqualityList_ms', perfNow() - tEqStart);
-  }
-  if (typeof controlManager.ensureEqualityToggles === 'function') {
-    if (perfEnabled) {
-      const tEqToggleStart = perfNow();
-      controlManager.ensureEqualityToggles(eqs);
-      perfSample('main:subscriber_ensureEqualityToggles_ms', perfNow() - tEqToggleStart);
-    } else {
-      controlManager.ensureEqualityToggles(eqs);
-    }
   }
   if (perfEnabled) {
     perfSample('main:store_subscriber_ms', perfNow() - tSubStart, {
