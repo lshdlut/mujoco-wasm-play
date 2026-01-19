@@ -69,6 +69,7 @@ const overlaySensor = document.querySelector('[data-testid="overlay-sensor"]');
 const toastEl = document.querySelector('[data-testid="toast"]');
 let viewerStoreRef = null;
 let infoTimeEl = null;
+let infoFpsEl = null;
 
 let latestSnapshot = null;
 let renderStats = { drawn: 0, hidden: 0 };
@@ -76,7 +77,10 @@ let fpsEstimate = 0;
 let lastFpsFrameSample = 0;
 let lastFpsSampleTimeMs = perfNow();
 const uiTickSubscribers = new Set();
+const snapshotSubscribers = new Set();
 const frameSubscribers = new Set();
+const pluginDisposers = [];
+let pluginDisposeInstalled = false;
 
 function subscribeClock(set, fn) {
   if (typeof fn !== 'function') {
@@ -369,6 +373,25 @@ function updateInfoOverlayTime(state) {
   infoTimeEl.textContent = `${time.toFixed(3)} s`;
 }
 
+function updateInfoOverlayFast(state) {
+  if (!overlayInfo) return;
+  if (!state?.overlays?.info) return;
+  if (!infoFpsEl || !infoFpsEl.isConnected) {
+    const grid = overlayInfo.querySelector('.info-grid');
+    if (!grid) return;
+    infoFpsEl = grid.querySelector('.info-value[data-info-field="fps"]');
+    if (!infoFpsEl) return;
+  }
+  const simRun = !!state?.simulation?.run;
+  const fpsState = Number(state?.hud?.fps);
+  const fps = Number.isFinite(fpsEstimate) && fpsEstimate > 0
+    ? fpsEstimate
+    : (Number.isFinite(fpsState) ? fpsState : 0);
+  const value = simRun ? (Number(fps) || 0) : 0;
+  const text = value < 1 ? `${value.toFixed(1)} fps` : `${Math.round(value)} fps`;
+  if (infoFpsEl.textContent !== text) infoFpsEl.textContent = text;
+}
+
 
 function updateInfoOverlayCard(state) {
   if (!overlayInfo) return;
@@ -564,6 +587,18 @@ function applySnapshot(snapshot) {
     }
     perfMarkOnce('play:main:first_store_update_end');
   }
+  if (snapshotSubscribers.size) {
+    const state = store.get();
+    const nowMs = perfNow();
+    for (const fn of snapshotSubscribers) {
+      try {
+        fn({ snapshot, state, nowMs });
+      } catch (err) {
+        logWarn('[clock] snapshot subscriber error', err);
+        strictCatch(err, 'main:clock_snapshot_subscriber');
+      }
+    }
+  }
   if (typeof window !== 'undefined') {
     window.__lastSnapshot = snapshot;
   }
@@ -618,11 +653,17 @@ let lastFontIndex = null;
 let pendingUiFrame = false;
 let pendingUiState = null;
 let lastUiUpdateMs = 0;
+let lastControlsUpdateMs = 0;
 let lastUiSlowUpdateMs = 0;
 let lastInfoOverlayVisible = false;
+let lastRightPanelVisible = false;
+let lastRightCtrlRef = null;
+let lastRightActsRef = null;
+let lastRightQposRef = null;
+let lastRightEqActiveRef = null;
 const UI_UPDATE_INTERVAL_MS = readNumericParam(
   'ui_ms',
-  120,
+  33,
   { parser: (value) => Number.parseInt(value, 10), min: 16, max: 2000 },
 );
 const UI_SLOW_UPDATE_INTERVAL_MS = readNumericParam(
@@ -630,6 +671,7 @@ const UI_SLOW_UPDATE_INTERVAL_MS = readNumericParam(
   1000,
   { parser: (value) => Number.parseInt(value, 10), min: 200, max: 10000 },
 );
+const CONTROLS_UPDATE_INTERVAL_MS = Math.max(UI_UPDATE_INTERVAL_MS, 120);
 
 function scheduleUiUpdate(state) {
   pendingUiState = state;
@@ -638,7 +680,9 @@ function scheduleUiUpdate(state) {
   const tick = () => {
     pendingUiFrame = false;
     const now = perfNow();
-    if ((now - lastUiUpdateMs) < UI_UPDATE_INTERVAL_MS) {
+    const elapsedMs = now - lastUiUpdateMs;
+    if (elapsedMs < UI_UPDATE_INTERVAL_MS) {
+      const waitMs = Math.max(0, UI_UPDATE_INTERVAL_MS - elapsedMs);
       pendingUiFrame = true;
       setTimeout(() => {
         if (typeof window !== 'undefined' && window.requestAnimationFrame) {
@@ -646,12 +690,15 @@ function scheduleUiUpdate(state) {
         } else {
           tick();
         }
-      }, UI_UPDATE_INTERVAL_MS);
+      }, waitMs);
       return;
     }
     lastUiUpdateMs = now;
     const uiState = pendingUiState || state;
-    updateControls(uiState);
+    if ((now - lastControlsUpdateMs) >= CONTROLS_UPDATE_INTERVAL_MS) {
+      lastControlsUpdateMs = now;
+      updateControls(uiState);
+    }
     updateToast(uiState);
     updateRealtimeOverlay(uiState);
     updateInfoOverlayTime(uiState);
@@ -668,6 +715,8 @@ function scheduleUiUpdate(state) {
       updateInfoOverlayCard(uiState);
     }
 
+    updateInfoOverlayFast(uiState);
+
     const snapshot = latestSnapshot || null;
     if (uiTickSubscribers.size) {
       for (const fn of uiTickSubscribers) {
@@ -683,7 +732,16 @@ function scheduleUiUpdate(state) {
     // Dynamic panel elements (actuator/joint/equality lists) can involve lots of DOM writes.
     // Keep them on the UI tick so snapshotHz (30/60/120) does not directly scale UI costs.
     const rightVisible = !!uiState?.panels?.right && !uiState?.overlays?.fullscreen;
-    if (!rightVisible || !snapshot) return;
+    if (!rightVisible || !snapshot) {
+      lastRightPanelVisible = false;
+      lastRightCtrlRef = null;
+      lastRightActsRef = null;
+      lastRightQposRef = null;
+      lastRightEqActiveRef = null;
+      return;
+    }
+    const panelJustOpened = !lastRightPanelVisible;
+    lastRightPanelVisible = true;
     const perfEnabled = isPerfEnabled();
 
     // Dynamic: build actuator sliders when metadata arrives
@@ -693,45 +751,57 @@ function scheduleUiUpdate(state) {
       const ctrlValues = snapshot.ctrl != null
         ? snapshot.ctrl
         : (uiState.model && uiState.model.ctrl != null ? uiState.model.ctrl : []);
-      if (perfEnabled) {
-        const tActsStart = perfNow();
-        controlManager.ensureActuatorSliders(acts, ctrlValues);
-        perfSample('main:subscriber_ensureActuatorSliders_ms', perfNow() - tActsStart);
-      } else {
-        controlManager.ensureActuatorSliders(acts, ctrlValues);
+      if (panelJustOpened || lastRightActsRef !== acts || lastRightCtrlRef !== ctrlValues) {
+        lastRightActsRef = acts;
+        lastRightCtrlRef = ctrlValues;
+        if (perfEnabled) {
+          const tActsStart = perfNow();
+          controlManager.ensureActuatorSliders(acts, ctrlValues);
+          perfSample('main:subscriber_ensureActuatorSliders_ms', perfNow() - tActsStart);
+        } else {
+          controlManager.ensureActuatorSliders(acts, ctrlValues);
+        }
       }
     }
 
-    const tDofsStart = perfEnabled ? perfNow() : 0;
-    const dofs = deriveJointDofs(snapshot, uiState);
-    if (perfEnabled) {
-      perfSample('main:subscriber_deriveJointDofs_ms', perfNow() - tDofsStart, {
-        ngeom: typeof snapshot?.ngeom === 'number' ? (snapshot.ngeom | 0) : null,
-        hasDofs: Array.isArray(dofs) ? dofs.length : null,
-      });
-    }
     if (typeof controlManager.ensureJointSliders === 'function') {
-      if (perfEnabled) {
-        const tJointStart = perfNow();
-        controlManager.ensureJointSliders(dofs);
-        perfSample('main:subscriber_ensureJointSliders_ms', perfNow() - tJointStart);
-      } else {
-        controlManager.ensureJointSliders(dofs);
+      const qposRef = snapshot.qpos || null;
+      if (panelJustOpened || lastRightQposRef !== qposRef) {
+        lastRightQposRef = qposRef;
+        const tDofsStart = perfEnabled ? perfNow() : 0;
+        const dofs = deriveJointDofs(snapshot, uiState);
+        if (perfEnabled) {
+          perfSample('main:subscriber_deriveJointDofs_ms', perfNow() - tDofsStart, {
+            ngeom: typeof snapshot?.ngeom === 'number' ? (snapshot.ngeom | 0) : null,
+            hasDofs: Array.isArray(dofs) ? dofs.length : null,
+          });
+        }
+        if (perfEnabled) {
+          const tJointStart = perfNow();
+          controlManager.ensureJointSliders(dofs);
+          perfSample('main:subscriber_ensureJointSliders_ms', perfNow() - tJointStart);
+        } else {
+          controlManager.ensureJointSliders(dofs);
+        }
       }
     }
 
-    const tEqStart = perfEnabled ? perfNow() : 0;
-    const eqs = deriveEqualityList(snapshot);
-    if (perfEnabled) {
-      perfSample('main:subscriber_deriveEqualityList_ms', perfNow() - tEqStart);
-    }
     if (typeof controlManager.ensureEqualityToggles === 'function') {
-      if (perfEnabled) {
-        const tEqToggleStart = perfNow();
-        controlManager.ensureEqualityToggles(eqs);
-        perfSample('main:subscriber_ensureEqualityToggles_ms', perfNow() - tEqToggleStart);
-      } else {
-        controlManager.ensureEqualityToggles(eqs);
+      const eqActiveRef = snapshot.eq_active || null;
+      if (panelJustOpened || lastRightEqActiveRef !== eqActiveRef) {
+        lastRightEqActiveRef = eqActiveRef;
+        const tEqStart = perfEnabled ? perfNow() : 0;
+        const eqs = deriveEqualityList(snapshot);
+        if (perfEnabled) {
+          perfSample('main:subscriber_deriveEqualityList_ms', perfNow() - tEqStart);
+        }
+        if (perfEnabled) {
+          const tEqToggleStart = perfNow();
+          controlManager.ensureEqualityToggles(eqs);
+          perfSample('main:subscriber_ensureEqualityToggles_ms', perfNow() - tEqToggleStart);
+        } else {
+          controlManager.ensureEqualityToggles(eqs);
+        }
       }
     }
 
@@ -770,6 +840,10 @@ store.subscribe((state) => {
   if (overlays.sensor !== overlayStateCache.sensor) {
     updateOverlay(overlaySensor, overlays.sensor);
     overlayStateCache.sensor = overlays.sensor;
+  }
+  if (overlays.info) {
+    // Keep F2 Info HUD time responsive even when UI updates are throttled.
+    updateInfoOverlayTime(state);
   }
   if (perfEnabled) {
     perfSample('main:subscriber_updateOverlays_ms', perfNow() - tOverlaysStart);
@@ -838,6 +912,12 @@ const pickingController = createPickingController({
 });
 pickingController.setup();
 
+let cachedJointDofs = [];
+let cachedJointDofsMeta = null;
+let cachedEqualityEntries = [];
+let cachedEqualityMeta = null;
+let cachedEqualityActiveRef = null;
+
 function deriveJointDofs(snapshot, state) {
   if (!snapshot) return [];
   const jtype = snapshot.jtype instanceof Int32Array
@@ -854,25 +934,48 @@ function deriveJointDofs(snapshot, state) {
     ? snapshot.qpos
     : (Array.isArray(snapshot.qpos) ? Float64Array.from(snapshot.qpos) : null);
   const nq = snapshot.nq | 0;
-  const out = [];
-  const nj = jtype?.length || 0;
   const groupState = state?.rendering?.groups?.joint;
   const jointGroupEnabled = Array.isArray(groupState) ? groupState.some(Boolean) : true;
-  if (!jointGroupEnabled) return out;
-  for (let i = 0; i < nj; i += 1) {
-    const type = jtype[i] | 0;
-    if (type !== 2 && type !== 3) continue; // slide / hinge
-    const qposIndex = jqpos && i < jqpos.length ? jqpos[i] : -1;
-    if (qposIndex < 0 || qposIndex >= nq) continue;
-    const r0 = jrange && jrange.length >= 2 * (i + 1) ? jrange[2 * i] : null;
-    const r1 = jrange && jrange.length >= 2 * (i + 1) ? jrange[2 * i + 1] : null;
-    const min = Number.isFinite(r0) ? r0 : (type === 3 ? -Math.PI : -1);
-    const max = Number.isFinite(r1) ? r1 : (type === 3 ? Math.PI : 1);
-    const value = qpos && qpos.length > qposIndex ? qpos[qposIndex] : 0;
-    const label = names[i] ? String(names[i]) : `Joint ${i}`;
-    out.push({ index: qposIndex, jointIndex: i, min, max, value, label });
+  if (!jointGroupEnabled) return [];
+
+  if (!jtype || !jqpos || !jrange) return [];
+  const nj = jtype.length || 0;
+  const metaSame = !!(cachedJointDofsMeta
+    && cachedJointDofsMeta.jtype === jtype
+    && cachedJointDofsMeta.jqpos === jqpos
+    && cachedJointDofsMeta.jrange === jrange
+    && cachedJointDofsMeta.names === names
+    && cachedJointDofsMeta.nq === nq);
+
+  if (!metaSame) {
+    const out = [];
+    for (let i = 0; i < nj; i += 1) {
+      const type = jtype[i] | 0;
+      if (type !== 2 && type !== 3) continue; // slide / hinge
+      const qposIndex = jqpos && i < jqpos.length ? jqpos[i] : -1;
+      if (qposIndex < 0 || qposIndex >= nq) continue;
+      const r0 = jrange && jrange.length >= 2 * (i + 1) ? jrange[2 * i] : null;
+      const r1 = jrange && jrange.length >= 2 * (i + 1) ? jrange[2 * i + 1] : null;
+      const min = Number.isFinite(r0) ? r0 : (type === 3 ? -Math.PI : -1);
+      const max = Number.isFinite(r1) ? r1 : (type === 3 ? Math.PI : 1);
+      const value = qpos && qpos.length > qposIndex ? qpos[qposIndex] : 0;
+      const label = names[i] ? String(names[i]) : `Joint ${i}`;
+      out.push({ index: qposIndex, jointIndex: i, min, max, value, label });
+    }
+    cachedJointDofs = out;
+    cachedJointDofsMeta = { jtype, jqpos, jrange, names, nq };
+    return out;
   }
-  return out;
+
+  if (qpos && qpos.length) {
+    for (const entry of cachedJointDofs) {
+      const idx = entry.index | 0;
+      if (idx >= 0 && idx < qpos.length) {
+        entry.value = qpos[idx];
+      }
+    }
+  }
+  return cachedJointDofs;
 }
 
 function deriveEqualityList(snapshot) {
@@ -896,45 +999,69 @@ function deriveEqualityList(snapshot) {
   const eqNames = Array.isArray(snapshot.eq_names) ? snapshot.eq_names : null;
   const jointNames = Array.isArray(snapshot.jnt_names) ? snapshot.jnt_names : [];
   const n = eqActive.length | 0;
-  const out = [];
   const typeLabels = ['connect', 'weld', 'joint', 'tendon', 'flex', 'contact'];
-  for (let i = 0; i < n; i += 1) {
-    const active = !!eqActive[i];
-    const t = eqType && i < eqType.length ? (eqType[i] | 0) : -1;
-    const typeName = t >= 0 && t < typeLabels.length ? typeLabels[t] : null;
-    const objStride = eqObj1 && eqObj1.length >= 2 * n ? 2 : 1;
-    const objTypeStride = eqObjType && eqObjType.length >= 2 * n ? 2 : 1;
-    const obj1Id = eqObj1 ? eqObj1[(objStride * i) | 0] : -1;
-    const obj2Id = eqObj2 ? eqObj2[(objStride * i) | 0] : -1;
-    const objType1 = eqObjType ? eqObjType[(objTypeStride * i) | 0] : -1;
-    const objType2 = eqObjType ? eqObjType[(objTypeStride * i) + 1] ?? objType1 : objType1;
-    const nameFromEq = eqNames && eqNames[i] ? String(eqNames[i]) : null;
-    const name1 = objType1 === 3 && obj1Id >= 0 && obj1Id < jointNames.length
-      ? String(jointNames[obj1Id] ?? '')
-      : null;
-    const name2 = objType2 === 3 && obj2Id >= 0 && obj2Id < jointNames.length
-      ? String(jointNames[obj2Id] ?? '')
-      : null;
-    let label = nameFromEq || `Eq ${i}`;
-    let fullLabel = label;
-    if (!nameFromEq) {
-      if (name1 && name2 && name1 !== name2) {
-        label = typeName ? `[${typeName}] ${name1} \u2194 ${name2}` : `${name1} \u2194 ${name2}`;
-      } else if (name1) {
-        label = typeName ? `[${typeName}] ${name1}` : name1;
-      } else if (typeName) {
-        label = `[${typeName}] Eq ${i}`;
+
+  const meta = { n, eqType, eqObj1, eqObj2, eqObjType, eqNames, jointNames };
+  const metaSame = !!(cachedEqualityMeta
+    && cachedEqualityMeta.n === meta.n
+    && cachedEqualityMeta.eqType === meta.eqType
+    && cachedEqualityMeta.eqObj1 === meta.eqObj1
+    && cachedEqualityMeta.eqObj2 === meta.eqObj2
+    && cachedEqualityMeta.eqObjType === meta.eqObjType
+    && cachedEqualityMeta.eqNames === meta.eqNames
+    && cachedEqualityMeta.jointNames === meta.jointNames);
+
+  if (!metaSame) {
+    const out = [];
+    for (let i = 0; i < n; i += 1) {
+      const active = !!eqActive[i];
+      const t = eqType && i < eqType.length ? (eqType[i] | 0) : -1;
+      const typeName = t >= 0 && t < typeLabels.length ? typeLabels[t] : null;
+      const objStride = eqObj1 && eqObj1.length >= 2 * n ? 2 : 1;
+      const objTypeStride = eqObjType && eqObjType.length >= 2 * n ? 2 : 1;
+      const obj1Id = eqObj1 ? eqObj1[(objStride * i) | 0] : -1;
+      const obj2Id = eqObj2 ? eqObj2[(objStride * i) | 0] : -1;
+      const objType1 = eqObjType ? eqObjType[(objTypeStride * i) | 0] : -1;
+      const objType2 = eqObjType ? eqObjType[(objTypeStride * i) + 1] ?? objType1 : objType1;
+      const nameFromEq = eqNames && eqNames[i] ? String(eqNames[i]) : null;
+      const name1 = objType1 === 3 && obj1Id >= 0 && obj1Id < jointNames.length
+        ? String(jointNames[obj1Id] ?? '')
+        : null;
+      const name2 = objType2 === 3 && obj2Id >= 0 && obj2Id < jointNames.length
+        ? String(jointNames[obj2Id] ?? '')
+        : null;
+      let label = nameFromEq || `Eq ${i}`;
+      let fullLabel = label;
+      if (!nameFromEq) {
+        if (name1 && name2 && name1 !== name2) {
+          label = typeName ? `[${typeName}] ${name1} \u2194 ${name2}` : `${name1} \u2194 ${name2}`;
+        } else if (name1) {
+          label = typeName ? `[${typeName}] ${name1}` : name1;
+        } else if (typeName) {
+          label = `[${typeName}] Eq ${i}`;
+        } else {
+          label = `Eq ${i}`;
+        }
+        fullLabel = label;
       } else {
-        label = `Eq ${i}`;
+        fullLabel = nameFromEq;
+        label = nameFromEq;
       }
-      fullLabel = label;
-    } else {
-      fullLabel = nameFromEq;
-      label = nameFromEq;
+      out.push({ index: i, active, label, fullLabel, typeName, objType1, objType2, obj1Id, obj2Id });
     }
-    out.push({ index: i, active, label, fullLabel, typeName, objType1, objType2, obj1Id, obj2Id });
+    cachedEqualityEntries = out;
+    cachedEqualityMeta = meta;
+    cachedEqualityActiveRef = eqActive;
+    return out;
   }
-  return out;
+
+  if (cachedEqualityActiveRef !== eqActive) {
+    cachedEqualityActiveRef = eqActive;
+    for (let i = 0; i < n && i < cachedEqualityEntries.length; i += 1) {
+      cachedEqualityEntries[i].active = !!eqActive[i];
+    }
+  }
+  return cachedEqualityEntries;
 }
 
 const spec = await loadUiSpec();
@@ -1170,6 +1297,7 @@ if (typeof window !== 'undefined') {
     getSnapshot: () => latestSnapshot,
     clock: {
       onUiTick: (fn) => subscribeClock(uiTickSubscribers, fn),
+      onSnapshot: (fn) => subscribeClock(snapshotSubscribers, fn),
       onFrame: (fn) => subscribeClock(frameSubscribers, fn),
     },
     logStatus,
@@ -1182,6 +1310,21 @@ if (typeof window !== 'undefined') {
 async function loadPlayPlugins(host) {
   if (!host) return;
   const urls = [];
+  if (typeof window !== 'undefined' && !pluginDisposeInstalled) {
+    pluginDisposeInstalled = true;
+    window.addEventListener('beforeunload', () => {
+      while (pluginDisposers.length) {
+        const entry = pluginDisposers.pop();
+        if (!entry || typeof entry.dispose !== 'function') continue;
+        try {
+          entry.dispose();
+        } catch (err) {
+          logWarn('[plugins] dispose failed', { url: entry.url, err });
+          strictCatch(err, 'main:plugins_dispose', { allow: true });
+        }
+      }
+    }, { capture: true });
+  }
   try {
     const rawList = (typeof globalThis !== 'undefined' && Array.isArray(globalThis.PLAY_PLUGINS))
       ? globalThis.PLAY_PLUGINS
@@ -1221,7 +1364,12 @@ async function loadPlayPlugins(host) {
         logWarn('[plugins] missing registerPlayPlugin/default export', { url });
         continue;
       }
-      await register(host);
+      const maybeDisposer = await register(host);
+      if (typeof maybeDisposer === 'function') {
+        pluginDisposers.push({ url, dispose: maybeDisposer });
+      } else if (maybeDisposer && typeof maybeDisposer.dispose === 'function') {
+        pluginDisposers.push({ url, dispose: () => maybeDisposer.dispose() });
+      }
       logStatus('[plugins] loaded', { url });
     } catch (err) {
       logError('[plugins] load failed', { url, err });
