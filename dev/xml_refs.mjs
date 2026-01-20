@@ -52,17 +52,30 @@ function readCompilerDirs(doc) {
     if (typeof raw !== 'string' || !raw.trim()) return '';
     return trimTrailingSlash(raw);
   };
+  const readBool = (attr) => {
+    const raw = compiler?.getAttribute?.(attr);
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    const token = raw.trim().toLowerCase();
+    if (token === 'true' || token === '1' || token === 'yes') return true;
+    if (token === 'false' || token === '0' || token === 'no') return false;
+    return null;
+  };
   return {
     assetdir: read('assetdir'),
     meshdir: read('meshdir'),
     texturedir: read('texturedir'),
-    hfielddir: read('hfielddir'),
+    strippath: readBool('strippath'),
   };
 }
 
-function isProbablyRemotePath(value) {
+function isInlineDataPath(value) {
   const v = String(value ?? '').trim().toLowerCase();
-  return v.startsWith('http://') || v.startsWith('https://') || v.startsWith('data:');
+  return v.startsWith('data:');
+}
+
+function isRemotePath(value) {
+  const v = String(value ?? '').trim().toLowerCase();
+  return v.startsWith('http://') || v.startsWith('https://');
 }
 
 function shouldTreatAsAbsolutePath(value) {
@@ -79,7 +92,10 @@ export function parseMuJoCoDirectFileRefs(xmlText) {
   const addRef = (kind, fileValue) => {
     const raw = normaliseSlashes(fileValue);
     if (!raw) return;
-    if (isProbablyRemotePath(raw)) {
+    if (isInlineDataPath(raw)) {
+      return;
+    }
+    if (isRemotePath(raw)) {
       refs.push({ kind, path: raw, remote: true });
       return;
     }
@@ -105,15 +121,21 @@ export function parseMuJoCoDirectFileRefs(xmlText) {
   for (const node of doc.querySelectorAll('flexcomp[file]')) {
     addRef('mesh', node.getAttribute('file') || '');
   }
-  for (const node of doc.querySelectorAll('texture[file]')) {
+  for (const node of doc.querySelectorAll('texture')) {
     addRef('texture', node.getAttribute('file') || '');
+    addRef('texture', node.getAttribute('fileright') || '');
+    addRef('texture', node.getAttribute('fileleft') || '');
+    addRef('texture', node.getAttribute('fileup') || '');
+    addRef('texture', node.getAttribute('filedown') || '');
+    addRef('texture', node.getAttribute('filefront') || '');
+    addRef('texture', node.getAttribute('fileback') || '');
   }
   for (const node of doc.querySelectorAll('hfield[file]')) {
     addRef('hfield', node.getAttribute('file') || '');
   }
-  // Skins are assets too; MuJoCo uses them for skinning/meshes.
+  // Skin file paths are resolved via meshdir (like meshes).
   for (const node of doc.querySelectorAll('skin[file]')) {
-    addRef('skin', node.getAttribute('file') || '');
+    addRef('mesh', node.getAttribute('file') || '');
   }
 
   return { compiler, refs };
@@ -161,28 +183,60 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
 
   const visitedXml = new Set();
   const fileBuffers = new Map();
-  const pending = [{ type: 'xml', rel: rootRel, text: String(xmlText ?? ''), compilerState: null }];
+  const rootModelDir = dirnamePosix(rootRel);
+  const pending = [{
+    type: 'xml',
+    rel: rootRel,
+    text: String(xmlText ?? ''),
+    compilerState: null,
+    modelDir: rootModelDir,
+    fromInclude: false,
+  }];
   const unsupported = [];
 
-  async function ensureFileBuffer(relPath) {
-    const rel = normaliseMuJoCoVirtualPath(relPath);
-    if (!rel) throw new Error('buildMuJoCoBundle: missing relPath');
-    if (!fileBuffers.has(rel)) {
-      const buf = await readFileArrayBuffer(rel);
-      fileBuffers.set(rel, buf);
+  function basenamePosix(relPath) {
+    const raw = normalisePosixPath(normaliseSlashes(relPath));
+    if (!raw) return '';
+    const idx = raw.lastIndexOf('/');
+    return idx >= 0 ? raw.slice(idx + 1) : raw;
+  }
+
+  async function ensureFileBufferForCandidates(relPaths, context = null) {
+    const list = Array.isArray(relPaths) ? relPaths : [relPaths];
+    const tried = [];
+    let lastErr = null;
+
+    for (const entry of list) {
+      const rel = normaliseMuJoCoVirtualPath(entry);
+      if (!rel) continue;
+      if (fileBuffers.has(rel)) return rel;
+      tried.push(rel);
+      try {
+        const buf = await readFileArrayBuffer(rel);
+        fileBuffers.set(rel, buf);
+        return rel;
+      } catch (err) {
+        lastErr = err;
+      }
     }
-    return fileBuffers.get(rel) || null;
+
+    const label = context && typeof context === 'object' ? context.label : '';
+    const from = context && typeof context === 'object' ? context.from : '';
+    const triedLabel = tried.length ? tried.join(', ') : '(none)';
+    const detail = lastErr ? ` Last error: ${String(lastErr?.message || lastErr)}` : '';
+    const suffix = from ? ` (from ${from})` : '';
+    throw new Error(`${label || 'Missing file'}${suffix}. Tried: ${triedLabel}.${detail}`);
   }
 
   function resolveCompilerDir(baseDir, rawDir, rel, kind) {
     const raw = typeof rawDir === 'string' ? rawDir.trim() : '';
     if (!raw) return '';
-    if (isProbablyRemotePath(raw) || shouldTreatAsAbsolutePath(raw)) {
+    if (isInlineDataPath(raw) || isRemotePath(raw) || shouldTreatAsAbsolutePath(raw)) {
       unsupported.push({
         kind: `compiler:${kind}`,
         path: raw,
         from: rel,
-        remote: isProbablyRemotePath(raw),
+        remote: isInlineDataPath(raw) || isRemotePath(raw),
         absolute: shouldTreatAsAbsolutePath(raw),
       });
       return '';
@@ -196,62 +250,94 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
     return resolved;
   }
 
-  function resolveCompilerState(baseDir, localCompiler, inheritedState, rel) {
+  function resolveCompilerState(modelDir, localCompiler, inheritedState, rel) {
     const inherited = inheritedState && typeof inheritedState === 'object'
       ? inheritedState
-      : { assetBase: baseDir, meshBase: baseDir, textureBase: baseDir, hfieldBase: baseDir };
+      : {
+        assetDir: '',
+        meshDir: '',
+        textureDir: '',
+        strippath: false,
+        assetBase: modelDir,
+        meshBase: modelDir,
+        textureBase: modelDir,
+      };
+
+    let assetDir = inherited.assetDir || '';
+    let meshDir = inherited.meshDir || '';
+    let textureDir = inherited.textureDir || '';
+    let strippath = !!inherited.strippath;
 
     const rawAsset = typeof localCompiler?.assetdir === 'string' ? localCompiler.assetdir.trim() : '';
     const rawMesh = typeof localCompiler?.meshdir === 'string' ? localCompiler.meshdir.trim() : '';
     const rawTex = typeof localCompiler?.texturedir === 'string' ? localCompiler.texturedir.trim() : '';
-    const rawHfield = typeof localCompiler?.hfielddir === 'string' ? localCompiler.hfielddir.trim() : '';
+    if (rawAsset) assetDir = rawAsset;
+    if (rawMesh) meshDir = rawMesh;
+    if (rawTex) textureDir = rawTex;
+    if (typeof localCompiler?.strippath === 'boolean') {
+      strippath = localCompiler.strippath;
+    }
 
-    const assetBase = rawAsset ? (resolveCompilerDir(baseDir, rawAsset, rel, 'assetdir') || inherited.assetBase) : inherited.assetBase;
-    const meshBase = rawMesh
-      ? (resolveCompilerDir(assetBase, rawMesh, rel, 'meshdir') || inherited.meshBase)
-      : (rawAsset ? assetBase : inherited.meshBase);
-    const textureBase = rawTex
-      ? (resolveCompilerDir(assetBase, rawTex, rel, 'texturedir') || inherited.textureBase)
-      : (rawAsset ? assetBase : inherited.textureBase);
-    const hfieldBase = rawHfield
-      ? (resolveCompilerDir(assetBase, rawHfield, rel, 'hfielddir') || inherited.hfieldBase)
-      : (rawAsset ? assetBase : inherited.hfieldBase);
+    const assetBase = assetDir ? (resolveCompilerDir(modelDir, assetDir, rel, 'assetdir') || modelDir) : modelDir;
+    const meshBase = meshDir ? (resolveCompilerDir(modelDir, meshDir, rel, 'meshdir') || assetBase) : assetBase;
+    const textureBase = textureDir ? (resolveCompilerDir(modelDir, textureDir, rel, 'texturedir') || assetBase) : assetBase;
 
-    return { assetBase, meshBase, textureBase, hfieldBase };
+    return { assetDir, meshDir, textureDir, strippath, assetBase, meshBase, textureBase };
   }
 
-  function resolveRefPath(baseDir, compilerState, ref, rel) {
+  function resolveRefCandidates(modelDir, baseDir, compilerState, ref, rel, { fallbackToBaseDir } = {}) {
     const rawPath = ref?.path ? String(ref.path) : '';
-    if (!rawPath) return '';
+    if (!rawPath) return [];
     if (ref.remote || ref.absolute) {
       unsupported.push({ ...ref, from: rel });
-      return '';
+      return [];
     }
-    const base = (() => {
-      switch (ref.kind) {
-        case 'include':
-          return baseDir;
-        case 'model':
-          return compilerState?.assetBase ?? baseDir;
-        case 'mesh':
-          return compilerState?.meshBase ?? baseDir;
-        case 'texture':
-          return compilerState?.textureBase ?? baseDir;
-        case 'hfield':
-          return compilerState?.hfieldBase ?? baseDir;
-        case 'skin':
-          return compilerState?.assetBase ?? baseDir;
-        default:
-          return baseDir;
+
+    const candidates = [];
+    const outsideRoot = [];
+
+    if (ref.kind === 'include') {
+      candidates.push(joinMuJoCoRelativePath(modelDir, rawPath));
+      candidates.push(joinMuJoCoRelativePath(baseDir, rawPath));
+    } else if (ref.kind === 'model') {
+      candidates.push(joinMuJoCoRelativePath(modelDir, rawPath));
+      if (fallbackToBaseDir) candidates.push(joinMuJoCoRelativePath(baseDir, rawPath));
+    } else {
+      const stripped = compilerState?.strippath ? basenamePosix(rawPath) : rawPath;
+      const primaryBase = (() => {
+        switch (ref.kind) {
+          case 'mesh':
+          case 'hfield':
+            return compilerState?.meshBase ?? modelDir;
+          case 'texture':
+            return compilerState?.textureBase ?? modelDir;
+          default:
+            return modelDir;
+        }
+      })();
+      candidates.push(joinMuJoCoRelativePath(primaryBase, stripped));
+      if (fallbackToBaseDir) candidates.push(joinMuJoCoRelativePath(baseDir, stripped));
+    }
+
+    const out = [];
+    const seen = new Set();
+    for (const entry of candidates) {
+      const resolved = normaliseMuJoCoVirtualPath(entry);
+      if (!resolved) continue;
+      if (isOutsideRoot(resolved)) {
+        outsideRoot.push(resolved);
+        continue;
       }
-    })();
-    const resolved = joinMuJoCoRelativePath(base, rawPath);
-    if (!resolved) return '';
-    if (isOutsideRoot(resolved)) {
-      unsupported.push({ ...ref, path: resolved, from: rel, outsideRoot: true });
-      return '';
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
+      out.push(resolved);
     }
-    return resolved;
+
+    if (!out.length && outsideRoot.length) {
+      unsupported.push({ ...ref, path: outsideRoot[0], from: rel, outsideRoot: true });
+    }
+
+    return out;
   }
 
   while (pending.length) {
@@ -265,39 +351,53 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
 
       const parsed = parseMuJoCoDirectFileRefs(item.text);
       const baseDir = dirnamePosix(rel);
-      let compilerState = resolveCompilerState(baseDir, parsed.compiler, item.compilerState, rel);
+      const modelDir = typeof item?.modelDir === 'string' ? item.modelDir : rootModelDir;
+      const fromInclude = !!item?.fromInclude;
+      let compilerState = resolveCompilerState(modelDir, parsed.compiler, item.compilerState, rel);
 
       // MuJoCo `<include>` behaves like textual insertion; compiler directives inside an included file
       // (e.g. `scene.xml`) affect subsequent file path resolution in the including XML.
       // We approximate this by parsing includes first and "rolling forward" the compiler state.
       for (const ref of parsed.refs ?? []) {
         if (ref.kind !== 'include') continue;
-        const resolvedRel = resolveRefPath(baseDir, compilerState, ref, rel);
-        if (!resolvedRel) continue;
-        await ensureFileBuffer(resolvedRel);
+        const candidates = resolveRefCandidates(modelDir, baseDir, compilerState, ref, rel, { fallbackToBaseDir: true });
+        if (!candidates.length) continue;
+        const resolvedRel = await ensureFileBufferForCandidates(candidates, { label: 'Missing include file', from: rel });
         const buf = fileBuffers.get(resolvedRel) || null;
         const includeText = decodeTextFromArrayBuffer(buf);
         if (!visitedXml.has(resolvedRel)) {
-          pending.push({ type: 'xml', rel: resolvedRel, text: includeText, compilerState });
+          pending.push({
+            type: 'xml',
+            rel: resolvedRel,
+            text: includeText,
+            compilerState,
+            modelDir,
+            fromInclude: true,
+          });
         }
         const includeParsed = parseMuJoCoDirectFileRefs(includeText);
-        const includeDir = dirnamePosix(resolvedRel);
-        compilerState = resolveCompilerState(includeDir, includeParsed.compiler, compilerState, resolvedRel);
+        compilerState = resolveCompilerState(modelDir, includeParsed.compiler, compilerState, resolvedRel);
       }
 
       for (const ref of parsed.refs ?? []) {
-        const resolvedRel = resolveRefPath(baseDir, compilerState, ref, rel);
-        if (!resolvedRel) continue;
-        await ensureFileBuffer(resolvedRel);
-        if (ref.kind === 'include') {
-          // handled above (compiler propagation + queue)
-          continue;
-        }
+        if (ref.kind === 'include') continue;
+        const candidates = resolveRefCandidates(modelDir, baseDir, compilerState, ref, rel, {
+          fallbackToBaseDir: fromInclude,
+        });
+        if (!candidates.length) continue;
+        const resolvedRel = await ensureFileBufferForCandidates(candidates, { label: 'Missing referenced file', from: rel });
         if (ref.kind === 'model' && !visitedXml.has(resolvedRel)) {
           const buf = fileBuffers.get(resolvedRel) || null;
           const modelText = decodeTextFromArrayBuffer(buf);
           // MuJoCo loads `<model file="...">` as a separate model asset; do not inherit compiler dirs.
-          pending.push({ type: 'xml', rel: resolvedRel, text: modelText, compilerState: null });
+          pending.push({
+            type: 'xml',
+            rel: resolvedRel,
+            text: modelText,
+            compilerState: null,
+            modelDir: dirnamePosix(resolvedRel),
+            fromInclude: false,
+          });
         }
       }
       continue;

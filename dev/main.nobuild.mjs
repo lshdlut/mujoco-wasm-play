@@ -70,6 +70,11 @@ const toastEl = document.querySelector('[data-testid="toast"]');
 let viewerStoreRef = null;
 let infoTimeEl = null;
 let infoFpsEl = null;
+let infoSizeEl = null;
+let infoCpuEl = null;
+let infoSolverEl = null;
+let infoEnergyEl = null;
+let infoFwdinvEl = null;
 
 let latestSnapshot = null;
 let renderStats = { drawn: 0, hidden: 0 };
@@ -376,12 +381,27 @@ function updateInfoOverlayTime(state) {
 function updateInfoOverlayFast(state) {
   if (!overlayInfo) return;
   if (!state?.overlays?.info) return;
+  const grid = overlayInfo.querySelector('.info-grid');
+  if (!grid) return;
   if (!infoFpsEl || !infoFpsEl.isConnected) {
-    const grid = overlayInfo.querySelector('.info-grid');
-    if (!grid) return;
     infoFpsEl = grid.querySelector('.info-value[data-info-field="fps"]');
-    if (!infoFpsEl) return;
   }
+  if (!infoSizeEl || !infoSizeEl.isConnected) {
+    infoSizeEl = grid.querySelector('.info-value[data-info-field="size"]');
+  }
+  if (!infoCpuEl || !infoCpuEl.isConnected) {
+    infoCpuEl = grid.querySelector('.info-value[data-info-field="cpu"]');
+  }
+  if (!infoSolverEl || !infoSolverEl.isConnected) {
+    infoSolverEl = grid.querySelector('.info-value[data-info-field="solver"]');
+  }
+  if (!infoEnergyEl || !infoEnergyEl.isConnected) {
+    infoEnergyEl = grid.querySelector('.info-value[data-info-field="energy"]');
+  }
+  if (!infoFwdinvEl || !infoFwdinvEl.isConnected) {
+    infoFwdinvEl = grid.querySelector('.info-value[data-info-field="fwdinv"]');
+  }
+  const info = state?.hud?.info || null;
   const simRun = !!state?.simulation?.run;
   const fpsState = Number(state?.hud?.fps);
   const fps = Number.isFinite(fpsEstimate) && fpsEstimate > 0
@@ -389,7 +409,54 @@ function updateInfoOverlayFast(state) {
     : (Number.isFinite(fpsState) ? fpsState : 0);
   const value = simRun ? (Number(fps) || 0) : 0;
   const text = value < 1 ? `${value.toFixed(1)} fps` : `${Math.round(value)} fps`;
-  if (infoFpsEl.textContent !== text) infoFpsEl.textContent = text;
+  if (infoFpsEl && infoFpsEl.textContent !== text) infoFpsEl.textContent = text;
+
+  if (infoSizeEl) {
+    const nefc = Number(info?.nefc) || 0;
+    const ncon = Number(info?.ncon) || Number(state?.hud?.contacts) || 0;
+    const sizeText = nefc ? `${nefc}  (${ncon} con)` : `${ncon} con`;
+    if (infoSizeEl.textContent !== sizeText) infoSizeEl.textContent = sizeText;
+  }
+
+  if (infoCpuEl) {
+    const step = Number(info?.cpuStepMs);
+    const fwd = Number(info?.cpuForwardMs);
+    const val = simRun ? step : fwd;
+    const cpuMs = Number.isFinite(val) && val > 0 ? val : null;
+    const cpuText = cpuMs != null ? `${cpuMs.toFixed(3)} ms` : 'n/a';
+    if (infoCpuEl.textContent !== cpuText) infoCpuEl.textContent = cpuText;
+  }
+
+  if (infoSolverEl) {
+    const solverErr = Number(info?.solverSolerr);
+    const solverIter = Number(info?.solverNiter) || 0;
+    const solverText = (() => {
+      if (Number.isFinite(solverErr)) return `${solverErr.toFixed(2)}  (${solverIter | 0} it)`;
+      if (solverIter > 0) return `${solverIter | 0} it`;
+      return 'n/a';
+    })();
+    if (infoSolverEl.textContent !== solverText) infoSolverEl.textContent = solverText;
+  }
+
+  if (infoEnergyEl) {
+    const energy = Number(info?.energy);
+    const energyText = Number.isFinite(energy) ? energy.toFixed(3) : 'n/a';
+    if (infoEnergyEl.textContent !== energyText) infoEnergyEl.textContent = energyText;
+  }
+
+  if (infoFwdinvEl) {
+    const enableFlags = state?.model?.opt?.enableflags;
+    const enabled = typeof enableFlags === 'number' && !!(enableFlags & (1 << 2));
+    const solverFwdinv = Array.isArray(info?.solverFwdinv) ? info.solverFwdinv : null;
+    const fwdinvText = (() => {
+      if (!enabled || !solverFwdinv || solverFwdinv.length < 2) return 'n/a';
+      const f0 = Number(solverFwdinv[0]);
+      const f1 = Number(solverFwdinv[1]);
+      if (!Number.isFinite(f0) || !Number.isFinite(f1)) return 'n/a';
+      return `${f0.toFixed(1)}  ${f1.toFixed(1)}`;
+    })();
+    if (infoFwdinvEl.textContent !== fwdinvText) infoFwdinvEl.textContent = fwdinvText;
+  }
 }
 
 
