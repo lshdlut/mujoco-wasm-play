@@ -298,15 +298,10 @@ export function readNumericParam(name, defaultValue, options = {}, params = view
 }
 
 export function consumeViewerParams(params = viewerSearchParams) {
-  const requestedMode = params.get('mode');
   const fallbackModeParam = (params.get('fallback') || 'auto').toLowerCase();
-  const presetParam = (params.get('preset') || 'bright-outdoor').toLowerCase();
 
   return {
-    requestedMode,
     fallbackModeParam,
-    presetParam,
-    strictMode: isStrictEnabled(params),
     debugMode: readBoolean('debug', params) === true,
     hideAllGeometryDefault: readTruthyFlag(
       ['nogeom', 'no_geom', 'no-geom', 'hideall', 'hide_all'],

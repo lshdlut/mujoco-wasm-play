@@ -1,6 +1,8 @@
 // Minimal MuJoCo XML reference helpers (direct references only).
 // Keep behaviour audit-friendly; do not introduce network fetching here.
 
+import { isStrictEnabled, strictCatch } from './viewer_runtime.mjs';
+
 function normaliseSlashes(value) {
   return String(value ?? '').trim().replaceAll('\\', '/');
 }
@@ -217,6 +219,9 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
         return rel;
       } catch (err) {
         lastErr = err;
+        if (isStrictEnabled()) {
+          strictCatch(err, 'xml_refs:ensureFileBufferForCandidates', { allow: true });
+        }
       }
     }
 

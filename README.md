@@ -2,7 +2,7 @@
 
 ![mujoco-wasm-play](mujoco-wasm-play-cards.png)
 
-[**Live Demo (Rajagopal2015, MuJoCo 3.3.7)**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/)
+[**Live Demo (Rajagopal2015, MuJoCo 3.3.7)**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/)
 
 > Active development: APIs, query parameters, and file layout may change without notice; expect breaking changes between revisions.
 
@@ -28,9 +28,11 @@ Glue-layer and playground for consuming MuJoCo WASM artifacts produced by 'mujoc
 
 - Local dev (serve from `dev/` with `dev_server.py` on port 4173):
   - `python dev/dev_server.py --root dev --port 4173`
-  - `http://127.0.0.1:4173/index.html?model=raj&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/`
+  - `http://127.0.0.1:4173/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/`
 - Public demo (GitHub Pages, stable MuJoCo 3.3.7, Rajagopal2015 model):
-  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&mode=worker&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/`
+  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/`
+
+Note: the Play backend is worker-only. The legacy `mode=worker|direct` query parameter is deprecated and ignored.
 
 For the full upstream surface and version/tag mapping, see `https://github.com/lshdlut/mujoco-wasm-forge`.
 
@@ -46,4 +48,4 @@ For the full upstream surface and version/tag mapping, see `https://github.com/l
 
 ## Plugins (Experimental)
 
-This repo can optionally load external UI/plugins without forking. See `PLUGIN_GUIDE.md` for the full contract (mounts, Host API, clocks, and cleanup).
+This repo can optionally load external UI/plugins without forking. See `plugin_dev.md` for the full contract (mounts, Host API, worker constraints, clocks, cleanup, and 3D overlays).

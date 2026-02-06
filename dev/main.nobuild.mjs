@@ -156,14 +156,19 @@ const {
   findToken,
   bigN,
   skyOverride,
-  requestedMode,
   requestedModel,
   skyDebugModeParam,
 } = consumeViewerParams();
 
 const dumpBigParam = dumpToken === 'big' || findToken === 'big';
 const skyOffParam = skyOverride === true;
-// Play UI runs on worker backend only; ignore direct/auto requests for now.
+// Play UI runs on a worker backend only.
+if (typeof window !== 'undefined') {
+  const search = window.location?.search || '';
+  if (/(?:^|[?&])mode=/.test(search)) {
+    logWarn("[viewer] query parameter 'mode' is deprecated and ignored (worker-only backend).");
+  }
+}
 const backend = await createBackend({ model: requestedModel, prepareBindingUpdate });
 const store = createViewerStore({});
 viewerStoreRef = store;
@@ -1347,6 +1352,18 @@ if (typeof window !== 'undefined') {
     getContext: () => (rendererManager.getContext ? rendererManager.getContext() : (renderCtx.initialized ? renderCtx : null)),
     ensureLoop: () => rendererManager.ensureRenderLoop(),
     renderScene: (snapshot, state) => rendererManager.renderScene(snapshot, state),
+    getOverlay3D: () => (rendererManager.getOverlay3D ? rendererManager.getOverlay3D() : null),
+    overlay3d: {
+      get: () => (rendererManager.getOverlay3D ? rendererManager.getOverlay3D() : null),
+      createScope: (scopeId, options) => {
+        const mgr = rendererManager.getOverlay3D ? rendererManager.getOverlay3D() : null;
+        return mgr ? mgr.createScope(scopeId, options) : null;
+      },
+      getScope: (scopeId) => {
+        const mgr = rendererManager.getOverlay3D ? rendererManager.getOverlay3D() : null;
+        return mgr ? mgr.getScope(scopeId) : null;
+      },
+    },
   };
   window.__PLAY_HOST__ = {
     apiVersion: 1,
