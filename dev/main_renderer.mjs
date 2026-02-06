@@ -3415,11 +3415,6 @@ function ensureInstancedGeometry(inst, gtype) {
   return geometry;
 }
 
-function instancingIsOverlayObjType(objType) {
-  const ot = objType | 0;
-  return ot === MJ_OBJ.SITE || ot === MJ_OBJ.TENDON;
-}
-
 function instancingEnabledFromState(state) {
   return state?.rendering?.options?.instancing?.enabled !== false;
 }
@@ -3447,7 +3442,7 @@ function ensureInstancedMaterial(
   const oq = Math.max(0, Math.min(1000, opacityQ | 0));
   const rq = Math.max(0, Math.min(1000, roughnessQ | 0));
   const mq = Math.max(0, Math.min(1000, metalnessQ | 0));
-  const forceBasicFlag = !!forceBasic || instancingIsOverlayObjType(objType);
+  const forceBasicFlag = !!forceBasic;
   const key = `inst:${forceBasicFlag ? 1 : 0}:o${oq}:r${reflectanceQ | 0}:ru${rq}:me${mq}`;
   if (inst.materials.has(key)) {
     const mat = inst.materials.get(key);
@@ -6012,20 +6007,6 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     const mesh = ensureGeomMesh(ctx, meshIndex, gtypeRaw, assets, dataId, sizeVec, { geomMeta, dynamicSizeScale: true }, state);
     if (perfEnabled) meshMs += perfNow() - tEnsureStart;
     if (!mesh) return false;
-    const scnObjType = objTypeView[si] | 0;
-    if (instancingIsOverlayObjType(scnObjType)) {
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const mat of mats) {
-        if (!mat || typeof mat !== 'object') continue;
-        if (!('toneMapped' in mat)) continue;
-        if (mat.toneMapped !== false) {
-          mat.toneMapped = false;
-          if ('needsUpdate' in mat) mat.needsUpdate = true;
-        }
-      }
-    }
     if (perfEnabled && mesh !== meshBefore) {
       if (meshBefore) {
         ensureRebuilt += 1;
@@ -6375,13 +6356,17 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     extras.push(i);
   }
 
-  // Creating hundreds of new Three.js meshes/geometries in a single frame can
-  // stall the main thread (especially in headless / SwiftShader runs). Spread
-  // extra-geom construction across frames while always updating existing ones.
-  const createBudget = 8;
+  // TODO(delete): Remove extra-geom creation throttling. This was originally added
+  // to avoid one-frame main-thread stalls when creating lots of scene geoms
+  // (sites/tendons/etc). Modern runtimes should generally handle this better, and
+  // many plugin overlays prefer immediate construction.
+  //
+  // For now, keep the throttling logic in place but set budgets extremely high so
+  // it behaves like "create immediately" until the code is deleted.
+  const createBudget = Number.POSITIVE_INFINITY;
   let createdThisFrame = 0;
   const tCreateStart = perfNow();
-  const createTimeBudgetMs = 6;
+  const createTimeBudgetMs = Number.POSITIVE_INFINITY;
   for (let k = 0; k < extras.length; k += 1) {
     const meshIndex = baseNgeom + k;
     const scnIdx = extras[k] | 0;
@@ -6439,13 +6424,6 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       }
       if (batch.material && typeof batch.material.wireframe === 'boolean') {
         batch.material.wireframe = wireframe;
-      }
-      if (typeof batch.objType === 'number') {
-        const overlay = instancingIsOverlayObjType(batch.objType);
-        const nextCastShadow = !overlay;
-        const nextReceiveShadow = !overlay;
-        if (batch.mesh.castShadow !== nextCastShadow) batch.mesh.castShadow = nextCastShadow;
-        if (batch.mesh.receiveShadow !== nextReceiveShadow) batch.mesh.receiveShadow = nextReceiveShadow;
       }
       if (batch.material && 'envMapIntensity' in batch.material) {
         const q = batch.material.userData?.reflectanceQ;
