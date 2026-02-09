@@ -9,7 +9,7 @@ Dev HTTP server for mujoco-wasm-play.
   Cache-Control: public, max-age=0, must-revalidate
 
 Usage:
-  python dev_server.py --root . --port 8080
+  python dev_server.py --root . --port 8000
 """
 from __future__ import annotations
 import argparse
@@ -90,7 +90,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".", help="directory to serve")
-    ap.add_argument("--port", type=int, default=8080)
+    ap.add_argument("--port", type=int, default=8000)
     args = ap.parse_args()
 
     root = os.path.abspath(args.root)
@@ -107,5 +107,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 

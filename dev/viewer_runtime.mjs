@@ -347,13 +347,21 @@ export function buildWorkerUrl(baseUrl, params = viewerSearchParams) {
 
 export function normalizeVer(v) {
   const s = String(v || '').trim();
-  return s ? s : '3.3.7';
+  return s ? s : '3.4.0';
 }
 
 export function getForgeDistBase(ver) {
   const v = normalizeVer(ver);
   const override = resolveForgeDistBaseOverride(v);
   if (override) return override;
+  const host = (typeof location !== 'undefined' && location && typeof location.hostname === 'string')
+    ? location.hostname
+    : '';
+  if (host === 'localhost' || host === '127.0.0.1') {
+    // Local dev: serve from the parent directory so sibling repos (e.g. mujoco-wasm-forge)
+    // are available under the same origin.
+    return `/mujoco-wasm-forge/dist/${v}/`;
+  }
   return `/dist/${v}/`;
 }
 

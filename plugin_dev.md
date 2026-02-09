@@ -357,5 +357,4 @@ export function registerPlayPlugin(host) {
 - Worker runtime (MuJoCo/forge owner): `dev/physics.worker.mjs`
 - Protocol generator: `tools/generate_worker_protocol.mjs`
 - Built-in UI controls + shortcuts: `dev/spec/ui_spec.json`
-- Overlay structure notes: `dev/spec/overlay_spec.md`
-- End-to-end data flow notes: `dev/spec/flow.md`
+- Overlay implementation (scopes/layers/transparency/assets): `dev/main_renderer.mjs` (`ensureOverlay3D`)

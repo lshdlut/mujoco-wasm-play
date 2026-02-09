@@ -2,7 +2,7 @@
 
 ![mujoco-wasm-play](mujoco-wasm-play-cards.png)
 
-[**Live Demo (Rajagopal2015, MuJoCo 3.3.7)**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/)
+[**Live Demo (Rajagopal2015, MuJoCo 3.4.0)**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/)
 
 > Active development: APIs, query parameters, and file layout may change without notice; expect breaking changes between revisions.
 
@@ -16,21 +16,22 @@ Glue-layer and playground for consuming MuJoCo WASM artifacts produced by 'mujoc
 ## Online Demo / Forge Dist
 
 - This repo does not ship forge `dist/` artifacts; it expects a MuJoCo WASM bundle provided by `mujoco-wasm-forge`.
-- At runtime, `viewer_runtime.mjs#getForgeDistBase(ver)` resolves the dist base either as:
-  - a local path `/dist/<ver>/` (same origin), or
-  - an override from `window.__FORGE_DIST_BASE__` or the `forgeBase` query parameter. These strings are treated as templates: if they include `{ver}`, it is replaced by the normalized version (for example `3.3.7`).
-- This viewer requires a forge build with viewer extensions (scene + vopt pointers). Some forge tags (for example `forge-3.3.7-r1`) ship a minimal MuJoCo build and are not compatible.
+- At runtime, the worker resolves the forge dist base either as:
+  - a local dev default (on `localhost`/`127.0.0.1`: `/mujoco-wasm-forge/dist/<ver>/`; otherwise `/dist/<ver>/`), or
+  - an override from `window.__FORGE_DIST_BASE__` or the `forgeBase` query parameter. These strings are treated as templates: if they include `{ver}`, it is replaced by the normalized version (for example `3.4.0`).
+- This viewer requires a forge build with viewer extensions (scene + vopt pointers). Some forge tags (for example `forge-3.4.0-r1`) ship a minimal MuJoCo build and are not compatible.
 - A typical remote base template (for jsDelivr + pinned forge commit) looks like:
   - `https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
 - When sharing a public demo link (for example from GitHub Pages), include a `forgeBase=` parameter pointing at your forge dist base so the viewer can fetch `mujoco.js` and `mujoco.wasm`.
 
 ### Example URLs
 
-- Local dev (serve from `dev/` with `dev_server.py` on port 4173):
-  - `python dev/dev_server.py --root dev --port 4173`
-  - `http://127.0.0.1:4173/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/`
-- Public demo (GitHub Pages, stable MuJoCo 3.3.7, Rajagopal2015 model):
-  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@db751c12429310732be86dc9a1d443f5040fd9ba/dist/3.3.7/`
+- Local dev (serve from the parent directory on port 8000 so the sibling forge repo is available):
+  - `python dev/dev_server.py --root .. --port 8000`
+  - `http://127.0.0.1:8000/mujoco-wasm-play/dev/index.html?model=raj`
+  - Assumes `../mujoco-wasm-forge/dist/3.4.0/` is present under the same parent directory.
+- Public demo (GitHub Pages, stable MuJoCo 3.4.0, Rajagopal2015 model):
+  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/`
 
 Note: the Play backend is worker-only. The legacy `mode=worker|direct` query parameter is deprecated and ignored.
 

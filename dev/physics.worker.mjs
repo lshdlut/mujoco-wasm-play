@@ -1527,10 +1527,12 @@ async function loadModule() {
   const tLoadStart = perfEnabled ? perfNowMs() : 0;
   // Build absolute URLs and import dynamically to avoid ref path/caching pitfalls
   // Versioned dist base from worker URL (?ver=...) and optional forgeBase override.
-  let ver = '3.3.7';
+  let ver = '3.4.0';
   let forgeBaseOverride = '';
+  let urlHost = '';
   try {
     const urlSelf = new URL(import.meta.url);
+    urlHost = urlSelf.hostname || '';
     const v = urlSelf.searchParams.get('ver');
     if (v) ver = v;
     const fb = urlSelf.searchParams.get('forgeBase');
@@ -1539,12 +1541,20 @@ async function loadModule() {
     strictCatch(err, 'worker:parse_worker_url');
   }
 
+  const resolveLocalDistBase = () => {
+    if (urlHost === 'localhost' || urlHost === '127.0.0.1') {
+      // Local dev: serve from the parent directory so the sibling forge repo is available.
+      return new URL(`../../mujoco-wasm-forge/dist/${ver}/`, import.meta.url);
+    }
+    return new URL(`../dist/${ver}/`, import.meta.url);
+  };
+
   let distBase;
   if (forgeBaseOverride) {
     // When forgeBase is provided (e.g. from GitHub Pages demo),
     // treat it as the canonical dist/<ver>/ base URL.
     try {
-      // Resolve relative paths (e.g. "/dist/3.3.7/") against this worker URL so
+      // Resolve relative paths (e.g. "/dist/3.4.0/") against this worker URL so
       // local dev + Playwright can pass forgeBase without needing an absolute URL.
       distBase = new URL(forgeBaseOverride, import.meta.url);
     } catch (err) {
@@ -1553,12 +1563,11 @@ async function loadModule() {
       distBase = compatFallback(
         'forgeBase.malformed',
         { forgeBase: forgeBaseOverride },
-        () => new URL(`../dist/${ver}/`, import.meta.url),
+        resolveLocalDistBase,
       );
     }
   } else {
-    // Local dev: serve dist/<ver>/ from the same origin.
-    distBase = new URL(`../dist/${ver}/`, import.meta.url);
+    distBase = resolveLocalDistBase();
   }
   const jsAbs = new URL(`mujoco.js`, distBase);
   const wasmAbs = new URL(`mujoco.wasm`, distBase);
