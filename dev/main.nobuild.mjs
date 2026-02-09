@@ -1495,19 +1495,3 @@ function queueResizeCanvas() {
 
 queueResizeCanvas();
 window.addEventListener('resize', queueResizeCanvas);
-
-
-/**
- * Camera controller for orbit/pan/zoom with pointer gestures.
- *
- * Options:
- * - minDistance: fixed minimum distance (takes precedence over getMinDistance).
- * - getMinDistance(camera, target, ctx): dynamic minimum distance when minDistance is not provided.
- * - zoomK: wheel delta scale (default 0.35), maxWheelStep clamps magnitude pre-scaling.
- * - invertY: inverts vertical component for orbit/rotate and translate.
- * - keyRoot: element to receive key events (falls back to canvas).
- * - assertUp: when true, verify camera.up matches initial up and realign if it drifts.
- * - wheelLineFactor / wheelPageFactor: DOM_DELTA normalization constants.
- * - minOrthoZoom / maxOrthoZoom: zoom clamps for orthographic cameras.
- *
- */

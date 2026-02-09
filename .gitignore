@@ -63,5 +63,6 @@ Thumbs.db
 /*.md
 !DEV_ENHANCE.md
 !/PLUGIN_GUIDE.md
+!/plugin_dev.md
 !/README.md
 !/PLAY_SIMULATE_AUDIT.md
