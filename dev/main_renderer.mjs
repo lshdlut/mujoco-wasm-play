@@ -1567,6 +1567,7 @@ function sendViewerCameraSync(backend, ctx, state, scratchVec = null) {
   const payload = buildViewerCameraPayload(ctx, state, scratchVec);
   if (!payload) return;
   ctx.viewerCameraSynced = true;
+  ctx.viewerCameraSyncPending = true;
   ctx.viewerCameraTrackId = Number.isFinite(payload.trackbodyid) ? (payload.trackbodyid | 0) : null;
   backend.apply({
     kind: 'gesture',
@@ -2156,6 +2157,11 @@ function applyViewerCameraSnapshot(ctx, snapshot, state, bounds, { tempVecA, tem
     }
   }
   if (!ctx.viewerCameraSynced) return false;
+  if (ctx.viewerCameraSyncPending) {
+    const phase = snapshot?.gesture?.phase;
+    if (typeof phase !== 'string' || phase === 'idle') return false;
+    ctx.viewerCameraSyncPending = false;
+  }
   const cam = snapshot?.viewerCamera;
   if (!cam || !Array.isArray(cam.lookat) || cam.lookat.length < 3) return false;
   const dist = Number(cam.distance);
@@ -7587,6 +7593,7 @@ function createRendererManager({
   ctx.currentCameraMode = typeof ctx.currentCameraMode === 'number' ? ctx.currentCameraMode : 0;
   ctx.fixedCameraActive = !!ctx.fixedCameraActive;
   ctx.viewerCameraSynced = !!ctx.viewerCameraSynced;
+  ctx.viewerCameraSyncPending = !!ctx.viewerCameraSyncPending;
   ctx.viewerCameraTrackId = Number.isFinite(ctx.viewerCameraTrackId) ? (ctx.viewerCameraTrackId | 0) : null;
 
   const cleanup = [];
@@ -8533,6 +8540,7 @@ function createCameraController({
     const payload = buildViewerCameraPayload(renderCtx, state, tempVecE);
     if (payload) {
       renderCtx.viewerCameraSynced = true;
+      renderCtx.viewerCameraSyncPending = true;
       renderCtx.viewerCameraTrackId = Number.isFinite(payload.trackbodyid) ? (payload.trackbodyid | 0) : null;
     }
     return payload;
