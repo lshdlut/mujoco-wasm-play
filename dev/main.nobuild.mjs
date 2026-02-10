@@ -137,6 +137,8 @@ const renderCtx = {
   cameraTarget: new THREE.Vector3(0, 0, 0),
   autoAligned: false,
   viewerCameraSynced: false,
+  viewerCameraSyncSeqSent: 0,
+  viewerCameraSyncSeqAck: 0,
   viewerCameraTrackId: null,
   bounds: null,
   snapshotLogState: null,
@@ -632,6 +634,20 @@ function updatePanels(state) {
 
 function applySnapshot(snapshot) {
   latestSnapshot = snapshot;
+  if (renderCtx) {
+    const seqAckSource = Number(snapshot?.viewerCameraSyncSeq);
+    if (Number.isFinite(seqAckSource)) {
+      const seqAck = Math.max(0, Math.trunc(seqAckSource));
+      const prevAckSource = Number(renderCtx.viewerCameraSyncSeqAck);
+      const prevAck = Number.isFinite(prevAckSource) ? Math.max(0, Math.trunc(prevAckSource)) : 0;
+      renderCtx.viewerCameraSyncSeqAck = Math.max(prevAck, seqAck);
+    }
+    const seqSentSource = Number(renderCtx.viewerCameraSyncSeqSent);
+    const seqSent = Number.isFinite(seqSentSource) ? Math.max(0, Math.trunc(seqSentSource)) : 0;
+    const seqAckSource2 = Number(renderCtx.viewerCameraSyncSeqAck);
+    const seqAck2 = Number.isFinite(seqAckSource2) ? Math.max(0, Math.trunc(seqAckSource2)) : 0;
+    renderCtx.viewerCameraSynced = seqSent > 0 && seqAck2 >= seqSent;
+  }
   const perfEnabled = isPerfEnabled();
   const t0 = perfEnabled ? perfNow() : 0;
   let mergeMs = null;

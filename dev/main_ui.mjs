@@ -1675,6 +1675,7 @@ function applyGesture(store, backend, payload) {
         reldy: payload.reldy,
         shiftKey: payload.shiftKey,
         cam: payload.cam,
+        camSyncSeq: payload.camSyncSeq,
       }),
     )
       .then((snapshot) => {

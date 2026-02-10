@@ -1566,14 +1566,18 @@ function sendViewerCameraSync(backend, ctx, state, scratchVec = null) {
   if (!ctx || !backend || typeof backend.apply !== 'function') return;
   const payload = buildViewerCameraPayload(ctx, state, scratchVec);
   if (!payload) return;
-  ctx.viewerCameraSynced = true;
-  ctx.viewerCameraSyncPending = true;
+  const prevSeqSource = Number(ctx.viewerCameraSyncSeqSent);
+  const prevSeq = Number.isFinite(prevSeqSource) ? Math.max(0, Math.trunc(prevSeqSource)) : 0;
+  const camSyncSeq = prevSeq + 1;
+  ctx.viewerCameraSyncSeqSent = camSyncSeq;
+  ctx.viewerCameraSynced = false;
   ctx.viewerCameraTrackId = Number.isFinite(payload.trackbodyid) ? (payload.trackbodyid | 0) : null;
   backend.apply({
     kind: 'gesture',
     gestureType: 'camera',
     phase: 'sync',
     cam: payload,
+    camSyncSeq,
   });
 }
 
@@ -2157,11 +2161,6 @@ function applyViewerCameraSnapshot(ctx, snapshot, state, bounds, { tempVecA, tem
     }
   }
   if (!ctx.viewerCameraSynced) return false;
-  if (ctx.viewerCameraSyncPending) {
-    const phase = snapshot?.gesture?.phase;
-    if (typeof phase !== 'string' || phase === 'idle') return false;
-    ctx.viewerCameraSyncPending = false;
-  }
   const cam = snapshot?.viewerCamera;
   if (!cam || !Array.isArray(cam.lookat) || cam.lookat.length < 3) return false;
   const dist = Number(cam.distance);
@@ -7593,7 +7592,12 @@ function createRendererManager({
   ctx.currentCameraMode = typeof ctx.currentCameraMode === 'number' ? ctx.currentCameraMode : 0;
   ctx.fixedCameraActive = !!ctx.fixedCameraActive;
   ctx.viewerCameraSynced = !!ctx.viewerCameraSynced;
-  ctx.viewerCameraSyncPending = !!ctx.viewerCameraSyncPending;
+  ctx.viewerCameraSyncSeqSent = Number.isFinite(ctx.viewerCameraSyncSeqSent)
+    ? Math.max(0, Math.trunc(ctx.viewerCameraSyncSeqSent))
+    : 0;
+  ctx.viewerCameraSyncSeqAck = Number.isFinite(ctx.viewerCameraSyncSeqAck)
+    ? Math.max(0, Math.trunc(ctx.viewerCameraSyncSeqAck))
+    : 0;
   ctx.viewerCameraTrackId = Number.isFinite(ctx.viewerCameraTrackId) ? (ctx.viewerCameraTrackId | 0) : null;
 
   const cleanup = [];
@@ -8533,17 +8537,25 @@ function createCameraController({
     const state = typeof store?.get === 'function' ? store.get() : null;
     const mode = Number(state?.runtime?.cameraIndex ?? 0) | 0;
     const trackingBodyId = mode === 1 ? resolveTrackingBodyId(state) : null;
-    const needsSync =
-      !renderCtx.viewerCameraSynced ||
-      (mode === 1 && Number.isFinite(trackingBodyId) && trackingBodyId !== renderCtx.viewerCameraTrackId);
+    const trackingChanged =
+      mode === 1 && Number.isFinite(trackingBodyId) && trackingBodyId !== renderCtx.viewerCameraTrackId;
+    const needsSync = trackingChanged || !renderCtx.viewerCameraSynced;
     if (!needsSync) return null;
-    const payload = buildViewerCameraPayload(renderCtx, state, tempVecE);
-    if (payload) {
-      renderCtx.viewerCameraSynced = true;
-      renderCtx.viewerCameraSyncPending = true;
-      renderCtx.viewerCameraTrackId = Number.isFinite(payload.trackbodyid) ? (payload.trackbodyid | 0) : null;
-    }
-    return payload;
+
+    const seqSentSource = Number(renderCtx.viewerCameraSyncSeqSent);
+    const seqSent = Number.isFinite(seqSentSource) ? Math.max(0, Math.trunc(seqSentSource)) : 0;
+    const seqAckSource = Number(renderCtx.viewerCameraSyncSeqAck);
+    const seqAck = Number.isFinite(seqAckSource) ? Math.max(0, Math.trunc(seqAckSource)) : 0;
+    const syncInFlight = seqSent > 0 && seqAck < seqSent;
+    if (syncInFlight && !trackingChanged) return null;
+
+    const cam = buildViewerCameraPayload(renderCtx, state, tempVecE);
+    if (!cam) return null;
+    const camSyncSeq = seqSent + 1;
+    renderCtx.viewerCameraSyncSeqSent = camSyncSeq;
+    renderCtx.viewerCameraSynced = false;
+    renderCtx.viewerCameraTrackId = Number.isFinite(cam.trackbodyid) ? (cam.trackbodyid | 0) : null;
+    return { cam, camSyncSeq };
   }
 
   function applyCameraGesture(mode, dx, dy) {
@@ -8671,7 +8683,8 @@ function createCameraController({
         shiftKey: currentShift(event),
         reldx: 0,
         reldy: 0,
-        cam: camPayload,
+        cam: camPayload?.cam || null,
+        camSyncSeq: camPayload?.camSyncSeq ?? null,
       });
     }
   }
@@ -8699,7 +8712,8 @@ function createCameraController({
         shiftKey: currentShift(event),
         reldx,
         reldy,
-        cam: camPayload,
+        cam: camPayload?.cam || null,
+        camSyncSeq: camPayload?.camSyncSeq ?? null,
       });
     }
   }
@@ -8752,7 +8766,8 @@ function createCameraController({
         shiftKey: currentShift(event),
         reldx: 0,
         reldy,
-        cam: camPayload,
+        cam: camPayload?.cam || null,
+        camSyncSeq: camPayload?.camSyncSeq ?? null,
       });
     }
   }

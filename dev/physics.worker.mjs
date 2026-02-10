@@ -48,6 +48,7 @@ let nu = 0;
 let pendingCtrl = new Map(); // index -> value (clamped later)
 let gestureState = { mode: 'idle', phase: 'idle', pointer: null };
 let dragState = { dx: 0, dy: 0 };
+let viewerCameraSyncSeqAck = 0;
 let voptFlags = DEFAULT_VOPT_FLAGS_NUMERIC.slice();
 let sceneFlags = SCENE_FLAG_DEFAULTS_NUMERIC.slice();
 let labelMode = 0;
@@ -1936,6 +1937,7 @@ function snapshot() {
     gesture,
     drag,
     viewerCamera,
+    viewerCameraSyncSeq: viewerCameraSyncSeqAck,
     voptFlags: Array.isArray(voptFlags) ? voptFlags : [],
     sceneFlags: Array.isArray(sceneFlags) ? sceneFlags : SCENE_FLAG_DEFAULTS_NUMERIC,
     labelMode,
@@ -2924,11 +2926,16 @@ const commandHandlers = {
       const reldy = Number(payload.reldy);
       const shiftKey = !!payload.shiftKey;
       const camPayload = payload.cam || null;
+      const camSyncSeqSource = Number(payload.camSyncSeq);
+      const camSyncSeq = Number.isFinite(camSyncSeqSource) ? Math.max(0, Math.trunc(camSyncSeqSource)) : null;
       const cameraModeIndex = Number(cameraMode) | 0;
       const canApply = cameraModeIndex <= 1;
       if (canApply) {
         if (camPayload) {
           writeViewerCameraFromPayload(camPayload);
+          if (camSyncSeq != null && camSyncSeq > 0 && camSyncSeq > viewerCameraSyncSeqAck) {
+            viewerCameraSyncSeqAck = camSyncSeq;
+          }
         }
         if (phase === 'sync') {
           const fns = ensureMjvCameraAbi();

@@ -169,6 +169,7 @@ function createInitialSnapshot() {
     frameMode: 0,
     cameraMode: 0,
     viewerCamera: null,
+    viewerCameraSyncSeq: 0,
     groups: createViewerGroupState(true),
     align: null,
     copyState: null,
@@ -276,6 +277,7 @@ function resolveSnapshot(state) {
     labelMode: Number.isFinite(state.labelMode) ? (state.labelMode | 0) : 0,
     frameMode: Number.isFinite(state.frameMode) ? (state.frameMode | 0) : 0,
     cameraMode: Number.isFinite(state.cameraMode) ? (state.cameraMode | 0) : 0,
+    viewerCameraSyncSeq: Number.isFinite(state.viewerCameraSyncSeq) ? Math.max(0, Math.trunc(state.viewerCameraSyncSeq)) : 0,
     viewerCamera:
       state.viewerCamera && typeof state.viewerCamera === 'object'
         ? {
@@ -1303,6 +1305,9 @@ export async function createBackend(options = {}) {
           orthographic: !!payload.viewerCamera.orthographic,
         };
       }
+      if (Number.isFinite(payload.viewerCameraSyncSeq)) {
+        lastSnapshot.viewerCameraSyncSeq = Math.max(0, Math.trunc(payload.viewerCameraSyncSeq));
+      }
       if (payload.options) {
         lastSnapshot.options = payload.options;
       }
@@ -1871,6 +1876,7 @@ export async function createBackend(options = {}) {
           reldy: Number(payload.reldy),
           shiftKey: !!payload.shiftKey,
           cam: payload.cam || null,
+          camSyncSeq: Number.isFinite(payload.camSyncSeq) ? Math.trunc(payload.camSyncSeq) : null,
         });
       } catch (err) {
         logError('[backend gesture] failed', err);
