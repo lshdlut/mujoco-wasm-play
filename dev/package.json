@@ -9,7 +9,7 @@
     "lint": "echo TBA",
     "test": "echo TBA",
     "build": "echo TBA",
-    "dev": "python ./dev_server.py --root ../.. --port 8000",
+    "dev": "python ./dev_server.py --root . --port 8000",
     "generate": "(node ../tools/generate_ui_artifacts.mjs || \"%npm_node_execpath%\" ../tools/generate_ui_artifacts.mjs) && (node ../tools/generate_worker_protocol.mjs || \"%npm_node_execpath%\" ../tools/generate_worker_protocol.mjs)",
     "generate:protocol": "node ../tools/generate_worker_protocol.mjs || \"%npm_node_execpath%\" ../tools/generate_worker_protocol.mjs",
     "generate:ui": "node ../tools/generate_ui_artifacts.mjs || \"%npm_node_execpath%\" ../tools/generate_ui_artifacts.mjs",

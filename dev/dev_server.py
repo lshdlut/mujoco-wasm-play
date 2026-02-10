@@ -16,10 +16,29 @@ import argparse
 import http.server
 import mimetypes
 import os
+from pathlib import Path
 from functools import partial
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    def translate_path(self, path: str) -> str:  # type: ignore[override]
+        # Support multi-repo local dev without changing the root.
+        # If the sibling forge repo exists next to mujoco-wasm-play, mount it so
+        # the viewer can fetch `/mujoco-wasm-forge/dist/<ver>/...` on localhost.
+        cleaned = path.split('?', 1)[0].split('#', 1)[0]
+        repo_root = Path(__file__).resolve().parents[1]
+        parent_root = repo_root.parent
+        mounts = {
+            "/mujoco-wasm-play/": repo_root,
+            "/mujoco-wasm-forge/": parent_root / "mujoco-wasm-forge",
+        }
+        for prefix, root in mounts.items():
+            if cleaned == prefix.rstrip("/") or cleaned.startswith(prefix):
+                rel = cleaned[len(prefix):].lstrip("/")
+                target = (root / rel).resolve()
+                return str(target)
+        return super().translate_path(path)
+
     def end_headers(self) -> None:  # type: ignore[override]
         # Security/cache headers
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -107,4 +126,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

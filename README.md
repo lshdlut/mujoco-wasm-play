@@ -27,9 +27,10 @@ Glue-layer and playground for consuming MuJoCo WASM artifacts produced by 'mujoc
 ### Example URLs
 
 - Local dev (serve from the parent directory on port 8000 so the sibling forge repo is available):
-  - `python dev/dev_server.py --root .. --port 8000`
-  - `http://127.0.0.1:8000/mujoco-wasm-play/dev/index.html?model=raj`
-  - Assumes `../mujoco-wasm-forge/dist/3.4.0/` is present under the same parent directory.
+- Local dev (serve from `dev/` on port 8000):
+  - `python dev/dev_server.py --root dev --port 8000`
+  - `http://127.0.0.1:8000/index.html?model=raj`
+  - If a sibling repo `../mujoco-wasm-forge/` exists, the dev server mounts it at `/mujoco-wasm-forge/` automatically.
 - Public demo (GitHub Pages, stable MuJoCo 3.4.0, Rajagopal2015 model):
   - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/`
 
