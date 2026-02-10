@@ -3773,9 +3773,10 @@ function shortcutFromEvent(event) {
         }),
       );
 
-      if (meta.special) {
-        meta.special.apply(select.value);
-      }
+      // Initialise from store state rather than DOM defaults.
+      // This avoids special selects (notably font scaling) briefly applying the first option.
+      const initialValue = readControlValue(store.get(), control);
+      binding.setValue?.(initialValue);
     }
 
   function buildSegmentedOptions(control, group, options) {

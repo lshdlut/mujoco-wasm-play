@@ -1495,3 +1495,7 @@ function queueResizeCanvas() {
 
 queueResizeCanvas();
 window.addEventListener('resize', queueResizeCanvas);
+if (typeof ResizeObserver !== 'undefined' && canvas) {
+  const ro = new ResizeObserver(() => queueResizeCanvas());
+  ro.observe(canvas);
+}
