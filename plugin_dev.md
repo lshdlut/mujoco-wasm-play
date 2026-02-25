@@ -24,6 +24,9 @@ Supported configuration:
 - Query parameter: `?plugins=<url1>,<url2>`
 - Global (must be set before the main module runs): `globalThis.PLAY_PLUGINS = ['<url1>', '<url2>']`
 
+Example (local dev): load the built-in demo plugin:
+- `http://127.0.0.1:8000/index.html?model=raj&plugins=./plugins/test_ui_sections_plugin.mjs`
+
 Notes:
 - Each entry must be a valid ESM module URL/specifier for `import()`.
 - For cross-origin URLs, the server must allow CORS and serve JavaScript with a correct MIME type.
@@ -33,11 +36,12 @@ Plugin load failures are reported via `logError` + `strictCatch(..., { allow: tr
 
 ## Stable DOM Mounts
 
-Plugins should render only into the plugin mounts. Avoid mutating the core panel mounts.
+Plugins should render only into the plugin mounts, or use `host.ui.sections.register(...)` for first-class foldable sections. Avoid directly mutating the core panel mounts.
 
 Plugin mounts:
 - `host.mounts.leftPanelPlugin`: left panel plugin area
 - `host.mounts.rightPanelPlugin`: right panel plugin area (intended for complex demo UI)
+- `host.mounts.leftPanelAfterFilePlugin`: left panel slot rendered immediately after the built-in `File` section (preferred for "File → Plugin → Option" UX)
 - `host.mounts.overlayRoot`: viewer overlay root (progress bars, status cards, HUD overlays)
 
 Core mounts (owned by the viewer):
@@ -46,6 +50,7 @@ Core mounts (owned by the viewer):
 
 HTML source of these mounts:
 - `dev/index.html` uses `data-play-mount="leftPanel|rightPanel|overlayRoot|leftPanelPlugin|rightPanelPlugin"`.
+- `dev/main_ui.mjs` dynamically inserts `data-play-mount="leftPanelAfterFilePlugin"` after rendering the `File` section.
 
 ## Host API (`window.__PLAY_HOST__`)
 
@@ -87,6 +92,69 @@ Convenience helpers around the built-in UI spec:
 - `host.controls.loadXmlTextAsModel(xmlText, label?)`
 
 Control IDs and shortcuts come from `dev/spec/ui_spec.json`.
+
+### `host.ui` (UI sections + kit)
+
+Plugins should **prefer `host.ui`** over hand-rolling foldable blocks or mutating core panel DOM.
+
+#### Panel actions
+
+- `host.ui.panel('left').collapseAll()`
+- `host.ui.panel('left').expandAll()`
+- `host.ui.panel('left').toggleAll()`
+- `host.ui.panel('right')...` (same)
+
+These actions operate on all Play sections inside the selected panel (built-in + plugin sections) and persist collapsed state.
+
+Collapsed state persistence:
+- Storage: `localStorage` key `play:ui:v1:section_collapsed`
+- Keying: per `(panel, sectionId)` (so left/right can share names without fighting)
+- Precedence: saved state > `defaultOpen` / `default_open` > open
+
+#### Registering sections (foldable blocks)
+
+Create a native-behaving foldable section without copying header logic:
+
+- `host.ui.sections.register({ panel, sectionId, title, defaultOpen, after, before, mount, render })`
+
+Notes:
+- `sectionId` **must** be namespaced and start with `plugin:` (example: `plugin:sik_c3d`).
+- `after`/`before` insert relative to existing `sectionId`s within the same panel.
+- For the common "insert after File" case, use `panel: 'left', after: 'file'` or `mount: 'leftPanelAfterFilePlugin'`.
+- If `mount` is provided (`leftPanelPlugin`, `rightPanelPlugin`, ...), it must match `panel` (Play also infers `panel` from `mount` if `panel` is omitted).
+
+The `render(body, ctx)` callback receives:
+- `body`: the `.section-body` element to populate
+- `ctx`: `{ panel, sectionId, sectionEl, body, host }`
+If `render(...)` returns a function (or `{ dispose() }`), Play calls it on `unregister(...)`.
+
+Unregister:
+- `host.ui.sections.unregister(sectionId)`
+
+#### Data attribute contract (advanced / manual DOM)
+
+If you build foldable sections manually (not recommended), Play only treats elements as sections if they expose stable `data-play-*` attributes:
+
+- Section root: `data-play-role="section"` + `data-play-section-id="..."`
+- Header: `data-play-role="section-header"` (double-click triggers panel expand/collapse-all via event delegation)
+- Toggle button: `data-play-role="section-toggle"` (aria-expanded is managed by Play)
+- Body: `data-play-role="section-body"`
+
+#### UI kit (optional primitives)
+
+Small DOM helpers that match Play styling patterns:
+
+- `host.ui.kit.namedRow(labelText)` → `{ row, label, field }`
+- `host.ui.kit.fullRow()` → `{ row, field }`
+- `host.ui.kit.button({ label, variant, testId, onClick })`
+- `host.ui.kit.textbox({ value, placeholder, testId, onInput, onChange })`
+- `host.ui.kit.textarea({ value, placeholder, rows, variant, testId, onInput, onChange })` (`variant: 'default'|'code'`)
+- `host.ui.kit.select({ value, options, testId, onChange })`
+- `host.ui.kit.number({ value, min, max, step, testId, onInput, onChange })`
+- `host.ui.kit.range({ value, min, max, step, testId, onInput, onChange })`
+- `host.ui.kit.segmented({ options, value, testId, onChange })` → `{ root, inputs, value(), setValue(v) }`
+- `host.ui.kit.codebox({ value, testId })` (`<pre class="codebox">`)
+- `host.ui.kit.boolButton({ label, value, disabled, testId, onChange })` → `{ root, input, text }`
 
 ### `host.renderer`
 

@@ -510,6 +510,10 @@ body.fullscreen {
   text-align: right;
   font-size: calc(12px * var(--viewer-font-scale));
 }
+.control-field input.number-compact-center {
+  padding: 0;
+  text-align: center;
+}
 .control-field select:focus,
 .control-field select:active {
   color-scheme: light;
@@ -540,6 +544,40 @@ body.fullscreen {
   flex: 1;
   width: 100%;
   max-width: 100%;
+}
+.control-field textarea {
+  width: 100%;
+  min-height: calc(96px * var(--viewer-font-scale));
+  padding: calc(8px * var(--viewer-font-scale)) calc(10px * var(--viewer-font-scale));
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-control-bg);
+  color: var(--color-text);
+  font-size: calc(12px * var(--viewer-font-scale));
+  resize: vertical;
+  box-sizing: border-box;
+}
+.control-field textarea.code-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: calc(11px * var(--viewer-font-scale));
+}
+.control-field textarea:focus {
+  outline: none;
+  border-color: var(--color-border-strong);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+.control-field pre.codebox {
+  margin: 0;
+  padding: calc(8px * var(--viewer-font-scale)) calc(10px * var(--viewer-font-scale));
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--color-text);
+  font-size: calc(11px * var(--viewer-font-scale));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  white-space: pre-wrap;
+  max-height: calc(240px * var(--viewer-font-scale));
+  overflow: auto;
 }
 .slider-value {
   font-size: calc(11px * var(--viewer-font-scale));
@@ -784,7 +822,7 @@ body.layout-main {
 </style>
  </head>
   <body class="layout-3col">
-   <aside class="panel panel-left" data-testid="panel-left">
+   <aside class="panel panel-left" data-testid="panel-left" data-play-panel="left">
     <div class="panel-mount" data-play-mount="leftPanel"></div>
     <div class="panel-mount" data-play-mount="leftPanelPlugin"></div>
    </aside>
@@ -836,10 +874,10 @@ body.layout-main {
        <div class="help-key">F2</div>
        <div class="help-desc">Info overlay</div>
        <div class="help-key">UI title double-click</div>
-       <div class="help-desc">Expand / collapse all sections</div>
-      </div>
-      <div class="help-subtitle help-subtitle-unimplemented">Unimplemented / web differences</div>
-      <div class="help-grid">
+        <div class="help-desc">Expand / collapse all sections in that panel</div>
+       </div>
+       <div class="help-subtitle help-subtitle-unimplemented">Unimplemented / web differences</div>
+       <div class="help-grid">
        <div class="help-key">F3</div>
        <div class="help-desc">Profiler overlay (not implemented)</div>
        <div class="help-key">F4</div>
@@ -863,7 +901,7 @@ body.layout-main {
    <div class="toast" data-testid="toast">
    </div>
   </main>
-   <aside class="panel panel-right" data-testid="panel-right">
+   <aside class="panel panel-right" data-testid="panel-right" data-play-panel="right">
     <div class="panel-mount" data-play-mount="rightPanel"></div>
     <div class="panel-mount" data-play-mount="rightPanelPlugin"></div>
    </aside>

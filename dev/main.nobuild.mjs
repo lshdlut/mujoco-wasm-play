@@ -40,6 +40,9 @@ import {
   applySpecAction,
   createControlManager,
   createViewerStore,
+  installPanelSectionDblclickDelegation,
+  setPlaySectionCollapsed,
+  toggleAllPlaySections,
   mergeBackendSnapshot,
   prepareBindingUpdate,
   readControlValue,
@@ -86,6 +89,9 @@ const snapshotSubscribers = new Set();
 const frameSubscribers = new Set();
 const pluginDisposers = [];
 let pluginDisposeInstalled = false;
+
+installPanelSectionDblclickDelegation(leftPanel);
+installPanelSectionDblclickDelegation(rightPanel);
 
 function subscribeClock(set, fn) {
   if (typeof fn !== 'function') {
@@ -144,7 +150,7 @@ const renderCtx = {
   snapshotLogState: null,
   frameId: null,
 };
-    if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined') {
   window.__renderCtx = renderCtx;
 }
 
@@ -1354,6 +1360,440 @@ if (typeof registerGlobalShortcut === 'function') {
     await adjustRealtime(-1);
   });
 }
+
+const uiSectionRegistry = new Map();
+const UI_PLUGIN_SECTION_PREFIX = 'plugin:';
+
+function assertUiPanel(panel) {
+  if (panel !== 'left' && panel !== 'right') {
+    throw new Error(`ui: invalid panel "${panel}" (expected "left" | "right")`);
+  }
+  return panel;
+}
+
+function assertPluginSectionId(sectionId) {
+  const id = String(sectionId || '').trim();
+  if (!id) throw new Error('ui.sections.register: missing sectionId');
+  if (!id.startsWith(UI_PLUGIN_SECTION_PREFIX)) {
+    throw new Error(`ui.sections.register: plugin sectionId must start with "${UI_PLUGIN_SECTION_PREFIX}"`);
+  }
+  if (!/^[A-Za-z0-9:_.-]+$/.test(id)) {
+    throw new Error(`ui.sections.register: invalid sectionId "${id}"`);
+  }
+  return id;
+}
+
+function uiPanelRoot(panel) {
+  const p = assertUiPanel(panel);
+  return p === 'left' ? leftPanel : rightPanel;
+}
+
+function uiPanelCoreMount(panel) {
+  const p = assertUiPanel(panel);
+  return p === 'left' ? leftPanelMount : rightPanelMount;
+}
+
+function uiPanelAfterFileMount() {
+  return document.querySelector('[data-play-mount="leftPanelAfterFilePlugin"]') || null;
+}
+
+function createUiApi() {
+  const panelApi = (panel) => {
+    const p = assertUiPanel(panel);
+    const root = uiPanelRoot(p);
+    return {
+      root,
+      collapseAll: () => (root ? toggleAllPlaySections(root, { nextCollapsed: true }) : { changed: 0, collapsed: true }),
+      expandAll: () => (root ? toggleAllPlaySections(root, { nextCollapsed: false }) : { changed: 0, collapsed: false }),
+      toggleAll: () => (root ? toggleAllPlaySections(root) : { changed: 0, collapsed: null }),
+    };
+  };
+
+  const registerSection = (spec) => {
+    const mount = (typeof spec?.mount === 'string' && spec.mount.trim().length) ? spec.mount.trim() : null;
+    const mountPanel = mount?.startsWith?.('leftPanel')
+      ? 'left'
+      : (mount?.startsWith?.('rightPanel') ? 'right' : null);
+    const rawPanel = String(spec?.panel ?? mountPanel ?? 'left').trim();
+    const panel = assertUiPanel(rawPanel);
+    if (mountPanel && panel !== mountPanel) {
+      throw new Error(`ui.sections.register: mount "${mount}" requires panel "${mountPanel}" (got "${panel}")`);
+    }
+    const sectionId = assertPluginSectionId(spec?.sectionId ?? spec?.section_id ?? spec?.id);
+    if (uiSectionRegistry.has(sectionId)) {
+      throw new Error(`ui.sections.register: section already registered: "${sectionId}"`);
+    }
+    const panelRoot = uiPanelRoot(panel);
+    if (!panelRoot) throw new Error(`ui.sections.register: panel root unavailable: "${panel}"`);
+
+    // Reject collisions with built-in sections (or other plugins that bypassed the registry).
+    const existing = panelRoot.querySelector(`[data-play-section-id="${sectionId}"]`);
+    if (existing) {
+      throw new Error(`ui.sections.register: sectionId collision in DOM: "${sectionId}"`);
+    }
+
+    const title = (typeof spec?.title === 'string' && spec.title.trim().length) ? spec.title.trim() : sectionId;
+    const defaultOpen =
+      (typeof spec?.defaultOpen === 'boolean')
+        ? spec.defaultOpen
+        : (typeof spec?.default_open === 'boolean' ? spec.default_open : true);
+
+    const after = (typeof spec?.after === 'string' && spec.after.trim().length) ? spec.after.trim() : null;
+    const before = (typeof spec?.before === 'string' && spec.before.trim().length) ? spec.before.trim() : null;
+
+    let container = null;
+    let insertBefore = null;
+
+    if (mount) {
+      if (mount === 'leftPanelAfterFilePlugin') {
+        container = uiPanelAfterFileMount();
+      } else if (mount === 'leftPanel') {
+        container = leftPanelMount;
+      } else if (mount === 'rightPanel') {
+        container = rightPanelMount;
+      } else if (mount === 'leftPanelPlugin') {
+        container = leftPanelPluginMount;
+      } else if (mount === 'rightPanelPlugin') {
+        container = rightPanelPluginMount;
+      } else {
+        throw new Error(`ui.sections.register: unknown mount "${mount}"`);
+      }
+      if (!container) throw new Error(`ui.sections.register: mount unavailable: "${mount}"`);
+    } else if (panel === 'left' && after === 'file') {
+      container = uiPanelAfterFileMount();
+      if (!container) {
+        container = uiPanelCoreMount(panel);
+      }
+    } else {
+      container = uiPanelCoreMount(panel);
+    }
+
+    if (!mount && container === uiPanelCoreMount(panel) && (after || before)) {
+      const refId = before || after;
+      const refEl = panelRoot.querySelector(`[data-play-section-id="${refId}"]`);
+      if (!refEl) {
+        throw new Error(`ui.sections.register: reference section not found: "${refId}"`);
+      }
+      const parent = refEl.parentElement;
+      if (parent) {
+        container = parent;
+        insertBefore = before ? refEl : refEl.nextSibling;
+      }
+    }
+
+    const { sectionEl, body } = controlManager.createSection({
+      container,
+      panel,
+      sectionId,
+      title,
+      defaultOpen,
+      insertBefore,
+    });
+    if (!sectionEl || !body) {
+      throw new Error(`ui.sections.register: failed to create section: "${sectionId}"`);
+    }
+
+    let renderCleanup = null;
+    if (typeof spec?.render === 'function') {
+      try {
+        const result = spec.render(body, { panel, sectionId, sectionEl, body, host: window.__PLAY_HOST__ });
+        if (typeof result === 'function') {
+          renderCleanup = result;
+        } else if (result && typeof result.dispose === 'function') {
+          renderCleanup = () => result.dispose();
+        }
+      } catch (err) {
+        try {
+          sectionEl.remove();
+        } catch (removeErr) {
+          logWarn('[ui] plugin section cleanup after render failure failed', { sectionId, err: removeErr });
+          strictCatch(removeErr, 'main:ui_plugin_section_cleanup_after_render', { allow: true });
+        }
+        logWarn('[ui] plugin section render failed', { sectionId, err });
+        strictCatch(err, 'main:ui_plugin_section_render', { allow: true });
+        throw err;
+      }
+    }
+
+    const handle = {
+      panel,
+      sectionId,
+      sectionEl,
+      body,
+      setCollapsed: (collapsed) => setPlaySectionCollapsed(sectionEl, !!collapsed, { panel }),
+      collapse: () => setPlaySectionCollapsed(sectionEl, true, { panel }),
+      expand: () => setPlaySectionCollapsed(sectionEl, false, { panel }),
+      toggle: () => setPlaySectionCollapsed(sectionEl, !sectionEl.classList.contains('is-collapsed'), { panel }),
+      dispose: () => {
+        try {
+          const cleanup = renderCleanup;
+          renderCleanup = null;
+          if (typeof cleanup === 'function') {
+            try {
+              cleanup();
+            } catch (err) {
+              logWarn('[ui] plugin section cleanup failed', { sectionId, err });
+              strictCatch(err, 'main:ui_plugin_section_cleanup', { allow: true });
+            }
+          }
+          uiSectionRegistry.delete(sectionId);
+          sectionEl.remove();
+        } catch (err) {
+          logWarn('[ui] plugin section dispose failed', { sectionId, err });
+          strictCatch(err, 'main:ui_plugin_section_dispose', { allow: true });
+        }
+      },
+    };
+    uiSectionRegistry.set(sectionId, handle);
+    return handle;
+  };
+
+  const kit = {
+    namedRow: (labelText, options = null) => {
+      const row = document.createElement('div');
+      row.className = 'control-row';
+      if (options?.full) row.classList.add('full');
+      if (options?.half) row.classList.add('half');
+      const label = document.createElement('label');
+      label.className = 'control-label';
+      label.textContent = labelText ?? '';
+      const field = document.createElement('div');
+      field.className = 'control-field';
+      row.append(label, field);
+      return { row, label, field };
+    },
+    fullRow: (options = null) => {
+      const row = document.createElement('div');
+      row.className = 'control-row full';
+      if (options?.half) row.classList.add('half');
+      const field = document.createElement('div');
+      field.className = 'control-field';
+      row.append(field);
+      return { row, field };
+    },
+    button: ({ label, variant = 'secondary', testId = null, onClick } = {}) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = String(label ?? '').trim();
+      if (testId) button.setAttribute('data-testid', String(testId));
+      if (variant === 'primary') button.className = 'btn-primary';
+      else if (variant === 'pill') button.className = 'btn-pill';
+      else button.className = 'btn-secondary';
+      if (typeof onClick === 'function') {
+        button.addEventListener('click', (event) => onClick(event));
+      }
+      return button;
+    },
+    textbox: ({ value = '', placeholder = '', testId = null, onInput, onChange } = {}) => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = String(value ?? '');
+      if (placeholder) input.placeholder = String(placeholder);
+      if (testId) input.setAttribute('data-testid', String(testId));
+      if (typeof onInput === 'function') {
+        input.addEventListener('input', (event) => onInput(event, input.value));
+      }
+      if (typeof onChange === 'function') {
+        input.addEventListener('change', (event) => onChange(event, input.value));
+      }
+      return input;
+    },
+    textarea: ({
+      value = '',
+      placeholder = '',
+      rows = 4,
+      variant = 'default',
+      testId = null,
+      onInput,
+      onChange,
+    } = {}) => {
+      const ta = document.createElement('textarea');
+      ta.value = String(value ?? '');
+      if (placeholder) ta.placeholder = String(placeholder);
+      if (Number.isFinite(rows) && (rows | 0) > 0) ta.rows = rows | 0;
+      if (variant === 'code') ta.classList.add('code-textarea');
+      if (testId) ta.setAttribute('data-testid', String(testId));
+      if (typeof onInput === 'function') {
+        ta.addEventListener('input', (event) => onInput(event, ta.value));
+      }
+      if (typeof onChange === 'function') {
+        ta.addEventListener('change', (event) => onChange(event, ta.value));
+      }
+      return ta;
+    },
+    select: ({ value = '', options = [], testId = null, onChange } = {}) => {
+      const sel = document.createElement('select');
+      if (testId) sel.setAttribute('data-testid', String(testId));
+
+      const opts = Array.isArray(options) ? options : [];
+      for (const entry of opts) {
+        const obj = (entry && typeof entry === 'object') ? entry : null;
+        const optValue = obj ? obj.value : entry;
+        const optLabel = obj ? (obj.label ?? obj.value) : entry;
+        const option = document.createElement('option');
+        option.value = String(optValue ?? '');
+        option.textContent = String(optLabel ?? '');
+        sel.appendChild(option);
+      }
+
+      sel.value = String(value ?? '');
+      if (typeof onChange === 'function') {
+        sel.addEventListener('change', (event) => onChange(event, sel.value));
+      }
+      return sel;
+    },
+    number: ({
+      value = 0,
+      min = null,
+      max = null,
+      step = null,
+      variant = 'default',
+      testId = null,
+      onInput,
+      onChange,
+    } = {}) => {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.value = String(Number.isFinite(value) ? value : 0);
+      if (min != null) input.min = String(min);
+      if (max != null) input.max = String(max);
+      if (step != null) input.step = String(step);
+      if (variant === 'compact_center') input.classList.add('number-compact-center');
+      if (testId) input.setAttribute('data-testid', String(testId));
+      if (typeof onInput === 'function') {
+        input.addEventListener('input', (event) => onInput(event, input.value));
+      }
+      if (typeof onChange === 'function') {
+        input.addEventListener('change', (event) => onChange(event, input.value));
+      }
+      return input;
+    },
+    range: ({ value = 0, min = 0, max = 100, step = 1, testId = null, onInput, onChange } = {}) => {
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(min);
+      input.max = String(max);
+      input.step = String(step);
+      input.value = String(value);
+      if (testId) input.setAttribute('data-testid', String(testId));
+      if (typeof onInput === 'function') {
+        input.addEventListener('input', (event) => onInput(event, input.value));
+      }
+      if (typeof onChange === 'function') {
+        input.addEventListener('change', (event) => onChange(event, input.value));
+      }
+      return input;
+    },
+    segmented: ({ options = [], value = null, testId = null, onChange } = {}) => {
+      const root = document.createElement('div');
+      root.className = 'segmented';
+      if (testId) root.setAttribute('data-testid', String(testId));
+
+      const groupName = `seg_${Math.random().toString(36).slice(2)}`;
+      const inputs = [];
+
+      const opts = Array.isArray(options) ? options : [];
+      for (const entry of opts) {
+        const obj = (entry && typeof entry === 'object') ? entry : null;
+        const optValue = obj ? obj.value : entry;
+        const optLabel = obj ? (obj.label ?? obj.value) : entry;
+        const label = document.createElement('label');
+        label.className = 'segmented-option';
+
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = groupName;
+        input.value = String(optValue ?? '');
+
+        const span = document.createElement('span');
+        span.textContent = String(optLabel ?? '');
+
+        label.append(input, span);
+        root.appendChild(label);
+        inputs.push(input);
+
+        input.addEventListener('change', (event) => {
+          if (!input.checked) return;
+          if (typeof onChange === 'function') onChange(event, input.value);
+        });
+      }
+
+      if (value != null) {
+        const want = String(value);
+        for (const input of inputs) {
+          if (input.value === want) input.checked = true;
+        }
+      }
+
+      const api = {
+        root,
+        inputs,
+        value: () => {
+          const hit = inputs.find((i) => i.checked);
+          return hit ? hit.value : null;
+        },
+        setValue: (nextValue) => {
+          const want = String(nextValue ?? '');
+          for (const input of inputs) {
+            input.checked = (input.value === want);
+          }
+        },
+      };
+      return api;
+    },
+    codebox: ({ value = '', testId = null } = {}) => {
+      const pre = document.createElement('pre');
+      pre.className = 'codebox';
+      pre.textContent = String(value ?? '');
+      if (testId) pre.setAttribute('data-testid', String(testId));
+      return pre;
+    },
+    boolButton: ({ label, value = false, disabled = false, testId = null, onChange } = {}) => {
+      const root = document.createElement('label');
+      root.className = 'bool-button bool-label';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.setAttribute('role', 'switch');
+      if (testId) input.setAttribute('data-testid', String(testId));
+      input.checked = !!value;
+      input.disabled = !!disabled;
+      input.setAttribute('aria-checked', input.checked ? 'true' : 'false');
+      root.classList.toggle('is-active', input.checked);
+      root.classList.toggle('is-disabled', input.disabled);
+      const text = document.createElement('span');
+      text.className = 'bool-text';
+      text.textContent = String(label ?? '');
+      root.append(input, text);
+      input.addEventListener('change', (event) => {
+        const next = !!input.checked;
+        input.setAttribute('aria-checked', next ? 'true' : 'false');
+        root.classList.toggle('is-active', next);
+        if (typeof onChange === 'function') onChange(event, next);
+      });
+      input.addEventListener('focus', () => root.classList.add('has-focus'));
+      input.addEventListener('blur', () => root.classList.remove('has-focus'));
+      return { root, input, text };
+    },
+  };
+
+  return {
+    panel: panelApi,
+    sections: {
+      register: registerSection,
+      unregister: (sectionId) => {
+        const id = String(sectionId || '').trim();
+        const entry = uiSectionRegistry.get(id);
+        if (!entry) return false;
+        entry.dispose();
+        return true;
+      },
+      get: (sectionId) => uiSectionRegistry.get(String(sectionId || '').trim()) ?? null,
+      list: () => Array.from(uiSectionRegistry.keys()).sort(),
+    },
+    kit,
+  };
+}
+
 if (typeof window !== 'undefined') {
   window.__viewerStore = store;
   window.__viewerControls = {
@@ -1387,9 +1827,11 @@ if (typeof window !== 'undefined') {
       leftPanel: leftPanelMount,
       rightPanel: rightPanelMount,
       overlayRoot: overlayRootMount,
+      leftPanelAfterFilePlugin: document.querySelector('[data-play-mount="leftPanelAfterFilePlugin"]') || null,
       leftPanelPlugin: leftPanelPluginMount,
       rightPanelPlugin: rightPanelPluginMount,
     },
+    ui: createUiApi(),
     store,
     backend,
     controls: window.__viewerControls,

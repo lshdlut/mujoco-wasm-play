@@ -36,6 +36,189 @@ function clamp01(value) {
   return value;
 }
 
+const UI_STATE_VERSION = 1;
+const UI_SECTION_COLLAPSED_STORAGE_KEY = `play:ui:v${UI_STATE_VERSION}:section_collapsed`;
+let sectionCollapsedCache = null;
+let sectionCollapsedCacheDirty = false;
+let sectionCollapsedFlushQueued = false;
+const enqueueSectionCollapsedFlush =
+  (typeof queueMicrotask === 'function')
+    ? queueMicrotask
+    : (fn) => Promise.resolve().then(fn);
+
+function sectionCollapsedMapKey(panel, sectionId) {
+  const p = String(panel || '').trim();
+  const sid = String(sectionId || '').trim();
+  return JSON.stringify([p, sid]);
+}
+
+function getSectionCollapsedCache() {
+  if (sectionCollapsedCache) return sectionCollapsedCache;
+  sectionCollapsedCache = {};
+  const storage = (typeof window !== 'undefined' && window?.localStorage) ? window.localStorage : null;
+  if (!storage) return sectionCollapsedCache;
+  try {
+    const raw = storage.getItem(UI_SECTION_COLLAPSED_STORAGE_KEY);
+    if (!raw) return sectionCollapsedCache;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return sectionCollapsedCache;
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'boolean') {
+        sectionCollapsedCache[key] = value;
+      }
+    }
+  } catch (err) {
+    logWarn('[ui] section collapsed state load failed', err);
+    strictCatch(err, 'main:ui_section_collapsed_load', { allow: true });
+  }
+  return sectionCollapsedCache;
+}
+
+function flushSectionCollapsedCache() {
+  if (!sectionCollapsedCacheDirty) return;
+  sectionCollapsedCacheDirty = false;
+  const storage = (typeof window !== 'undefined' && window?.localStorage) ? window.localStorage : null;
+  if (!storage) return;
+  try {
+    const payload = sectionCollapsedCache ? JSON.stringify(sectionCollapsedCache) : '{}';
+    storage.setItem(UI_SECTION_COLLAPSED_STORAGE_KEY, payload);
+  } catch (err) {
+    logWarn('[ui] section collapsed state save failed', err);
+    strictCatch(err, 'main:ui_section_collapsed_save', { allow: true });
+  }
+}
+
+function queueSectionCollapsedFlush() {
+  if (sectionCollapsedFlushQueued) return;
+  sectionCollapsedFlushQueued = true;
+  enqueueSectionCollapsedFlush(() => {
+    sectionCollapsedFlushQueued = false;
+    flushSectionCollapsedCache();
+  });
+}
+
+export function readPersistedSectionCollapsed(panel, sectionId) {
+  const p = String(panel || '').trim();
+  const sid = String(sectionId || '').trim();
+  if (!p || !sid) return null;
+  const cache = getSectionCollapsedCache();
+  const key = sectionCollapsedMapKey(p, sid);
+  if (!Object.prototype.hasOwnProperty.call(cache, key)) return null;
+  const value = cache[key];
+  return typeof value === 'boolean' ? value : null;
+}
+
+export function writePersistedSectionCollapsed(panel, sectionId, collapsed) {
+  const p = String(panel || '').trim();
+  const sid = String(sectionId || '').trim();
+  if (!p || !sid) return;
+  const cache = getSectionCollapsedCache();
+  const key = sectionCollapsedMapKey(p, sid);
+  cache[key] = !!collapsed;
+  sectionCollapsedCacheDirty = true;
+  queueSectionCollapsedFlush();
+}
+
+export function resolvePlayPanelId(element) {
+  const el = element && typeof element.closest === 'function' ? element : null;
+  const panelRoot = el ? el.closest('[data-play-panel], [data-testid="panel-left"], [data-testid="panel-right"]') : null;
+  const explicit = panelRoot?.getAttribute?.('data-play-panel');
+  if (explicit === 'left' || explicit === 'right') return explicit;
+  const testId = panelRoot?.getAttribute?.('data-testid');
+  if (testId === 'panel-left') return 'left';
+  if (testId === 'panel-right') return 'right';
+  return null;
+}
+
+export function setPlaySectionCollapsed(sectionEl, collapsed, options = null) {
+  const persistState = options?.persist !== false;
+  const flush = options?.flush === true;
+  const panelOverride = options?.panel;
+  const el = sectionEl && typeof sectionEl.classList?.toggle === 'function' ? sectionEl : null;
+  if (!el) return;
+  el.classList.toggle('is-collapsed', !!collapsed);
+  const toggleBtn =
+    el.querySelector?.('[data-play-role="section-toggle"]')
+    || el.querySelector?.('.section-toggle');
+  if (toggleBtn && typeof toggleBtn.setAttribute === 'function') {
+    toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  }
+  if (persistState) {
+    const panel =
+      (panelOverride === 'left' || panelOverride === 'right')
+        ? panelOverride
+        : resolvePlayPanelId(el);
+    const sectionId =
+      el.getAttribute?.('data-play-section-id')
+      || el.dataset?.sectionId
+      || '';
+    if (panel && sectionId) {
+      writePersistedSectionCollapsed(panel, sectionId, !!collapsed);
+      if (flush) flushSectionCollapsedCache();
+    }
+  }
+}
+
+export function toggleAllPlaySections(panelRoot, options = null) {
+  const root = panelRoot && typeof panelRoot.querySelectorAll === 'function' ? panelRoot : null;
+  const overrideCollapsed = options?.nextCollapsed;
+  const forced = typeof overrideCollapsed === 'boolean' ? overrideCollapsed : null;
+  if (!root) return { changed: 0, collapsed: forced };
+  const selector = options?.selector || '[data-play-role="section"]';
+  const sections = root.querySelectorAll(selector);
+  if (sections.length === 0) return { changed: 0, collapsed: forced };
+  const panel = resolvePlayPanelId(root);
+  let collapseAll = forced;
+  if (collapseAll == null) {
+    let allCollapsed = true;
+    for (let i = 0; i < sections.length; i += 1) {
+      const sec = sections[i];
+      if (!sec.classList.contains('is-collapsed')) {
+        allCollapsed = false;
+        break;
+      }
+    }
+    collapseAll = !allCollapsed;
+  }
+  let changed = 0;
+  for (let i = 0; i < sections.length; i += 1) {
+    const sec = sections[i];
+    const wasCollapsed = sec.classList.contains('is-collapsed');
+    if (wasCollapsed === collapseAll) continue;
+    setPlaySectionCollapsed(sec, collapseAll, { panel });
+    changed += 1;
+  }
+  return { changed, collapsed: collapseAll };
+}
+
+export function installPanelSectionDblclickDelegation(panelRoot, options = null) {
+  const root = panelRoot && typeof panelRoot.addEventListener === 'function' ? panelRoot : null;
+  if (!root) return () => {};
+  const selector = options?.headerSelector || '[data-play-role="section-header"]';
+  const resetSelector = options?.resetSelector || '[data-play-role="section-reset"]';
+  const handler = (event) => {
+    const target = event?.target;
+    const el = target && typeof target.closest === 'function' ? target : null;
+    if (!el) return;
+    const header = el.closest(selector);
+    if (!header) return;
+    if (resetSelector) {
+      const reset = el.closest(resetSelector);
+      if (reset && header.contains(reset)) return;
+    }
+    event.preventDefault();
+    toggleAllPlaySections(root);
+  };
+  root.addEventListener('dblclick', handler);
+  return () => {
+    try {
+      root.removeEventListener('dblclick', handler);
+    } catch (err) {
+      strictCatch(err, 'main:panel_dblclick_cleanup', { allow: true });
+    }
+  };
+}
+
 // Lightweight state container and backend helpers for the simulate parity UI.
 // Runtime implementation lives in JS so it can be consumed directly by the
 // buildless viewer. Type definitions are provided separately in viewer_state_types.ts.
@@ -4473,18 +4656,24 @@ function shortcutFromEvent(event) {
     return renderer(container, control);
   }
 
-  function renderSection(container, section) {
+  function renderSection(container, section, options = null) {
+    const panel = options?.panel ?? null;
+    const persist = options?.persist !== false;
     const sectionEl = document.createElement('section');
     sectionEl.className = 'ui-section';
     sectionEl.dataset.sectionId = section.section_id;
+    sectionEl.setAttribute('data-play-role', 'section');
+    sectionEl.setAttribute('data-play-section-id', section.section_id);
     sectionEl.setAttribute('data-testid', `section-${section.section_id}`);
 
     const header = document.createElement('div');
     header.className = 'section-header';
+    header.setAttribute('data-play-role', 'section-header');
 
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'section-toggle';
+    toggle.setAttribute('data-play-role', 'section-toggle');
     toggle.textContent = section.title ?? section.section_id;
 
     const actions = document.createElement('div');
@@ -4492,6 +4681,7 @@ function shortcutFromEvent(event) {
     const reset = document.createElement('button');
     reset.type = 'button';
     reset.className = 'section-reset';
+    reset.setAttribute('data-play-role', 'section-reset');
     reset.title = 'Reset to defaults';
     reset.textContent = '?';
     reset.disabled = true;
@@ -4504,14 +4694,28 @@ function shortcutFromEvent(event) {
 
     const body = document.createElement('div');
     body.className = 'section-body';
+    body.setAttribute('data-play-role', 'section-body');
 
-    const setCollapsed = (collapsed) => {
-      sectionEl.classList.toggle('is-collapsed', collapsed);
-      toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    const resolvedPanel =
+      (panel === 'left' || panel === 'right')
+        ? panel
+        : resolvePlayPanelId(container);
+
+    const setCollapsed = (collapsed, { persistState = true, flush = false } = {}) => {
+      setPlaySectionCollapsed(sectionEl, collapsed, {
+        panel: resolvedPanel,
+        persist: persistState && persist,
+        flush,
+      });
     };
 
-    const initialCollapsed = false;
-    setCollapsed(initialCollapsed);
+    const persistedCollapsed = resolvedPanel ? readPersistedSectionCollapsed(resolvedPanel, section.section_id) : null;
+    const defaultOpen = typeof section?.default_open === 'boolean' ? section.default_open : null;
+    const initialCollapsed =
+      typeof persistedCollapsed === 'boolean'
+        ? persistedCollapsed
+        : (typeof defaultOpen === 'boolean' ? !defaultOpen : false);
+    setCollapsed(initialCollapsed, { persistState: false, flush: false });
 
     const toggleCollapsed = () => {
       const next = !sectionEl.classList.contains('is-collapsed');
@@ -4533,23 +4737,6 @@ function shortcutFromEvent(event) {
       if (event.target !== toggle) {
         toggleCollapsed();
       }
-    });
-
-    header.addEventListener('dblclick', (event) => {
-      if (event.target === reset) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const sections = Array.from(container.querySelectorAll('.ui-section'));
-      if (sections.length === 0) return;
-      const allCollapsed = sections.every((sec) => sec.classList.contains('is-collapsed'));
-      const collapseAll = !allCollapsed;
-      sections.forEach((sec) => {
-        sec.classList.toggle('is-collapsed', collapseAll);
-        const btn = sec.querySelector('.section-toggle');
-        if (btn) {
-          btn.setAttribute('aria-expanded', collapseAll ? 'false' : 'true');
-        }
-      });
     });
 
     sectionEl.append(header, body);
@@ -4595,7 +4782,12 @@ function shortcutFromEvent(event) {
       reset.disabled = true;
     }
 
-    container.append(sectionEl);
+    if (options?.insertBefore && typeof container?.insertBefore === 'function') {
+      container.insertBefore(sectionEl, options.insertBefore);
+    } else if (typeof container?.append === 'function') {
+      container.append(sectionEl);
+    }
+    return sectionEl;
   }
 
   function ensureDynamicList({
@@ -4762,10 +4954,16 @@ function shortcutFromEvent(event) {
     leftPanel.innerHTML = '';
     rightPanel.innerHTML = '';
     for (const section of spec.left) {
-      renderSection(leftPanel, section);
+      renderSection(leftPanel, section, { panel: 'left' });
+      if (section?.section_id === 'file') {
+        const slot = document.createElement('div');
+        slot.className = 'panel-mount';
+        slot.setAttribute('data-play-mount', 'leftPanelAfterFilePlugin');
+        leftPanel.append(slot);
+      }
     }
     for (const section of spec.right) {
-      renderSection(rightPanel, section);
+      renderSection(rightPanel, section, { panel: 'right' });
     }
     installShortcuts();
   }
@@ -4862,14 +5060,14 @@ function shortcutFromEvent(event) {
     shortcutsInstalled = true;
   }
 
-    function dispose() {
-      while (eventCleanup.length) {
-        const fn = eventCleanup.pop();
-        try {
-          fn();
-        } catch (err) {
-          strictCatch(err, 'main:event_cleanup');
-        }
+  function dispose() {
+    while (eventCleanup.length) {
+      const fn = eventCleanup.pop();
+      try {
+        fn();
+      } catch (err) {
+        strictCatch(err, 'main:event_cleanup');
+      }
     }
     controlById.clear();
     controlBindings.clear();
@@ -4881,56 +5079,74 @@ function shortcutFromEvent(event) {
     loadUiSpec,
     renderPanels,
     updateControls,
-      toggleControl,
-      cycleCamera,
-      loadXmlTextAsModel,
-      getBinding: (id) => controlBindings.get(id) ?? null,
-      registerGlobalShortcut,
-      listIds: (prefix) => {
+    toggleControl,
+    cycleCamera,
+    loadXmlTextAsModel,
+    getBinding: (id) => controlBindings.get(id) ?? null,
+    registerGlobalShortcut,
+    listIds: (prefix) => {
       const ids = Array.from(controlById.keys()).sort();
       if (!prefix) return ids;
       return ids.filter((id) => id.startsWith(prefix));
     },
     getControl: (id) => controlById.get(id) ?? null,
-      // Dynamic: ensure Actuator sliders exist under right panel 'control' section
+    createSection: ({ container, panel, sectionId, title, defaultOpen = true, insertBefore = null } = {}) => {
+      const root = container && typeof container.append === 'function' ? container : null;
+      if (!root) throw new Error('createSection: missing container');
+      const sid = String(sectionId || '').trim();
+      if (!sid) throw new Error('createSection: missing sectionId');
+      const section = {
+        section_id: sid,
+        title: typeof title === 'string' && title.trim().length ? title.trim() : sid,
+        default_open: typeof defaultOpen === 'boolean' ? defaultOpen : true,
+        items: [],
+      };
+      const sectionEl = renderSection(root, section, { panel, insertBefore });
+      const body =
+        sectionEl?.querySelector?.('[data-play-role="section-body"]')
+        || sectionEl?.querySelector?.('.section-body')
+        || null;
+      return { sectionEl, body };
+    },
+    // Dynamic: ensure Actuator sliders exist under right panel 'control' section
     ensureActuatorSliders: (actuators, ctrlValues = []) => {
-        try {
-          ensureDynamicSliders({
-            sectionId: 'control',
-            dynamicKey: 'actuators',
-            items: actuators,
-            itemIdPrefix: 'control.act.',
-            dataAttr: 'data-act-index',
-            getIndex: (item, fallback) => resolveListIndex(item, fallback),
-            getLabel: (item, fallback) => item.name ?? `Act ${resolveListIndex(item, fallback)}`,
-            getRange: (item) => ({
-              min: Number.isFinite(item.min) ? item.min : -1,
-              max: Number.isFinite(item.max) ? item.max : 1,
-              step: Number.isFinite(item.step) && item.step > 0 ? item.step : 0.001,
-            }),
-            getValue: (item, fallback) => {
-              const index = resolveListIndex(item, fallback);
-              const raw = Array.isArray(ctrlValues) && Number.isFinite(Number(ctrlValues[index]))
-                ? Number(ctrlValues[index])
-                : (ctrlValues?.[index] ?? null);
-              if (raw == null) return null;
-              const numeric = Number(raw);
-              return Number.isFinite(numeric) ? numeric : null;
-            },
-            onInput: async ({ index, value }) => {
-              try {
-                await applySpecAction(store, backend, { item_id: 'control.actuator' }, { index, value });
-              } catch (err) {
-                logWarn('[ui] set actuator failed', err);
-                strictCatch(err, 'main:ui_set_actuator');
-              }
-            },
-          });
+      try {
+        ensureDynamicSliders({
+          sectionId: 'control',
+          dynamicKey: 'actuators',
+          items: actuators,
+          itemIdPrefix: 'control.act.',
+          dataAttr: 'data-act-index',
+          getIndex: (item, fallback) => resolveListIndex(item, fallback),
+          getLabel: (item, fallback) => item.name ?? `Act ${resolveListIndex(item, fallback)}`,
+          getRange: (item) => ({
+            min: Number.isFinite(item.min) ? item.min : -1,
+            max: Number.isFinite(item.max) ? item.max : 1,
+            step: Number.isFinite(item.step) && item.step > 0 ? item.step : 0.001,
+          }),
+          getValue: (item, fallback) => {
+            const index = resolveListIndex(item, fallback);
+            const raw = Array.isArray(ctrlValues) && Number.isFinite(Number(ctrlValues[index]))
+              ? Number(ctrlValues[index])
+              : (ctrlValues?.[index] ?? null);
+            if (raw == null) return null;
+            const numeric = Number(raw);
+            return Number.isFinite(numeric) ? numeric : null;
+          },
+          onInput: async ({ index, value }) => {
+            try {
+              await applySpecAction(store, backend, { item_id: 'control.actuator' }, { index, value });
+            } catch (err) {
+              logWarn('[ui] set actuator failed', err);
+              strictCatch(err, 'main:ui_set_actuator');
+            }
+          },
+        });
       } catch (err) {
         logWarn('[ui] ensureActuatorSliders error', err);
         strictCatch(err, 'main:ui_ensure_actuator_sliders');
-        }
-      },
+      }
+    },
     // Dynamic: ensure Joint sliders exist under right panel 'joint' section
     ensureJointSliders: (dofs = []) => {
       try {
