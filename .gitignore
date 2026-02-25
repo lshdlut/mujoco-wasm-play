@@ -9,6 +9,10 @@ tmp/
 *.log
 tests/
 
+# Python
+__pycache__/
+*.pyc
+
 # Local notes (ignored)
 local/
 local_tools/docs/
@@ -66,4 +70,5 @@ Thumbs.db
 !/PLUGIN_GUIDE.md
 !/plugin_dev.md
 !/README.md
+!/README.zh-CN.md
 !/PLAY_SIMULATE_AUDIT.md

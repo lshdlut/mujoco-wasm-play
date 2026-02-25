@@ -9,6 +9,9 @@ Dev HTTP server for mujoco-wasm-play.
   Cache-Control: public, max-age=0, must-revalidate
 
 Usage:
+  # From the repo root:
+  python dev/dev_server.py --root dev --port 8000
+  # From the dev/ directory:
   python dev_server.py --root . --port 8000
 """
 from __future__ import annotations
@@ -16,33 +19,51 @@ import argparse
 import http.server
 import mimetypes
 import os
+import sys
 from pathlib import Path
-from functools import partial
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PARENT_ROOT = REPO_ROOT.parent
+MOUNTS = {
+    # Allow serving the repo root under a stable prefix, even when `--root` points
+    # at `dev/` (or any other subdir). This keeps local dev URLs compatible with
+    # GitHub Pages-style paths.
+    "/mujoco-wasm-play/": REPO_ROOT,
+    # If the sibling forge repo exists next to mujoco-wasm-play, mount it so the
+    # viewer can fetch `/mujoco-wasm-forge/dist/<ver>/...` on localhost.
+    "/mujoco-wasm-forge/": PARENT_ROOT / "mujoco-wasm-forge",
+}
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    def _has_header(self, name: str) -> bool:
+        prefix = (name + ":").lower().encode("latin-1")
+        for line in getattr(self, "_headers_buffer", []):
+            if isinstance(line, (bytes, bytearray)) and line.lower().startswith(prefix):
+                return True
+        return False
+
     def translate_path(self, path: str) -> str:  # type: ignore[override]
-        # Support multi-repo local dev without changing the root.
-        # If the sibling forge repo exists next to mujoco-wasm-play, mount it so
-        # the viewer can fetch `/mujoco-wasm-forge/dist/<ver>/...` on localhost.
         cleaned = path.split('?', 1)[0].split('#', 1)[0]
-        repo_root = Path(__file__).resolve().parents[1]
-        parent_root = repo_root.parent
-        mounts = {
-            "/mujoco-wasm-play/": repo_root,
-            "/mujoco-wasm-forge/": parent_root / "mujoco-wasm-forge",
-        }
-        for prefix, root in mounts.items():
+        for prefix, root in MOUNTS.items():
             if cleaned == prefix.rstrip("/") or cleaned.startswith(prefix):
                 rel = cleaned[len(prefix):].lstrip("/")
                 target = (root / rel).resolve()
+                if os.environ.get("PLAY_DEV_SERVER_DEBUG_MOUNTS") == "1":
+                    try:
+                        exists = target.exists()
+                    except OSError:
+                        exists = False
+                    print(f"[dev_server] mount {cleaned} -> {target} (exists={exists})", file=sys.stderr, flush=True)
                 return str(target)
         return super().translate_path(path)
 
     def end_headers(self) -> None:  # type: ignore[override]
         # Security/cache headers
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Cache-Control", "public, max-age=0, must-revalidate")
+        if not self._has_header("X-Content-Type-Options"):
+            self.send_header("X-Content-Type-Options", "nosniff")
+        if not self._has_header("Cache-Control"):
+            self.send_header("Cache-Control", "public, max-age=0, must-revalidate")
         # Avoid Expires header; base class doesn't add it
         super().end_headers()
 
@@ -72,6 +93,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         _base, ext = os.path.splitext(path)
         ext = ext.lower()
         force_ok = ext in ('.mjs', '.js', '.wasm')
+        if os.environ.get("PLAY_DEV_SERVER_DEBUG_MOUNTS") == "1":
+            if "mujoco-wasm-forge" in cleaned or "dist/" in cleaned or cleaned.endswith("mujoco.js"):
+                print(
+                    f"[dev_server] send_head cleaned={cleaned} path={path} exists={os.path.exists(path)} force_ok={force_ok}",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
         if not force_ok:
             return super().send_head()
@@ -101,7 +129,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(fs.st_size))
         # Disable conditional caching to avoid 304 for worker/esm/wasm
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         return f
 
@@ -114,6 +141,11 @@ def main() -> None:
 
     root = os.path.abspath(args.root)
     os.chdir(root)
+    if os.environ.get("PLAY_DEV_SERVER_DEBUG_MOUNTS") == "1":
+        print(f"[dev_server] REPO_ROOT={REPO_ROOT}", file=sys.stderr, flush=True)
+        print(f"[dev_server] PARENT_ROOT={PARENT_ROOT}", file=sys.stderr, flush=True)
+        print(f"[dev_server] MOUNTS={MOUNTS}", file=sys.stderr, flush=True)
+        print(f"[dev_server] CWD={Path.cwd()}", file=sys.stderr, flush=True)
     httpd = http.server.ThreadingHTTPServer(("", args.port), Handler)
     print(f"Serving {root} on http://localhost:{args.port}")
     try:
