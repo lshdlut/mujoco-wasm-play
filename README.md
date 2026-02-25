@@ -21,6 +21,8 @@ A performance-first MuJoCo viewer that brings most of the **MuJoCo Simulate** wo
 
 Reference numbers (best of 5 runs; each run reports the median; lower is better), measured interactively (rendered, not headless) with MuJoCo 3.4.0 after 35s warm-up + 8s sampling, with both side panels collapsed. CPU is the Simulate-style HUD value (press `F2`, while Running). Numbers vary with hardware, browser, and power/thermal settings.
 
+> Important: browser extensions and site-level features (e.g. enhanced security modes / efficiency or power-saving modes) can heavily impact Worker/WASM timing, and may affect the GitHub Pages demo more than `localhost`. For fair comparisons, try a private window, disable extensions, and keep the tab in the foreground.
+
 | Model | Native `simulate` (ms/step) | Web Play (ms/step) |
 |---|---:|---:|
 | `cards` | 0.542 | 0.718 |
