@@ -59,6 +59,9 @@ Thumbs.db
 .vite/
 .parcel-cache/
 
+# Sphinx / Read the Docs
+doc/*/_build/
+
 # Generated UI/protocol artifacts are committed for GitHub Pages runtime.
 # Re-generate via:
 #   node tools/generate_ui_artifacts.mjs
