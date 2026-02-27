@@ -3934,27 +3934,32 @@ function ensureOverlay3D(ctx) {
         };
 
         let used = 0;
-        const commit = ({ count = used } = {}) => {
-          const n = Math.max(0, Math.min(cap, count | 0));
-          used = n;
-          mesh.count = n;
-          mesh.visible = n > 0;
-          if (n <= 0) {
-            dirty = false;
-            return;
+        mesh.count = 0;
+        mesh.visible = false;
+
+        const flushCommit = (camera = null, frame = null) => {
+          const n = used | 0;
+          if (n > 0) {
+            for (let i = 0; i < n; i += 1) {
+              const pBase = i * 3;
+              const qBase = i * 4;
+              tmpPos.set(authorPos[pBase + 0], authorPos[pBase + 1], authorPos[pBase + 2]);
+              tmpQuat.set(authorQuat[qBase + 0], authorQuat[qBase + 1], authorQuat[qBase + 2], authorQuat[qBase + 3]);
+              tmpScale.set(authorScale[pBase + 0], authorScale[pBase + 1], authorScale[pBase + 2]);
+              tmpMat4.compose(tmpPos, tmpQuat, tmpScale);
+              authorMat4.set(tmpMat4.elements, i * 16);
+            }
+            updateBoundingSphere(n);
           }
-          for (let i = 0; i < n; i += 1) {
-            const pBase = i * 3;
-            const qBase = i * 4;
-            tmpPos.set(authorPos[pBase + 0], authorPos[pBase + 1], authorPos[pBase + 2]);
-            tmpQuat.set(authorQuat[qBase + 0], authorQuat[qBase + 1], authorQuat[qBase + 2], authorQuat[qBase + 3]);
-            tmpScale.set(authorScale[pBase + 0], authorScale[pBase + 1], authorScale[pBase + 2]);
-            tmpMat4.compose(tmpPos, tmpQuat, tmpScale);
-            authorMat4.set(tmpMat4.elements, i * 16);
-          }
-          updateBoundingSphere(n);
           dirty = true;
-          syncToGpu(ctx?.camera || null, { force: true, frame: null });
+          const f = Number.isFinite(frame) ? (frame | 0) : null;
+          syncToGpu(camera || ctx?.camera || null, { force: true, frame: f });
+        };
+
+        const commit = ({ count = used } = {}) => {
+          used = Math.max(0, Math.min(cap, count | 0));
+          const queue = manager._commitTasks;
+          if (queue instanceof Set) queue.add(flushCommit);
         };
 
         const onFrame = ({ camera = null, frame = null } = {}) => {
@@ -3972,7 +3977,8 @@ function ensureOverlay3D(ctx) {
           updateFrameRegistration();
           dirty = true;
           if (sync) {
-            syncToGpu(ctx?.camera || null, { force: true, frame: null });
+            const queue = manager._commitTasks;
+            if (queue instanceof Set) queue.add(flushCommit);
           }
           return transparencyPolicy;
         };
@@ -4002,6 +4008,9 @@ function ensureOverlay3D(ctx) {
           if (manager._frameBatches instanceof Set) {
             manager._frameBatches.delete(batch);
           }
+          if (manager._commitTasks instanceof Set) {
+            manager._commitTasks.delete(flushCommit);
+          }
           frameRegistered = false;
           try {
             if (mesh.parent && typeof mesh.parent.remove === 'function') {
@@ -4023,9 +4032,6 @@ function ensureOverlay3D(ctx) {
         };
         batch.dispose = dispose;
         disposers.push(dispose);
-
-        // Initial upload so users see something immediately after construction.
-        commit({ count: 0 });
 
         return batch;
       };
@@ -4071,12 +4077,15 @@ function ensureOverlay3D(ctx) {
         const points = new THREE.Points(geometry, mat);
         points.name = name ? String(name) : 'overlay3d:points';
         points.frustumCulled = false;
+        geometry.setDrawRange(0, 0);
+        points.visible = false;
 
         let used = 0;
-        const commit = ({ count = used } = {}) => {
-          const n = Math.max(0, Math.min(cap, count | 0));
-          used = n;
+        const flushCommit = () => {
+          const n = used | 0;
           geometry.setDrawRange(0, n);
+          points.visible = n > 0;
+          if (n <= 0) return;
           posAttr.array.set(authorPos.subarray(0, n * 3), 0);
           colAttr.array.set(authorRgb.subarray(0, n * 3), 0);
           if (typeof posAttr.clearUpdateRanges === 'function') posAttr.clearUpdateRanges();
@@ -4087,8 +4096,17 @@ function ensureOverlay3D(ctx) {
           colAttr.needsUpdate = true;
         };
 
+        const commit = ({ count = used } = {}) => {
+          used = Math.max(0, Math.min(cap, count | 0));
+          const queue = manager._commitTasks;
+          if (queue instanceof Set) queue.add(flushCommit);
+        };
+
         addObject3D(points, { layer, owned: false });
         const dispose = () => {
+          if (manager._commitTasks instanceof Set) {
+            manager._commitTasks.delete(flushCommit);
+          }
           try { disposeObject3DTree(points); } catch (err) { strictCatch(err, 'main:overlay3d_dispose_batch'); }
         };
         disposers.push(dispose);
@@ -4140,12 +4158,15 @@ function ensureOverlay3D(ctx) {
         const lines = new THREE.LineSegments(geometry, mat);
         lines.name = name ? String(name) : 'overlay3d:lines';
         lines.frustumCulled = false;
+        geometry.setDrawRange(0, 0);
+        lines.visible = false;
 
         let used = 0;
-        const commit = ({ count = used } = {}) => {
-          const n = Math.max(0, Math.min(cap, count | 0));
-          used = n;
+        const flushCommit = () => {
+          const n = used | 0;
           geometry.setDrawRange(0, n * 2);
+          lines.visible = n > 0;
+          if (n <= 0) return;
           posAttr.array.set(authorPos.subarray(0, n * 2 * 3), 0);
           colAttr.array.set(authorRgb.subarray(0, n * 2 * 3), 0);
           if (typeof posAttr.clearUpdateRanges === 'function') posAttr.clearUpdateRanges();
@@ -4156,8 +4177,17 @@ function ensureOverlay3D(ctx) {
           colAttr.needsUpdate = true;
         };
 
+        const commit = ({ count = used } = {}) => {
+          used = Math.max(0, Math.min(cap, count | 0));
+          const queue = manager._commitTasks;
+          if (queue instanceof Set) queue.add(flushCommit);
+        };
+
         addObject3D(lines, { layer, owned: false });
         const dispose = () => {
+          if (manager._commitTasks instanceof Set) {
+            manager._commitTasks.delete(flushCommit);
+          }
           try { disposeObject3DTree(lines); } catch (err) { strictCatch(err, 'main:overlay3d_dispose_batch'); }
         };
         disposers.push(dispose);
@@ -4288,6 +4318,26 @@ function ensureOverlay3D(ctx) {
   if (!(manager._frameBatches instanceof Set)) {
     manager._frameBatches = new Set();
   }
+  if (!(manager._commitTasks instanceof Set)) {
+    manager._commitTasks = new Set();
+  }
+  if (typeof manager.flushCommits !== 'function') {
+    manager.flushCommits = ({ camera = null, frame = null } = {}) => {
+      const tasks = manager._commitTasks;
+      if (!(tasks instanceof Set) || tasks.size === 0) return;
+      const cam = camera || ctx?.camera || null;
+      const flushed = Array.from(tasks.values());
+      tasks.clear();
+      for (const task of flushed) {
+        if (typeof task !== 'function') continue;
+        try {
+          task(cam, frame);
+        } catch (err) {
+          strictCatch(err, 'main:overlay3d_flushCommits');
+        }
+      }
+    };
+  }
   if (typeof manager.onFrame !== 'function') {
     manager.onFrame = ({ camera = null, frame = null } = {}) => {
       const cam = camera || ctx?.camera || null;
@@ -4322,6 +4372,9 @@ function ensureOverlay3D(ctx) {
       }
       if (manager._frameBatches instanceof Set) {
         manager._frameBatches.clear();
+      }
+      if (manager._commitTasks instanceof Set) {
+        manager._commitTasks.clear();
       }
       manager.root = null;
       manager.layers = null;
@@ -7606,6 +7659,25 @@ function createRendererManager({
   const tempVecC = new THREE.Vector3();
   const tempVecD = new THREE.Vector3();
 
+  const frameSubscribers = new Set();
+  let pendingSceneSnapshot = null;
+  let pendingSceneState = null;
+  let pendingSceneDirty = false;
+  let lastFrameSnapshot = null;
+  let lastFrameState = null;
+
+  function requestRenderScene(snapshot, state) {
+    pendingSceneSnapshot = snapshot || null;
+    pendingSceneState = state || null;
+    pendingSceneDirty = true;
+  }
+
+  function onFrame(fn) {
+    if (typeof fn !== 'function') return () => {};
+    frameSubscribers.add(fn);
+    return () => frameSubscribers.delete(fn);
+  }
+
   // Expose a small helper so other modules (e.g. environment manager)
   // can tweak JS-side geom view state without needing to know where
   // those fields live.
@@ -7645,9 +7717,39 @@ function createRendererManager({
       ctx.frameId = window.requestAnimationFrame(step);
       if (!ctx.initialized || !ctx.renderer || !ctx.sceneWorld || !ctx.camera) return;
       const tDrawStart = perfEnabled ? perfNow() : 0;
+      const frame = ctx._frameCounter || 0;
+
+      if (pendingSceneDirty) {
+        pendingSceneDirty = false;
+        const snapshot = pendingSceneSnapshot;
+        const state = pendingSceneState;
+        if (snapshot && state) {
+          renderScene(snapshot, state);
+          lastFrameSnapshot = snapshot;
+          lastFrameState = state;
+        }
+      }
+
+      if (frameSubscribers.size && lastFrameSnapshot && lastFrameState) {
+        const snapshot = lastFrameSnapshot;
+        const state = lastFrameState;
+        const nowMs = perfNow();
+        for (const fn of frameSubscribers) {
+          try {
+            fn({ snapshot, state, nowMs, frame });
+          } catch (err) {
+            logWarn('[clock] frame subscriber error', err);
+            strictCatch(err, 'main:clock_frame_subscriber');
+          }
+        }
+      }
+
       const overlay3d = ctx._overlay3d || ctx.overlay3d || null;
+      if (overlay3d && typeof overlay3d.flushCommits === 'function') {
+        overlay3d.flushCommits({ camera: ctx.camera, frame });
+      }
       if (overlay3d && typeof overlay3d.onFrame === 'function') {
-        overlay3d.onFrame({ camera: ctx.camera, frame: ctx._frameCounter || 0 });
+        overlay3d.onFrame({ camera: ctx.camera, frame });
       }
       // Background/environment is managed by environment manager (ensureEnvIfNeeded)
       renderWorldScene(ctx, ctx.renderer, { camera: ctx.camera });
@@ -8412,9 +8514,11 @@ function createRendererManager({
 
   return {
     setup,
+    requestRenderScene,
     renderScene,
     ensureRenderLoop,
     updateViewport: () => updateRendererViewport(),
+    onFrame,
     getContext,
     getOverlay3D,
     dispose,

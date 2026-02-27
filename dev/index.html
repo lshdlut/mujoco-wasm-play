@@ -513,6 +513,14 @@ body.fullscreen {
 .control-field input.number-compact-center {
   padding: 0;
   text-align: center;
+  /* Remove spinner chrome so centered numbers look truly centered. */
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.control-field input.number-compact-center::-webkit-outer-spin-button,
+.control-field input.number-compact-center::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .control-field select:focus,
 .control-field select:active {

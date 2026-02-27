@@ -196,8 +196,12 @@ Use instancing for lots of lightweight primitives (markers/arrows/etc). This is 
 - `batch.writer.quat` (`Float32Array`, length = `capacity * 4`, quaternion xyzw)
 - `batch.writer.scale` (`Float32Array`, length = `capacity * 3`)
 - `batch.writer.rgb` (`Float32Array`, length = `capacity * 3`, linear rgb multipliers)
-- `batch.commit({ count })` (rebuilds and uploads the instance buffer)
+- `batch.commit({ count })` (latches author buffers; flushed atomically at the frame barrier)
 - `batch.setTransparency(spec)` (updates transparency policy and sorting)
+
+Commit is **deferred**: it does not immediately upload to the GPU. Play flushes all pending overlay commits
+once per render frame (in `host.clock.onFrame`), after the core MuJoCo scene update, so overlays never get
+ahead/behind the model pose.
 
 Key options:
 - `primitive`: `'sphere' | 'box' | 'cylinder' | 'capsule' | 'cone'` (shared geometry via AssetRegistry)
@@ -219,7 +223,7 @@ The overlay system provides an explicit policy surface to avoid per-plugin hacks
   - `strict`: per-instance depth sort; best quality, higher CPU cost
 - `bins`: `1..16` (used when `sortMode='bins'`)
 - `update`: `'commit' | 'frame' | 'inherit'`
-  - `commit`: sort/upload only when `commit()` is called
+  - `commit`: sort/upload only when `commit()` is flushed (frame barrier)
   - `frame`: also re-sorts when the camera moves (render-loop hook)
 - `every`: integer `>= 1` (when `update='frame'`, only resort every N frames)
 - `depthTest`, `depthWrite`, `toneMapped`: advanced material toggles (optional)
@@ -290,14 +294,19 @@ Returns the last snapshot currently held by the UI thread (may be `null` during 
 ### `host.clock`
 
 Time hooks for different workloads:
-- `host.clock.onSnapshot(fn)`: called after each backend snapshot merges into the store.
-- `host.clock.onUiTick(fn)`: throttled UI tick for DOM/UI work (default `ui_ms=33`, not snapshot-aligned).
-- `host.clock.onFrame(fn)`: per-frame hook (RAF render loop; can be 60Hz+).
+- `host.clock.onSnapshot(fn)`: called after each backend snapshot merges into the store (`fn({ snapshot, state, nowMs })`).
+- `host.clock.onFrame(fn)`: render-frame barrier (`fn({ snapshot, state, nowMs, frame })`, can be 60Hz+).
+- UI lanes (throttled; intended for DOM/UI work):
+  - `host.clock.onUiMainTick(fn)` (alias: `onUiTick`): main UI tick (default `ui_ms=33`, not snapshot-aligned).
+  - `host.clock.onUiControlsTick(fn)`: slower UI lane used for expensive control syncing (interval = `max(ui_ms, 120ms)`, quantized by the UI main tick).
+  - `host.clock.onUiSlowTick(fn)`: slow UI lane for heavy cards/tables (default `ui_slow_ms=1000`, quantized by the UI main tick).
 
 Recommended usage:
 - Use `onSnapshot` for snapshot-aligned logic/state derivation.
-- Use `onUiTick` for DOM updates (labels, cards, progress bars).
-- Use `onFrame` only for animation that must track render frames.
+- Use `onFrame` for render-visible work (overlay commits, per-frame animation).
+- Use `onUiMainTick`/`onUiTick` for ordinary DOM updates (labels, cards, progress bars).
+- Use `onUiControlsTick` for expensive DOM work that does not need 30–60Hz.
+- Use `onUiSlowTick` for very heavy UI work (1–5Hz).
 
 ### Logging and error reporting
 
@@ -381,8 +390,9 @@ This viewer intentionally decouples:
 
 Recommended tiers:
 - Simulation/pose rendering: follow snapshotHz (adaptive; worker controlled).
-- Main UI panel updates: ~30Hz (`onUiTick` + change detection).
-- Heavy status cards / debug tables: 1–5Hz (`onUiTick` with additional throttling).
+- Main UI panel updates: ~30Hz (`onUiMainTick`/`onUiTick` + change detection).
+- Control-heavy UI sync: ~8Hz (`onUiControlsTick`, default `max(ui_ms, 120ms)`).
+- Heavy status cards / debug tables: 1–5Hz (`onUiSlowTick`, default `ui_slow_ms=1000`).
 
 Useful URL parameters:
 - `ui_ms=<16..2000>`: UI tick interval in milliseconds.
@@ -406,7 +416,8 @@ export function registerPlayPlugin(host) {
   card.textContent = 'Hello from plugin';
   root.appendChild(card);
 
-  const off = host.clock.onUiTick(({ state }) => {
+  const onUiMain = host.clock.onUiMainTick || host.clock.onUiTick;
+  const off = onUiMain(({ state }) => {
     card.dataset.run = state?.simulation?.run ? '1' : '0';
   });
 

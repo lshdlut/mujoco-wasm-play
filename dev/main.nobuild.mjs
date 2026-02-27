@@ -85,8 +85,9 @@ let fpsEstimate = 0;
 let lastFpsFrameSample = 0;
 let lastFpsSampleTimeMs = perfNow();
 const uiTickSubscribers = new Set();
+const uiControlsTickSubscribers = new Set();
+const uiSlowTickSubscribers = new Set();
 const snapshotSubscribers = new Set();
-const frameSubscribers = new Set();
 const pluginDisposers = [];
 let pluginDisposeInstalled = false;
 
@@ -700,41 +701,6 @@ function applySnapshot(snapshot) {
 if (typeof window !== 'undefined') {
   window.__PLAY_DUMP_GEOMORDER = () => ({ disabled: true });
 }
-let pendingRenderFrame = false;
-let renderSceneDirty = false;
-function scheduleRenderScene() {
-  renderSceneDirty = true;
-  if (pendingRenderFrame) return;
-  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return;
-  pendingRenderFrame = true;
-  window.requestAnimationFrame(() => {
-    pendingRenderFrame = false;
-    if (!renderSceneDirty) return;
-    renderSceneDirty = false;
-    if (!latestSnapshot) return;
-    const perfEnabled = isPerfEnabled();
-    const tRenderStart = perfEnabled ? perfNow() : 0;
-    rendererManager.renderScene(latestSnapshot, store.get());
-    if (frameSubscribers.size) {
-      for (const fn of frameSubscribers) {
-        try {
-          fn({ snapshot: latestSnapshot, state: store.get() });
-        } catch (err) {
-          logWarn('[clock] frame subscriber error', err);
-          strictCatch(err, 'main:clock_frame_subscriber');
-        }
-      }
-    }
-    if (perfEnabled) {
-      perfSample('main:raf_renderScene_ms', perfNow() - tRenderStart, {
-        frameId: Number.isFinite(latestSnapshot?.frameId) ? (latestSnapshot.frameId | 0) : null,
-        ngeom: typeof latestSnapshot?.ngeom === 'number' ? (latestSnapshot.ngeom | 0) : null,
-        scn_ngeom: (latestSnapshot?.scn_ngeom | 0) > 0 ? (latestSnapshot.scn_ngeom | 0) : null,
-      });
-      perfMarkOnce('play:main:first_raf_renderScene_end');
-    }
-  });
-}
 
 const initialSnapshot = await backend.snapshot();
 applySnapshot(initialSnapshot);
@@ -789,14 +755,19 @@ function scheduleUiUpdate(state) {
     }
     lastUiUpdateMs = now;
     const uiState = pendingUiState || state;
+    const snapshot = latestSnapshot || null;
+
+    let didControlsTick = false;
     if ((now - lastControlsUpdateMs) >= CONTROLS_UPDATE_INTERVAL_MS) {
       lastControlsUpdateMs = now;
       updateControls(uiState);
+      didControlsTick = true;
     }
     updateToast(uiState);
     updateRealtimeOverlay(uiState);
     updateInfoOverlayTime(uiState);
 
+    let didSlowTick = false;
     const infoVisible = !!uiState?.overlays?.info;
     if (infoVisible && !lastInfoOverlayVisible) {
       updateInfoOverlayCard(uiState);
@@ -804,14 +775,20 @@ function scheduleUiUpdate(state) {
       lastInfoOverlayVisible = true;
     } else if (!infoVisible) {
       lastInfoOverlayVisible = false;
-    } else if ((now - lastUiSlowUpdateMs) >= UI_SLOW_UPDATE_INTERVAL_MS) {
+    }
+
+    const wantsSlowTick = uiSlowTickSubscribers.size > 0;
+    const slowDue = (now - lastUiSlowUpdateMs) >= UI_SLOW_UPDATE_INTERVAL_MS;
+    if (slowDue && (infoVisible || wantsSlowTick)) {
       lastUiSlowUpdateMs = now;
-      updateInfoOverlayCard(uiState);
+      if (infoVisible && lastInfoOverlayVisible) {
+        updateInfoOverlayCard(uiState);
+      }
+      didSlowTick = wantsSlowTick;
     }
 
     updateInfoOverlayFast(uiState);
 
-    const snapshot = latestSnapshot || null;
     if (uiTickSubscribers.size) {
       for (const fn of uiTickSubscribers) {
         try {
@@ -819,6 +796,28 @@ function scheduleUiUpdate(state) {
         } catch (err) {
           logWarn('[clock] ui tick subscriber error', err);
           strictCatch(err, 'main:clock_ui_subscriber');
+        }
+      }
+    }
+
+    if (didControlsTick && uiControlsTickSubscribers.size) {
+      for (const fn of uiControlsTickSubscribers) {
+        try {
+          fn({ snapshot, state: uiState, nowMs: now });
+        } catch (err) {
+          logWarn('[clock] ui controls tick subscriber error', err);
+          strictCatch(err, 'main:clock_ui_controls_subscriber');
+        }
+      }
+    }
+
+    if (didSlowTick && uiSlowTickSubscribers.size) {
+      for (const fn of uiSlowTickSubscribers) {
+        try {
+          fn({ snapshot, state: uiState, nowMs: now });
+        } catch (err) {
+          logWarn('[clock] ui slow tick subscriber error', err);
+          strictCatch(err, 'main:clock_ui_slow_subscriber');
         }
       }
     }
@@ -910,12 +909,8 @@ function scheduleUiUpdate(state) {
 store.subscribe((state) => {
   const perfEnabled = isPerfEnabled();
   const tSubStart = perfEnabled ? perfNow() : 0;
-  if (perfEnabled) {
-    const tRenderQueueStart = perfNow();
-    scheduleRenderScene();
-    perfSample('main:subscriber_scheduleRenderScene_ms', perfNow() - tRenderQueueStart);
-  } else {
-    scheduleRenderScene();
+  if (typeof rendererManager?.requestRenderScene === 'function') {
+    rendererManager.requestRenderScene(latestSnapshot, state);
   }
   const tOverlaysStart = perfEnabled ? perfNow() : 0;
   const overlays = state.overlays || {};
@@ -1838,9 +1833,14 @@ if (typeof window !== 'undefined') {
     renderer: window.__viewerRenderer,
     getSnapshot: () => latestSnapshot,
     clock: {
+      // Main UI lane (throttled; default ~30Hz via `ui_ms`).
       onUiTick: (fn) => subscribeClock(uiTickSubscribers, fn),
+      onUiMainTick: (fn) => subscribeClock(uiTickSubscribers, fn),
+      // UI sub-lanes (explicit, throttled) for expensive DOM work.
+      onUiControlsTick: (fn) => subscribeClock(uiControlsTickSubscribers, fn),
+      onUiSlowTick: (fn) => subscribeClock(uiSlowTickSubscribers, fn),
       onSnapshot: (fn) => subscribeClock(snapshotSubscribers, fn),
-      onFrame: (fn) => subscribeClock(frameSubscribers, fn),
+      onFrame: (fn) => (rendererManager?.onFrame ? rendererManager.onFrame(fn) : (() => {})),
     },
     logStatus,
     logWarn,
