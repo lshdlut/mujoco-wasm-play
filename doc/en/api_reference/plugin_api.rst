@@ -135,6 +135,16 @@ as a developer reference:
 
   interface PlayHostV1 {
     apiVersion: 1;
+    capabilities: {
+      mounts: true;
+      ui: true;
+      store: true;
+      backend: true;
+      controls: true;
+      renderer: true;
+      clock: true;
+      overlay3d: true;
+    };
     mounts: {
       leftPanel: HTMLElement | null;
       rightPanel: HTMLElement | null;

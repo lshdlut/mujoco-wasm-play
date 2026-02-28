@@ -40,3 +40,13 @@ Playwright 配置支持：
 
 - ``npm run spec:lint``：校验 UI spec 契约
 - ``npm run ci:guard``：运行基于模式的 guard（见 ``tools/forbid_patterns.mjs``）
+- ``node tools/run_checks.mjs``：运行一套快速本地检查（guards + 模块边界 + Node 单元测试 + 语法检查）
+
+Node 单元测试
+---------------
+
+仓库在 ``test/`` 下提供了一小套无需额外依赖的 Node 测试。
+
+.. code-block:: bash
+
+  node --test test/*.test.mjs

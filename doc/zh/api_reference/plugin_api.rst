@@ -133,6 +133,16 @@ Host API 是一个普通的 JavaScript 对象。下面的 TypeScript-like 形状
 
   interface PlayHostV1 {
     apiVersion: 1;
+    capabilities: {
+      mounts: true;
+      ui: true;
+      store: true;
+      backend: true;
+      controls: true;
+      renderer: true;
+      clock: true;
+      overlay3d: true;
+    };
     mounts: {
       leftPanel: HTMLElement | null;
       rightPanel: HTMLElement | null;

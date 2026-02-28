@@ -40,4 +40,13 @@ Spec/tooling checks
 
 - ``npm run spec:lint``: validates the UI spec contract
 - ``npm run ci:guard``: runs pattern-based guards (see ``tools/forbid_patterns.mjs``)
+- ``node tools/run_checks.mjs``: runs a fast local check suite (guards + module boundaries + Node unit tests + syntax checks)
 
+Node unit tests
+---------------
+
+The repo includes a small set of dependency-free Node tests under ``test/``.
+
+.. code-block:: bash
+
+  node --test test/*.test.mjs

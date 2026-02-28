@@ -19,11 +19,16 @@
 关键运行时模块
 -------------------
 
-- ``dev/viewer_backend.mjs``：backend façade（启动 Worker，将 UI/手势动作翻译为命令）
+- ``dev/viewer_backend.mjs``：backend façade（稳定 import 路径）
+  - 实现：``dev/backend/backend_core.mjs``
 - ``dev/viewer_runtime.mjs``：日志、strict/compat/perf 辅助、URL 参数辅助
-- ``dev/main_ui.mjs``：UI spec 组装、store、control manager、分区行为
-- ``dev/main_renderer.mjs``：Three.js renderer manager 与 overlay3d 系统
-- ``dev/bridge.mjs``：forge/WASM bridge 辅助（FS 写入、typed view、资产）
+- ``dev/main_ui.mjs``：UI façade（稳定 import 路径）
+  - 内部模块：``dev/ui/state.mjs`` + ``dev/ui/control_manager.mjs``
+- ``dev/main_renderer.mjs``：renderer façade（稳定 import 路径）
+  - 内部模块：``dev/renderer/pipeline.mjs`` + ``dev/renderer/controllers.mjs``
+- ``dev/bridge.mjs``：bridge façade（稳定 import 路径）
+  - 实现：``dev/bridge/bridge_core.mjs``
+- ``dev/worker/snapshot_pool.mjs``：worker snapshot pool 策略与状态
 
 已提交的生成产物
 ------------------------------

@@ -5,11 +5,119 @@
 - 生成脚本：`node tools/generate_code_inventory.mjs`
 - 说明：这是一个“索引/清单”，不试图解释语义；语义与流程见其它 API/Reference 页面。
 - 说明：类成员提取为启发式（heuristic）——用于快速导航，不保证覆盖所有写法。
-- 生成时间（UTC）：`2026-02-27T07:56:56.226Z`
+- 生成时间（UTC）：`2026-02-27T10:01:28.478Z`
 
 ## dev/
 
+### `dev/backend/backend_core.mjs`
+
+- 行数：2161
+- 导出（Exports）：
+  - L396: export function `createBackend`
+- 声明（文件级）：
+  - L32: function `applyViewFields`
+  - L43: function `applyHistoryPayload`
+  - L54: function `applyKeyframesPayload`
+  - L88: function `applyWatchPayload`
+  - L122: function `resolveModelFileName`
+  - L135: function `buildModelCandidates`
+  - L153: function `createInitialSnapshot`
+  - L200: function `resolveSnapshot`
+  - L396: function `createBackend`
+- 声明（嵌套）：
+  - L138: const => `pushCandidate`
+  - L201: const => `viewOrNull`
+  - L265: property => `sceneFlags`
+  - L417: const => `normaliseInt`
+  - L421: const => `sampleIfFinite`
+  - L455: function `resetAdaptiveSnapshotState`
+  - L464: function `ewma`
+  - L470: function `postSnapshotHzIfChanged`
+  - L487: function `maybeUpdateAdaptiveSnapshotHz`
+  - L548: function `applySimulateMaskBinding`
+  - L581: function `spawnWorkerBackend`
+  - L586: function `collectLoadTransfers`
+  - L600: function `requestWorkerStrictReport`
+  - L616: function `loadDefaultXml`
+  - L677: function `notifyListeners`
+  - L709: function `detachClient`
+  - L716: function `restartWorkerWithLoadPayload`
+  - L768: function `restartWorkerWithXml`
+  - L773: function `formatCopyNumber`
+  - L782: function `buildCopyKeyXmlFromPayload`
+  - L809: const => `format`
+  - L834: function `writeCopyKeyToClipboard`
+  - L849: function `applyOptionSnapshot`
+  - L882: function `setRunState`
+  - L895: function `setRate`
+  - L907: function `loadXmlText`
+  - L913: function `loadXmlBundle`
+  - L922: function `applyVisualStatePayload`
+  - L959: function `updateGeometryCaches`
+  - L960: const => `makeView`
+  - L974: const => `makeViewOrNull`
+  - L988: property => `strict_report`
+  - L996: property => `run_state`
+  - L1003: property => `ready`
+  - L1093: property => `latency_probe`
+  - L1105: property => `struct_state`
+  - L1115: property => `meta_cameras`
+  - L1125: property => `meta_geoms`
+  - L1129: property => `selection`
+  - L1146: property => `meta_joints`
+  - L1147: const => `toI32`
+  - L1174: const => `jrange`
+  - L1192: property => `meta`
+  - L1210: property => `snapshot`
+  - L1445: property => `keyframes`
+  - L1449: property => `history`
+  - L1453: property => `watch`
+  - L1461: property => `render_assets`
+  - L1484: property => `gesture`
+  - L1500: property => `align`
+  - L1515: property => `copyState`
+  - L1542: property => `options`
+  - L1546: property => `log`
+  - L1549: property => `error`
+  - L1561: function `handleMessage`
+  - L1746: property => `handle`
+  - L1765: property => `handle`
+  - L1782: property => `handle`
+  - L1797: property => `handle`
+  - L1812: function `dispatchBinding`
+  - L1837: function `apply`
+  - L1972: function `snapshot`
+  - L1976: function `subscribe`
+  - L1982: function `step`
+  - L2025: function `setCameraIndex`
+  - L2029: const => `toVec3`
+  - L2040: function `applyPerturbCommand`
+  - L2093: function `setSelectionCommand`
+  - L2108: function `selectAtCommand`
+  - L2127: function `dispose`
+  - L2149: property => `getStrictReport`
+  - L2153: property => `getInitialModelInfo`
+  - L2154: property => `getBuiltinModels`
+- 类成员（启发式）：（无）
+
 ### `dev/bridge.mjs`
+
+- 行数：12
+- 导出（Exports）：
+  - L2: export `resolveHeapBuffer`
+  - L2: export `heapViewF64`
+  - L2: export `heapViewF32`
+  - L2: export `heapViewI32`
+  - L2: export `heapViewU8`
+  - L2: export `readCString`
+  - L2: export `collectRenderAssetsFromModule`
+  - L2: export `MjSimLite`
+  - L2: export `} from './bridge/bridge_core.mjs'`
+- 声明（文件级）：（未发现）
+- 声明（嵌套）：（无）
+- 类成员（启发式）：（无）
+
+### `dev/bridge/bridge_core.mjs`
 
 - 行数：2146
 - 导出（Exports）：
@@ -333,541 +441,27 @@
 
 ### `dev/main_renderer.mjs`
 
-- 行数：9476
+- 行数：7
 - 导出（Exports）：
-  - L9471: export `createCameraController`
-  - L9471: export `createPickingController`
-  - L9471: export `createRendererManager`
-- 声明（文件级）：
-  - L42: function `installMuJoCoShadowViewportInset`
-  - L80: function `onBeforeShadowMuJoCo`
-  - L91: function `createInfiniteGroundHelper`
-  - L372: function `mjuRound`
-  - L393: function `depthFromSoAPos`
-  - L411: function `transparentDepthNorm01`
-  - L416: function `transparentBinFromDepthNorm`
-  - L423: function `getWorldScene`
-  - L430: function `renderWorldScene`
-  - L450: function `createGeomNameLookup`
-  - L462: function `getOrCreateGeomNameLookup`
-  - L474: function `geomNameFromLookup`
-  - L478: function `isInfinitePlaneSize`
-  - L485: function `applyGeomMetadata`
-  - L551: function `applySkyboxVisibility`
-  - L613: function `setQuatFromMat3`
-  - L648: function `computeGeomRadius`
-  - L670: function `clampUnit`
-  - L677: function `parseVectorLike`
-  - L698: function `rgbFromArray`
-  - L710: function `applyAppearanceToMaterial`
-  - L743: function `resolveIndexedRgbaAppearance`
-  - L769: function `resolveFlexAppearance`
-  - L773: function `resolveSkinAppearance`
-  - L777: function `resolveMaterialTextureDescriptor`
-  - L823: function `getMuJoCoTextureCache`
-  - L830: function `createMuJoCoDataTexture`
-  - L899: function `applyMuJoCoTextureColorspace`
-  - L910: function `createMuJoCoCubeTexture`
-  - L950: function `getOrCreateMuJoCoTexture`
-  - L1003: function `getOrCreateMuJoCoCubeTexture`
-  - L1043: function `resolveMuJoCoTextureType`
-  - L1050: function `quantize1e6`
-  - L1056: function `quantize1e3`
-  - L1062: function `resolveMuJoCoTexcoordScale3`
-  - L1089: function `ensureMuJoCo2DGeneratedTexcoords`
-  - L1205: function `ensureMuJoCoCubeAlbedoHooks`
-  - L1246: function `applyMuJoCoCubeAlbedo`
-  - L1267: function `applyMuJoCoTextureToMesh`
-  - L1420: function `computeSceneExtent`
-  - L1428: function `resolveFogConfig`
-  - L1462: function `resolveHazeConfig`
-  - L1486: function `applySceneFog`
-  - L1506: function `ensureCameraTarget`
-  - L1518: function `resolveTrackingBodyId`
-  - L1535: function `buildViewerCameraPayload`
-  - L1565: function `sendViewerCameraSync`
-  - L1584: function `ensureFreeCameraPose`
-  - L1600: function `cacheTrackingPoseFromCurrent`
-  - L1615: function `rememberFreeCameraPose`
-  - L1627: function `restoreFreeCameraPose`
-  - L1643: function `applyTrackingCamera`
-  - L1728: function `ensureMjLightRig`
-  - L1752: function `removeMjLightSlot`
-  - L1758: function `createMjLightSlot`
-  - L1785: function `ensureMjLightSlot`
-  - L1797: function `disableMjLightSlot`
-  - L1804: function `updateMjLightRig`
-  - L2102: function `applyFixedCameraPreset`
-  - L2150: function `applyViewerCameraSnapshot`
-  - L2197: function `computeBoundsFromSceneSoA`
-  - L2259: function `scaleAllFactor`
-  - L2265: function `voptEnabled`
-  - L2269: function `normalizeDeltaByViewportHeight`
-  - L2276: function `meanSizeFromState`
-  - L2290: function `computeScenePolicy`
-  - L2316: function `disposeLabelTextureCache`
-  - L2329: function `getLabelTexture`
-  - L2390: function `createLabelSprite`
-  - L2407: function `ensureLabelGroup`
-  - L2419: function `hideLabelGroup`
-  - L2430: function `updateSceneLabelOverlays`
-  - L2501: function `computeGeometryBounds`
-  - L2506: function `createPrimitiveGeometry`
-  - L2662: function `isDynamicSizeScaleGeomType`
-  - L2678: function `safeScaleRatio`
-  - L2685: function `ensureGeomBuiltSizes`
-  - L2753: function `applyDynamicSizeScale`
-  - L2822: function `createMeshGeometryFromAssets`
-  - L3100: function `disposeMeshObject`
-  - L3173: function `disposeObject3DTree`
-  - L3216: function `disposeInstancing`
-  - L3256: class `MaterialPool`
-  - L3302: class `RefCountedAssetRegistry`
-  - L3376: function `ensureOverlay3D`
-  - L4389: function `disposeOverlay3D`
-  - L4401: function `syncRendererAssets`
-  - L4456: function `ensureInstancingRoot`
-  - L4491: function `ensureInstancedGeometry`
-  - L4526: function `instancingEnabledFromState`
-  - L4530: function `transparentBinsFromState`
-  - L4536: function `transparentSortModeFromState`
-  - L4542: function `ensureInstancedMaterial`
-  - L4601: function `ensureInstancedBatch`
-  - L4679: function `sortInstancedBatchByOrderRank`
-  - L4777: function `resolveGeomWorldMatrix`
-  - L4802: function `resolveGeomWorldPose`
-  - L4809: function `getSharedMeshGeometry`
-  - L4833: function `segmentColorForIndex`
-  - L4839: function `restoreSegmentMaterial`
-  - L4849: function `ensureSegmentMaterial`
-  - L4870: function `applyMaterialFlags`
-  - L4876: function `resolveMaterialScalar`
-  - L4884: function `resolveMaterialReflectance`
-  - L4890: function `resolveMaterialMetallic`
-  - L4895: function `resolveMaterialRoughness`
-  - L4900: function `resolveMaterialEmission`
-  - L4906: function `applyReflectanceToMaterial`
-  - L4940: function `ensureGeomMesh`
-  - L5128: function `ensureGeomState`
-  - L5218: function `setGeomViewProps`
-  - L5288: function `updateInfinitePlaneFromSceneSoA`
-  - L5429: function `getDefaultVopt`
-  - L5437: function `ensureFlexGroup`
-  - L5450: function `hideFlexGroup`
-  - L5461: function `ensureFlexEntry`
-  - L5571: function `applyFlexAppearance`
-  - L5586: function `normalize3Inv`
-  - L5592: function `flexMakeFace`
-  - L5621: function `flexAddNormal`
-  - L5637: function `flexMakeSmooth`
-  - L5675: function `flexMakeSide`
-  - L5704: function `fillFlexFaceTexcoords`
-  - L5729: function `updateFlexFaces`
-  - L6042: function `ensureSkinGroup`
-  - L6055: function `hideSkinGroup`
-  - L6066: function `ensureSkinEntry`
-  - L6159: function `applySkinAppearance`
-  - L6170: function `quatToMat3`
-  - L6195: function `updateSkinMesh`
-  - L6342: function `applyMjvSceneSoAGeoms`
-  - L7629: function `createRendererManager`
-  - L8530: function `createCameraController`
-  - L8944: function `defaultSelection`
-  - L8967: function `createPickingController`
-- 声明（嵌套）：
-  - L557: const => `setSolidBackground`
-  - L877: const => `isPow2`
-  - L1682: function `syncCameraPoseFromMode`
-  - L2254: function `overlayScale`
-  - L2284: function `computeMeanScale`
-  - L3326: const => `release`
-  - L3478: property => `acquire`
-  - L3483: property => `geometryPrimitive`
-  - L3508: property => `texture2DFromUrl`
-  - L3535: const => `addObject3D`
-  - L3618: const => `resolveTransparency`
-  - L3671: const => `wantsFrameSort`
-  - L3676: const => `updateFrameRegistration`
-  - L3707: const => `updateBoundingSphere`
-  - L3755: const => `syncToGpu`
-  - L3940: const => `flushCommit`
-  - L3959: const => `commit`
-  - L3965: const => `onFrame`
-  - L3973: const => `setTransparency`
-  - L4007: const => `dispose`
-  - L4084: const => `flushCommit`
-  - L4099: const => `commit`
-  - L4106: const => `dispose`
-  - L4165: const => `flushCommit`
-  - L4180: const => `commit`
-  - L4187: const => `dispose`
-  - L4235: const => `dispose`
-  - L4267: property => `dispose`
-  - L5707: const => `writeUV`
-  - L5737: const => `ensureAttribute`
-  - L6447: const => `isBodyStatic`
-  - L6710: const => `safeHide`
-  - L6718: const => `ensureGeomProxy`
-  - L6752: const => `fillSizeVec`
-  - L6778: const => `updateOne`
-  - L7669: function `requestRenderScene`
-  - L7675: function `onFrame`
-  - L7688: function `updateRendererViewport`
-  - L7709: function `ensureRenderLoop`
-  - L7715: const => `step`
-  - L7786: const => `visHandler`
-  - L7802: function `initRenderer`
-  - L7921: const => `resizeListener`
-  - L7929: function `renderScene`
-  - L8107: const => `trackingOverride`
-  - L8379: function `setup`
-  - L8384: function `getContext`
-  - L8388: function `getOverlay3D`
-  - L8394: function `dispose`
-  - L8458: const => `disposeResource`
-  - L8520: property => `updateViewport`
-  - L8580: const => `cameraModeIndex`
-  - L8589: const => `isInteractiveCamera`
-  - L8591: function `currentCtrl`
-  - L8595: function `currentShift`
-  - L8599: function `resolveGestureMode`
-  - L8606: function `pointerButtons`
-  - L8623: function `computeMinDistance`
-  - L8634: function `computeWheelReldy`
-  - L8639: function `buildCameraPayloadIfNeeded`
-  - L8665: function `applyCameraGesture`
-  - L8769: function `handlePointerDown`
-  - L8796: function `handlePointerMove`
-  - L8825: function `handlePointerUp`
-  - L8849: function `handleWheel`
-  - L8879: function `handleKey`
-  - L8889: function `install`
-  - L8894: const => `onPointerDown`
-  - L8895: const => `onPointerMove`
-  - L8896: const => `onPointerUp`
-  - L8897: const => `onWheel`
-  - L8898: const => `onContextMenu`
-  - L8901: const => `onKeyDown`
-  - L8902: const => `onKeyUp`
-  - L8927: function `dispose`
-  - L8939: property => `getModifierState`
-  - L9003: function `hasSelection`
-  - L9008: function `currentSelection`
-  - L9012: function `selectionSeq`
-  - L9016: function `clearSelection`
-  - L9030: function `showToast`
-  - L9038: function `updateSelection`
-  - L9074: function `getMeshList`
-  - L9094: function `projectPointer`
-  - L9103: function `resolveGeomMesh`
-  - L9114: function `geomNameFor`
-  - L9124: function `bodyIdFor`
-  - L9135: function `jointIdFor`
-  - L9150: function `applySelectionFromPick`
-  - L9170: function `resolveDragMode`
-  - L9176: function `selectionAsBody`
-  - L9182: function `updateAnchorFromSelection`
-  - L9199: function `setAnchorLocalFromWorld`
-  - L9235: function `resolvePick`
-  - L9281: function `selectionFromPick`
-  - L9289: function `beginPerturb`
-  - L9308: function `movePerturb`
-  - L9327: function `endPerturb`
-  - L9337: function `onClick`
-  - L9342: function `onDoubleClick`
-  - L9361: function `onPointerMove`
-  - L9366: function `onPointerDragStart`
-  - L9386: function `onPointerDragEnd`
-  - L9399: function `install`
-  - L9400: const => `onPointerDownEvt`
-  - L9409: const => `onPointerUpEvt`
-  - L9416: const => `onPointerMoveEvt`
-  - L9423: const => `onContextMenu`
-  - L9449: function `dispose`
-- 类成员（启发式）：
-  - L3257: method `MaterialPool#constructor`
-  - L3261: method `MaterialPool#_key`
-  - L3290: method `MaterialPool#disposeAll`
-  - L3303: method `RefCountedAssetRegistry#constructor`
-  - L3309: method `RefCountedAssetRegistry#acquire`
-  - L3338: method `RefCountedAssetRegistry#strictCatch`
-  - L3352: method `RefCountedAssetRegistry#disposeAll`
-  - L3359: method `RefCountedAssetRegistry#strictCatch`
-  - L3366: method `RefCountedAssetRegistry#stats`
+  - L2: export `createCameraController`
+  - L2: export `createPickingController`
+  - L2: export `createRendererManager`
+  - L2: export `} from './renderer/renderer_core.mjs'`
+- 声明（文件级）：（未发现）
+- 声明（嵌套）：（无）
+- 类成员（启发式）：（无）
 
 ### `dev/main_ui.mjs`
 
-- 行数：5273
-- 导出（Exports）：
-  - L100: export function `readPersistedSectionCollapsed`
-  - L111: export function `writePersistedSectionCollapsed`
-  - L122: export function `resolvePlayPanelId`
-  - L133: export function `setPlaySectionCollapsed`
-  - L162: export function `toggleAllPlaySections`
-  - L194: export function `installPanelSectionDblclickDelegation`
-  - L5263: export `DEFAULT_VIEWER_STATE`
-  - L5263: export `applyGesture`
-  - L5263: export `applySpecAction`
-  - L5263: export `createControlManager`
-  - L5263: export `createViewerStore`
-  - L5263: export `mergeBackendSnapshot`
-  - L5263: export `prepareBindingUpdate`
-  - L5263: export `readControlValue`
-- 声明（文件级）：
-  - L32: function `clamp01`
-  - L49: function `sectionCollapsedMapKey`
-  - L55: function `getSectionCollapsedCache`
-  - L77: function `flushSectionCollapsedCache`
-  - L91: function `queueSectionCollapsedFlush`
-  - L100: function `readPersistedSectionCollapsed`
-  - L111: function `writePersistedSectionCollapsed`
-  - L122: function `resolvePlayPanelId`
-  - L133: function `setPlaySectionCollapsed`
-  - L162: function `toggleAllPlaySections`
-  - L194: function `installPanelSectionDblclickDelegation`
-  - L244: function `ensureBindingIndex`
-  - L269: function `resolveBindingSpec`
-  - L377: function `getControlBindingSpec`
-  - L387: function `parseNumber`
-  - L392: function `parseVector`
-  - L419: function `toBoolean`
-  - L433: function `normaliseEnumValue`
-  - L451: function `normaliseValueByKind`
-  - L472: function `normaliseControlInput`
-  - L524: function `prepareBindingUpdate`
-  - L577: function `resolveRealTimeIndexFromRate`
-  - L593: function `createDefaultSelectionState`
-  - L608: function `resetSelectionState`
-  - L652: function `flagsFromMask`
-  - L825: function `cloneViewerState`
-  - L829: function `applyViewerStateOverrides`
-  - L838: function `formatStructPath`
-  - L842: function `valuesEqual`
-  - L854: function `diffStruct`
-  - L871: function `resetModelFrontendState`
-  - L880: function `cameraLabelFromIndex`
-  - L893: function `mergeBackendSnapshot`
-  - L1347: function `ensureRenderingState`
-  - L1429: function `ensureState`
-  - L1437: const => `ensureHistoryState`
-  - L1438: const => `ensureWatchState`
-  - L1439: const => `ensureKeyframeState`
-  - L1441: function `ensureThemeState`
-  - L1474: function `parseThemeBinary`
-  - L1597: function `applyBinding`
-  - L1607: function `formatKeyframeLabelFromState`
-  - L1639: function `applyControl`
-  - L1675: function `readBindingValue`
-  - L1691: function `readControlValue`
-  - L1715: function `createViewerStore`
-  - L1755: function `applySpecAction`
-  - L1809: function `applyGesture`
-  - L1928: function `applyPresetOverridesToStruct`
-  - L1949: function `applyAppearancePresetOverrides`
-  - L1967: function `ensureVisualCache`
-  - L1976: function `switchVisualSourceMode`
-  - L2191: function `normaliseSceneFlagArray`
-  - L2204: function `createControlManager`
-  - L2749: function `formatNumber`
-  - L2759: function `formatNumberTrimmed`
-  - L2767: function `attachCommitHandlers`
-  - L2783: function `attachOptionAvailability`
-  - L2791: function `appendUpdateOptions`
-  - L2804: function `pushToast`
-  - L2907: function `normaliseToRange`
-  - L2920: function `denormaliseFromRange`
-  - L2938: function `resolveCameraModeEntries`
-  - L2963: function `getCameraModeCount`
-  - L2973: function `syncCameraSelectOptions`
-  - L3006: function `resolveTrackingGeomEntries`
-  - L3028: function `syncTrackingGeomSelectOptions`
-  - L3063: function `resolveResetValue`
-  - L3079: function `normaliseShortcutSpec`
-  - L3103: function `canonicalShortcut`
-  - L3135: function `normaliseKeyToken`
-  - L3149: function `shortcutFromEvent`
-- 声明（嵌套）：
-  - L199: const => `handler`
-  - L1488: property => `overlay`
-  - L1492: property => `theme`
-  - L1533: property => `tracking_geom`
-  - L1541: property => `overlay`
-  - L1542: property => `run`
-  - L1548: property => `camera`
-  - L1549: property => `tracking_geom`
-  - L1550: property => `scrub_index`
-  - L1551: property => `key_index`
-  - L1552: property => `watch_field`
-  - L1553: property => `watch_index`
-  - L1554: property => `theme`
-  - L1555: property => `watch_summary`
-  - L1562: property => `group`
-  - L1571: property => `mask`
-  - L1578: property => `sim_opt`
-  - L1579: property => `struct`
-  - L1591: property => `vopt_flag`
-  - L1592: property => `scene_flag`
-  - L1593: property => `label_mode`
-  - L1594: property => `frame_mode`
-  - L1720: function `notify`
-  - L2224: const => `refreshModelSelectOptions`
-  - L2247: const => `addModelEntry`
-  - L2268: function `loadXmlTextAsModel`
-  - L2296: function `deriveXmlFileName`
-  - L2304: function `pickDirectoryHandle`
-  - L2317: function `promptDirectoryHandleForXmlRefs`
-  - L2332: const => `folderHint`
-  - L2388: const => `addRow`
-  - L2422: const => `cleanup`
-  - L2428: const => `resolveCancel`
-  - L2466: function `findFirstFileByName`
-  - L2499: function `getFileHandleByRelPath`
-  - L2514: function `readDirectoryFileArrayBuffer`
-  - L2520: function `buildMuJoCoBundle`
-  - L2529: function `readUrlFileArrayBuffer`
-  - L2540: function `loadXmlTextWithFolderRefs`
-  - L2595: function `loadXmlTextWithUrlRefs`
-  - L2639: function `applyThemeFromColorControl`
-  - L2650: function `applySpacingFromControl`
-  - L2664: function `applyFontFromControl`
-  - L2708: function `sanitiseName`
-  - L2718: function `normaliseOptions`
-  - L2727: const => `getOptionSupport`
-  - L2730: function `isOptionBinding`
-  - L2734: function `applyOptionAvailability`
-  - L2815: function `elementIsEditable`
-  - L2828: function `hasEditableFocus`
-  - L2851: function `parseRange`
-  - L3081: const => `addCombo`
-  - L3178: function `registerShortcutHandlers`
-  - L3187: function `registerGlobalShortcut`
-  - L3192: function `registerControl`
-  - L3200: function `createBinding`
-  - L3205: property => `setValue`
-  - L3215: function `guardBinding`
-  - L3222: function `createControlRow`
-  - L3233: function `createNamedRow`
-  - L3244: function `createFullRow`
-  - L3252: function `renderFileSectionExtras`
-  - L3313: const => `loadXmlFileImpl`
-  - L3458: function `createLabeledRow`
-  - L3469: function `expandSection`
-  - L3475: function `appendGroupedEntries`
-  - L3523: function `loadUiSpec`
-  - L3536: function `createBoolToggleElements`
-  - L3562: function `renderDisabledCheckbox`
-  - L3568: function `renderCheckbox`
-  - L3574: property => `getValue`
-  - L3575: property => `applyValue`
-  - L3627: function `renderRunToggle`
-  - L3636: const => `sync`
-  - L3644: property => `getValue`
-  - L3648: property => `applyValue`
-  - L3669: function `renderButton`
-  - L3702: property => `getValue`
-  - L3703: property => `setValue`
-  - L3717: function `resolveColorLabel`
-  - L3744: function `resolveSpacingLabel`
-  - L3769: function `resolveFontLabel`
-  - L3817: function `resolveSelectMeta`
-  - L3837: function `syncSelectOptions`
-  - L3854: function `readSelectValue`
-  - L3869: function `applySelectValue`
-  - L3919: function `renderSelect`
-  - L3935: property => `getValue`
-  - L3936: property => `applyValue`
-  - L3966: function `buildSegmentedOptions`
-  - L3989: function `createSegmentedGroup`
-  - L4017: function `attachSegmentedHandlers`
-  - L4031: function `renderVisualSourceControl`
-  - L4061: const => `resolveKey`
-  - L4070: property => `getValue`
-  - L4071: property => `applyValue`
-  - L4079: property => `onCommit`
-  - L4092: function `renderRadio`
-  - L4103: property => `getValue`
-  - L4104: property => `applyValue`
-  - L4111: property => `onCommit`
-  - L4117: function `renderSlider`
-  - L4139: const => `resolveRange`
-  - L4178: property => `getValue`
-  - L4185: property => `applyValue`
-  - L4199: const => `updateAvailability`
-  - L4230: const => `setEditing`
-  - L4241: function `createTextInputField`
-  - L4265: function `renderEditInput`
-  - L4271: property => `getValue`
-  - L4276: property => `applyValue`
-  - L4333: function `renderVectorInputBase`
-  - L4348: const => `formatVector`
-  - L4350: const => `setInputText`
-  - L4356: property => `getValue`
-  - L4357: property => `applyValue`
-  - L4383: const => `showInvalid`
-  - L4414: function `renderVectorInput`
-  - L4423: function `renderVec3StringInput`
-  - L4432: function `renderStatic`
-  - L4441: property => `getValue`
-  - L4442: property => `applyValue`
-  - L4464: function `renderWatchField`
-  - L4476: const => `syncOptions`
-  - L4490: property => `getValue`
-  - L4491: property => `applyValue`
-  - L4507: function `renderKeyframeSelect`
-  - L4518: const => `syncOptions`
-  - L4552: property => `getValue`
-  - L4553: property => `applyValue`
-  - L4574: function `renderSimulationNoiseNotice`
-  - L4586: function `renderSeparator`
-  - L4610: property => `edit_int`
-  - L4611: property => `edit_float`
-  - L4612: property => `edit_text`
-  - L4613: property => `edit_vec2`
-  - L4614: property => `edit_vec3`
-  - L4615: property => `edit_vec3_string`
-  - L4616: property => `edit_vec5`
-  - L4617: property => `edit_rgba`
-  - L4632: function `renderControl`
-  - L4659: function `renderSection`
-  - L4704: const => `setCollapsed`
-  - L4720: const => `toggleCollapsed`
-  - L4793: function `ensureDynamicList`
-  - L4848: function `resolveListIndex`
-  - L4853: function `ensureDynamicSliders`
-  - L4871: property => `updateExisting`
-  - L4907: property => `buildItem`
-  - L4931: const => `clearEditing`
-  - L4949: function `renderPanels`
-  - L4971: function `updateControls`
-  - L4991: function `toggleControl`
-  - L5018: function `cycleCamera`
-  - L5027: function `installShortcuts`
-  - L5031: const => `handler`
-  - L5063: function `dispose`
-  - L5085: property => `getBinding`
-  - L5087: property => `listIds`
-  - L5092: property => `getControl`
-  - L5093: property => `createSection`
-  - L5112: property => `ensureActuatorSliders`
-  - L5120: property => `getIndex`
-  - L5121: property => `getLabel`
-  - L5122: property => `getRange`
-  - L5127: property => `getValue`
-  - L5136: property => `onInput`
-  - L5151: property => `ensureJointSliders`
-  - L5159: property => `getIndex`
-  - L5160: property => `getLabel`
-  - L5161: property => `getRange`
-  - L5168: property => `getValue`
-  - L5170: property => `onInput`
-  - L5190: property => `ensureEqualityToggles`
-  - L5197: property => `updateExisting`
-  - L5217: property => `buildItem`
+- 行数：3
+- 导出（Exports）：（无）
+- 声明（文件级）：（未发现）
+- 声明（嵌套）：（无）
 - 类成员（启发式）：（无）
 
 ### `dev/main.nobuild.mjs`
 
-- 行数：1960
+- 行数：1961
 - 导出（Exports）：（无）
 - 声明（文件级）：
   - L97: function `subscribeClock`
@@ -883,17 +477,17 @@
   - L601: function `updatePanels`
   - L642: function `applySnapshot`
   - L736: function `scheduleUiUpdate`
-  - L1010: function `deriveJointDofs`
-  - L1070: function `deriveEqualityList`
-  - L1362: function `assertUiPanel`
-  - L1369: function `assertPluginSectionId`
-  - L1381: function `uiPanelRoot`
-  - L1386: function `uiPanelCoreMount`
-  - L1391: function `uiPanelAfterFileMount`
-  - L1395: function `createUiApi`
-  - L1852: function `loadPlayPlugins`
-  - L1931: function `resizeCanvas`
-  - L1941: function `queueResizeCanvas`
+  - L1011: function `deriveJointDofs`
+  - L1071: function `deriveEqualityList`
+  - L1363: function `assertUiPanel`
+  - L1370: function `assertPluginSectionId`
+  - L1382: function `uiPanelRoot`
+  - L1387: function `uiPanelCoreMount`
+  - L1392: function `uiPanelAfterFileMount`
+  - L1396: function `createUiApi`
+  - L1853: function `loadPlayPlugins`
+  - L1932: function `resizeCanvas`
+  - L1942: function `queueResizeCanvas`
 - 声明（嵌套）：
   - L256: property => `setRenderStats`
   - L323: const => `formatPercentSpeed`
@@ -905,179 +499,171 @@
   - L517: const => `cpuMs`
   - L740: const => `tick`
   - L984: property => `onGesture`
-  - L1000: property => `getSnapshot`
-  - L1181: const => `togglePanelsWithTab`
-  - L1310: const => `adjustRealtime`
-  - L1396: const => `panelApi`
-  - L1401: property => `collapseAll`
-  - L1402: property => `expandAll`
-  - L1403: property => `toggleAll`
-  - L1407: const => `registerSection`
-  - L1518: property => `setCollapsed`
-  - L1519: property => `collapse`
-  - L1520: property => `expand`
-  - L1521: property => `toggle`
-  - L1522: property => `dispose`
-  - L1547: property => `namedRow`
-  - L1560: property => `fullRow`
-  - L1569: property => `button`
-  - L1582: property => `textbox`
-  - L1619: property => `select`
-  - L1666: property => `range`
-  - L1682: property => `segmented`
-  - L1726: property => `value`
-  - L1730: property => `setValue`
-  - L1739: property => `codebox`
-  - L1746: property => `boolButton`
-  - L1778: property => `unregister`
-  - L1785: property => `get`
-  - L1786: property => `list`
-  - L1795: property => `getBinding`
-  - L1796: property => `listIds`
-  - L1797: property => `toggleControl`
-  - L1798: property => `getControl`
-  - L1799: property => `loadXmlTextAsModel`
-  - L1802: property => `getStats`
-  - L1803: property => `getContext`
-  - L1804: property => `ensureLoop`
-  - L1805: property => `renderScene`
-  - L1806: property => `getOverlay3D`
-  - L1808: property => `get`
-  - L1809: property => `createScope`
-  - L1813: property => `getScope`
-  - L1834: property => `getSnapshot`
-  - L1837: property => `onUiTick`
-  - L1838: property => `onUiMainTick`
-  - L1840: property => `onUiControlsTick`
-  - L1841: property => `onUiSlowTick`
-  - L1842: property => `onSnapshot`
-  - L1843: property => `onFrame`
+  - L1001: property => `getSnapshot`
+  - L1182: const => `togglePanelsWithTab`
+  - L1311: const => `adjustRealtime`
+  - L1397: const => `panelApi`
+  - L1402: property => `collapseAll`
+  - L1403: property => `expandAll`
+  - L1404: property => `toggleAll`
+  - L1408: const => `registerSection`
+  - L1519: property => `setCollapsed`
+  - L1520: property => `collapse`
+  - L1521: property => `expand`
+  - L1522: property => `toggle`
+  - L1523: property => `dispose`
+  - L1548: property => `namedRow`
+  - L1561: property => `fullRow`
+  - L1570: property => `button`
+  - L1583: property => `textbox`
+  - L1620: property => `select`
+  - L1667: property => `range`
+  - L1683: property => `segmented`
+  - L1727: property => `value`
+  - L1731: property => `setValue`
+  - L1740: property => `codebox`
+  - L1747: property => `boolButton`
+  - L1779: property => `unregister`
+  - L1786: property => `get`
+  - L1787: property => `list`
+  - L1796: property => `getBinding`
+  - L1797: property => `listIds`
+  - L1798: property => `toggleControl`
+  - L1799: property => `getControl`
+  - L1800: property => `loadXmlTextAsModel`
+  - L1803: property => `getStats`
+  - L1804: property => `getContext`
+  - L1805: property => `ensureLoop`
+  - L1806: property => `renderScene`
+  - L1807: property => `getOverlay3D`
+  - L1809: property => `get`
+  - L1810: property => `createScope`
+  - L1814: property => `getScope`
+  - L1835: property => `getSnapshot`
+  - L1838: property => `onUiTick`
+  - L1839: property => `onUiMainTick`
+  - L1841: property => `onUiControlsTick`
+  - L1842: property => `onUiSlowTick`
+  - L1843: property => `onSnapshot`
+  - L1844: property => `onFrame`
 - 类成员（启发式）：（无）
 
 ### `dev/physics.worker.mjs`
 
-- 行数：3523
+- 行数：3428
 - 导出（Exports）：（无）
 - 声明（文件级）：
-  - L151: function `snapshotPoolMarkDirtyMany`
-  - L172: function `markDirty`
-  - L181: function `snapshotPoolSetHz`
-  - L190: function `snapshotPoolMarkDirty`
-  - L194: function `snapshotPoolMarkAllDirty`
-  - L198: function `snapshotPoolResetTimers`
-  - L202: function `snapshotPoolShouldUpdate`
-  - L210: function `snapshotPoolDidUpdate`
-  - L236: function `buildPerf`
-  - L252: function `safePost`
-  - L278: function `setRunning`
-  - L290: function `resetTimingForCurrentSim`
-  - L312: function `readStructState`
-  - L323: function `createGroupState`
-  - L333: function `cloneGroupState`
-  - L342: function `cloneSceneFlags`
-  - L354: function `maybeSyncTimestepFromOptions`
-  - L364: function `emitOptionState`
-  - L387: function `getOptionsForSnapshot`
-  - L411: function `syncVoptToWasm`
-  - L448: function `ensureMjvPerturbAbi`
-  - L491: function `ensureMjvCameraAbi`
-  - L523: function `mjvMouseActionFor`
-  - L534: function `writeViewerCameraFromPayload`
-  - L574: function `readViewerFreeCameraState`
-  - L598: function `clearPerturbXfrcIfNeeded`
-  - L609: function `applyMjvPerturbForceIfActive`
-  - L620: function `applySimulatePerturbPipeline`
-  - L651: function `emitStructState`
-  - L657: function `collectCameraMeta`
-  - L712: function `emitCameraMeta`
-  - L722: function `collectGeomMeta`
-  - L736: function `emitGeomMeta`
-  - L746: function `normaliseInt`
-  - L751: function `clamp`
-  - L755: function `initHistoryBuffers`
-  - L792: function `serializeHistoryMeta`
-  - L815: function `emitHistoryMeta`
-  - L822: function `buildInfoStats`
-  - L1003: function `captureHistorySample`
-  - L1019: function `releaseHistoryScrub`
-  - L1029: function `loadHistoryOffset`
-  - L1057: function `applyHistoryConfig`
-  - L1076: function `resetKeyframes`
-  - L1119: function `serializeKeyframeMeta`
-  - L1138: function `emitKeyframeMeta`
-  - L1145: function `ensureKeySlot`
-  - L1158: function `saveKeyframe`
-  - L1178: function `loadKeyframe`
-  - L1192: function `resetWatchState`
-  - L1205: function `resolveWatchField`
-  - L1212: function `updateWatchTarget`
-  - L1226: function `readWatchView`
-  - L1248: function `sampleWatch`
-  - L1283: function `emitWatchState`
-  - L1289: function `collectWatchSources`
-  - L1316: function `wasmUrl`
-  - L1320: function `cstr`
-  - L1324: function `readLastErrorMeta`
-  - L1344: function `readErrno`
-  - L1349: function `readModelCount`
-  - L1361: function `readDataCount`
-  - L1373: function `readPtr`
-  - L1386: const => `readModelPtr`
-  - L1387: const => `readDataPtr`
-  - L1389: function `computeBoundsFromPositions`
-  - L1430: function `captureBounds`
-  - L1442: function `captureCopyState`
-  - L1526: function `loadModule`
-  - L1693: function `loadXmlWithFallback`
-  - L1749: function `snapshot`
-  - L2240: function `emitRenderAssets`
-  - L2267: function `collectAssetBuffersForTransfer`
-  - L3507: function `dispatchCommandMessage`
+  - L141: function `buildPerf`
+  - L157: function `safePost`
+  - L183: function `setRunning`
+  - L195: function `resetTimingForCurrentSim`
+  - L217: function `readStructState`
+  - L228: function `createGroupState`
+  - L238: function `cloneGroupState`
+  - L247: function `cloneSceneFlags`
+  - L259: function `maybeSyncTimestepFromOptions`
+  - L269: function `emitOptionState`
+  - L292: function `getOptionsForSnapshot`
+  - L316: function `syncVoptToWasm`
+  - L353: function `ensureMjvPerturbAbi`
+  - L396: function `ensureMjvCameraAbi`
+  - L428: function `mjvMouseActionFor`
+  - L439: function `writeViewerCameraFromPayload`
+  - L479: function `readViewerFreeCameraState`
+  - L503: function `clearPerturbXfrcIfNeeded`
+  - L514: function `applyMjvPerturbForceIfActive`
+  - L525: function `applySimulatePerturbPipeline`
+  - L556: function `emitStructState`
+  - L562: function `collectCameraMeta`
+  - L617: function `emitCameraMeta`
+  - L627: function `collectGeomMeta`
+  - L641: function `emitGeomMeta`
+  - L651: function `normaliseInt`
+  - L656: function `clamp`
+  - L660: function `initHistoryBuffers`
+  - L697: function `serializeHistoryMeta`
+  - L720: function `emitHistoryMeta`
+  - L727: function `buildInfoStats`
+  - L908: function `captureHistorySample`
+  - L924: function `releaseHistoryScrub`
+  - L934: function `loadHistoryOffset`
+  - L962: function `applyHistoryConfig`
+  - L981: function `resetKeyframes`
+  - L1024: function `serializeKeyframeMeta`
+  - L1043: function `emitKeyframeMeta`
+  - L1050: function `ensureKeySlot`
+  - L1063: function `saveKeyframe`
+  - L1083: function `loadKeyframe`
+  - L1097: function `resetWatchState`
+  - L1110: function `resolveWatchField`
+  - L1117: function `updateWatchTarget`
+  - L1131: function `readWatchView`
+  - L1153: function `sampleWatch`
+  - L1188: function `emitWatchState`
+  - L1194: function `collectWatchSources`
+  - L1221: function `wasmUrl`
+  - L1225: function `cstr`
+  - L1229: function `readLastErrorMeta`
+  - L1249: function `readErrno`
+  - L1254: function `readModelCount`
+  - L1266: function `readDataCount`
+  - L1278: function `readPtr`
+  - L1291: const => `readModelPtr`
+  - L1292: const => `readDataPtr`
+  - L1294: function `computeBoundsFromPositions`
+  - L1335: function `captureBounds`
+  - L1347: function `captureCopyState`
+  - L1431: function `loadModule`
+  - L1598: function `loadXmlWithFallback`
+  - L1654: function `snapshot`
+  - L2145: function `emitRenderAssets`
+  - L2172: function `collectAssetBuffersForTransfer`
+  - L3412: function `dispatchCommandMessage`
 - 声明（嵌套）：
-  - L414: const => `writeScalar`
-  - L419: const => `writeGroup`
-  - L662: const => `readFloat`
-  - L672: const => `readInt`
-  - L1291: const => `add`
-  - L1545: const => `resolveLocalDistBase`
-  - L1576: const => `assertForgeViewerAbi`
-  - L1695: const => `ensureSim`
-  - L2162: const => `transfers`
-  - L2270: const => `push`
-  - L2672: property => `strictReport`
-  - L2675: property => `load`
-  - L2690: const => `initOptions`
-  - L2805: const => `jnt_names`
-  - L2863: property => `reset`
-  - L2873: property => `step`
-  - L2894: property => `gesture`
-  - L2970: property => `setVoptFlag`
-  - L2980: property => `setSceneFlag`
-  - L2992: property => `setLabelMode`
-  - L2998: property => `setFrameMode`
-  - L3004: property => `setCameraMode`
-  - L3009: property => `setGroupState`
-  - L3022: property => `historyScrub`
-  - L3031: property => `historyConfig`
-  - L3034: property => `keyframeSave`
-  - L3040: property => `keyframeLoad`
-  - L3047: property => `keyframeSelect`
-  - L3056: property => `setWatch`
-  - L3061: property => `setVisualOption`
-  - L3078: property => `setField`
-  - L3128: property => `applyPerturb`
-  - L3200: property => `setSelection`
-  - L3250: property => `selectAt`
-  - L3410: property => `align`
-  - L3423: property => `copyState`
-  - L3429: property => `setCtrlNoise`
-  - L3430: property => `setCtrl`
-  - L3434: property => `setQpos`
-  - L3452: property => `setEqualityActive`
-  - L3467: property => `setRate`
-  - L3471: property => `setSnapshotHz`
-  - L3492: property => `setPaused`
-  - L3502: property => `snapshot`
+  - L319: const => `writeScalar`
+  - L324: const => `writeGroup`
+  - L567: const => `readFloat`
+  - L577: const => `readInt`
+  - L1196: const => `add`
+  - L1450: const => `resolveLocalDistBase`
+  - L1481: const => `assertForgeViewerAbi`
+  - L1600: const => `ensureSim`
+  - L2067: const => `transfers`
+  - L2175: const => `push`
+  - L2577: property => `strictReport`
+  - L2580: property => `load`
+  - L2595: const => `initOptions`
+  - L2710: const => `jnt_names`
+  - L2768: property => `reset`
+  - L2778: property => `step`
+  - L2799: property => `gesture`
+  - L2875: property => `setVoptFlag`
+  - L2885: property => `setSceneFlag`
+  - L2897: property => `setLabelMode`
+  - L2903: property => `setFrameMode`
+  - L2909: property => `setCameraMode`
+  - L2914: property => `setGroupState`
+  - L2927: property => `historyScrub`
+  - L2936: property => `historyConfig`
+  - L2939: property => `keyframeSave`
+  - L2945: property => `keyframeLoad`
+  - L2952: property => `keyframeSelect`
+  - L2961: property => `setWatch`
+  - L2966: property => `setVisualOption`
+  - L2983: property => `setField`
+  - L3033: property => `applyPerturb`
+  - L3105: property => `setSelection`
+  - L3155: property => `selectAt`
+  - L3315: property => `align`
+  - L3328: property => `copyState`
+  - L3334: property => `setCtrlNoise`
+  - L3335: property => `setCtrl`
+  - L3339: property => `setQpos`
+  - L3357: property => `setEqualityActive`
+  - L3372: property => `setRate`
+  - L3376: property => `setSnapshotHz`
+  - L3397: property => `setPaused`
+  - L3407: property => `snapshot`
 - 类成员（启发式）：（无）
 
 ### `dev/plugins/test_ui_sections_plugin.mjs`
@@ -1114,95 +700,585 @@
 - 声明（嵌套）：（无）
 - 类成员（启发式）：（无）
 
+### `dev/renderer/controllers.mjs`
+
+- 行数：956
+- 导出（Exports）：
+  - L952: export `createCameraController`
+  - L952: export `createPickingController`
+- 声明（文件级）：
+  - L9: function `createCameraController`
+  - L423: function `defaultSelection`
+  - L446: function `createPickingController`
+- 声明（嵌套）：
+  - L59: const => `cameraModeIndex`
+  - L68: const => `isInteractiveCamera`
+  - L70: function `currentCtrl`
+  - L74: function `currentShift`
+  - L78: function `resolveGestureMode`
+  - L85: function `pointerButtons`
+  - L102: function `computeMinDistance`
+  - L113: function `computeWheelReldy`
+  - L118: function `buildCameraPayloadIfNeeded`
+  - L144: function `applyCameraGesture`
+  - L248: function `handlePointerDown`
+  - L275: function `handlePointerMove`
+  - L304: function `handlePointerUp`
+  - L328: function `handleWheel`
+  - L358: function `handleKey`
+  - L368: function `install`
+  - L373: const => `onPointerDown`
+  - L374: const => `onPointerMove`
+  - L375: const => `onPointerUp`
+  - L376: const => `onWheel`
+  - L377: const => `onContextMenu`
+  - L380: const => `onKeyDown`
+  - L381: const => `onKeyUp`
+  - L406: function `dispose`
+  - L418: property => `getModifierState`
+  - L483: function `hasSelection`
+  - L488: function `currentSelection`
+  - L492: function `selectionSeq`
+  - L496: function `clearSelection`
+  - L510: function `showToast`
+  - L518: function `updateSelection`
+  - L554: function `getMeshList`
+  - L574: function `projectPointer`
+  - L583: function `resolveGeomMesh`
+  - L594: function `geomNameFor`
+  - L604: function `bodyIdFor`
+  - L615: function `jointIdFor`
+  - L630: function `applySelectionFromPick`
+  - L650: function `resolveDragMode`
+  - L656: function `selectionAsBody`
+  - L662: function `updateAnchorFromSelection`
+  - L679: function `setAnchorLocalFromWorld`
+  - L715: function `resolvePick`
+  - L761: function `selectionFromPick`
+  - L769: function `beginPerturb`
+  - L788: function `movePerturb`
+  - L807: function `endPerturb`
+  - L817: function `onClick`
+  - L822: function `onDoubleClick`
+  - L841: function `onPointerMove`
+  - L846: function `onPointerDragStart`
+  - L866: function `onPointerDragEnd`
+  - L879: function `install`
+  - L880: const => `onPointerDownEvt`
+  - L889: const => `onPointerUpEvt`
+  - L896: const => `onPointerMoveEvt`
+  - L903: const => `onContextMenu`
+  - L929: function `dispose`
+- 类成员（启发式）：（无）
+
+### `dev/renderer/pipeline.mjs`
+
+- 行数：8535
+- 导出（Exports）：
+  - L8530: export `createRendererManager`
+  - L8530: export `getOrCreateGeomNameLookup`
+  - L8530: export `geomNameFromLookup`
+- 声明（文件级）：
+  - L41: function `installMuJoCoShadowViewportInset`
+  - L79: function `onBeforeShadowMuJoCo`
+  - L90: function `createInfiniteGroundHelper`
+  - L371: function `mjuRound`
+  - L392: function `depthFromSoAPos`
+  - L410: function `transparentDepthNorm01`
+  - L415: function `transparentBinFromDepthNorm`
+  - L422: function `getWorldScene`
+  - L429: function `renderWorldScene`
+  - L449: function `createGeomNameLookup`
+  - L461: function `getOrCreateGeomNameLookup`
+  - L473: function `geomNameFromLookup`
+  - L477: function `isInfinitePlaneSize`
+  - L484: function `applyGeomMetadata`
+  - L550: function `applySkyboxVisibility`
+  - L612: function `setQuatFromMat3`
+  - L647: function `computeGeomRadius`
+  - L669: function `clampUnit`
+  - L676: function `parseVectorLike`
+  - L697: function `rgbFromArray`
+  - L709: function `applyAppearanceToMaterial`
+  - L742: function `resolveIndexedRgbaAppearance`
+  - L768: function `resolveFlexAppearance`
+  - L772: function `resolveSkinAppearance`
+  - L776: function `resolveMaterialTextureDescriptor`
+  - L822: function `getMuJoCoTextureCache`
+  - L829: function `createMuJoCoDataTexture`
+  - L898: function `applyMuJoCoTextureColorspace`
+  - L909: function `createMuJoCoCubeTexture`
+  - L949: function `getOrCreateMuJoCoTexture`
+  - L1002: function `getOrCreateMuJoCoCubeTexture`
+  - L1042: function `resolveMuJoCoTextureType`
+  - L1049: function `quantize1e6`
+  - L1055: function `quantize1e3`
+  - L1061: function `resolveMuJoCoTexcoordScale3`
+  - L1088: function `ensureMuJoCo2DGeneratedTexcoords`
+  - L1204: function `ensureMuJoCoCubeAlbedoHooks`
+  - L1245: function `applyMuJoCoCubeAlbedo`
+  - L1266: function `applyMuJoCoTextureToMesh`
+  - L1419: function `computeSceneExtent`
+  - L1427: function `resolveFogConfig`
+  - L1461: function `resolveHazeConfig`
+  - L1485: function `applySceneFog`
+  - L1505: function `ensureCameraTarget`
+  - L1517: function `resolveTrackingBodyId`
+  - L1534: function `buildViewerCameraPayload`
+  - L1564: function `sendViewerCameraSync`
+  - L1583: function `ensureFreeCameraPose`
+  - L1599: function `cacheTrackingPoseFromCurrent`
+  - L1614: function `rememberFreeCameraPose`
+  - L1626: function `restoreFreeCameraPose`
+  - L1642: function `applyTrackingCamera`
+  - L1727: function `ensureMjLightRig`
+  - L1751: function `removeMjLightSlot`
+  - L1757: function `createMjLightSlot`
+  - L1784: function `ensureMjLightSlot`
+  - L1796: function `disableMjLightSlot`
+  - L1803: function `updateMjLightRig`
+  - L2101: function `applyFixedCameraPreset`
+  - L2149: function `applyViewerCameraSnapshot`
+  - L2196: function `computeBoundsFromSceneSoA`
+  - L2258: function `scaleAllFactor`
+  - L2264: function `voptEnabled`
+  - L2268: function `normalizeDeltaByViewportHeight`
+  - L2275: function `meanSizeFromState`
+  - L2289: function `computeScenePolicy`
+  - L2315: function `disposeLabelTextureCache`
+  - L2328: function `getLabelTexture`
+  - L2389: function `createLabelSprite`
+  - L2406: function `ensureLabelGroup`
+  - L2418: function `hideLabelGroup`
+  - L2429: function `updateSceneLabelOverlays`
+  - L2500: function `computeGeometryBounds`
+  - L2505: function `createPrimitiveGeometry`
+  - L2661: function `isDynamicSizeScaleGeomType`
+  - L2677: function `safeScaleRatio`
+  - L2684: function `ensureGeomBuiltSizes`
+  - L2752: function `applyDynamicSizeScale`
+  - L2821: function `createMeshGeometryFromAssets`
+  - L3099: function `disposeMeshObject`
+  - L3172: function `disposeObject3DTree`
+  - L3215: function `disposeInstancing`
+  - L3255: class `MaterialPool`
+  - L3301: class `RefCountedAssetRegistry`
+  - L3375: function `ensureOverlay3D`
+  - L4388: function `disposeOverlay3D`
+  - L4400: function `syncRendererAssets`
+  - L4455: function `ensureInstancingRoot`
+  - L4490: function `ensureInstancedGeometry`
+  - L4525: function `instancingEnabledFromState`
+  - L4529: function `transparentBinsFromState`
+  - L4535: function `transparentSortModeFromState`
+  - L4541: function `ensureInstancedMaterial`
+  - L4600: function `ensureInstancedBatch`
+  - L4678: function `sortInstancedBatchByOrderRank`
+  - L4776: function `resolveGeomWorldMatrix`
+  - L4801: function `resolveGeomWorldPose`
+  - L4808: function `getSharedMeshGeometry`
+  - L4832: function `segmentColorForIndex`
+  - L4838: function `restoreSegmentMaterial`
+  - L4848: function `ensureSegmentMaterial`
+  - L4869: function `applyMaterialFlags`
+  - L4875: function `resolveMaterialScalar`
+  - L4883: function `resolveMaterialReflectance`
+  - L4889: function `resolveMaterialMetallic`
+  - L4894: function `resolveMaterialRoughness`
+  - L4899: function `resolveMaterialEmission`
+  - L4905: function `applyReflectanceToMaterial`
+  - L4939: function `ensureGeomMesh`
+  - L5127: function `ensureGeomState`
+  - L5217: function `setGeomViewProps`
+  - L5287: function `updateInfinitePlaneFromSceneSoA`
+  - L5428: function `getDefaultVopt`
+  - L5436: function `ensureFlexGroup`
+  - L5449: function `hideFlexGroup`
+  - L5460: function `ensureFlexEntry`
+  - L5570: function `applyFlexAppearance`
+  - L5585: function `normalize3Inv`
+  - L5591: function `flexMakeFace`
+  - L5620: function `flexAddNormal`
+  - L5636: function `flexMakeSmooth`
+  - L5674: function `flexMakeSide`
+  - L5703: function `fillFlexFaceTexcoords`
+  - L5728: function `updateFlexFaces`
+  - L6041: function `ensureSkinGroup`
+  - L6054: function `hideSkinGroup`
+  - L6065: function `ensureSkinEntry`
+  - L6158: function `applySkinAppearance`
+  - L6169: function `quatToMat3`
+  - L6194: function `updateSkinMesh`
+  - L6341: function `applyMjvSceneSoAGeoms`
+  - L7628: function `createRendererManager`
+- 声明（嵌套）：
+  - L556: const => `setSolidBackground`
+  - L876: const => `isPow2`
+  - L1681: function `syncCameraPoseFromMode`
+  - L2253: function `overlayScale`
+  - L2283: function `computeMeanScale`
+  - L3325: const => `release`
+  - L3477: property => `acquire`
+  - L3482: property => `geometryPrimitive`
+  - L3507: property => `texture2DFromUrl`
+  - L3534: const => `addObject3D`
+  - L3617: const => `resolveTransparency`
+  - L3670: const => `wantsFrameSort`
+  - L3675: const => `updateFrameRegistration`
+  - L3706: const => `updateBoundingSphere`
+  - L3754: const => `syncToGpu`
+  - L3939: const => `flushCommit`
+  - L3958: const => `commit`
+  - L3964: const => `onFrame`
+  - L3972: const => `setTransparency`
+  - L4006: const => `dispose`
+  - L4083: const => `flushCommit`
+  - L4098: const => `commit`
+  - L4105: const => `dispose`
+  - L4164: const => `flushCommit`
+  - L4179: const => `commit`
+  - L4186: const => `dispose`
+  - L4234: const => `dispose`
+  - L4266: property => `dispose`
+  - L5706: const => `writeUV`
+  - L5736: const => `ensureAttribute`
+  - L6446: const => `isBodyStatic`
+  - L6709: const => `safeHide`
+  - L6717: const => `ensureGeomProxy`
+  - L6751: const => `fillSizeVec`
+  - L6777: const => `updateOne`
+  - L7668: function `requestRenderScene`
+  - L7674: function `onFrame`
+  - L7687: function `updateRendererViewport`
+  - L7708: function `ensureRenderLoop`
+  - L7714: const => `step`
+  - L7785: const => `visHandler`
+  - L7801: function `initRenderer`
+  - L7920: const => `resizeListener`
+  - L7928: function `renderScene`
+  - L8106: const => `trackingOverride`
+  - L8378: function `setup`
+  - L8383: function `getContext`
+  - L8387: function `getOverlay3D`
+  - L8393: function `dispose`
+  - L8457: const => `disposeResource`
+  - L8519: property => `updateViewport`
+- 类成员（启发式）：
+  - L3256: method `MaterialPool#constructor`
+  - L3260: method `MaterialPool#_key`
+  - L3289: method `MaterialPool#disposeAll`
+  - L3302: method `RefCountedAssetRegistry#constructor`
+  - L3308: method `RefCountedAssetRegistry#acquire`
+  - L3337: method `RefCountedAssetRegistry#strictCatch`
+  - L3351: method `RefCountedAssetRegistry#disposeAll`
+  - L3358: method `RefCountedAssetRegistry#strictCatch`
+  - L3365: method `RefCountedAssetRegistry#stats`
+
+### `dev/renderer/renderer_core.mjs`
+
+- 行数：5
+- 导出（Exports）：
+  - L2: export `createRendererManager } from './pipeline.mjs'`
+  - L2: export `{ createCameraController`
+  - L2: export `createPickingController } from './controllers.mjs'`
+- 声明（文件级）：（未发现）
+- 声明（嵌套）：（无）
+- 类成员（启发式）：（无）
+
+### `dev/ui/control_manager.mjs`
+
+- 行数：3074
+- 导出（Exports）：
+  - L3073: export `createControlManager`
+- 声明（文件级）：
+  - L13: function `createControlManager`
+  - L558: function `formatNumber`
+  - L568: function `formatNumberTrimmed`
+  - L576: function `attachCommitHandlers`
+  - L592: function `attachOptionAvailability`
+  - L600: function `appendUpdateOptions`
+  - L613: function `pushToast`
+  - L716: function `normaliseToRange`
+  - L729: function `denormaliseFromRange`
+  - L747: function `resolveCameraModeEntries`
+  - L772: function `getCameraModeCount`
+  - L782: function `syncCameraSelectOptions`
+  - L815: function `resolveTrackingGeomEntries`
+  - L837: function `syncTrackingGeomSelectOptions`
+  - L872: function `resolveResetValue`
+  - L888: function `normaliseShortcutSpec`
+  - L912: function `canonicalShortcut`
+  - L944: function `normaliseKeyToken`
+  - L958: function `shortcutFromEvent`
+- 声明（嵌套）：
+  - L33: const => `refreshModelSelectOptions`
+  - L56: const => `addModelEntry`
+  - L77: function `loadXmlTextAsModel`
+  - L105: function `deriveXmlFileName`
+  - L113: function `pickDirectoryHandle`
+  - L126: function `promptDirectoryHandleForXmlRefs`
+  - L141: const => `folderHint`
+  - L197: const => `addRow`
+  - L231: const => `cleanup`
+  - L237: const => `resolveCancel`
+  - L275: function `findFirstFileByName`
+  - L308: function `getFileHandleByRelPath`
+  - L323: function `readDirectoryFileArrayBuffer`
+  - L329: function `buildMuJoCoBundle`
+  - L338: function `readUrlFileArrayBuffer`
+  - L349: function `loadXmlTextWithFolderRefs`
+  - L404: function `loadXmlTextWithUrlRefs`
+  - L448: function `applyThemeFromColorControl`
+  - L459: function `applySpacingFromControl`
+  - L473: function `applyFontFromControl`
+  - L517: function `sanitiseName`
+  - L527: function `normaliseOptions`
+  - L536: const => `getOptionSupport`
+  - L539: function `isOptionBinding`
+  - L543: function `applyOptionAvailability`
+  - L624: function `elementIsEditable`
+  - L637: function `hasEditableFocus`
+  - L660: function `parseRange`
+  - L890: const => `addCombo`
+  - L987: function `registerShortcutHandlers`
+  - L996: function `registerGlobalShortcut`
+  - L1001: function `registerControl`
+  - L1009: function `createBinding`
+  - L1014: property => `setValue`
+  - L1024: function `guardBinding`
+  - L1031: function `createControlRow`
+  - L1042: function `createNamedRow`
+  - L1053: function `createFullRow`
+  - L1061: function `renderFileSectionExtras`
+  - L1122: const => `loadXmlFileImpl`
+  - L1267: function `createLabeledRow`
+  - L1278: function `expandSection`
+  - L1284: function `appendGroupedEntries`
+  - L1332: function `loadUiSpec`
+  - L1345: function `createBoolToggleElements`
+  - L1371: function `renderDisabledCheckbox`
+  - L1377: function `renderCheckbox`
+  - L1383: property => `getValue`
+  - L1384: property => `applyValue`
+  - L1436: function `renderRunToggle`
+  - L1445: const => `sync`
+  - L1453: property => `getValue`
+  - L1457: property => `applyValue`
+  - L1478: function `renderButton`
+  - L1511: property => `getValue`
+  - L1512: property => `setValue`
+  - L1526: function `resolveColorLabel`
+  - L1553: function `resolveSpacingLabel`
+  - L1578: function `resolveFontLabel`
+  - L1626: function `resolveSelectMeta`
+  - L1646: function `syncSelectOptions`
+  - L1663: function `readSelectValue`
+  - L1678: function `applySelectValue`
+  - L1728: function `renderSelect`
+  - L1744: property => `getValue`
+  - L1745: property => `applyValue`
+  - L1775: function `buildSegmentedOptions`
+  - L1798: function `createSegmentedGroup`
+  - L1826: function `attachSegmentedHandlers`
+  - L1840: function `renderVisualSourceControl`
+  - L1870: const => `resolveKey`
+  - L1879: property => `getValue`
+  - L1880: property => `applyValue`
+  - L1888: property => `onCommit`
+  - L1901: function `renderRadio`
+  - L1912: property => `getValue`
+  - L1913: property => `applyValue`
+  - L1920: property => `onCommit`
+  - L1926: function `renderSlider`
+  - L1948: const => `resolveRange`
+  - L1987: property => `getValue`
+  - L1994: property => `applyValue`
+  - L2008: const => `updateAvailability`
+  - L2039: const => `setEditing`
+  - L2050: function `createTextInputField`
+  - L2074: function `renderEditInput`
+  - L2080: property => `getValue`
+  - L2085: property => `applyValue`
+  - L2142: function `renderVectorInputBase`
+  - L2157: const => `formatVector`
+  - L2159: const => `setInputText`
+  - L2165: property => `getValue`
+  - L2166: property => `applyValue`
+  - L2192: const => `showInvalid`
+  - L2223: function `renderVectorInput`
+  - L2232: function `renderVec3StringInput`
+  - L2241: function `renderStatic`
+  - L2250: property => `getValue`
+  - L2251: property => `applyValue`
+  - L2273: function `renderWatchField`
+  - L2285: const => `syncOptions`
+  - L2299: property => `getValue`
+  - L2300: property => `applyValue`
+  - L2316: function `renderKeyframeSelect`
+  - L2327: const => `syncOptions`
+  - L2361: property => `getValue`
+  - L2362: property => `applyValue`
+  - L2383: function `renderSimulationNoiseNotice`
+  - L2395: function `renderSeparator`
+  - L2419: property => `edit_int`
+  - L2420: property => `edit_float`
+  - L2421: property => `edit_text`
+  - L2422: property => `edit_vec2`
+  - L2423: property => `edit_vec3`
+  - L2424: property => `edit_vec3_string`
+  - L2425: property => `edit_vec5`
+  - L2426: property => `edit_rgba`
+  - L2441: function `renderControl`
+  - L2468: function `renderSection`
+  - L2513: const => `setCollapsed`
+  - L2529: const => `toggleCollapsed`
+  - L2602: function `ensureDynamicList`
+  - L2657: function `resolveListIndex`
+  - L2662: function `ensureDynamicSliders`
+  - L2680: property => `updateExisting`
+  - L2716: property => `buildItem`
+  - L2740: const => `clearEditing`
+  - L2758: function `renderPanels`
+  - L2780: function `updateControls`
+  - L2800: function `toggleControl`
+  - L2827: function `cycleCamera`
+  - L2836: function `installShortcuts`
+  - L2840: const => `handler`
+  - L2872: function `dispose`
+  - L2894: property => `getBinding`
+  - L2896: property => `listIds`
+  - L2901: property => `getControl`
+  - L2902: property => `createSection`
+  - L2921: property => `ensureActuatorSliders`
+  - L2929: property => `getIndex`
+  - L2930: property => `getLabel`
+  - L2931: property => `getRange`
+  - L2936: property => `getValue`
+  - L2945: property => `onInput`
+  - L2960: property => `ensureJointSliders`
+  - L2968: property => `getIndex`
+  - L2969: property => `getLabel`
+  - L2970: property => `getRange`
+  - L2977: property => `getValue`
+  - L2979: property => `onInput`
+  - L2999: property => `ensureEqualityToggles`
+  - L3006: property => `updateExisting`
+  - L3026: property => `buildItem`
+- 类成员（启发式）：（无）
+
+### `dev/ui/state.mjs`
+
+- 行数：2216
+- 导出（Exports）：
+  - L102: export function `readPersistedSectionCollapsed`
+  - L113: export function `writePersistedSectionCollapsed`
+  - L124: export function `resolvePlayPanelId`
+  - L135: export function `setPlaySectionCollapsed`
+  - L164: export function `toggleAllPlaySections`
+  - L196: export function `installPanelSectionDblclickDelegation`
+  - L2207: export `DEFAULT_VIEWER_STATE`
+  - L2207: export `applyGesture`
+  - L2207: export `applySpecAction`
+  - L2207: export `createViewerStore`
+  - L2207: export `mergeBackendSnapshot`
+  - L2207: export `prepareBindingUpdate`
+  - L2207: export `readControlValue`
+- 声明（文件级）：
+  - L34: function `clamp01`
+  - L51: function `sectionCollapsedMapKey`
+  - L57: function `getSectionCollapsedCache`
+  - L79: function `flushSectionCollapsedCache`
+  - L93: function `queueSectionCollapsedFlush`
+  - L102: function `readPersistedSectionCollapsed`
+  - L113: function `writePersistedSectionCollapsed`
+  - L124: function `resolvePlayPanelId`
+  - L135: function `setPlaySectionCollapsed`
+  - L164: function `toggleAllPlaySections`
+  - L196: function `installPanelSectionDblclickDelegation`
+  - L246: function `ensureBindingIndex`
+  - L271: function `resolveBindingSpec`
+  - L379: function `getControlBindingSpec`
+  - L389: function `parseNumber`
+  - L394: function `parseVector`
+  - L421: function `toBoolean`
+  - L435: function `normaliseEnumValue`
+  - L453: function `normaliseValueByKind`
+  - L474: function `normaliseControlInput`
+  - L526: function `prepareBindingUpdate`
+  - L579: function `resolveRealTimeIndexFromRate`
+  - L595: function `createDefaultSelectionState`
+  - L610: function `resetSelectionState`
+  - L654: function `flagsFromMask`
+  - L827: function `cloneViewerState`
+  - L831: function `applyViewerStateOverrides`
+  - L840: function `formatStructPath`
+  - L844: function `valuesEqual`
+  - L856: function `diffStruct`
+  - L873: function `resetModelFrontendState`
+  - L882: function `cameraLabelFromIndex`
+  - L895: function `mergeBackendSnapshot`
+  - L1349: function `ensureRenderingState`
+  - L1431: function `ensureState`
+  - L1439: const => `ensureHistoryState`
+  - L1440: const => `ensureWatchState`
+  - L1441: const => `ensureKeyframeState`
+  - L1443: function `ensureThemeState`
+  - L1476: function `parseThemeBinary`
+  - L1599: function `applyBinding`
+  - L1609: function `formatKeyframeLabelFromState`
+  - L1641: function `applyControl`
+  - L1677: function `readBindingValue`
+  - L1693: function `readControlValue`
+  - L1717: function `createViewerStore`
+  - L1757: function `applySpecAction`
+  - L1811: function `applyGesture`
+  - L1930: function `applyPresetOverridesToStruct`
+  - L1951: function `applyAppearancePresetOverrides`
+  - L1969: function `ensureVisualCache`
+  - L1978: function `switchVisualSourceMode`
+  - L2193: function `normaliseSceneFlagArray`
+- 声明（嵌套）：
+  - L201: const => `handler`
+  - L1490: property => `overlay`
+  - L1494: property => `theme`
+  - L1535: property => `tracking_geom`
+  - L1543: property => `overlay`
+  - L1544: property => `run`
+  - L1550: property => `camera`
+  - L1551: property => `tracking_geom`
+  - L1552: property => `scrub_index`
+  - L1553: property => `key_index`
+  - L1554: property => `watch_field`
+  - L1555: property => `watch_index`
+  - L1556: property => `theme`
+  - L1557: property => `watch_summary`
+  - L1564: property => `group`
+  - L1573: property => `mask`
+  - L1580: property => `sim_opt`
+  - L1581: property => `struct`
+  - L1593: property => `vopt_flag`
+  - L1594: property => `scene_flag`
+  - L1595: property => `label_mode`
+  - L1596: property => `frame_mode`
+  - L1722: function `notify`
+- 类成员（启发式）：（无）
+
+### `dev/ui/ui_core.mjs`
+
+- 行数：5
+- 导出（Exports）：
+  - L3: export `createControlManager } from './control_manager.mjs'`
+- 声明（文件级）：（未发现）
+- 声明（嵌套）：（无）
+- 类成员（启发式）：（无）
+
 ### `dev/viewer_backend.mjs`
 
-- 行数：2161
+- 行数：3
 - 导出（Exports）：
-  - L396: export function `createBackend`
-- 声明（文件级）：
-  - L32: function `applyViewFields`
-  - L43: function `applyHistoryPayload`
-  - L54: function `applyKeyframesPayload`
-  - L88: function `applyWatchPayload`
-  - L122: function `resolveModelFileName`
-  - L135: function `buildModelCandidates`
-  - L153: function `createInitialSnapshot`
-  - L200: function `resolveSnapshot`
-  - L396: function `createBackend`
-- 声明（嵌套）：
-  - L138: const => `pushCandidate`
-  - L201: const => `viewOrNull`
-  - L265: property => `sceneFlags`
-  - L417: const => `normaliseInt`
-  - L421: const => `sampleIfFinite`
-  - L455: function `resetAdaptiveSnapshotState`
-  - L464: function `ewma`
-  - L470: function `postSnapshotHzIfChanged`
-  - L487: function `maybeUpdateAdaptiveSnapshotHz`
-  - L548: function `applySimulateMaskBinding`
-  - L581: function `spawnWorkerBackend`
-  - L586: function `collectLoadTransfers`
-  - L600: function `requestWorkerStrictReport`
-  - L616: function `loadDefaultXml`
-  - L677: function `notifyListeners`
-  - L709: function `detachClient`
-  - L716: function `restartWorkerWithLoadPayload`
-  - L768: function `restartWorkerWithXml`
-  - L773: function `formatCopyNumber`
-  - L782: function `buildCopyKeyXmlFromPayload`
-  - L809: const => `format`
-  - L834: function `writeCopyKeyToClipboard`
-  - L849: function `applyOptionSnapshot`
-  - L882: function `setRunState`
-  - L895: function `setRate`
-  - L907: function `loadXmlText`
-  - L913: function `loadXmlBundle`
-  - L922: function `applyVisualStatePayload`
-  - L959: function `updateGeometryCaches`
-  - L960: const => `makeView`
-  - L974: const => `makeViewOrNull`
-  - L988: property => `strict_report`
-  - L996: property => `run_state`
-  - L1003: property => `ready`
-  - L1093: property => `latency_probe`
-  - L1105: property => `struct_state`
-  - L1115: property => `meta_cameras`
-  - L1125: property => `meta_geoms`
-  - L1129: property => `selection`
-  - L1146: property => `meta_joints`
-  - L1147: const => `toI32`
-  - L1174: const => `jrange`
-  - L1192: property => `meta`
-  - L1210: property => `snapshot`
-  - L1445: property => `keyframes`
-  - L1449: property => `history`
-  - L1453: property => `watch`
-  - L1461: property => `render_assets`
-  - L1484: property => `gesture`
-  - L1500: property => `align`
-  - L1515: property => `copyState`
-  - L1542: property => `options`
-  - L1546: property => `log`
-  - L1549: property => `error`
-  - L1561: function `handleMessage`
-  - L1746: property => `handle`
-  - L1765: property => `handle`
-  - L1782: property => `handle`
-  - L1797: property => `handle`
-  - L1812: function `dispatchBinding`
-  - L1837: function `apply`
-  - L1972: function `snapshot`
-  - L1976: function `subscribe`
-  - L1982: function `step`
-  - L2025: function `setCameraIndex`
-  - L2029: const => `toVec3`
-  - L2040: function `applyPerturbCommand`
-  - L2093: function `setSelectionCommand`
-  - L2108: function `selectAtCommand`
-  - L2127: function `dispose`
-  - L2149: property => `getStrictReport`
-  - L2153: property => `getInitialModelInfo`
-  - L2154: property => `getBuiltinModels`
+  - L2: export `createBackend } from './backend/backend_core.mjs'`
+- 声明（文件级）：（未发现）
+- 声明（嵌套）：（无）
 - 类成员（启发式）：（无）
 
 ### `dev/viewer_defaults.mjs`
@@ -1399,6 +1475,31 @@
 - 声明（嵌套）：（无）
 - 类成员（启发式）：（无）
 
+### `dev/worker/snapshot_pool.mjs`
+
+- 行数：117
+- 导出（Exports）：
+  - L10: export const `SNAPSHOT_POOL`
+  - L38: export const `DIRTY_REASON`
+  - L53: export function `markDirty`
+  - L62: export function `snapshotPoolSetHz`
+  - L71: export function `snapshotPoolMarkDirty`
+  - L75: export function `snapshotPoolMarkAllDirty`
+  - L79: export function `snapshotPoolResetTimers`
+  - L83: export function `snapshotPoolShouldUpdate`
+  - L91: export function `snapshotPoolDidUpdate`
+- 声明（文件级）：
+  - L32: function `snapshotPoolMarkDirtyMany`
+  - L53: function `markDirty`
+  - L62: function `snapshotPoolSetHz`
+  - L71: function `snapshotPoolMarkDirty`
+  - L75: function `snapshotPoolMarkAllDirty`
+  - L79: function `snapshotPoolResetTimers`
+  - L83: function `snapshotPoolShouldUpdate`
+  - L91: function `snapshotPoolDidUpdate`
+- 声明（嵌套）：（无）
+- 类成员（启发式）：（无）
+
 ### `dev/xml_refs.mjs`
 
 - 行数：457
@@ -1438,6 +1539,20 @@
 
 ## tools/
 
+### `tools/check_module_boundaries.mjs`
+
+- 行数：156
+- 导出（Exports）：（无）
+- 声明（文件级）：
+  - L5: function `runGit`
+  - L13: function `toPosix`
+  - L17: function `layerOf`
+  - L62: function `extractImportSpecifiers`
+  - L80: function `resolveRelativeImport`
+  - L100: function `shouldSkipFile`
+- 声明（嵌套）：（无）
+- 类成员（启发式）：（无）
+
 ### `tools/forbid_patterns.mjs`
 
 - 行数：271
@@ -1449,6 +1564,27 @@
   - L175: function `walk`
   - L192: function `findCatchViolations`
 - 声明（嵌套）：（无）
+- 类成员（启发式）：（无）
+
+### `tools/generate_code_inventory.mjs`
+
+- 行数：431
+- 导出（Exports）：（无）
+- 声明（文件级）：
+  - L49: function `listTrackedFiles`
+  - L65: function `isExcluded`
+  - L69: function `inferGroup`
+  - L76: function `parseExportBlock`
+  - L119: function `parseJsLike`
+  - L286: function `parsePython`
+  - L318: function `buildInventory`
+  - L345: function `renderMarkdown`
+  - L419: function `writeDocs`
+- 声明（嵌套）：
+  - L126: function `pushDecl`
+  - L131: function `isCommentLike`
+  - L136: function `recordClassMembers`
+  - L291: function `pushDecl`
 - 类成员（启发式）：（无）
 
 ### `tools/generate_ui_artifacts.mjs`
@@ -1504,6 +1640,17 @@
   - L70: function `walkDir`
   - L87: function `isShipPath`
   - L92: function `getShipRelPath`
+- 声明（嵌套）：（无）
+- 类成员（启发式）：（无）
+
+### `tools/run_checks.mjs`
+
+- 行数：66
+- 导出（Exports）：（无）
+- 声明（文件级）：
+  - L5: function `run`
+  - L17: function `listNodeTests`
+  - L27: function `fileExists`
 - 声明（嵌套）：（无）
 - 类成员（启发式）：（无）
 

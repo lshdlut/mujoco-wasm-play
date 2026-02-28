@@ -19,11 +19,16 @@ Key runtime entrypoints
 Key runtime modules
 -------------------
 
-- ``dev/viewer_backend.mjs``: backend façade (spawns Worker, translates UI/gesture actions into commands)
+- ``dev/viewer_backend.mjs``: backend façade (stable import path)
+  - implementation: ``dev/backend/backend_core.mjs``
 - ``dev/viewer_runtime.mjs``: logging, strict/compat/perf helpers, URL param helpers
-- ``dev/main_ui.mjs``: UI spec wiring, store, control manager, section behavior
-- ``dev/main_renderer.mjs``: Three.js renderer manager and overlay3d system
-- ``dev/bridge.mjs``: forge/WASM bridge helpers (FS writes, typed views, assets)
+- ``dev/main_ui.mjs``: UI façade (stable import path)
+  - internals: ``dev/ui/state.mjs`` + ``dev/ui/control_manager.mjs``
+- ``dev/main_renderer.mjs``: renderer façade (stable import path)
+  - internals: ``dev/renderer/pipeline.mjs`` + ``dev/renderer/controllers.mjs``
+- ``dev/bridge.mjs``: bridge façade (stable import path)
+  - implementation: ``dev/bridge/bridge_core.mjs``
+- ``dev/worker/snapshot_pool.mjs``: worker snapshot pool policy/state
 
 Generated artifacts (committed)
 -------------------------------
@@ -46,4 +51,3 @@ Forge dist bundles
 This repo may vendor one or more forge bundles under ``dev/dist/<ver>/`` for
 local/demo convenience, but the build pipeline for these artifacts lives in the
 forge repo (``mujoco-wasm-forge``).
-
