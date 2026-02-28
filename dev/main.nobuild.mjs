@@ -996,6 +996,7 @@ const pickingController = createPickingController({
   store,
   backend,
   renderCtx,
+  applySpecAction,
   debugMode,
   getSnapshot: () => latestSnapshot,
 });
@@ -1816,8 +1817,19 @@ if (typeof window !== 'undefined') {
       },
     },
   };
+  const HOST_CAPABILITIES = Object.freeze({
+    mounts: true,
+    ui: true,
+    store: true,
+    backend: true,
+    controls: true,
+    renderer: true,
+    clock: true,
+    overlay3d: true,
+  });
   window.__PLAY_HOST__ = {
     apiVersion: 1,
+    capabilities: HOST_CAPABILITIES,
     mounts: {
       leftPanel: leftPanelMount,
       rightPanel: rightPanelMount,
