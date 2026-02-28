@@ -47,13 +47,19 @@ const JS_METHOD_NAME_BLACKLIST = new Set([
 ]);
 
 function listTrackedFiles() {
-  const out = execFileSync('git', ['ls-files'], { cwd: repoRoot });
-  return out
+  const tracked = execFileSync('git', ['ls-files'], { cwd: repoRoot })
     .toString('utf8')
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => line.replace(/\\/g, '/'));
+  const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: repoRoot })
+    .toString('utf8')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/\\/g, '/'));
+  return Array.from(new Set([...tracked, ...untracked]));
 }
 
 function isExcluded(relPath) {
