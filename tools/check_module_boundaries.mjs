@@ -16,25 +16,23 @@ function toPosix(relPath) {
 
 function layerOf(relPath) {
   const p = toPosix(relPath);
-  if (!p.startsWith('dev/')) return null;
 
-  if (p === 'dev/main.nobuild.mjs') return 'entry';
+  if (p === 'app/main.mjs') return 'entry';
 
-  if (p === 'dev/main_ui.mjs' || p.startsWith('dev/ui/')) return 'ui';
-  if (p === 'dev/main_renderer.mjs' || p.startsWith('dev/renderer/')) return 'renderer';
-  if (p === 'dev/viewer_backend.mjs' || p.startsWith('dev/backend/')) return 'backend';
-  if (p === 'dev/physics.worker.mjs' || p.startsWith('dev/worker/')) return 'worker';
-  if (p === 'dev/bridge.mjs' || p.startsWith('dev/bridge/')) return 'bridge';
-  if (p === 'dev/main_environment.mjs' || p.startsWith('dev/environment/')) return 'environment';
+  if (p.startsWith('app/')) return 'entry';
+  if (p.startsWith('ui/')) return 'ui';
+  if (p.startsWith('renderer/')) return 'renderer';
+  if (p.startsWith('backend/')) return 'backend';
+  if (p === 'worker/protocol.gen.mjs' || p === 'worker/dispatch.gen.mjs') return 'protocol';
+  if (p === 'worker/physics.worker.mjs' || p.startsWith('worker/')) return 'worker';
+  if (p.startsWith('bridge/')) return 'bridge';
+  if (p.startsWith('environment/')) return 'environment';
+  if (p.startsWith('core/')) return 'base';
 
-  if (p === 'dev/protocol.gen.mjs' || p === 'dev/dispatch.gen.mjs' || p.startsWith('dev/protocol/')) return 'protocol';
+  if (p.startsWith('plugins/')) return 'plugin';
+  if (p.startsWith('spec/')) return 'spec';
 
-  if (p.startsWith('dev/viewer_') || p === 'dev/fallbacks.mjs' || p === 'dev/xml_refs.mjs') return 'base';
-
-  if (p.startsWith('dev/plugins/')) return 'plugin';
-  if (p.startsWith('dev/spec/')) return 'spec';
-
-  return 'misc';
+  return null;
 }
 
 const ALLOWED_IMPORTS = {
@@ -99,26 +97,35 @@ function resolveRelativeImport(fromRel, spec) {
 
 function shouldSkipFile(relPath) {
   const p = toPosix(relPath);
-  if (!p.startsWith('dev/')) return true;
-  if (p.startsWith('dev/node_modules/')) return true;
-  if (p.startsWith('dev/dist/')) return true;
-  if (p.startsWith('dev/model/')) return true;
-  if (p.startsWith('dev/local_model/')) return true;
-  if (p.startsWith('dev/spec/')) return true;
-  if (p.startsWith('dev/plugins/')) return true;
+  if (p.startsWith('node_modules/')) return true;
+  if (p.startsWith('dist/')) return true;
+  if (p.startsWith('local_tools/')) return true;
+  if (p.startsWith('local_model/')) return true;
+  if (p.startsWith('model/')) return true;
+  if (p.startsWith('spec/')) return true;
+  if (p.startsWith('plugins/')) return true;
+  if (p.startsWith('assets/')) return true;
+  if (p.startsWith('doc/')) return true;
+  if (p.startsWith('tests/')) return true;
+  if (p.startsWith('tools/')) return true;
   return false;
 }
 
 const tracked = runGit(['ls-files']).split(/\r?\n/).filter(Boolean).map(toPosix);
 const untracked = runGit(['ls-files', '--others', '--exclude-standard']).split(/\r?\n/).filter(Boolean).map(toPosix);
 const allFiles = Array.from(new Set([...tracked, ...untracked]));
-const devFiles = allFiles.filter((p) => (p.endsWith('.mjs') || p.endsWith('.ts')) && p.startsWith('dev/') && !shouldSkipFile(p));
-const devSet = new Set(devFiles);
+const codeFiles = allFiles.filter((p) => {
+  if (!(p.endsWith('.mjs') || p.endsWith('.ts'))) return false;
+  if (!layerOf(p)) return false;
+  if (shouldSkipFile(p)) return false;
+  return fs.existsSync(path.resolve(process.cwd(), p));
+});
+const codeSet = new Set(codeFiles);
 
 const violations = [];
 let edgeCount = 0;
 
-for (const fromRel of devFiles) {
+for (const fromRel of codeFiles) {
   const fromLayer = layerOf(fromRel);
   const allow = ALLOWED_IMPORTS[fromLayer] || null;
   if (!allow) continue;
@@ -132,7 +139,7 @@ for (const fromRel of devFiles) {
 
     const toRel = resolveRelativeImport(fromRel, spec);
     if (!toRel) continue;
-    if (!devSet.has(toRel)) continue;
+    if (!codeSet.has(toRel)) continue;
 
     edgeCount += 1;
     const toLayer = layerOf(toRel);
@@ -152,4 +159,4 @@ if (violations.length) {
   process.exit(1);
 }
 
-console.log(`[boundaries] OK (${devFiles.length} files, ${edgeCount} edges)`);
+console.log(`[boundaries] OK (${codeFiles.length} files, ${edgeCount} edges)`);

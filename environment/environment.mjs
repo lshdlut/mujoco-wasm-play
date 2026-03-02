@@ -5,7 +5,9 @@ import {
   logWarn,
   strictCatch,
   strictEnsure,
-} from './viewer_runtime.mjs';
+} from '../core/viewer_runtime.mjs';
+
+const ASSET_ENV_BASE_URL = new URL('../assets/env/', import.meta.url);
 
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
@@ -43,7 +45,7 @@ const FALLBACK_PRESETS = {
     // Kept deliberately low so HDRI does not wash out shadows.
     envIntensity: 0.35,
     // Preset-specific environment settings
-    hdri: 'rustig_koppie_puresky_4k.hdr',
+    hdri: new URL('rustig_koppie_puresky_4k.hdr', ASSET_ENV_BASE_URL).href,
     backgroundBottom: 0x6a8bb3,
     ground: {
       style: 'shadow',
@@ -89,7 +91,7 @@ const FALLBACK_PRESETS = {
     fill: { color: 0x182030, intensity: 0.14, position: [-1.5, 1.5, 1] },
     shadowBias: -0.0002,
     envIntensity: 0.08,
-    hdri: 'starmap_random_2020_4k_rot.exr',
+    hdri: new URL('starmap_random_2020_4k_rot.exr', ASSET_ENV_BASE_URL).href,
     backgroundBottom: 0x02030a,
     ground: {
       style: 'shadow',
@@ -917,7 +919,7 @@ function createEnvironmentManager({
     // Decide which preset HDRI to use from the unified rendering buffer.
     const url = (preset && typeof preset.hdri === 'string' && preset.hdri.length)
       ? preset.hdri
-      : 'rustig_koppie_puresky_4k.hdr';
+      : new URL('rustig_koppie_puresky_4k.hdr', ASSET_ENV_BASE_URL).href;
     const hdrReady =
       ctx.envFromHDRI &&
       ctx.envRT &&

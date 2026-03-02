@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,9 +10,10 @@ const repoRoot = path.resolve(__dirname, '..');
 const CODE_EXTS = new Set(['.mjs', '.js', '.ts', '.py']);
 
 const EXCLUDE_PREFIXES = [
-  'dev/dist/',
-  'dev/node_modules/',
+  'dist/',
+  'node_modules/',
   'tests/playwright-report/',
+  'tests/test-results/',
 ];
 
 const JS_METHOD_NAME_BLACKLIST = new Set([
@@ -59,7 +60,8 @@ function listTrackedFiles() {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => line.replace(/\\/g, '/'));
-  return Array.from(new Set([...tracked, ...untracked]));
+  return Array.from(new Set([...tracked, ...untracked]))
+    .filter((relPath) => existsSync(path.resolve(repoRoot, relPath)));
 }
 
 function isExcluded(relPath) {
@@ -67,7 +69,14 @@ function isExcluded(relPath) {
 }
 
 function inferGroup(relPath) {
-  if (relPath.startsWith('dev/')) return 'dev';
+  if (relPath.startsWith('app/')) return 'app';
+  if (relPath.startsWith('core/')) return 'core';
+  if (relPath.startsWith('environment/')) return 'environment';
+  if (relPath.startsWith('backend/')) return 'backend';
+  if (relPath.startsWith('bridge/')) return 'bridge';
+  if (relPath.startsWith('renderer/')) return 'renderer';
+  if (relPath.startsWith('ui/')) return 'ui';
+  if (relPath.startsWith('worker/')) return 'worker';
   if (relPath.startsWith('tools/')) return 'tools';
   if (relPath.startsWith('tests/')) return 'tests';
   return null;
@@ -368,7 +377,7 @@ function renderMarkdown({ language, generatedAt, files }) {
   out.push(...intro);
   out.push('');
 
-  const groups = ['dev', 'tools', 'tests'];
+  const groups = ['app', 'core', 'environment', 'backend', 'bridge', 'renderer', 'ui', 'worker', 'tools', 'tests'];
   for (const group of groups) {
     const groupFiles = files.filter((f) => f.group === group);
     out.push(`## ${group}/`);

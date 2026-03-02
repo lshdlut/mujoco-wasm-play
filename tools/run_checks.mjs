@@ -15,12 +15,12 @@ function run(label, args, options = {}) {
 }
 
 function listNodeTests() {
-  const dir = path.resolve(process.cwd(), 'test');
+  const dir = path.resolve(process.cwd(), 'tests', 'unit');
   if (!fs.existsSync(dir)) return [];
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   return entries
     .filter((entry) => entry.isFile() && entry.name.endsWith('.test.mjs'))
-    .map((entry) => path.join('test', entry.name))
+    .map((entry) => path.join('tests', 'unit', entry.name))
     .sort();
 }
 
@@ -39,27 +39,29 @@ if (tests.length) {
   run('node_tests', ['--test', ...tests]);
 }
 
-  // Syntax-only checks for browser-only entrypoints.
-  run('syntax: main_renderer', ['--check', 'dev/main_renderer.mjs']);
-  if (fileExists('dev/renderer/renderer_core.mjs')) {
-    run('syntax: renderer_core', ['--check', 'dev/renderer/renderer_core.mjs']);
-  }
-  if (fileExists('dev/renderer/pipeline.mjs')) {
-    run('syntax: renderer_pipeline', ['--check', 'dev/renderer/pipeline.mjs']);
-  }
-  if (fileExists('dev/renderer/controllers.mjs')) {
-    run('syntax: renderer_controllers', ['--check', 'dev/renderer/controllers.mjs']);
-  }
-  run('syntax: physics.worker', ['--check', 'dev/physics.worker.mjs']);
-  if (fileExists('dev/worker/snapshot_pool.mjs')) {
-    run('syntax: snapshot_pool', ['--check', 'dev/worker/snapshot_pool.mjs']);
-  }
-  run('syntax: main.nobuild', ['--check', 'dev/main.nobuild.mjs']);
-  if (fileExists('dev/backend/backend_core.mjs')) {
-    run('syntax: backend_core', ['--check', 'dev/backend/backend_core.mjs']);
-  }
-  if (fileExists('dev/bridge/bridge_core.mjs')) {
-    run('syntax: bridge_core', ['--check', 'dev/bridge/bridge_core.mjs']);
-  }
+// Syntax-only checks for browser-only entrypoints.
+if (fileExists('ui/state.mjs')) {
+  run('syntax: ui_state', ['--check', 'ui/state.mjs']);
+}
+if (fileExists('ui/control_manager.mjs')) {
+  run('syntax: ui_control_manager', ['--check', 'ui/control_manager.mjs']);
+}
+if (fileExists('renderer/pipeline.mjs')) {
+  run('syntax: renderer_pipeline', ['--check', 'renderer/pipeline.mjs']);
+}
+if (fileExists('renderer/controllers.mjs')) {
+  run('syntax: renderer_controllers', ['--check', 'renderer/controllers.mjs']);
+}
+run('syntax: physics.worker', ['--check', 'worker/physics.worker.mjs']);
+if (fileExists('worker/snapshot_pool.mjs')) {
+  run('syntax: snapshot_pool', ['--check', 'worker/snapshot_pool.mjs']);
+}
+run('syntax: app_main', ['--check', 'app/main.mjs']);
+if (fileExists('backend/backend_core.mjs')) {
+  run('syntax: backend_core', ['--check', 'backend/backend_core.mjs']);
+}
+if (fileExists('bridge/heap_views.mjs')) {
+  run('syntax: bridge_heap_views', ['--check', 'bridge/heap_views.mjs']);
+}
 
 console.log('[checks] OK');

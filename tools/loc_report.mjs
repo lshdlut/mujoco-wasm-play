@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
-const shipRoot = path.join(repoRoot, 'dev');
+const shipRoot = repoRoot;
 
 const textExts = new Set([
   '.mjs',
@@ -86,11 +86,22 @@ function walkDir(rootDir, relBase = '') {
 
 function isShipPath(relPath) {
   const normalized = relPath.replace(/\\/g, '/');
-  return normalized.startsWith('dev/');
+  return (
+    normalized === 'index.html'
+    || normalized === 'favicon.ico'
+    || normalized.startsWith('app/')
+    || normalized.startsWith('backend/')
+    || normalized.startsWith('bridge/')
+    || normalized.startsWith('core/')
+    || normalized.startsWith('environment/')
+    || normalized.startsWith('renderer/')
+    || normalized.startsWith('ui/')
+    || normalized.startsWith('worker/')
+  );
 }
 
 function getShipRelPath(relPath) {
-  return relPath.replace(/^dev[\\/]/, '').replace(/\\/g, '/');
+  return relPath.replace(/\\/g, '/');
 }
 
 const trackedFiles = new Set(listTrackedFiles());
@@ -99,12 +110,13 @@ let repoLoc = 0;
 for (const relPath of trackedFiles) {
   if (!isTextFile(relPath)) continue;
   const fullPath = path.join(repoRoot, relPath);
+  if (!existsSync(fullPath)) continue;
   repoLoc += countLines(fullPath);
 }
 
 let shipHandLoc = 0;
 let shipGeneratedLoc = 0;
-const shipFiles = walkDir(shipRoot, 'dev');
+const shipFiles = walkDir(shipRoot, '');
 
 for (const { fullPath, relPath } of shipFiles) {
   const normalized = relPath.replace(/\\/g, '/');

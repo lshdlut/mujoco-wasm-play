@@ -11,13 +11,13 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 
 const specPath = path.join(repoRoot, 'tools', 'worker_protocol.json');
-const outDir = path.join(repoRoot, 'dev');
+const outDir = path.join(repoRoot, 'worker');
 const protocolOutPath = path.join(outDir, 'protocol.gen.mjs');
 const dispatchOutPath = path.join(outDir, 'dispatch.gen.mjs');
 
 // NOTE: This generator only writes the protocol/dispatcher modules consumed by the
-// runtime worker/backend. The runtime files themselves (`dev/physics.worker.mjs`,
-// `dev/viewer_backend.mjs`) are maintained manually.
+// runtime worker/backend. The runtime files themselves (`worker/physics.worker.mjs`,
+// `backend/backend_core.mjs`) are maintained manually.
 
 const spec = JSON.parse(await readFile(specPath, 'utf8'));
 const allowedCtors = new Set(['Float64Array', 'Float32Array', 'Int32Array', 'Uint8Array']);

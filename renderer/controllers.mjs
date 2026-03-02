@@ -1,10 +1,11 @@
 // Renderer controllers (camera + picking).
 
 import * as THREE from 'three';
-import { consumeViewerParams, isPerfEnabled, isStrictEnabled, perfMarkOnce, perfNow, perfSample, logDebug, logWarn, logStatus, logError, strictCatch, strictEnsure, strictOverride } from '../viewer_runtime.mjs';
-import { compatFallback } from '../fallbacks.mjs';
-import { pushSkyDebug } from '../main_environment.mjs';
-import { buildViewerCameraPayload, geomNameFromLookup, getOrCreateGeomNameLookup, normalizeDeltaByViewportHeight, resolveTrackingBodyId } from './pipeline.mjs';
+import { consumeViewerParams, isPerfEnabled, isStrictEnabled, perfMarkOnce, perfNow, perfSample, logDebug, logWarn, logStatus, logError, strictCatch, strictEnsure, strictOverride } from '../core/viewer_runtime.mjs';
+import { compatFallback } from '../core/fallbacks.mjs';
+import { pushSkyDebug } from '../environment/environment.mjs';
+import { buildViewerCameraPayload, normalizeDeltaByViewportHeight, resolveTrackingBodyId } from './pipeline.mjs';
+import { geomNameFromLookup, getOrCreateGeomNameLookup } from './geom_names.mjs';
 
 function createCameraController({
   THREE_NS,

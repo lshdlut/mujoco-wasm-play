@@ -14,9 +14,9 @@ import {
   strictCatch,
   strictEnsure,
   strictOverride,
-} from './viewer_runtime.mjs';
-import { compatFallback } from './fallbacks.mjs';
-import { DEFAULT_REALTIME_INDEX, DEFAULT_VOPT_FLAGS, REALTIME_LEVELS, SCENE_FLAG_DEFAULTS } from './viewer_defaults.mjs';
+} from '../core/viewer_runtime.mjs';
+import { compatFallback } from '../core/fallbacks.mjs';
+import { DEFAULT_REALTIME_INDEX, DEFAULT_VOPT_FLAGS, REALTIME_LEVELS, SCENE_FLAG_DEFAULTS } from '../core/viewer_defaults.mjs';
 import {
   assignStructPath,
   bool,
@@ -29,30 +29,44 @@ import {
   resolveStructPath,
   splitBinding,
   toNumber,
-} from './viewer_shared.mjs';
-import { STAT_FIELD_DESCRIPTORS, VISUAL_FIELD_DESCRIPTORS } from './viewer_structs.mjs';
-import { createBackend } from './viewer_backend.mjs';
+} from '../core/viewer_shared.mjs';
+import { STAT_FIELD_DESCRIPTORS, VISUAL_FIELD_DESCRIPTORS } from '../core/viewer_structs.mjs';
+import { createBackend } from '../backend/backend_core.mjs';
 
 
 import {
   DEFAULT_VIEWER_STATE,
   applyGesture,
   applySpecAction,
-  createControlManager,
   createViewerStore,
+  mergeBackendSnapshot,
+  readControlValue,
+} from '../ui/state.mjs';
+import { prepareBindingUpdate } from '../ui/bindings.mjs';
+import {
   installPanelSectionDblclickDelegation,
   setPlaySectionCollapsed,
   toggleAllPlaySections,
-  mergeBackendSnapshot,
-  prepareBindingUpdate,
-  readControlValue,
-} from './main_ui.mjs';
-import { createCameraController, createPickingController, createRendererManager } from './main_renderer.mjs';
-import { createEnvironmentManager } from './main_environment.mjs';
+} from '../ui/panel_sections.mjs';
+import { createControlManager } from '../ui/control_manager.mjs';
+import { createRendererManager } from '../renderer/pipeline.mjs';
+import { createCameraController, createPickingController } from '../renderer/controllers.mjs';
+import { createEnvironmentManager } from '../environment/environment.mjs';
+import { createPlayHost } from './play_host.mjs';
 
 perfMarkOnce('play:main:start', {
   href: (typeof window !== 'undefined' && window.location?.href) ? window.location.href : null,
 });
+
+const PLAY_ROOT_URL = new URL('../', import.meta.url);
+
+function resolvePluginImportSpecifier(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return s;
+  const looksLikePath = s.startsWith('.') || s.startsWith('/') || s.includes('/') || s.endsWith('.mjs') || s.endsWith('.js');
+  if (!looksLikePath) return s; // allow importmap/bare specifiers
+  return new URL(s, PLAY_ROOT_URL).href;
+}
 
 const CAMERA_PRESETS = ['Free', 'Tracking'];
 
@@ -1817,19 +1831,7 @@ if (typeof window !== 'undefined') {
       },
     },
   };
-  const HOST_CAPABILITIES = Object.freeze({
-    mounts: true,
-    ui: true,
-    store: true,
-    backend: true,
-    controls: true,
-    renderer: true,
-    clock: true,
-    overlay3d: true,
-  });
-  window.__PLAY_HOST__ = {
-    apiVersion: 1,
-    capabilities: HOST_CAPABILITIES,
+  window.__PLAY_HOST__ = createPlayHost({
     mounts: {
       leftPanel: leftPanelMount,
       rightPanel: rightPanelMount,
@@ -1858,7 +1860,7 @@ if (typeof window !== 'undefined') {
     logWarn,
     logError,
     strictCatch,
-  };
+  });
 }
 
 async function loadPlayPlugins(host) {
@@ -1910,7 +1912,7 @@ async function loadPlayPlugins(host) {
   const unique = Array.from(new Set(urls));
   for (const url of unique) {
     try {
-      const mod = await import(url);
+      const mod = await import(resolvePluginImportSpecifier(url));
       const register = (mod && typeof mod.registerPlayPlugin === 'function')
         ? mod.registerPlayPlugin
         : (mod && typeof mod.default === 'function' ? mod.default : null);

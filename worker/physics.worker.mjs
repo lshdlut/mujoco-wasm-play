@@ -1,10 +1,13 @@
 // Runtime physics worker (manual source file).
-// Note: `tools/generate_worker_protocol.mjs` only regenerates `protocol.gen.mjs`
-// and `dispatch.gen.mjs`. This file is not generated.
+// Note: `tools/generate_worker_protocol.mjs` only regenerates
+// `worker/protocol.gen.mjs` and `worker/dispatch.gen.mjs`.
+// This file is not generated.
 
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
-import { collectRenderAssetsFromModule, heapViewF64, heapViewF32, heapViewI32, readCString, MjSimLite } from './bridge.mjs';
+import { heapViewF64, heapViewF32, heapViewI32, readCString } from '../bridge/heap_views.mjs';
+import { collectRenderAssetsFromModule } from '../bridge/render_assets_collect.mjs';
+import { MjSimLite } from '../bridge/mj_sim_lite.mjs';
 import {
   isPerfEnabled,
   perfNow as perfNowMs,
@@ -15,9 +18,9 @@ import {
   strictCatch,
   strictEnsure,
   getStrictReport,
-} from './viewer_runtime.mjs';
-import { compatFallback } from './fallbacks.mjs';
-import { DEFAULT_VOPT_FLAGS_NUMERIC, MJ_GROUP_COUNT, MJ_GROUP_TYPES, SCENE_FLAG_DEFAULTS_NUMERIC } from './viewer_defaults.mjs';
+} from '../core/viewer_runtime.mjs';
+import { compatFallback } from '../core/fallbacks.mjs';
+import { DEFAULT_VOPT_FLAGS_NUMERIC, MJ_GROUP_COUNT, MJ_GROUP_TYPES, SCENE_FLAG_DEFAULTS_NUMERIC } from '../core/viewer_defaults.mjs';
 import {
   detectOptionSupport,
   readOptionStruct,
@@ -26,7 +29,7 @@ import {
   writeOptionField,
   writeStatisticField,
   writeVisualField,
-} from './viewer_structs.mjs';
+} from '../core/viewer_structs.mjs';
 import { dispatchCommand } from './dispatch.gen.mjs';
 import { collectSnapshotTransfersInto } from './protocol.gen.mjs';
 import {
@@ -39,7 +42,7 @@ import {
   snapshotPoolResetTimers,
   snapshotPoolSetHz,
   snapshotPoolShouldUpdate,
-} from './worker/snapshot_pool.mjs';
+} from './snapshot_pool.mjs';
 
 const MJ_TIMER_STEP = 0;
 const MJ_TIMER_FORWARD = 1;

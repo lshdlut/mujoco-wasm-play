@@ -1,13 +1,16 @@
 # Node / tooling
 node_modules/
-dist/
-build/
-local_temp/
-coverage/
-dev/local_model/
-tmp/
+/dist/
+/build/
+/local_temp/
+/coverage/
+/local_model/
+/tmp/
 *.log
-tests/
+/tests/playwright-report/
+/tests/test-results/
+/playwright-report/
+/test-results/
 
 # Python
 __pycache__/
@@ -15,7 +18,7 @@ __pycache__/
 
 # Local notes (ignored)
 local/
-local_tools/docs/
+/local_tools/docs/
 FORGE_NOTES.local.md
 FORGE_REFERENCE.md
 AGENTS.md
@@ -24,28 +27,22 @@ tmp_*
 backups/
 worker_debug_direct.txt
 worker_debug_last.txt
-dev/spec/*audit*.md
+spec/*audit*.md
 
 # Local tools and artifacts
-local_tools/
-release_assets/
+/local_tools/
+/release_assets/
 
 # Legacy/experimental (not part of canonical play)
-scripts/
-wrappers/
+/scripts/
+/wrappers/
 FORGE_*.md
 /mjmodel_tmp.h
 /simulate_tmp.cc
 
-# Large local models (keep untracked)
-dev/RKOB_simplified_upper_with_marker_CAMS.xml
-dev/horse_17D50M_full.xml
-dev/RKOB_full_no_hand_STAR_OSSO.xml
-dev/RKOB_simplified_upper_STAR_OSSO.xml
-dev/stark2021_with_muscles.xml
+# Large local models: keep untracked under /local_model/ (gitignored)
 
-# Package manager lock (keep root local-only)
-/package-lock.json
+# Package manager lock
 
 # Editors and OS
 .vscode/

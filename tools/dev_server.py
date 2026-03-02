@@ -3,6 +3,7 @@
 Dev HTTP server for mujoco-wasm-play.
 
 - Serves a given root directory (default: repository dev root)
+- Serves a given root directory (default: repository root)
 - Ensures correct MIME types for .mjs/.js/.wasm
 - Adds security/cache headers:
   X-Content-Type-Options: nosniff
@@ -10,9 +11,7 @@ Dev HTTP server for mujoco-wasm-play.
 
 Usage:
   # From the repo root:
-  python dev/dev_server.py --root dev --port 8000
-  # From the dev/ directory:
-  python dev_server.py --root . --port 8000
+  python tools/dev_server.py --root . --port 8000
 """
 from __future__ import annotations
 import argparse
@@ -26,7 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PARENT_ROOT = REPO_ROOT.parent
 MOUNTS = {
     # Allow serving the repo root under a stable prefix, even when `--root` points
-    # at `dev/` (or any other subdir). This keeps local dev URLs compatible with
+    # at a subdir. This keeps local dev URLs compatible with
     # GitHub Pages-style paths.
     "/mujoco-wasm-play/": REPO_ROOT,
     # If the sibling forge repo exists next to mujoco-wasm-play, mount it so the
