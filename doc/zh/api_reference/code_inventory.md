@@ -1,19 +1,21 @@
-# 代码清单（自动生成）
+# 代码清单
 
-本页面由脚本自动生成，用于把代码库中的声明（文件级与嵌套）与 ESM exports 以可检索的形式列出来。
+状态：自动生成。
+
+本页面用于把代码库中的声明与 ESM exports 以可检索的形式列出来。
 
 - 生成脚本：`node tools/generate_code_inventory.mjs`
-- 说明：这是一个“索引/清单”，不试图解释语义；语义与流程见其它 API/Reference 页面。
-- 说明：类成员提取为启发式（heuristic）——用于快速导航，不保证覆盖所有写法。
-- 生成时间（UTC）：`2026-03-02T07:07:35.363Z`
+- 说明：这是清单，不解释语义；语义与流程见其它 API/Reference 页面。
+- 说明：类成员提取是启发式，只用于快速导航，不保证覆盖所有写法。
+- 生成时间 UTC：`2026-03-02T08:31:05.912Z`
 
 ## app/
 
 ### `app/main.mjs`
 
 - 行数：1974
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L63: function `resolvePluginImportSpecifier`
   - L111: function `subscribeClock`
   - L120: function `formatArenaBytes`
@@ -39,7 +41,7 @@
   - L1866: function `loadPlayPlugins`
   - L1945: function `resizeCanvas`
   - L1955: function `queueResizeCanvas`
-- 声明（嵌套）：
+- 嵌套声明：
   - L270: property => `setRenderStats`
   - L337: const => `formatPercentSpeed`
   - L343: const => `formatPercentPhysics`
@@ -97,36 +99,36 @@
   - L1855: property => `onUiSlowTick`
   - L1856: property => `onSnapshot`
   - L1857: property => `onFrame`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `app/play_host.mjs`
 
 - 行数：66
-- 导出（Exports）：
+- 导出：
   - L15: export function `createPlayHost`
-- 声明（文件级）：
+- 文件级声明：
   - L5: function `freezeIfObject`
   - L15: function `createPlayHost`
-- 声明（嵌套）：
+- 嵌套声明：
   - L46: property => `getCapability`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ## core/
 
 ### `core/fallbacks.mjs`
 
 - 行数：27
-- 导出（Exports）：
+- 导出：
   - L13: export function `compatFallback`
-- 声明（文件级）：
+- 文件级声明：
   - L13: function `compatFallback`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `core/viewer_defaults.mjs`
 
 - 行数：33
-- 导出（Exports）：
+- 导出：
   - L15: export const `MJ_GROUP_TYPES`
   - L16: export const `MJ_GROUP_COUNT`
   - L18: export const `SCENE_FLAG_DEFAULTS`
@@ -135,15 +137,15 @@
   - L25: export const `DEFAULT_VOPT_FLAGS_NUMERIC`
   - L29: export const `REALTIME_LEVELS`
   - L31: export const `DEFAULT_REALTIME_INDEX`
-- 声明（文件级）：
+- 文件级声明：
   - L5: function `makeFlagArray`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `core/viewer_runtime.mjs`
 
 - 行数：567
-- 导出（Exports）：
+- 导出：
   - L4: export function `isVerboseDebug`
   - L31: export function `logStatus`
   - L43: export function `logWarn`
@@ -177,7 +179,7 @@
   - L524: export function `strictCatch`
   - L534: export function `getStrictReport`
   - L546: export function `clearStrictReport`
-- 声明（文件级）：
+- 文件级声明：
   - L4: function `isVerboseDebug`
   - L23: function `isWorkerContext`
   - L27: function `postWorkerLog`
@@ -223,13 +225,13 @@
   - L524: function `strictCatch`
   - L534: function `getStrictReport`
   - L546: function `clearStrictReport`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `core/viewer_shared.mjs`
 
 - 行数：151
-- 导出（Exports）：
+- 导出：
   - L6: export function `toNumber`
   - L12: export function `bool`
   - L22: export function `cloneStruct`
@@ -241,7 +243,7 @@
   - L124: export function `createViewerGroupState`
   - L132: export function `normaliseGroupState`
   - L144: export function `splitBinding`
-- 声明（文件级）：
+- 文件级声明：
   - L6: function `toNumber`
   - L12: function `bool`
   - L22: function `cloneStruct`
@@ -253,13 +255,13 @@
   - L124: function `createViewerGroupState`
   - L132: function `normaliseGroupState`
   - L144: function `splitBinding`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `core/viewer_state_types.ts`
 
 - 行数：389
-- 导出（Exports）：
+- 导出：
   - L378: export `DEFAULT_VIEWER_STATE`
   - L378: export `createViewerStore`
   - L378: export `applySpecAction`
@@ -270,14 +272,14 @@
   - L378: export `mergeBackendSnapshot`
   - L378: export `switchVisualSourceMode`
   - L378: export `} from './state.mjs'`
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `core/viewer_structs.mjs`
 
 - 行数：1030
-- 导出（Exports）：
+- 导出：
   - L109: export function `setStructPath`
   - L148: export function `writeStructField`
   - L185: export function `readStructSnapshot`
@@ -291,7 +293,7 @@
   - L991: export const `STAT_FIELD_DESCRIPTORS`
   - L1022: export function `writeStatisticField`
   - L1026: export function `readStatisticStruct`
-- 声明（文件级）：
+- 文件级声明：
   - L6: function `pointerName`
   - L13: function `getFieldPtr`
   - L26: function `resolveHeapBuffer`
@@ -314,18 +316,18 @@
   - L987: function `readVisualStruct`
   - L1022: function `writeStatisticField`
   - L1026: function `readStatisticStruct`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `core/xml_refs.mjs`
 
 - 行数：457
-- 导出（Exports）：
+- 导出：
   - L89: export function `parseMuJoCoDirectFileRefs`
   - L146: export function `normaliseMuJoCoVirtualPath`
   - L152: export function `joinMuJoCoRelativePath`
   - L179: export function `buildMuJoCoBundle`
-- 声明（文件级）：
+- 文件级声明：
   - L6: function `normaliseSlashes`
   - L10: function `trimTrailingSlash`
   - L15: function `normalisePosixPath`
@@ -341,7 +343,7 @@
   - L168: function `dirnamePosix`
   - L175: function `isOutsideRoot`
   - L179: function `buildMuJoCoBundle`
-- 声明（嵌套）：
+- 嵌套声明：
   - L52: const => `read`
   - L57: const => `readBool`
   - L94: const => `addRef`
@@ -352,19 +354,19 @@
   - L293: function `resolveRefCandidates`
   - L312: const => `primaryBase`
   - L415: const => `formatSample`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ## environment/
 
 ### `environment/environment.mjs`
 
 - 行数：1326
-- 导出（Exports）：
+- 导出：
   - L1320: export `FALLBACK_PRESETS`
   - L1320: export `FALLBACK_PRESET_ALIASES`
   - L1320: export `createEnvironmentManager`
   - L1320: export `pushSkyDebug`
-- 声明（文件级）：
+- 文件级声明：
   - L12: function `clamp01`
   - L19: function `getWorldScene`
   - L133: function `ensureSkyCache`
@@ -389,25 +391,25 @@
   - L842: function `updateSkyDome`
   - L881: function `buildSkyBackground`
   - L887: function `createEnvironmentManager`
-- 声明（嵌套）：
+- 嵌套声明：
   - L688: const => `toColor`
   - L893: function `syncRendererClearColor`
   - L903: function `ensureOutdoorSkyEnv`
   - L973: const => `tryLoadHDRI`
   - L1142: function `applyFallbackAppearance`
   - L1210: function `ensureEnvIfNeeded`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ## backend/
 
 ### `backend/backend_core.mjs`
 
 - 行数：1783
-- 导出（Exports）：
+- 导出：
   - L18: export function `createBackend`
-- 声明（文件级）：
+- 文件级声明：
   - L18: function `createBackend`
-- 声明（嵌套）：
+- 嵌套声明：
   - L39: const => `normaliseInt`
   - L43: const => `sampleIfFinite`
   - L77: function `resetAdaptiveSnapshotState`
@@ -478,50 +480,50 @@
   - L1771: property => `getStrictReport`
   - L1775: property => `getInitialModelInfo`
   - L1776: property => `getBuiltinModels`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `backend/model_candidates.mjs`
 
 - 行数：50
-- 导出（Exports）：
+- 导出：
   - L13: export const `MODEL_POOL`
   - L21: export function `resolveModelFileName`
   - L34: export function `buildModelCandidates`
-- 声明（文件级）：
+- 文件级声明：
   - L21: function `resolveModelFileName`
   - L34: function `buildModelCandidates`
-- 声明（嵌套）：
+- 嵌套声明：
   - L37: const => `pushCandidate`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `backend/snapshot_utils.mjs`
 
 - 行数：350
-- 导出（Exports）：
+- 导出：
   - L19: export function `applyViewFields`
   - L30: export function `applyHistoryPayload`
   - L41: export function `applyKeyframesPayload`
   - L75: export function `applyWatchPayload`
   - L109: export function `createInitialSnapshot`
   - L156: export function `resolveSnapshot`
-- 声明（文件级）：
+- 文件级声明：
   - L19: function `applyViewFields`
   - L30: function `applyHistoryPayload`
   - L41: function `applyKeyframesPayload`
   - L75: function `applyWatchPayload`
   - L109: function `createInitialSnapshot`
   - L156: function `resolveSnapshot`
-- 声明（嵌套）：
+- 嵌套声明：
   - L157: const => `viewOrNull`
   - L221: property => `sceneFlags`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ## bridge/
 
 ### `bridge/heap_views.mjs`
 
 - 行数：167
-- 导出（Exports）：
+- 导出：
   - L5: export function `resolveHeapBuffer`
   - L111: export function `computeMeshElementCounts`
   - L142: export function `heapViewF64`
@@ -529,7 +531,7 @@
   - L148: export function `heapViewI32`
   - L151: export function `heapViewU8`
   - L154: export function `readCString`
-- 声明（文件级）：
+- 文件级声明：
   - L5: function `resolveHeapBuffer`
   - L40: function `ensureHeapViewCache`
   - L56: function `createHeapTypedArray`
@@ -539,23 +541,23 @@
   - L148: function `heapViewI32`
   - L151: function `heapViewU8`
   - L154: function `readCString`
-- 声明（嵌套）：
+- 嵌套声明：
   - L121: const => `safeMax`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `bridge/mj_sim_lite.mjs`
 
 - 行数：1247
-- 导出（Exports）：
+- 导出：
   - L22: export class `MjSimLite`
-- 声明（文件级）：
+- 文件级声明：
   - L7: function `tagForgeModule`
   - L22: class `MjSimLite`
-- 声明（嵌套）：
+- 嵌套声明：
   - L309: const => `call`
   - L643: property => `release`
   - L703: const => `readScalar`
-- 类成员（启发式）：
+- 类成员：
   - L23: method `MjSimLite#constructor`
   - L46: method `MjSimLite#strictCatch`
   - L51: method (async) `MjSimLite#maybeInstallShimFromQuery`
@@ -759,29 +761,29 @@
 ### `bridge/render_assets_collect.mjs`
 
 - 行数：746
-- 导出（Exports）：
+- 导出：
   - L33: export function `collectRenderAssetsFromModule`
-- 声明（文件级）：
+- 文件级声明：
   - L6: function `cloneTyped`
   - L27: function `readView`
   - L33: function `collectRenderAssetsFromModule`
-- 声明（嵌套）：
+- 嵌套声明：
   - L52: const => `ensureFunc`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ## renderer/
 
 ### `renderer/controllers.mjs`
 
 - 行数：957
-- 导出（Exports）：
+- 导出：
   - L953: export `createCameraController`
   - L953: export `createPickingController`
-- 声明（文件级）：
+- 文件级声明：
   - L10: function `createCameraController`
   - L424: function `defaultSelection`
   - L447: function `createPickingController`
-- 声明（嵌套）：
+- 嵌套声明：
   - L60: const => `cameraModeIndex`
   - L69: const => `isInteractiveCamera`
   - L71: function `currentCtrl`
@@ -840,12 +842,12 @@
   - L897: const => `onPointerMoveEvt`
   - L904: const => `onContextMenu`
   - L930: function `dispose`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `renderer/deformables.mjs`
 
 - 行数：998
-- 导出（Exports）：
+- 导出：
   - L986: export `ensureFlexGroup`
   - L986: export `hideFlexGroup`
   - L986: export `ensureFlexEntry`
@@ -856,7 +858,7 @@
   - L986: export `ensureSkinEntry`
   - L986: export `applySkinAppearance`
   - L986: export `updateSkinMesh`
-- 声明（文件级）：
+- 文件级声明：
   - L9: function `clampUnit`
   - L15: function `applyAppearanceToMaterial`
   - L48: function `resolveIndexedRgbaAppearance`
@@ -879,42 +881,42 @@
   - L804: function `applySkinAppearance`
   - L815: function `quatToMat3`
   - L840: function `updateSkinMesh`
-- 声明（嵌套）：
+- 嵌套声明：
   - L352: const => `writeUV`
   - L382: const => `ensureAttribute`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `renderer/depth_sort.mjs`
 
 - 行数：39
-- 导出（Exports）：
+- 导出：
   - L33: export `depthFromSoAPos`
   - L33: export `transparentBinFromDepthNorm`
   - L33: export `transparentDepthNorm01`
-- 声明（文件级）：
+- 文件级声明：
   - L3: function `depthFromSoAPos`
   - L21: function `transparentDepthNorm01`
   - L26: function `transparentBinFromDepthNorm`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `renderer/geom_names.mjs`
 
 - 行数：31
-- 导出（Exports）：
+- 导出：
   - L15: export function `getOrCreateGeomNameLookup`
   - L27: export function `geomNameFromLookup`
-- 声明（文件级）：
+- 文件级声明：
   - L3: function `createGeomNameLookup`
   - L15: function `getOrCreateGeomNameLookup`
   - L27: function `geomNameFromLookup`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `renderer/mujoco_constants.mjs`
 
 - 行数：110
-- 导出（Exports）：
+- 导出：
   - L3: export const `MJ_GEOM`
   - L26: export const `MJ_VIS`
   - L60: export const `MJ_OBJ`
@@ -923,31 +925,31 @@
   - L103: export const `MJ_MAXPLANEGRID`
   - L105: export const `MJ_MINVAL`
   - L106: export const `MJ_TEXTURE`
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `renderer/mujoco_shadows.mjs`
 
 - 行数：75
-- 导出（Exports）：
+- 导出：
   - L25: export function `installMuJoCoShadowViewportInset`
   - L64: export function `onBeforeShadowMuJoCo`
-- 声明（文件级）：
+- 文件级声明：
   - L25: function `installMuJoCoShadowViewportInset`
   - L64: function `onBeforeShadowMuJoCo`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `renderer/mujoco_textures.mjs`
 
 - 行数：650
-- 导出（Exports）：
+- 导出：
   - L644: export `resolveMaterialTextureDescriptor`
   - L644: export `quantize1e6`
   - L644: export `quantize1e3`
   - L644: export `applyMuJoCoTextureToMesh`
-- 声明（文件级）：
+- 文件级声明：
   - L7: function `resolveMaterialTextureDescriptor`
   - L53: function `getMuJoCoTextureCache`
   - L60: function `createMuJoCoDataTexture`
@@ -963,21 +965,21 @@
   - L430: function `ensureMuJoCoCubeAlbedoHooks`
   - L471: function `applyMuJoCoCubeAlbedo`
   - L492: function `applyMuJoCoTextureToMesh`
-- 声明（嵌套）：
+- 嵌套声明：
   - L107: const => `isPow2`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `renderer/overlay3d.mjs`
 
 - 行数：1117
-- 导出（Exports）：
+- 导出：
   - L1113: export `disposeOverlay3D`
   - L1113: export `ensureOverlay3D`
-- 声明（文件级）：
+- 文件级声明：
   - L13: class `RefCountedAssetRegistry`
   - L87: function `ensureOverlay3D`
   - L1100: function `disposeOverlay3D`
-- 声明（嵌套）：
+- 嵌套声明：
   - L37: const => `release`
   - L189: property => `acquire`
   - L194: property => `geometryPrimitive`
@@ -1001,7 +1003,7 @@
   - L898: const => `dispose`
   - L946: const => `dispose`
   - L978: property => `dispose`
-- 类成员（启发式）：
+- 类成员：
   - L14: method `RefCountedAssetRegistry#constructor`
   - L20: method `RefCountedAssetRegistry#acquire`
   - L49: method `RefCountedAssetRegistry#strictCatch`
@@ -1012,12 +1014,12 @@
 ### `renderer/pipeline.mjs`
 
 - 行数：3686
-- 导出（Exports）：
+- 导出：
   - L363: export function `resolveTrackingBodyId`
   - L380: export function `buildViewerCameraPayload`
   - L1114: export function `normalizeDeltaByViewportHeight`
   - L3683: export `createRendererManager`
-- 声明（文件级）：
+- 文件级声明：
   - L94: function `mjuRound`
   - L106: function `applySkyboxVisibility`
   - L168: function `setQuatFromMat3`
@@ -1062,7 +1064,7 @@
   - L1488: function `getDefaultVopt`
   - L1496: function `applyMjvSceneSoAGeoms`
   - L2783: function `createRendererManager`
-- 声明（嵌套）：
+- 嵌套声明：
   - L112: const => `setSolidBackground`
   - L527: function `syncCameraPoseFromMode`
   - L1099: function `overlayScale`
@@ -1088,12 +1090,12 @@
   - L3548: function `dispose`
   - L3612: const => `disposeResource`
   - L3674: property => `updateViewport`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `renderer/scene_soa_geoms.mjs`
 
 - 行数：1865
-- 导出（Exports）：
+- 导出：
   - L1831: export `GROUND_DISTANCE`
   - L1831: export `RENDER_ORDER`
   - L1831: export `TRANSPARENT_BIN_CAM_POS`
@@ -1126,7 +1128,7 @@
   - L1831: export `ensureGeomMesh`
   - L1831: export `ensureGeomState`
   - L1831: export `setGeomViewProps`
-- 声明（文件级）：
+- 文件级声明：
   - L11: function `createInfiniteGroundHelper`
   - L188: function `isInfinitePlaneSize`
   - L195: function `applyGeomMetadata`
@@ -1164,8 +1166,8 @@
   - L1483: function `ensureGeomMesh`
   - L1671: function `ensureGeomState`
   - L1761: function `setGeomViewProps`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：
+- 嵌套声明：无
+- 类成员：
   - L896: method `MaterialPool#constructor`
   - L900: method `MaterialPool#_key`
   - L929: method `MaterialPool#disposeAll`
@@ -1173,34 +1175,34 @@
 ### `renderer/three_helpers.mjs`
 
 - 行数：161
-- 导出（Exports）：
+- 导出：
   - L154: export `computeGeometryBounds`
   - L154: export `disposeMeshObject`
   - L154: export `disposeObject3DTree`
   - L154: export `getWorldScene`
   - L154: export `renderWorldScene`
-- 声明（文件级）：
+- 文件级声明：
   - L6: function `getWorldScene`
   - L13: function `renderWorldScene`
   - L33: function `computeGeometryBounds`
   - L38: function `disposeMeshObject`
   - L111: function `disposeObject3DTree`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ## ui/
 
 ### `ui/bindings.mjs`
 
 - 行数：343
-- 导出（Exports）：
+- 导出：
   - L36: export function `resolveBindingSpec`
   - L144: export function `getControlBindingSpec`
   - L159: export function `parseVector`
   - L186: export function `toBoolean`
   - L239: export function `normaliseControlInput`
   - L291: export function `prepareBindingUpdate`
-- 声明（文件级）：
+- 文件级声明：
   - L12: function `ensureBindingIndex`
   - L36: function `resolveBindingSpec`
   - L144: function `getControlBindingSpec`
@@ -1211,15 +1213,15 @@
   - L218: function `normaliseValueByKind`
   - L239: function `normaliseControlInput`
   - L291: function `prepareBindingUpdate`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `ui/control_manager.mjs`
 
 - 行数：2461
-- 导出（Exports）：
+- 导出：
   - L2460: export `createControlManager`
-- 声明（文件级）：
+- 文件级声明：
   - L12: function `createControlManager`
   - L151: function `formatNumber`
   - L161: function `formatNumberTrimmed`
@@ -1239,7 +1241,7 @@
   - L505: function `canonicalShortcut`
   - L537: function `normaliseKeyToken`
   - L551: function `shortcutFromEvent`
-- 声明（嵌套）：
+- 嵌套声明：
   - L35: function `renderFileSectionExtras`
   - L41: function `applyThemeFromColorControl`
   - L52: function `applySpacingFromControl`
@@ -1375,16 +1377,16 @@
   - L2386: property => `ensureEqualityToggles`
   - L2393: property => `updateExisting`
   - L2413: property => `buildItem`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `ui/file_section.mjs`
 
 - 行数：665
-- 导出（Exports）：
+- 导出：
   - L8: export function `createFileSectionManager`
-- 声明（文件级）：
+- 文件级声明：
   - L8: function `createFileSectionManager`
-- 声明（嵌套）：
+- 嵌套声明：
   - L16: function `createControlRow`
   - L27: function `createFullRow`
   - L39: const => `refreshModelSelectOptions`
@@ -1406,19 +1408,19 @@
   - L410: function `loadXmlTextWithUrlRefs`
   - L454: function `renderFileSectionExtras`
   - L515: const => `loadXmlFileImpl`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `ui/panel_sections.mjs`
 
 - 行数：188
-- 导出（Exports）：
+- 导出：
   - L67: export function `readPersistedSectionCollapsed`
   - L78: export function `writePersistedSectionCollapsed`
   - L89: export function `resolvePlayPanelId`
   - L100: export function `setPlaySectionCollapsed`
   - L129: export function `toggleAllPlaySections`
   - L161: export function `installPanelSectionDblclickDelegation`
-- 声明（文件级）：
+- 文件级声明：
   - L16: function `sectionCollapsedMapKey`
   - L22: function `getSectionCollapsedCache`
   - L44: function `flushSectionCollapsedCache`
@@ -1429,14 +1431,14 @@
   - L100: function `setPlaySectionCollapsed`
   - L129: function `toggleAllPlaySections`
   - L161: function `installPanelSectionDblclickDelegation`
-- 声明（嵌套）：
+- 嵌套声明：
   - L166: const => `handler`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `ui/state.mjs`
 
 - 行数：1696
-- 导出（Exports）：
+- 导出：
   - L33: export function `clamp01`
   - L1687: export `DEFAULT_VIEWER_STATE`
   - L1687: export `applyGesture`
@@ -1445,7 +1447,7 @@
   - L1687: export `mergeBackendSnapshot`
   - L1687: export `readControlValue`
   - L1687: export `resetModelFrontendState`
-- 声明（文件级）：
+- 文件级声明：
   - L33: function `clamp01`
   - L59: function `resolveRealTimeIndexFromRate`
   - L75: function `createDefaultSelectionState`
@@ -1479,7 +1481,7 @@
   - L1449: function `ensureVisualCache`
   - L1458: function `switchVisualSourceMode`
   - L1673: function `normaliseSceneFlagArray`
-- 声明（嵌套）：
+- 嵌套声明：
   - L970: property => `overlay`
   - L974: property => `theme`
   - L1015: property => `tracking_geom`
@@ -1502,21 +1504,21 @@
   - L1075: property => `label_mode`
   - L1076: property => `frame_mode`
   - L1202: function `notify`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ## worker/
 
 ### `worker/dispatch.gen.mjs`
 
 - 行数：90
-- 导出（Exports）：
+- 导出：
   - L19: export function `encodeCommand`
   - L31: export function `decodeCommand`
   - L44: export function `dispatchCommand`
   - L55: export function `encodeEvent`
   - L67: export function `decodeEvent`
   - L80: export function `dispatchEvent`
-- 声明（文件级）：
+- 文件级声明：
   - L8: function `assertPayloadFields`
   - L19: function `encodeCommand`
   - L31: function `decodeCommand`
@@ -1524,14 +1526,14 @@
   - L55: function `encodeEvent`
   - L67: function `decodeEvent`
   - L80: function `dispatchEvent`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `worker/physics.worker.mjs`
 
 - 行数：3431
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L144: function `buildPerf`
   - L160: function `safePost`
   - L186: function `setRunning`
@@ -1598,7 +1600,7 @@
   - L2148: function `emitRenderAssets`
   - L2175: function `collectAssetBuffersForTransfer`
   - L3415: function `dispatchCommandMessage`
-- 声明（嵌套）：
+- 嵌套声明：
   - L322: const => `writeScalar`
   - L327: const => `writeGroup`
   - L570: const => `readFloat`
@@ -1643,12 +1645,12 @@
   - L3379: property => `setSnapshotHz`
   - L3400: property => `setPaused`
   - L3410: property => `snapshot`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `worker/protocol.gen.mjs`
 
 - 行数：198
-- 导出（Exports）：
+- 导出：
   - L3: export const `SNAPSHOT_VIEW_FIELDS`
   - L10: export const `GEOM_VIEW_FIELDS_OPTIONAL`
   - L17: export const `GEOM_VIEW_FIELDS_ALWAYS`
@@ -1660,17 +1662,17 @@
   - L171: export const `CONTACT_TRANSFER_FIELDS`
   - L185: export function `collectSnapshotTransfersInto`
   - L195: export function `collectSnapshotTransfers`
-- 声明（文件级）：
+- 文件级声明：
   - L173: function `collectBuffers`
   - L185: function `collectSnapshotTransfersInto`
   - L195: function `collectSnapshotTransfers`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `worker/snapshot_pool.mjs`
 
 - 行数：117
-- 导出（Exports）：
+- 导出：
   - L10: export const `SNAPSHOT_POOL`
   - L38: export const `DIRTY_REASON`
   - L53: export function `markDirty`
@@ -1680,7 +1682,7 @@
   - L79: export function `snapshotPoolResetTimers`
   - L83: export function `snapshotPoolShouldUpdate`
   - L91: export function `snapshotPoolDidUpdate`
-- 声明（文件级）：
+- 文件级声明：
   - L32: function `snapshotPoolMarkDirtyMany`
   - L53: function `markDirty`
   - L62: function `snapshotPoolSetHz`
@@ -1689,58 +1691,58 @@
   - L79: function `snapshotPoolResetTimers`
   - L83: function `snapshotPoolShouldUpdate`
   - L91: function `snapshotPoolDidUpdate`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ## tools/
 
 ### `tools/check_module_boundaries.mjs`
 
 - 行数：163
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L5: function `runGit`
   - L13: function `toPosix`
   - L17: function `layerOf`
   - L60: function `extractImportSpecifiers`
   - L78: function `resolveRelativeImport`
   - L98: function `shouldSkipFile`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tools/dev_server.py`
 
 - 行数：160
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L37: class `Handler`
   - L135: def `main`
-- 声明（嵌套）：
+- 嵌套声明：
   - L38: def `_has_header`
   - L45: def `translate_path`
   - L60: def `end_headers`
   - L69: def `guess_type`
   - L87: def `send_head`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tools/forbid_patterns.mjs`
 
 - 行数：271
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L63: function `stripStringsAndComments`
   - L151: function `buildLineIndex`
   - L159: function `indexToLineCol`
   - L175: function `walk`
   - L192: function `findCatchViolations`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tools/generate_code_inventory.mjs`
 
-- 行数：440
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 行数：445
+- 导出：无
+- 文件级声明：
   - L50: function `listTrackedFiles`
   - L67: function `isExcluded`
   - L71: function `inferGroup`
@@ -1749,19 +1751,19 @@
   - L295: function `parsePython`
   - L327: function `buildInventory`
   - L354: function `renderMarkdown`
-  - L428: function `writeDocs`
-- 声明（嵌套）：
+  - L433: function `writeDocs`
+- 嵌套声明：
   - L135: function `pushDecl`
   - L140: function `isCommentLike`
   - L145: function `recordClassMembers`
   - L300: function `pushDecl`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tools/generate_ui_artifacts.mjs`
 
 - 行数：866
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L20: function `requireArray`
   - L27: function `requireNumber`
   - L47: function `sanitiseName`
@@ -1780,29 +1782,29 @@
   - L482: function `renderViewerShared`
   - L486: function `renderViewerStructs`
   - L849: function `renderViewerTypes`
-- 声明（嵌套）：
+- 嵌套声明：
   - L72: function `appendGroupedEntries`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tools/generate_worker_protocol.mjs`
 
 - 行数：240
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L25: function `normaliseFieldList`
   - L45: function `normaliseTransferFields`
   - L52: function `normaliseNameList`
   - L59: function `normaliseMessageSpec`
   - L90: function `renderFieldList`
   - L95: function `renderFieldSpec`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tools/loc_report.mjs`
 
 - 行数：141
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L42: function `isTextFile`
   - L46: function `isGeneratedFile`
   - L54: function `countLines`
@@ -1810,322 +1812,322 @@
   - L70: function `walkDir`
   - L87: function `isShipPath`
   - L103: function `getShipRelPath`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tools/run_checks.mjs`
 
 - 行数：68
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L5: function `run`
   - L17: function `listNodeTests`
   - L27: function `fileExists`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ## tests/
 
 ### `tests/e2e/contact_overlays_humanoid_debug.spec.ts`
 
 - 行数：126
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L10: function `enableContactFlagsViaControls`
   - L34: function `waitForContacts`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/convex-hull-parity.spec.ts`
 
 - 行数：151
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：
   - L91: const => `readHullState`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/e2e/default-init-debug.spec.ts`
 
 - 行数：40
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/equality-panel.spec.ts`
 
 - 行数：69
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L7: function `readEqualitySnapshot`
   - L23: function `readEqualityDom`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/flex-layer-parity.spec.ts`
 
 - 行数：54
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L7: function `setSliderNormalised`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/geomorder-dump.spec.ts`
 
 - 行数：87
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：
   - L33: const => `label`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/e2e/humanoid100-model-ref-load.spec.ts`
 
 - 行数：33
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/info-overlay.spec.ts`
 
 - 行数：100
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L4: function `openInfoOverlay`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/instancing-instancecolor-attr.spec.ts`
 
 - 行数：88
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L7: function `pauseSimulation`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/instancing-site-tendon-parity.spec.ts`
 
 - 行数：201
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L7: function `pauseSimulation`
-- 声明（嵌套）：
+- 嵌套声明：
   - L57: const => `resolveScnIndex`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/e2e/instancing-visual-parity.spec.ts`
 
 - 行数：300
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L7: function `pauseSimulation`
-- 声明（嵌套）：
+- 嵌套声明：
   - L85: const => `samplePatchFromCanvas`
   - L109: const => `projectScnToPixel`
   - L121: const => `samplePixels`
   - L155: const => `resolveMeshIndex`
   - L171: const => `warmupNonInstancedMeshes`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/e2e/mjvscene-export.spec.ts`
 
 - 行数：113
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/mjvscene-skin-diag.spec.ts`
 
 - 行数：58
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/model-scan.local.spec.ts`
 
 - 行数：93
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L7: function `listXmlFiles`
-- 声明（嵌套）：
+- 嵌套声明：
   - L9: const => `walk`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/e2e/model-switch-reset.spec.ts`
 
 - 行数：47
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/perf-phases.spec.ts`
 
 - 行数：199
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：
   - L132: const => `pick`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/e2e/physics-options.spec.ts`
 
 - 行数：265
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L11: function `readPhysicsOptions`
   - L37: function `readPhysicsFlags`
-- 声明（嵌套）：
+- 嵌套声明：
   - L78: const => `byId`
   - L107: const => `apply`
   - L207: const => `setChecked`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/e2e/raj_single_reset_memory.spec.ts`
 
 - 行数：43
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：
   - L14: const => `readTime`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/e2e/raj-site-tendon-rgba.spec.ts`
 
 - 行数：101
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L15: function `summarize`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/rendering-behaviors.spec.ts`
 
 - 行数：58
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/skybox-toggle.spec.ts`
 
 - 行数：165
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L7: function `readSkyState`
   - L27: function `readSkyDebug`
   - L59: function `setVisualSource`
   - L73: function `setSkyboxState`
-- 声明（嵌套）：
+- 嵌套声明：
   - L87: const => `skyState`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/e2e/slidercrank-parity.spec.ts`
 
 - 行数：94
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L9: function `readSlidercrankSummary`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/static-transparent-parity.spec.ts`
 
 - 行数：158
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：
   - L55: const => `isStatic`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/e2e/strict_gate.spec.mjs`
 
 - 行数：78
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/tendon-catenary-parity.spec.ts`
 
 - 行数：95
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L7: function `sceneTendonCounts`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/test-utils.ts`
 
 - 行数：68
-- 导出（Exports）：
+- 导出：
   - L5: export function `ensureSectionExpanded`
   - L23: export function `waitForViewerReady`
   - L44: export function `loadXmlFromFileInput`
   - L55: export function `firstVisibleGeomSummary`
-- 声明（文件级）：
+- 文件级声明：
   - L5: function `ensureSectionExpanded`
   - L23: function `waitForViewerReady`
   - L44: function `loadXmlFromFileInput`
   - L55: function `firstVisibleGeomSummary`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/texture-flag-parity.spec.ts`
 
 - 行数：111
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L7: function `pickMeshWithMap`
   - L39: function `meshMapState`
   - L55: function `forceRender`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/transparent-strict-ordering.spec.ts`
 
 - 行数：93
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L7: function `pauseSimulation`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/ui_kit_contract.spec.ts`
 
 - 行数：34
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/ui_sections_contract.spec.ts`
 
 - 行数：61
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/e2e/worker-time-advances.spec.ts`
 
 - 行数：30
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/microbench/flex.microbench.spec.ts`
 
 - 行数：207
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L21: function `pickStat`
   - L27: function `extractTopMs`
   - L38: function `meanFpsFromInterval`
@@ -2134,86 +2136,86 @@
   - L60: function `ensureSimRunning`
   - L72: function `minimizeUi`
   - L89: function `rotateCameraFor`
-- 声明（嵌套）：
+- 嵌套声明：
   - L128: const => `extract`
   - L182: function `runPhase`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/playwright.config.mjs`
 
 - 行数：100
-- 导出（Exports）：
-  - L75: export default `(default)`
-- 声明（文件级）：
+- 导出：
+  - L75: export default
+- 文件级声明：
   - L14: function `isFinitePort`
   - L18: function `isPortOpen`
   - L40: function `pickPort`
-- 声明（嵌套）：
+- 嵌套声明：
   - L21: const => `settle`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/playwright.microbench.config.mjs`
 
 - 行数：99
-- 导出（Exports）：
-  - L75: export default `(default)`
-- 声明（文件级）：
+- 导出：
+  - L75: export default
+- 文件级声明：
   - L14: function `isFinitePort`
   - L18: function `isPortOpen`
   - L40: function `pickPort`
-- 声明（嵌套）：
+- 嵌套声明：
   - L21: const => `settle`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/scripts/sky_debug_playwright.py`
 
 - 行数：168
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L12: def `main`
-- 声明（嵌套）：
+- 嵌套声明：
   - L34: def `on_console`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/tooling/validate_spec.mjs`
 
 - 行数：114
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L9: function `fail`
   - L13: function `readJson`
   - L22: function `requireNonEmptyArray`
   - L29: function `requireFiniteNumber`
   - L37: function `validateUiSpec`
   - L80: function `validateProtocol`
-- 声明（嵌套）：
+- 嵌套声明：
   - L54: function `registerItemId`
   - L63: function `validateSection`
   - L85: function `validateEntries`
-- 类成员（启发式）：（无）
+- 类成员：无
 
 ### `tests/unit/protocol_dispatch.test.mjs`
 
 - 行数：73
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L14: function `payloadWithRequiredFields`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/unit/ui_snapshot_merge.test.mjs`
 
 - 行数：76
-- 导出（Exports）：（无）
-- 声明（文件级）：
+- 导出：无
+- 文件级声明：
   - L6: function `clone`
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 嵌套声明：无
+- 类成员：无
 
 ### `tests/unit/ui_spec_action.test.mjs`
 
 - 行数：22
-- 导出（Exports）：（无）
-- 声明（文件级）：（未发现）
-- 声明（嵌套）：（无）
-- 类成员（启发式）：（无）
+- 导出：无
+- 文件级声明：未发现
+- 嵌套声明：无
+- 类成员：无
