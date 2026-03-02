@@ -24,7 +24,7 @@ Best practices:
 - host plugins on the same origin when possible
 - for public demos, avoid accepting user-provided plugin URLs
 
-forgeBase = executing JavaScript (plus WASM)
+forgeBase and executing JavaScript
 --------------------------------------------
 
 ``forgeBase`` points to a directory that serves ``mujoco.js`` and
@@ -45,4 +45,3 @@ default.
 
 If you need to fetch assets from custom endpoints, do so explicitly in your own
 code and call ``host.backend.loadXmlBundle(...)``.
-

@@ -18,7 +18,7 @@ Play 当前在 module Worker 中运行 MuJoCo。旧的 ``mode=...`` 查询参数
 
 如果你需要更高级的资产加载，请使用 ``host.backend.loadXmlBundle(...)``。
 
-网络依赖（Three.js CDN）
+网络依赖
 -----------------------------------
 
 ``index.html`` 通过 import map 从 CDN 导入 Three.js。离线部署时应将 Three.js vendor 到本地，并相应更新 import map。

@@ -1,36 +1,38 @@
-# 插件开发契约（实验性）
+# 插件开发契约
+
+状态：实验性。该接口可能会变化。
 
 本仓库支持可选的外部插件，它们可以在无需 fork `mujoco-wasm-play` 的情况下，注入 UI/行为。
 
 本文档定义：
-- 稳定的 DOM 挂载点（插件在此渲染 UI）。
-- Host API（`window.__PLAY_HOST__`）以及 clock 语义。
-- Worker 边界（MuJoCo/forge 在此运行），以及如何为新的 WASM ABI 调用扩展 worker 协议。
-- 数据流期望（snapshots vs. events）与刷新率指南。
+- 稳定的 DOM 挂载点：插件在此渲染 UI。
+- Host API：`window.__PLAY_HOST__`，以及 clock 语义。
+- Worker 边界：MuJoCo/forge 在此运行，并说明如何为新的 WASM ABI 调用扩展 worker 协议。
+- 数据流期望：snapshots vs. events 与刷新率指南。
 
-## 关键约束（Worker 后端）
+## 关键约束：Worker 后端
 
-默认入口点（`index.html` -> `app/main.mjs`）会在 Web Worker 内运行 MuJoCo/forge。
+默认入口点：`index.html` → `app/main.mjs`。它会在 Web Worker 内运行 MuJoCo/forge。
 
 影响：
-- UI 插件运行在主线程，**无法** 直接访问 WASM 导出（Worker 模式下没有 `window.__forgeModule`）。
-- 任何新的 ABI（例如 `mjwf_smocap_*`、`mjwf_sik_*`）都必须在 worker 内调用，并通过 worker RPC（commands/events）或通过写入现有 snapshot 字段的数据，暴露给插件。
+- UI 插件运行在主线程，**无法** 直接访问 WASM 导出。Worker 模式下没有 `window.__forgeModule`。
+- 任何新的 ABI，例如 `mjwf_smocap_*`、`mjwf_sik_*`，都必须在 worker 内调用，并通过 worker RPC 或写入既有 snapshot 字段暴露给插件。
 
 ## 加载插件
 
-插件通过动态 `import()` 加载（仅支持 ESM）。
+插件通过动态 `import()` 加载，仅支持 ESM。
 
 支持的配置：
 - 查询参数：`?plugins=<url1>,<url2>`
-- 全局变量（必须在主模块运行之前设置）：`globalThis.PLAY_PLUGINS = ['<url1>', '<url2>']`
+- 全局变量：必须在主模块运行之前设置。`globalThis.PLAY_PLUGINS = ['<url1>', '<url2>']`
 
-示例（本地开发）：加载内置演示插件：
+示例：本地开发时加载内置演示插件：
 - `http://127.0.0.1:8000/index.html?model=raj&plugins=./plugins/test_ui_sections_plugin.mjs`
 
 说明：
 - 每个条目必须是 `import()` 可用的有效 ESM 模块 URL/specifier。
 - 对于跨域 URL，服务器必须允许 CORS，并以正确的 MIME 类型提供 JavaScript。
-- 以 `./` 或 `../` 开头的 import specifier 会相对于仓库根目录（与 `index.html` 同级的目录）解析。
+- 以 `./` 或 `../` 开头的 import specifier 会相对于仓库根目录解析，也就是 `index.html` 所在目录。
 
 插件加载失败会通过 `logError` + `strictCatch(..., { allow: true })` 上报，并不会阻止主应用继续运行。
 
@@ -40,11 +42,11 @@
 
 插件挂载点：
 - `host.mounts.leftPanelPlugin`: 左侧面板插件区域
-- `host.mounts.rightPanelPlugin`: 右侧面板插件区域（面向更复杂的 demo UI）
-- `host.mounts.leftPanelAfterFilePlugin`: 左侧面板中紧接内置 `File` 分区之后的插槽（推荐用于“File → Plugin → Option”的 UX）
-- `host.mounts.overlayRoot`: viewer overlay 根（进度条、状态卡、HUD 覆盖等）
+- `host.mounts.rightPanelPlugin`: 右侧面板插件区域，面向更复杂的 demo UI
+- `host.mounts.leftPanelAfterFilePlugin`: 左侧面板中紧接内置 `File` 分区之后的插槽，推荐用于 “File → Plugin → Option” 的 UX
+- `host.mounts.overlayRoot`: viewer overlay 根，例如进度条、状态卡、HUD 覆盖与提示
 
-核心挂载点（由 viewer 拥有）：
+核心挂载点：由 viewer 拥有
 - `host.mounts.leftPanel`
 - `host.mounts.rightPanel`
 
@@ -52,7 +54,7 @@
 - `index.html` 使用 `data-play-mount="leftPanel|rightPanel|overlayRoot|leftPanelPlugin|rightPanelPlugin"`。
 - `ui/control_manager.mjs` 会在渲染内置 `File` 分区后，插入 `data-play-mount="leftPanelAfterFilePlugin"`。
 
-## Host API（`window.__PLAY_HOST__`）
+## Host API
 
 运行时 viewer 会暴露 `window.__PLAY_HOST__`，并将同一个对象传给每个插件的 register 函数。
 
@@ -65,23 +67,23 @@
 - `host.store.subscribe((state) => void): () => void`
 
 建议：
-- 读取当前 viewer 状态（面板/覆盖层、HUD、渲染选项）。
-- 将 demo 特有状态写入专用命名空间下（推荐：`state.demo.<yourDemoName>`）。
+- 读取当前 viewer 状态，例如面板/覆盖层、HUD、渲染选项。
+- 将 demo 特有状态写入专用命名空间，例如 `state.demo.<yourDemoName>`。
 
 ### `host.backend`
 
-后端实例（`app/main.mjs` 中为 worker-only）。
+后端实例。在 `app/main.mjs` 中它是 worker-only。
 
 插件常用的方法：
-- `host.backend.apply(...)`（发送 UI/apply 命令）
-- `host.backend.subscribe((snapshot) => void)`（原始 snapshot 流）
-- `host.backend.snapshot()`（获取最新 snapshot）
-- `host.backend.loadXmlText(xmlText)` / `host.backend.loadXmlBundle(...)`（重新加载模型）
+- `host.backend.apply(...)`：发送 UI/apply 命令
+- `host.backend.subscribe((snapshot) => void)`：原始 snapshot 流
+- `host.backend.snapshot()`：获取最新 snapshot
+- `host.backend.loadXmlText(xmlText)` / `host.backend.loadXmlBundle(...)`：重新加载模型
 - `host.backend.step(n)` / `host.backend.setRate(rate)` / `host.backend.setRunState(running, source?)`
 
 重要：
 - 在 worker 模式下，插件 **不得** 依赖直接读取 WASM 导出；应始终通过 `backend` 和/或 snapshots。
-- backend surface 可能会演进；对可选调用建议做特性探测（`typeof host.backend.foo === 'function'`）。
+- backend surface 可能会演进；对可选调用建议做特性探测：`typeof host.backend.foo === 'function'`。
 
 ### `host.controls`
 
@@ -93,7 +95,7 @@
 
 控件 ID 与快捷键来自 `spec/ui_spec.json`。
 
-### `host.ui`（UI sections + kit）
+### `host.ui`
 
 插件应 **优先使用 `host.ui`**，而不是手写可折叠块或修改核心面板 DOM。
 
@@ -102,45 +104,49 @@
 - `host.ui.panel('left').collapseAll()`
 - `host.ui.panel('left').expandAll()`
 - `host.ui.panel('left').toggleAll()`
-- `host.ui.panel('right')...`（同上）
+- `host.ui.panel('right')...`：同上
 
-这些动作会作用于选定面板内的所有 Play 分区（内置 + 插件），并持久化折叠状态。
+这些动作会作用于选定面板内的所有 Play 分区，包含内置与插件分区，并持久化折叠状态。
 
 折叠状态持久化：
 - 存储位置：`localStorage` key `play:ui:v1:section_collapsed`
-- key 规则：按 `(panel, sectionId)` 区分（因此 left/right 可以复用名字而互不冲突）
+- key 规则：按 `panel` 与 `sectionId` 区分，因此 left/right 可以复用名字而互不冲突
 - 优先级：已保存状态 > `defaultOpen` / `default_open` > open
 
-#### 注册分区（可折叠块）
+#### 注册分区
 
 无需复制 header 逻辑即可创建一个具有原生行为的可折叠分区：
 
 - `host.ui.sections.register({ panel, sectionId, title, defaultOpen, after, before, mount, render })`
 
 说明：
-- `sectionId` **必须** 命名空间化并以 `plugin:` 开头（例如 `plugin:sik_c3d`）。
+- `sectionId` **必须** 命名空间化并以 `plugin:` 开头。例如：`plugin:sik_c3d`。
 - `after`/`before` 以同面板内现有 `sectionId` 为参照插入。
 - 常见“插在 File 后面”的场景，使用 `panel: 'left', after: 'file'` 或 `mount: 'leftPanelAfterFilePlugin'`。
-- 若提供 `mount`（`leftPanelPlugin`、`rightPanelPlugin` 等），它必须与 `panel` 一致（若省略 `panel`，Play 也会从 `mount` 推断 `panel`）。
+- 若提供 `mount`，例如 `leftPanelPlugin`、`rightPanelPlugin`，它必须与 `panel` 一致。若省略 `panel`，Play 也会从 `mount` 推断 `panel`。
 
 `render(body, ctx)` 回调会收到：
 - `body`: 需要填充的 `.section-body` 元素
 - `ctx`: `{ panel, sectionId, sectionEl, body, host }`
-若 `render(...)` 返回函数（或 `{ dispose() }`），Play 会在 `unregister(...)` 时调用它。
+若 `render(...)` 返回函数，或返回 `{ dispose() }`，Play 会在 `unregister(...)` 时调用它。
 
 注销：
 - `host.ui.sections.unregister(sectionId)`
 
-#### data 属性契约（高级 / 手写 DOM）
+#### data 属性契约
 
-如果你手工构建可折叠分区（不推荐），Play 只有在元素暴露稳定的 `data-play-*` 属性时才会把它们视作分区：
+高级。手写 DOM。
+
+如果你手工构建可折叠分区，不推荐。Play 只有在元素暴露稳定的 `data-play-*` 属性时才会把它们视作分区：
 
 - 分区根：`data-play-role="section"` + `data-play-section-id="..."`
-- Header：`data-play-role="section-header"`（双击会通过事件代理触发面板展开/折叠全部）
-- Toggle 按钮：`data-play-role="section-toggle"`（`aria-expanded` 由 Play 管理）
+- Header：`data-play-role="section-header"`。双击会通过事件代理触发面板展开/折叠全部。
+- Toggle 按钮：`data-play-role="section-toggle"`。`aria-expanded` 由 Play 管理。
 - Body：`data-play-role="section-body"`
 
-#### UI kit（可选原语）
+#### UI kit
+
+可选原语。
 
 与 Play 样式模式一致的小型 DOM 辅助工具：
 
@@ -164,72 +170,72 @@
 - `host.renderer.renderScene(snapshot, state)`
 - `host.renderer.getStats()`
 
-### `host.renderer.overlay3d`（3D Overlay / 插件 3D 图层）
+### `host.renderer.overlay3d`
 
 viewer 提供了一个正式的、对插件友好的 3D overlay 系统，它直接在 Three.js 世界场景中渲染。
 
 目标：
-- 让插件无需经过 worker → `mjvScene` 路径，即可绘制*被世界遮挡*（world-occluded）的 primitive/mesh。
-- 提供稳定的 **layer 语义**（world vs HUD），以及正式的 **透明度策略**，避免插件之间在 `renderOrder`/`depthWrite` 上互相打架。
-- 提供带 scope 的 **AssetRegistry**（引用计数，scope dispose 时自动释放），以防止 GPU/内存泄漏以及误释放共享资源。
+- 让插件无需经过 worker → `mjvScene` 路径，即可绘制*被世界遮挡*的 primitive/mesh，也就是 world-occluded。
+- 提供稳定的 **layer 语义**，例如 world vs HUD，并给出正式的 **透明度策略**，避免插件之间在 `renderOrder`/`depthWrite` 上互相打架。
+- 提供带 scope 的 **AssetRegistry**。它使用引用计数，并在 scope dispose 时自动释放，避免 GPU/内存泄漏与误释放共享资源。
 
 入口点：
-- `host.renderer.getOverlay3D()` → 返回 overlay manager（如果渲染器尚未就绪则返回 `null`）
+- `host.renderer.getOverlay3D()` → 返回 overlay manager。渲染器尚未就绪时返回 `null`。
 - `host.renderer.overlay3d.get()` → 同上
-- `host.renderer.overlay3d.createScope(scopeId, options?)` → 便捷封装（`get()` + `createScope`）
-- `host.renderer.overlay3d.getScope(scopeId)` → 便捷封装（`get()` + `getScope`）
+- `host.renderer.overlay3d.createScope(scopeId, options?)` → 便捷封装：`get()` + `createScope`
+- `host.renderer.overlay3d.getScope(scopeId)` → 便捷封装：`get()` + `getScope`
 
-#### 图层（Layers）
+#### 图层
 
-每个 scope 有各 layer 的 root（以下 API 中使用的字符串）：
-- `worldOpaque`: 普通 world 对象（depth-tested；面向不透明材质）
-- `worldTransparent`: 面向 alpha blending 的 world 对象（depth-tested；当 opacity < 1 时默认关闭 depth-write）
-- `worldOverlay`: 被世界遮挡的 overlay，且应在基础 world 之后绘制（选中高亮、gizmo）
-- `hud`: 永远置顶的 overlay（默认关闭 depth-test）
+每个 scope 提供各 layer 的 root。以下为 API 使用的字符串：
+- `worldOpaque`: 普通 world 对象，depth-tested，面向不透明材质
+- `worldTransparent`: 面向 alpha blending 的 world 对象，depth-tested；当 opacity < 1 时默认关闭 depth-write
+- `worldOverlay`: 被世界遮挡的 overlay，应在基础 world 之后绘制，例如选中高亮、gizmo
+- `hud`: 永远置顶的 overlay，默认关闭 depth-test
 
-#### Instanced Primitive（SoA writer + commit）
+#### Instanced primitive
 
-当你需要绘制大量轻量 primitive（marker/arrow 等）时，请使用 instancing。这是面向大数量的推荐路径。
+当你需要绘制大量轻量 primitive，例如 marker、arrow，请使用 instancing。这是面向大数量的推荐路径。
 
 `scope.createInstancedMeshBatch({ ... })` 会返回：
-- `batch.writer.pos` (`Float32Array`, length = `capacity * 3`)
-- `batch.writer.quat` (`Float32Array`, length = `capacity * 4`, quaternion xyzw)
-- `batch.writer.scale` (`Float32Array`, length = `capacity * 3`)
-- `batch.writer.rgb` (`Float32Array`, length = `capacity * 3`, linear rgb multipliers)
-- `batch.commit({ count })`（锁存作者缓冲；在帧屏障处原子刷新）
-- `batch.setTransparency(spec)`（更新透明度策略与排序）
+- `batch.writer.pos`: `Float32Array`，length = `capacity * 3`
+- `batch.writer.quat`: `Float32Array`，length = `capacity * 4`，quaternion xyzw
+- `batch.writer.scale`: `Float32Array`，length = `capacity * 3`
+- `batch.writer.rgb`: `Float32Array`，length = `capacity * 3`，linear rgb multipliers
+- `batch.commit({ count })`: 锁存作者缓冲；在帧屏障处原子刷新
+- `batch.setTransparency(spec)`: 更新透明度策略与排序
 
-Commit 是 **延迟** 的：它不会立即上传到 GPU。Play 会在每个渲染帧（`host.clock.onFrame`）刷新所有待提交的 overlay commit，在核心 MuJoCo 场景更新之后，因此 overlays 永远不会超前/落后模型姿态。
+Commit 是 **延迟** 的：它不会立即上传到 GPU。Play 会在每个渲染帧刷新所有待提交的 overlay commit，发生在核心 MuJoCo 场景更新之后。渲染帧回调来自 `host.clock.onFrame`。
 
 关键 options：
-- `primitive`: `'sphere' | 'box' | 'cylinder' | 'capsule' | 'cone'`（通过 AssetRegistry 共享几何体）
+- `primitive`: `'sphere' | 'box' | 'cylinder' | 'capsule' | 'cone'`。通过 AssetRegistry 共享几何体。
 - `capacity`: 该 batch 的最大 instance 数量
 - `layer`: 上述 layer id 之一
-- `transparency`: 策略对象（见下文）
+- `transparency`: 策略对象，见下文
 
-#### 透明度策略（instancing）
+#### 透明度策略
 
 透明 instancing 是系统级问题：Three.js 不会自动为 instances 做 depth sort。overlay 系统提供了显式的策略 surface，避免每个插件都各自搞 hack。
 
-`transparency` 字段（`createInstancedMeshBatch` 与 `batch.setTransparency` 均支持）：
-- `mode`: `'opaque' | 'blend'`（在 `worldTransparent` 下默认为 `'blend'`，其它图层默认为 `'opaque'`）
-- `opacity`: `0..1`（当 `< 1` 时启用 blend 模式）
+`transparency` 字段。`createInstancedMeshBatch` 与 `batch.setTransparency` 均支持：
+- `mode`: `'opaque' | 'blend'`。在 `worldTransparent` 下默认为 `'blend'`，其它图层默认为 `'opaque'`。
+- `opacity`: `0..1`。当 `< 1` 时启用 blend 模式。
 - `sortMode`: `'nosort' | 'bins' | 'strict' | 'inherit'`
   - `nosort`: 不做 per-instance 排序；最快
   - `bins`: 粗粒度深度分箱；适合大数量的默认方案
   - `strict`: per-instance 深度排序；质量最好，但 CPU 成本更高
-- `bins`: `1..16`（当 `sortMode='bins'` 时使用）
+- `bins`: `1..16`。当 `sortMode='bins'` 时使用。
 - `update`: `'commit' | 'frame' | 'inherit'`
-  - `commit`: 仅在 `commit()` 被 flush（帧屏障）时排序/上传
-  - `frame`: 相机移动时也会重排（render-loop hook）
-- `every`: integer `>= 1`（当 `update='frame'` 时，每 N 帧才重排一次）
-- `depthTest`, `depthWrite`, `toneMapped`: 高级材质开关（可选）
+  - `commit`: 仅在 `commit()` 被 flush 时排序/上传，也就是帧屏障
+  - `frame`: 相机移动时也会重排，来自 render-loop hook
+- `every`: integer `>= 1`。当 `update='frame'` 时，每 N 帧才重排一次。
+- `depthTest`, `depthWrite`, `toneMapped`: 高级材质开关，可选
 
 新 batch 的全局默认值：
 - `overlay = host.renderer.overlay3d.get()`
 - `overlay.setTransparencyDefaults({ sortMode, bins, update, every })`
 
-#### 资源（引用计数，作用域）
+#### 资源
 
 每个 scope 都暴露了 `scope.assets` 辅助函数。通过 `scope.assets.*` 获取的 handle 会在 scope 被 dispose 时自动 release。
 
@@ -238,7 +244,7 @@ Commit 是 **延迟** 的：它不会立即上传到 GPU。Play 会在每个渲�
 - `scope.assets.texture2DFromUrl(url, options?)` → `{ asset: Texture, release() }`
 - `scope.assets.acquire(key, createFn, { dispose? })` → 通用的引用计数资源 handle
 
-#### 示例（instanced 的透明 marker）
+#### 示例：instanced 透明 marker
 
 ```js
 export function registerPlayPlugin(host) {
@@ -284,7 +290,9 @@ export function registerPlayPlugin(host) {
 }
 ```
 
-### `host.getSnapshot()`
+### `host.getSnapshot`
+
+签名：`host.getSnapshot()`
 
 返回 UI 线程当前持有的最新 snapshot（初始加载期间可能为 `null`）。
 
@@ -327,7 +335,7 @@ Disposer 会在页面卸载（`beforeunload`）时被调用。插件应清理：
 - DOM 事件监听器
 - timers / `requestAnimationFrame` 循环
 
-## Worker 协议扩展（用于新的 WASM ABI 调用）
+## Worker 协议扩展
 
 如果你的 demo 需要在 forge WASM 内实现新功能（例如 smocap/SIK），你需要提供一个 worker RPC surface。
 
@@ -355,7 +363,9 @@ worker command/event allow-list 位于生成文件中：
 - Main-thread wrapper: `backend/backend_core.mjs`（在 `backend` 上暴露方法，和/或通过 `backend.apply` 路由）。
 - 可选的 store merge: `ui/state.mjs`（仅当你希望把 worker snapshots/events 以结构化方式反映到 `store` 中）。
 
-### 设计规则（推荐）
+### 设计规则
+
+推荐。
 
 - 优先把结果写入 `mjData`，这样它们会自然出现在现有 snapshots 中。
   - 例：如果 smocap 产生目标姿态，写入 mocap bodies、qpos、ctrl 等。

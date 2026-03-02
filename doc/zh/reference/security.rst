@@ -21,7 +21,7 @@ Plugins = 执行 JavaScript
 - 尽可能将插件托管在同源（same origin）
 - 面向公开 demo，避免接受用户提供的插件 URL
 
-forgeBase = 执行 JavaScript（外加 WASM）
+forgeBase 与执行 JavaScript
 --------------------------------------------
 
 ``forgeBase`` points to a directory that serves ``mujoco.js`` and

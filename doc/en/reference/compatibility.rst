@@ -30,7 +30,7 @@ Recommended (optional):
 
 - ``version.json`` (used for cache tagging and diagnostics)
 
-Viewer ABI extensions (required)
+Viewer ABI extensions
 --------------------------------
 
 Play validates that the loaded forge module exports a required viewer ABI set.

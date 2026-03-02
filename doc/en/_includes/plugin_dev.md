@@ -1,50 +1,52 @@
-# Plugin Development Contract (Experimental)
+# Plugin Development Contract
+
+Status: experimental. This surface may change.
 
 This repo supports optional, external plugins that can inject UI/behavior without forking `mujoco-wasm-play`.
 
 This document defines:
-- Stable DOM mounts (where plugins render UI).
-- The Host API (`window.__PLAY_HOST__`) and clock semantics.
-- The worker boundary (where MuJoCo/forge runs) and how to extend the worker protocol for new WASM ABI calls.
-- Data-flow expectations (snapshots vs. events) and refresh-rate guidelines.
+- Stable DOM mounts: where plugins render UI.
+- The Host API: `window.__PLAY_HOST__`, plus clock semantics.
+- The worker boundary: where MuJoCo/forge runs, and how to extend the worker protocol for new WASM ABI calls.
+- Data-flow expectations: snapshots vs. events, plus refresh-rate guidelines.
 
-## Key Constraints (Worker Backend)
+## Key Constraints: Worker Backend
 
-The default entrypoint (`index.html` -> `app/main.mjs`) runs MuJoCo/forge inside a Web Worker.
+The default entrypoint is `index.html` → `app/main.mjs`. It runs MuJoCo/forge inside a Web Worker.
 
 Implications:
-- UI plugins run on the main thread and **cannot** directly access WASM exports (no `window.__forgeModule` in worker mode).
-- Any new ABI (e.g., `mjwf_smocap_*`, `mjwf_sik_*`) must be invoked inside the worker and exposed to plugins via worker RPC (commands/events) or via data written into existing snapshot fields.
+- UI plugins run on the main thread and **cannot** directly access WASM exports. In worker mode there is no `window.__forgeModule`.
+- Any new ABI, for example `mjwf_smocap_*` or `mjwf_sik_*`, must be invoked inside the worker and exposed to plugins via worker RPC or via data written into existing snapshot fields.
 
-## Loading Plugins
+## Loading plugins
 
-Plugins are loaded via dynamic `import()` (ESM only).
+Plugins are loaded via dynamic `import()` and must be ESM.
 
 Supported configuration:
 - Query parameter: `?plugins=<url1>,<url2>`
-- Global (must be set before the main module runs): `globalThis.PLAY_PLUGINS = ['<url1>', '<url2>']`
+- Global. Must be set before the main module runs: `globalThis.PLAY_PLUGINS = ['<url1>', '<url2>']`
 
-Example (local dev): load the built-in demo plugin:
+Example: local dev loading the built-in demo plugin:
 - `http://127.0.0.1:8000/index.html?model=raj&plugins=./plugins/test_ui_sections_plugin.mjs`
 
 Notes:
 - Each entry must be a valid ESM module URL/specifier for `import()`.
 - For cross-origin URLs, the server must allow CORS and serve JavaScript with a correct MIME type.
-- Import specifiers that start with `./` or `../` are resolved relative to the repo root (same folder as `index.html`).
+- Import specifiers that start with `./` or `../` are resolved relative to the repo root, i.e. the `index.html` folder.
 
 Plugin load failures are reported via `logError` + `strictCatch(..., { allow: true })` and do not stop the main app.
 
-## Stable DOM Mounts
+## Stable DOM mounts
 
 Plugins should render only into the plugin mounts, or use `host.ui.sections.register(...)` for first-class foldable sections. Avoid directly mutating the core panel mounts.
 
 Plugin mounts:
 - `host.mounts.leftPanelPlugin`: left panel plugin area
-- `host.mounts.rightPanelPlugin`: right panel plugin area (intended for complex demo UI)
-- `host.mounts.leftPanelAfterFilePlugin`: left panel slot rendered immediately after the built-in `File` section (preferred for "File → Plugin → Option" UX)
-- `host.mounts.overlayRoot`: viewer overlay root (progress bars, status cards, HUD overlays)
+- `host.mounts.rightPanelPlugin`: right panel plugin area, intended for complex demo UI
+- `host.mounts.leftPanelAfterFilePlugin`: left panel slot rendered immediately after the built-in `File` section. Preferred for "File → Plugin → Option" UX.
+- `host.mounts.overlayRoot`: viewer overlay root, such as progress bars, status cards, and HUD overlays
 
-Core mounts (owned by the viewer):
+Core mounts. Owned by the viewer:
 - `host.mounts.leftPanel`
 - `host.mounts.rightPanel`
 
@@ -52,7 +54,7 @@ HTML source of these mounts:
 - `index.html` uses `data-play-mount="leftPanel|rightPanel|overlayRoot|leftPanelPlugin|rightPanelPlugin"`.
 - `ui/control_manager.mjs` inserts `data-play-mount="leftPanelAfterFilePlugin"` immediately after rendering the built-in `File` section.
 
-## Host API (`window.__PLAY_HOST__`)
+## Host API
 
 At runtime the viewer exposes `window.__PLAY_HOST__` and passes the same object into each plugin register function.
 
@@ -65,23 +67,23 @@ State container with:
 - `host.store.subscribe((state) => void): () => void`
 
 Guidance:
-- Read current viewer state (panels/overlays, hud, rendering options).
-- Write demo-specific state under a dedicated namespace (recommend: `state.demo.<yourDemoName>`).
+- Read current viewer state such as panels/overlays, hud, rendering options.
+- Write demo-specific state under a dedicated namespace, for example `state.demo.<yourDemoName>`.
 
 ### `host.backend`
 
-Backend instance (worker-only in `app/main.mjs`).
+Backend instance. In `app/main.mjs` it is worker-only.
 
 Typical methods used by plugins:
-- `host.backend.apply(...)` (send UI/apply commands)
-- `host.backend.subscribe((snapshot) => void)` (raw snapshot stream)
-- `host.backend.snapshot()` (fetch latest snapshot)
-- `host.backend.loadXmlText(xmlText)` / `host.backend.loadXmlBundle(...)` (reload model)
+- `host.backend.apply(...)`: send UI/apply commands
+- `host.backend.subscribe((snapshot) => void)`: raw snapshot stream
+- `host.backend.snapshot()`: fetch latest snapshot
+- `host.backend.loadXmlText(xmlText)` / `host.backend.loadXmlBundle(...)`: reload model
 - `host.backend.step(n)` / `host.backend.setRate(rate)` / `host.backend.setRunState(running, source?)`
 
 Important:
 - In worker mode, plugins **must not** rely on reading WASM exports directly; always go through `backend` and/or snapshots.
-- The backend surface may evolve; prefer feature-detecting (`typeof host.backend.foo === 'function'`) for optional calls.
+- The backend surface may evolve; prefer feature-detecting optional calls via `typeof host.backend.foo === 'function'`.
 
 ### `host.controls`
 
@@ -93,7 +95,7 @@ Convenience helpers around the built-in UI spec:
 
 Control IDs and shortcuts come from `spec/ui_spec.json`.
 
-### `host.ui` (UI sections + kit)
+### `host.ui`
 
 Plugins should **prefer `host.ui`** over hand-rolling foldable blocks or mutating core panel DOM.
 
@@ -102,45 +104,49 @@ Plugins should **prefer `host.ui`** over hand-rolling foldable blocks or mutatin
 - `host.ui.panel('left').collapseAll()`
 - `host.ui.panel('left').expandAll()`
 - `host.ui.panel('left').toggleAll()`
-- `host.ui.panel('right')...` (same)
+- `host.ui.panel('right')...`: same
 
-These actions operate on all Play sections inside the selected panel (built-in + plugin sections) and persist collapsed state.
+These actions operate on all Play sections inside the selected panel, including built-in and plugin sections, and persist collapsed state.
 
 Collapsed state persistence:
 - Storage: `localStorage` key `play:ui:v1:section_collapsed`
-- Keying: per `(panel, sectionId)` (so left/right can share names without fighting)
+- Keying: based on `panel` and `sectionId`, so left/right can share names without fighting
 - Precedence: saved state > `defaultOpen` / `default_open` > open
 
-#### Registering sections (foldable blocks)
+#### Registering sections
 
 Create a native-behaving foldable section without copying header logic:
 
 - `host.ui.sections.register({ panel, sectionId, title, defaultOpen, after, before, mount, render })`
 
 Notes:
-- `sectionId` **must** be namespaced and start with `plugin:` (example: `plugin:sik_c3d`).
+- `sectionId` **must** be namespaced and start with `plugin:`. Example: `plugin:sik_c3d`.
 - `after`/`before` insert relative to existing `sectionId`s within the same panel.
 - For the common "insert after File" case, use `panel: 'left', after: 'file'` or `mount: 'leftPanelAfterFilePlugin'`.
-- If `mount` is provided (`leftPanelPlugin`, `rightPanelPlugin`, ...), it must match `panel` (Play also infers `panel` from `mount` if `panel` is omitted).
+- If `mount` is provided, for example `leftPanelPlugin` or `rightPanelPlugin`, it must match `panel`. Play also infers `panel` from `mount` if `panel` is omitted.
 
 The `render(body, ctx)` callback receives:
 - `body`: the `.section-body` element to populate
 - `ctx`: `{ panel, sectionId, sectionEl, body, host }`
-If `render(...)` returns a function (or `{ dispose() }`), Play calls it on `unregister(...)`.
+If `render(...)` returns a function or `{ dispose() }`, Play calls it on `unregister(...)`.
 
 Unregister:
 - `host.ui.sections.unregister(sectionId)`
 
-#### Data attribute contract (advanced / manual DOM)
+#### Data attribute contract
 
-If you build foldable sections manually (not recommended), Play only treats elements as sections if they expose stable `data-play-*` attributes:
+Advanced. Manual DOM.
+
+If you build foldable sections manually, this is not recommended. Play only treats elements as sections if they expose stable `data-play-*` attributes:
 
 - Section root: `data-play-role="section"` + `data-play-section-id="..."`
-- Header: `data-play-role="section-header"` (double-click triggers panel expand/collapse-all via event delegation)
-- Toggle button: `data-play-role="section-toggle"` (aria-expanded is managed by Play)
+- Header: `data-play-role="section-header"`. Double-click triggers panel expand/collapse-all via event delegation.
+- Toggle button: `data-play-role="section-toggle"`. aria-expanded is managed by Play.
 - Body: `data-play-role="section-body"`
 
-#### UI kit (optional primitives)
+#### UI kit
+
+Optional primitives.
 
 Small DOM helpers that match Play styling patterns:
 
@@ -164,75 +170,76 @@ Renderer helpers:
 - `host.renderer.renderScene(snapshot, state)`
 - `host.renderer.getStats()`
 
-### `host.renderer.overlay3d` (3D Overlay / Plugin 3D Layer)
+### `host.renderer.overlay3d`
 
 The viewer provides a formal, plugin-friendly 3D overlay system that renders directly in the Three.js world scene.
 
 Goals:
 - Let plugins draw *world-occluded* primitives/meshes without going through the worker → `mjvScene` path.
-- Provide stable **layer semantics** (world vs HUD) and a formal **transparency policy** so plugins don't fight over `renderOrder`/`depthWrite`.
-- Provide a scoped **AssetRegistry** (refcounted, auto-released on scope dispose) to prevent GPU/memory leaks and accidental shared-resource frees.
+- Provide stable **layer semantics** such as world vs HUD, plus a formal **transparency policy** so plugins don't fight over `renderOrder`/`depthWrite`.
+- Provide a scoped **AssetRegistry**. It is refcounted and auto-released on scope dispose to prevent GPU/memory leaks and accidental shared-resource frees.
 
 Entry points:
-- `host.renderer.getOverlay3D()` → returns the overlay manager (or `null` if renderer not ready)
+- `host.renderer.getOverlay3D()` → returns the overlay manager. Returns `null` if renderer is not ready.
 - `host.renderer.overlay3d.get()` → same as above
-- `host.renderer.overlay3d.createScope(scopeId, options?)` → convenience wrapper (`get()` + `createScope`)
-- `host.renderer.overlay3d.getScope(scopeId)` → convenience wrapper (`get()` + `getScope`)
+- `host.renderer.overlay3d.createScope(scopeId, options?)` → convenience wrapper: `get()` + `createScope`
+- `host.renderer.overlay3d.getScope(scopeId)` → convenience wrapper: `get()` + `getScope`
 
 #### Layers
 
-Each scope has per-layer roots (strings used in the APIs below):
-- `worldOpaque`: normal world objects (depth-tested; intended for opaque materials)
-- `worldTransparent`: normal world objects intended for alpha blending (depth-tested; depth-write defaults to off when opacity < 1)
-- `worldOverlay`: world-occluded overlays that should draw after the base world (selection highlights, gizmos)
-- `hud`: always-on-top overlays (depth-test defaults to off)
+Each scope has per-layer roots. These strings are used in the APIs below:
+- `worldOpaque`: normal world objects, depth-tested, intended for opaque materials
+- `worldTransparent`: normal world objects intended for alpha blending, depth-tested; depth-write defaults to off when opacity < 1
+- `worldOverlay`: world-occluded overlays that should draw after the base world, for example selection highlights and gizmos
+- `hud`: always-on-top overlays, depth-test defaults to off
 
-#### Instanced Primitives (SoA writer + commit)
+#### Instanced primitives
 
-Use instancing for lots of lightweight primitives (markers/arrows/etc). This is the recommended path for large counts.
+Use instancing for lots of lightweight primitives such as markers and arrows. This is the recommended path for large counts.
 
 `scope.createInstancedMeshBatch({ ... })` returns:
-- `batch.writer.pos` (`Float32Array`, length = `capacity * 3`)
-- `batch.writer.quat` (`Float32Array`, length = `capacity * 4`, quaternion xyzw)
-- `batch.writer.scale` (`Float32Array`, length = `capacity * 3`)
-- `batch.writer.rgb` (`Float32Array`, length = `capacity * 3`, linear rgb multipliers)
-- `batch.commit({ count })` (latches author buffers; flushed atomically at the frame barrier)
-- `batch.setTransparency(spec)` (updates transparency policy and sorting)
+- `batch.writer.pos`: `Float32Array`, length = `capacity * 3`
+- `batch.writer.quat`: `Float32Array`, length = `capacity * 4`, quaternion xyzw
+- `batch.writer.scale`: `Float32Array`, length = `capacity * 3`
+- `batch.writer.rgb`: `Float32Array`, length = `capacity * 3`, linear rgb multipliers
+- `batch.commit({ count })`: latches author buffers; flushed atomically at the frame barrier
+- `batch.setTransparency(spec)`: updates transparency policy and sorting
 
 Commit is **deferred**: it does not immediately upload to the GPU. Play flushes all pending overlay commits
-once per render frame (in `host.clock.onFrame`), after the core MuJoCo scene update, so overlays never get
+once per render frame, after the core MuJoCo scene update. The frame hook comes from `host.clock.onFrame`.
+As a result, overlays never get
 ahead/behind the model pose.
 
 Key options:
-- `primitive`: `'sphere' | 'box' | 'cylinder' | 'capsule' | 'cone'` (shared geometry via AssetRegistry)
+- `primitive`: `'sphere' | 'box' | 'cylinder' | 'capsule' | 'cone'`. Shared geometry via AssetRegistry.
 - `capacity`: max instances in this batch
 - `layer`: one of the layer ids above
-- `transparency`: policy object (see below)
+- `transparency`: policy object, see below
 
-#### Transparency Policy (instancing)
+#### Transparency policy
 
 Transparent instancing is a system-level problem: instances are not automatically depth-sorted by Three.js.
 The overlay system provides an explicit policy surface to avoid per-plugin hacks.
 
-`transparency` fields (supported on `createInstancedMeshBatch` and `batch.setTransparency`):
-- `mode`: `'opaque' | 'blend'` (defaults to `'blend'` for `worldTransparent`, else `'opaque'`)
-- `opacity`: `0..1` (when `< 1`, enables blend mode)
+`transparency` fields. Supported on `createInstancedMeshBatch` and `batch.setTransparency`:
+- `mode`: `'opaque' | 'blend'`. Defaults to `'blend'` for `worldTransparent`, else `'opaque'`.
+- `opacity`: `0..1`. When `< 1`, enables blend mode.
 - `sortMode`: `'nosort' | 'bins' | 'strict' | 'inherit'`
   - `nosort`: no per-instance ordering; fastest
   - `bins`: coarse depth bins; good default for large counts
   - `strict`: per-instance depth sort; best quality, higher CPU cost
-- `bins`: `1..16` (used when `sortMode='bins'`)
+- `bins`: `1..16`. Used when `sortMode='bins'`.
 - `update`: `'commit' | 'frame' | 'inherit'`
-  - `commit`: sort/upload only when `commit()` is flushed (frame barrier)
-  - `frame`: also re-sorts when the camera moves (render-loop hook)
-- `every`: integer `>= 1` (when `update='frame'`, only resort every N frames)
-- `depthTest`, `depthWrite`, `toneMapped`: advanced material toggles (optional)
+  - `commit`: sort/upload only when `commit()` is flushed. This is the frame barrier.
+  - `frame`: also re-sorts when the camera moves. This comes from the render-loop hook.
+- `every`: integer `>= 1`. When `update='frame'`, only resort every N frames.
+- `depthTest`, `depthWrite`, `toneMapped`: advanced material toggles, optional
 
 Global defaults for new batches:
 - `overlay = host.renderer.overlay3d.get()`
 - `overlay.setTransparencyDefaults({ sortMode, bins, update, every })`
 
-#### Assets (refcounted, scoped)
+#### Assets
 
 Each scope exposes `scope.assets` helpers. Handles acquired through `scope.assets.*` are auto-released when the scope is disposed.
 
@@ -241,7 +248,7 @@ Useful helpers:
 - `scope.assets.texture2DFromUrl(url, options?)` → `{ asset: Texture, release() }`
 - `scope.assets.acquire(key, createFn, { dispose? })` → generic refcounted asset handle
 
-#### Example (instanced transparent markers)
+#### Example: instanced transparent markers
 
 ```js
 export function registerPlayPlugin(host) {
@@ -287,7 +294,9 @@ export function registerPlayPlugin(host) {
 }
 ```
 
-### `host.getSnapshot()`
+### `host.getSnapshot`
+
+Signature: `host.getSnapshot()`
 
 Returns the last snapshot currently held by the UI thread (may be `null` during initial load).
 
@@ -330,7 +339,7 @@ Disposers are called on page unload (`beforeunload`). Plugins should clean up:
 - DOM event listeners
 - timers / `requestAnimationFrame` loops
 
-## Worker Protocol Extensions (for new WASM ABI calls)
+## Worker protocol extensions
 
 If your demo needs new functionality implemented inside the forge WASM (e.g. smocap/SIK), you will need a worker RPC surface.
 
@@ -358,7 +367,9 @@ Typical touch points:
 - Main-thread wrapper: `backend/backend_core.mjs` (expose a method on `backend` and/or route through `backend.apply`).
 - Optional store merge: `ui/state.mjs` (only if you want to reflect worker snapshots/events into `store` in a structured way).
 
-### Design rules (recommended)
+### Design rules
+
+Recommended.
 
 - Prefer writing results into `mjData` so they naturally show up in existing snapshots.
   - Example: if smocap produces target poses, write to mocap bodies, qpos, ctrl, etc.
@@ -381,7 +392,7 @@ If you do add a new snapshot field, you must also consider:
 - whether it should be included in the snapshot transfer list (to avoid copies),
 - and whether it affects snapshot size/latency (especially at 60–120Hz).
 
-## Refresh-Rate Guidance
+## Refresh rate guidance
 
 This viewer intentionally decouples:
 - physics stepping (worker internal tick) and

@@ -30,7 +30,7 @@ Play 期望 forge 的 ``dist/<ver>/`` 目录至少包含：
 
 - ``version.json`` (用于缓存标记与诊断)
 
-Viewer ABI 扩展（必需）
+Viewer ABI 扩展
 --------------------------------
 
 Play 会校验已加载的 forge 模块是否导出了必需的 viewer ABI 集合。若缺少任何导出，Worker 会抛出错误并报告缺失的符号。

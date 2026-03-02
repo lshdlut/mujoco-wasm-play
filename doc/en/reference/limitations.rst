@@ -22,7 +22,7 @@ Remote/absolute references are rejected by default.
 
 If you need advanced asset loading, use ``host.backend.loadXmlBundle(...)``.
 
-Network dependencies (Three.js CDN)
+Network dependencies
 -----------------------------------
 
 ``index.html`` imports Three.js from a CDN via an import map. Offline

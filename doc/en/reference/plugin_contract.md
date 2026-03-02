@@ -1,4 +1,6 @@
-# Plugin contract (authoritative)
+# Plugin contract
+
+This is the authoritative reference.
 
 This page is the **authoritative** plugin development contract for Play.
 
