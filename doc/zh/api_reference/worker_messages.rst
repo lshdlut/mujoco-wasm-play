@@ -6,8 +6,8 @@ Play 使用 module Worker 来运行 MuJoCo，并与主线程通信。消息通�
 消息形状
 --------------
 
-- 命令（main → worker）：形如 ``{ cmd: string, ...payload }`` 的对象
-- 事件（worker → main）：形如 ``{ kind: string, ...payload }`` 的对象
+- 命令：main → worker。形如 ``{ cmd: string, ...payload }`` 的对象
+- 事件：worker → main。形如 ``{ kind: string, ...payload }`` 的对象
 
 权威协议规范是 JSON IDL：
 
@@ -19,8 +19,8 @@ Play 使用 module Worker 来运行 MuJoCo，并与主线程通信。消息通�
 
 ``tools/generate_worker_protocol.mjs`` generates:
 
-- ``worker/protocol.gen.mjs`` (lists, field specs)
-- ``worker/dispatch.gen.mjs`` (encode/decode/dispatch helpers)
+- ``worker/protocol.gen.mjs``：lists, field specs
+- ``worker/dispatch.gen.mjs``：encode/decode/dispatch helpers
 
 这些模块会：
 
@@ -32,7 +32,7 @@ Play 使用 module Worker 来运行 MuJoCo，并与主线程通信。消息通�
 
 上述 spec 是单一事实来源。为了快速浏览，下面是当前目录：
 
-命令（main → worker）：
+命令：main → worker
 
 .. code-block:: text
 
@@ -42,7 +42,7 @@ Play 使用 module Worker 来运行 MuJoCo，并与主线程通信。消息通�
   keyframeSelect, keyframeSave, keyframeLoad, setWatch, step, reset, gesture,
   align, copyState, applyPerturb, setSelection, selectAt, setCtrlNoise
 
-事件（worker → main）：
+事件：worker → main
 
 .. code-block:: text
 

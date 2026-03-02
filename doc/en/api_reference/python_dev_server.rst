@@ -16,10 +16,10 @@ What it does
   - ``.wasm`` → ``application/wasm``
 - Adds security/cache headers:
   - ``X-Content-Type-Options: nosniff``
-  - ``Cache-Control`` (dev-friendly defaults)
+  - ``Cache-Control``: dev-friendly defaults
 - Mounts stable prefixes:
   - ``/mujoco-wasm-play/`` → repo root
-  - ``/mujoco-wasm-forge/`` → sibling forge repo (if present)
+  - ``/mujoco-wasm-forge/`` → sibling forge repo, if present
 
 Environment variables
 ---------------------

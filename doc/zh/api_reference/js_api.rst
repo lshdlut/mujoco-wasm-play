@@ -1,9 +1,9 @@
-JavaScript API（开发者）
+JavaScript API
 ==========================
 
 本页面记录 UI 之外的、面向开发者的 JavaScript surface。
 
-插件的主要入口点是 :doc:`plugin_api` (``window.__PLAY_HOST__``)。
+插件的主要入口点是 :doc:`plugin_api`：``window.__PLAY_HOST__``。
 
 后端 API
 -----------
@@ -17,7 +17,7 @@ JavaScript API（开发者）
 接口概览
 ----------------
 
-这些方法当前存在（即使其中一些目前是 no-op）。大多数方法会在发送命令后立即返回本地已知的最新 snapshot。
+这些方法当前存在，即使其中一些目前是 no-op。大多数方法会在发送命令后立即返回本地已知的最新 snapshot。
 
 .. code-block:: ts
 
@@ -52,12 +52,12 @@ JavaScript API（开发者）
     dispose(): void;
   }
 
-``apply(...)`` payloads
+``apply`` payloads
 -----------------------
 
 ``backend.apply(...)`` 主要接受两种 shape：
 
-- UI apply（核心 UI 使用；插件在高级场景下也可以使用）：
+- UI apply：核心 UI 使用。插件在高级场景下也可以使用。
 
   .. code-block:: ts
 
@@ -68,7 +68,7 @@ JavaScript API（开发者）
       control?: object;  // optional control metadata
     }
 
-- Gesture apply（高级用法；会被转发到 Worker）：
+- Gesture apply：高级用法。会被转发到 Worker。
 
   .. code-block:: ts
 
@@ -101,9 +101,9 @@ JavaScript API（开发者）
 
 为便于开发调试，Play 还暴露了：
 
-- ``window.__viewerStore`` (与 ``__PLAY_HOST__.store`` 相同)
-- ``window.__viewerControls`` (control-manager 实例)
-- ``window.__viewerRenderer`` (renderer manager，包含 ``overlay3d`` 辅助)
-- ``window.__lastSnapshot`` (主线程观察到的最新 snapshot)
+- ``window.__viewerStore``：与 ``__PLAY_HOST__.store`` 相同
+- ``window.__viewerControls``：control-manager 实例
+- ``window.__viewerRenderer``：renderer manager，包含 ``overlay3d`` 辅助
+- ``window.__lastSnapshot``：主线程观察到的最新 snapshot
 
 完整调试 hook 列表见 :doc:`/reference/configuration`。

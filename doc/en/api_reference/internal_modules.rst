@@ -1,9 +1,9 @@
-Internal modules (by file)
+Internal modules
 ==========================
 
 This page is an index of important runtime modules and their exported surfaces.
-For a mechanically-complete list of exports and declarations (file-scope +
-nested) across the repo, see :doc:`code_inventory`.
+For a mechanically-complete list of exports and declarations across the repo,
+including file-scope and nested declarations, see :doc:`code_inventory`.
 
 Core runtime modules
 --------------------
@@ -15,7 +15,7 @@ Core runtime modules
   - Host contract helper: ``app/play_host.mjs``
 
 ``backend/backend_core.mjs``
-  Backend (main thread). Exports ``createBackend(...)`` and wraps the Worker
+  Backend on the main thread. Exports ``createBackend(...)`` and wraps the Worker
   protocol with a friendlier API used by UI and plugins.
 
 ``worker/physics.worker.mjs``
@@ -28,16 +28,16 @@ Core runtime modules
 ``core/viewer_runtime.mjs``
   Shared runtime helpers used in both main and worker:
 
-  - URL parameter parsing (``consumeViewerParams(...)`` and readers)
-  - strict/compat/verbose/perf helpers (``strictCatch``/``perfSample``/etc)
+  - URL parameter parsing: ``consumeViewerParams(...)`` and readers
+  - strict/compat/verbose/perf helpers: ``strictCatch``/``perfSample``/etc
   - logging helpers
 
 ``ui/state.mjs``
   Viewer store/state/actions and snapshot merge. Exports:
 
-  - ``createViewerStore(...)`` (viewer store)
-  - ``applySpecAction(...)`` / ``applyGesture(...)`` (UI → backend commands)
-  - ``mergeBackendSnapshot(...)`` (snapshot → store merge)
+  - ``createViewerStore(...)``: viewer store
+  - ``applySpecAction(...)`` / ``applyGesture(...)``: UI → backend commands
+  - ``mergeBackendSnapshot(...)``: snapshot → store merge
 
 ``ui/control_manager.mjs``
   DOM wiring and control/panel rendering. Exports ``createControlManager(...)``.
@@ -51,7 +51,7 @@ Core runtime modules
   - Scene-SoA geometry/instancing/material helpers: ``renderer/scene_soa_geoms.mjs``
 
 ``renderer/controllers.mjs``
-  Input controllers (camera + picking). Exports:
+  Input controllers: camera and picking. Exports:
 
   - ``createCameraController(...)``
   - ``createPickingController(...)``
@@ -60,15 +60,15 @@ Core runtime modules
   Environment/sky management. Exports:
 
   - ``createEnvironmentManager(...)``
-  - ``pushSkyDebug(...)`` (developer/debug helper)
+  - ``pushSkyDebug(...)``: developer/debug helper
 
 ``bridge/``
   forge/WASM bridge helpers and a small simulator wrapper live under the
   ``bridge/`` directory:
 
-  - heap view helpers (``heapViewF64``/``heapViewF32``/etc)
+  - heap view helpers: ``heapViewF64``/``heapViewF32``/etc
   - ``collectRenderAssetsFromModule(...)``
-  - ``MjSimLite`` (minimal helper wrapper)
+  - ``MjSimLite``: minimal helper wrapper
 
 Split runtime modules
 ---------------------
@@ -87,14 +87,14 @@ UI internals
 Renderer internals
   - ``renderer/pipeline.mjs``: Three.js renderer pipeline + renderer manager
   - ``renderer/controllers.mjs``: camera + picking controllers
-  - ``renderer/overlay3d.mjs``: overlay3d manager (scopes + batches)
-  - ``renderer/three_helpers.mjs``: shared Three.js helpers (dispose/bounds/scene)
+  - ``renderer/overlay3d.mjs``: overlay3d manager: scopes and batches
+  - ``renderer/three_helpers.mjs``: shared Three.js helpers: dispose, bounds, scene
   - ``renderer/depth_sort.mjs``: depth/transparency sorting helpers
   - ``renderer/mujoco_shadows.mjs``: MuJoCo shadow-map parity helpers
   - ``renderer/mujoco_constants.mjs``: MuJoCo enums/constants
   - ``renderer/mujoco_textures.mjs``: MuJoCo textures + generated texcoords helpers
   - ``renderer/deformables.mjs``: flex/skin mesh helpers
-  - ``renderer/scene_soa_geoms.mjs``: Scene-SoA geoms/instancing/material helpers (extracted from pipeline)
+  - ``renderer/scene_soa_geoms.mjs``: Scene-SoA geoms/instancing/material helpers, extracted from pipeline
 
 Backend internals
   - ``backend/backend_core.mjs``: backend implementation
@@ -109,26 +109,24 @@ Bridge internals
 Worker internals
   - ``worker/snapshot_pool.mjs``: snapshot pool policy/state
 
-Module dependency direction (enforced)
+Module dependency direction
 --------------------------------------
 
 Play's runtime is intentionally layered. ``tools/check_module_boundaries.mjs``
-(run via ``node tools/run_checks.mjs``) enforces a coarse dependency DAG:
+enforces a coarse dependency DAG. Run via ``node tools/run_checks.mjs``:
 
-- ``base``: shared runtime utilities (``core/viewer_*.mjs``, ``core/xml_refs.mjs``,
-  ``core/fallbacks.mjs``, ``app/play_host.mjs``)
-- ``bridge``: low-level forge/WASM helpers (``bridge/*.mjs``)
-- ``protocol``: generated worker protocol glue (``worker/protocol.gen.mjs``,
-  ``worker/dispatch.gen.mjs``)
-- ``worker``: physics worker (``worker/physics.worker.mjs``, ``worker/**``)
-- ``backend``: main-thread backend (``backend/**``)
-- ``environment``: presets + sky helpers (``environment/environment.mjs``)
-- ``ui``: store + UI (``ui/**``)
-- ``renderer``: Three.js renderer + controllers (``renderer/**``)
-- ``entry``: application assembly (``app/main.mjs``)
+- ``base``: shared runtime utilities. ``core/viewer_*.mjs``, ``core/xml_refs.mjs``, ``core/fallbacks.mjs``, ``app/play_host.mjs``
+- ``bridge``: low-level forge/WASM helpers. ``bridge/*.mjs``
+- ``protocol``: generated worker protocol glue. ``worker/protocol.gen.mjs``, ``worker/dispatch.gen.mjs``
+- ``worker``: physics worker. ``worker/physics.worker.mjs``, ``worker/**``
+- ``backend``: main-thread backend. ``backend/**``
+- ``environment``: presets and sky helpers. ``environment/environment.mjs``
+- ``ui``: store and UI. ``ui/**``
+- ``renderer``: Three.js renderer and controllers. ``renderer/**``
+- ``entry``: application assembly. ``app/main.mjs``
 
 The intent is to keep worker/backend semantics isolated and prevent UI/renderer
-from becoming mutually dependent (renderer no longer imports UI).
+from becoming mutually dependent. Renderer no longer imports UI.
 
 Protocol and generated helpers
 ------------------------------
@@ -144,10 +142,10 @@ Protocol and generated helpers
   reject unknown commands/events.
 
 ``spec/ui_spec.json``
-  UI spec contract (control ids, fields, bindings).
+  UI spec contract: control ids, fields, bindings.
 
 ``core/viewer_state_types.ts``
-  TypeScript definition of the viewer store state (a complete field list).
+  TypeScript definition of the viewer store state. This is the complete field list.
 
 ``core/viewer_structs.mjs`` / ``core/viewer_shared.mjs`` / ``core/viewer_defaults.mjs``
   Generated/utility helpers for struct layouts, defaults, and shared state
@@ -157,8 +155,8 @@ Other utilities
 ---------------
 
 ``core/xml_refs.mjs``
-  MJCF XML file reference parsing and bundle building (used by
-  ``loadXmlBundle(...)`` style flows).
+  MJCF XML file reference parsing and bundle building. Used by
+  ``loadXmlBundle(...)`` style flows.
 
 ``tools/dev_server.py``
   Small Python dev server that serves static files and ensures correct MIME

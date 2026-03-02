@@ -16,10 +16,10 @@ Play 内置了一个用于本地开发的小型 Python HTTP 服务器：
   - ``.wasm`` → ``application/wasm``
 - 添加安全/缓存相关响应头：
   - ``X-Content-Type-Options: nosniff``
-  - ``Cache-Control`` (dev-friendly defaults)
+  - ``Cache-Control``：dev-friendly defaults
 - 挂载稳定前缀：
   - ``/mujoco-wasm-play/`` → 仓库根目录
-  - ``/mujoco-wasm-forge/`` → 同级 forge 仓库（若存在）
+  - ``/mujoco-wasm-forge/`` → 同级 forge 仓库，若存在
 
 环境变量
 ---------------------

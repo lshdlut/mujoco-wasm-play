@@ -1,9 +1,9 @@
-JavaScript API (developer)
+JavaScript API
 ==========================
 
 This page documents developer-facing JavaScript surfaces beyond the UI.
 
-The primary entrypoint for plugins is :doc:`plugin_api` (``window.__PLAY_HOST__``).
+The primary entrypoint for plugins is :doc:`plugin_api`: ``window.__PLAY_HOST__``.
 
 Backend API
 -----------
@@ -18,7 +18,7 @@ the protocol defined in :doc:`worker_messages`.
 Interface summary
 -----------------
 
-These methods exist today (even if some are currently no-ops). Most methods
+These methods exist today, even if some are currently no-ops. Most methods
 return the latest locally-known snapshot immediately after sending a command.
 
 .. code-block:: ts
@@ -54,12 +54,12 @@ return the latest locally-known snapshot immediately after sending a command.
     dispose(): void;
   }
 
-``apply(...)`` payloads
+``apply`` payloads
 -----------------------
 
 ``backend.apply(...)`` accepts two main shapes:
 
-- UI apply (used by core UI; plugins may use it for advanced cases):
+- UI apply: used by core UI. Plugins may use it for advanced cases.
 
   .. code-block:: ts
 
@@ -70,7 +70,7 @@ return the latest locally-known snapshot immediately after sending a command.
       control?: object;  // optional control metadata
     }
 
-- Gesture apply (advanced; forwarded to the Worker):
+- Gesture apply: advanced. Forwarded to the Worker.
 
   .. code-block:: ts
 
@@ -104,9 +104,9 @@ Debug globals
 
 For developer debugging, Play also exposes:
 
-- ``window.__viewerStore`` (same as ``__PLAY_HOST__.store``)
-- ``window.__viewerControls`` (control-manager instance)
-- ``window.__viewerRenderer`` (renderer manager, including ``overlay3d`` helpers)
-- ``window.__lastSnapshot`` (latest snapshot observed on the main thread)
+- ``window.__viewerStore``: same as ``__PLAY_HOST__.store``
+- ``window.__viewerControls``: control-manager instance
+- ``window.__viewerRenderer``: renderer manager, including ``overlay3d`` helpers
+- ``window.__lastSnapshot``: latest snapshot observed on the main thread
 
 See :doc:`/reference/configuration` for the full list of debug hooks.

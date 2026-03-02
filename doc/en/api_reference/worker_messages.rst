@@ -7,8 +7,8 @@ Messages use ``postMessage`` and are validated/encoded by generated helpers.
 Message shapes
 --------------
 
-- Commands (main → worker): objects with ``{ cmd: string, ...payload }``
-- Events (worker → main): objects with ``{ kind: string, ...payload }``
+- Commands: main → worker. Objects with ``{ cmd: string, ...payload }``
+- Events: worker → main. Objects with ``{ kind: string, ...payload }``
 
 The canonical protocol spec is the JSON IDL:
 
@@ -20,8 +20,8 @@ Generated helpers
 
 ``tools/generate_worker_protocol.mjs`` generates:
 
-- ``worker/protocol.gen.mjs`` (lists, field specs)
-- ``worker/dispatch.gen.mjs`` (encode/decode/dispatch helpers)
+- ``worker/protocol.gen.mjs``: lists and field specs
+- ``worker/dispatch.gen.mjs``: encode/decode/dispatch helpers
 
 These modules:
 
@@ -34,7 +34,7 @@ Command/event catalogs
 The spec above is the single source of truth. For quick scanning, these are the
 current catalogs:
 
-Commands (main → worker):
+Commands: main → worker
 
 .. code-block:: text
 
@@ -44,7 +44,7 @@ Commands (main → worker):
   keyframeSelect, keyframeSave, keyframeLoad, setWatch, step, reset, gesture,
   align, copyState, applyPerturb, setSelection, selectAt, setCtrlNoise
 
-Events (worker → main):
+Events: worker → main
 
 .. code-block:: text
 

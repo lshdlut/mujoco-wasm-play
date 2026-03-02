@@ -1,4 +1,4 @@
-Runtime lifecycle (end-to-end)
+Runtime lifecycle
 ==============================
 
 This page ties Play's runtime "processes" to concrete code locations. It is
@@ -11,13 +11,13 @@ Entry points
 Main thread:
 
 - ``index.html``: static HTML shell + import map + mount elements.
-- ``app/main.mjs``: main entrypoint (UI wiring + renderer + backend +
-  plugin host exposure).
+- ``app/main.mjs``: main entrypoint. UI wiring, renderer, backend, and plugin
+  Host exposure.
 
 Worker:
 
-- ``worker/physics.worker.mjs``: module Worker entrypoint (forge/WASM load + MuJoCo
-  stepping + snapshots).
+- ``worker/physics.worker.mjs``: module Worker entrypoint. forge/WASM load,
+  MuJoCo stepping, and snapshot emission.
 
 Backend module:
 
@@ -27,11 +27,12 @@ Backend module:
 Boot sequence
 -------------
 
-1. **HTML loads** ``app/main.mjs`` (ESM).
+1. **HTML loads** ``app/main.mjs`` as ESM.
 2. **URL/global config is consumed**:
 
-   - URL helpers live in ``core/viewer_runtime.mjs`` (``consumeViewerParams(...)``,
-     ``buildWorkerUrl(...)``, strict/verbose toggles, etc).
+   - URL helpers live in ``core/viewer_runtime.mjs``. This includes
+     ``consumeViewerParams(...)``, ``buildWorkerUrl(...)``, and strict/verbose
+     toggles.
 3. **Backend is created**:
 
    - ``app/main.mjs`` calls ``createBackend(...)`` from
@@ -40,8 +41,8 @@ Boot sequence
      begins the command/event handshake.
 4. **Forge dist is resolved and loaded in the Worker**:
 
-   - The Worker resolves a forge ``dist/<ver>/`` base (from ``forgeBase=...`` or
-     local fallbacks).
+   - The Worker resolves a forge ``dist/<ver>/`` base from ``forgeBase=...`` or
+     local fallbacks.
    - It dynamically imports ``mujoco.js`` and loads ``mujoco.wasm``.
 5. **Ready**:
 
@@ -58,22 +59,22 @@ The main thread and the Worker communicate via ``postMessage``:
 
 Protocol source of truth:
 
-  - ``tools/worker_protocol.json`` (IDL).
+  - ``tools/worker_protocol.json``: JSON IDL.
   - Generated runtime helpers:
 
-  - ``worker/protocol.gen.mjs`` (lists + field specs + transfer fields)
-  - ``worker/dispatch.gen.mjs`` (encode/decode/dispatch)
+  - ``worker/protocol.gen.mjs``: lists, field specs, transfer fields
+  - ``worker/dispatch.gen.mjs``: encode, decode, dispatch
 
 See :doc:`/api_reference/worker_messages`.
 
-Snapshot pipeline (Worker → Main)
+Snapshot pipeline
 ---------------------------------
 
 High-frequency state is delivered via the ``snapshot`` event.
 
 Worker side:
 
-- Runs stepping internally (MuJoCo/WASM).
+- Runs stepping internally via MuJoCo/WASM.
 - Emits ``snapshot`` events that often contain TypedArray views and uses
   transfer lists to avoid copies.
 
@@ -83,8 +84,8 @@ Main thread side:
   - Merges snapshot fields into the viewer store:
 
   - ``mergeBackendSnapshot(...)`` is implemented/exported by ``ui/state.mjs``.
-  - ``app/main.mjs`` also keeps a ``latestSnapshot`` for quick access
-    (and exposes it as ``window.__lastSnapshot`` for debugging).
+  - ``app/main.mjs`` also keeps a ``latestSnapshot`` for quick access and exposes
+    it as ``window.__lastSnapshot`` for debugging.
 
 UI ticks and "lanes"
 --------------------
@@ -92,18 +93,18 @@ UI ticks and "lanes"
 Play intentionally decouples:
 
 - Worker stepping
-- snapshot delivery (adaptive, worker-driven)
-- UI updates (throttled lanes for DOM work)
+- snapshot delivery, adaptive and worker-driven
+- UI updates, throttled lanes for DOM work
 
 The main entrypoint installs a small clock/subscription system that provides:
 
-- ``onSnapshot``: snapshot-aligned work (state derivation)
-- ``onFrame``: render-frame barrier (overlay commits / per-frame animation)
-- ``onUiTick`` / ``onUiMainTick``: normal DOM updates (default ~30Hz)
+- ``onSnapshot``: snapshot-aligned work, state derivation
+- ``onFrame``: render-frame barrier, overlay commits and per-frame animation
+- ``onUiTick`` / ``onUiMainTick``: normal DOM updates, default ~30Hz
 - ``onUiControlsTick``: slower lane for expensive control syncing
 - ``onUiSlowTick``: slow lane for heavy cards/tables
 
-These hooks are exposed to plugins via the Host API (see :doc:`/reference/plugin_contract`).
+These hooks are exposed to plugins via the Host API. See :doc:`/reference/plugin_contract`.
 
 Rendering pipeline
 ------------------
@@ -112,29 +113,29 @@ Rendering runs on the main thread and is driven by snapshots + viewer state.
 
 Key modules:
 
-- ``renderer/pipeline.mjs`` exports ``createRendererManager(...)`` (scene +
-  render loop).
+- ``renderer/pipeline.mjs`` exports ``createRendererManager(...)``: scene and
+  render loop.
 - ``renderer/controllers.mjs`` exports:
 
-  - ``createCameraController(...)`` (camera interaction and sync)
-  - ``createPickingController(...)`` (picking/selection)
+  - ``createCameraController(...)``: camera interaction and sync
+  - ``createPickingController(...)``: picking and selection
 - ``environment/environment.mjs`` exports ``createEnvironmentManager(...)`` for sky
   / environment handling.
 
 The renderer:
 
-- Consumes snapshots (poses, scene SoA fields, render assets, etc).
+- Consumes snapshots: poses, scene SoA fields, render assets.
 - Updates Three.js scene objects and materials.
 - Flushes overlay3d commits at the render-frame barrier to keep overlays in sync
   with the MuJoCo scene.
 
-Model loading (end-user vs developer)
+Model loading
 -------------------------------------
 
 End-user:
 
-- Use ``model=...`` to select a builtin alias or a path under ``model/`` (or
-  ``local_model/`` for local-only files).
+- Use ``model=...`` to select a builtin alias or a path under ``model/``. Use
+  ``local_model/`` for local-only files.
 
 Developer:
 
@@ -149,17 +150,17 @@ Related utilities:
 - ``bridge/`` contains forge/WASM heap helpers and the ``MjSimLite`` wrapper
   for interacting with the module heap.
 
-Plugin lifecycle (main thread)
+Plugin lifecycle
 ------------------------------
 
 Plugins are dynamically imported ESM modules and are expected to export
-``registerPlayPlugin(host)`` (or a default export).
+``registerPlayPlugin(host)`` or a default export.
 
 Loading sources:
 
 - URL query parameter: ``plugins=...``
-- Global: ``globalThis.PLAY_PLUGINS = [...]`` (must be set before the main
-  module runs)
+- Global: ``globalThis.PLAY_PLUGINS = [...]``. This must be set before the main
+  module runs.
 
 See :doc:`/reference/plugin_contract` for mounts, UI injection, overlay3d, and
 Worker boundary constraints.
@@ -171,6 +172,6 @@ Strict/verbose/perf helpers live in ``core/viewer_runtime.mjs``:
 
 - ``strictCatch(...)`` / ``strictEnsure(...)`` / ``strictOverride(...)``
 - ``perfMark(...)`` / ``perfSample(...)`` / ``perfSummary()``
-- logging helpers (``logStatus``, ``logWarn``, ``logError``)
+- logging helpers: ``logStatus``, ``logWarn``, ``logError``
 
 For developer-facing debug globals, see :doc:`/reference/configuration`.

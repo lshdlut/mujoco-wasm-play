@@ -1,4 +1,4 @@
-Plugin API (Host API)
+Plugin API
 =====================
 
 Plugins interact with Play via the Host object exposed at runtime:
@@ -13,9 +13,9 @@ examples, see :doc:`/reference/plugin_contract`.
 Registration
 ------------
 
-A plugin module is loaded via dynamic ``import()`` and must export either:
+A plugin module is loaded via dynamic ``import()`` and must export one of:
 
-- ``registerPlayPlugin(host)`` (named export), or
+- ``registerPlayPlugin(host)``: named export
 - a default export function ``(host) => disposer``
 
 The register function may return:
@@ -23,7 +23,7 @@ The register function may return:
 - a disposer function ``() => void``, or
 - an object with ``dispose(): void``
 
-Host object (v1)
+Host object v1
 ----------------
 
 The Host API is a plain JavaScript object. This TypeScript-like shape is meant
@@ -43,7 +43,7 @@ Notes:
     | "leftPanelAfterFilePlugin" | "leftPanelPlugin" | "rightPanelPlugin";
 
   interface ViewerControlsApi {
-    // Debug/inspection helpers (not part of the stable plugin contract).
+    // Debug/inspection helpers. Not part of the stable plugin contract.
     getBinding(id: string): unknown | null;
 
     // Convenience helpers around the built-in UI spec.

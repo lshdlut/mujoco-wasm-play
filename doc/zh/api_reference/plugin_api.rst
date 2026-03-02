@@ -1,4 +1,4 @@
-插件 API（Host API）
+插件 API
 =====================
 
 插件通过运行时暴露的 Host 对象与 Play 交互：
@@ -14,7 +14,7 @@
 
 插件模块通过动态 ``import()`` 加载，必须导出以下之一：
 
-- ``registerPlayPlugin(host)`` (命名导出)，或
+- ``registerPlayPlugin(host)``：命名导出
 - 一个默认导出函数 ``(host) => disposer``
 
 注册函数可以返回：
@@ -22,7 +22,7 @@
 - 一个 disposer 函数 ``() => void``，或
 - 一个带 ``dispose(): void`` 的对象
 
-Host 对象（v1）
+Host 对象 v1
 ----------------
 
 Host API 是一个普通的 JavaScript 对象。下面的 TypeScript-like 形状用于开发者参考：
@@ -40,7 +40,7 @@ Host API 是一个普通的 JavaScript 对象。下面的 TypeScript-like 形状
     | "leftPanelAfterFilePlugin" | "leftPanelPlugin" | "rightPanelPlugin";
 
   interface ViewerControlsApi {
-    // Debug/inspection helpers (not part of the stable plugin contract).
+    // Debug/inspection helpers. Not part of the stable plugin contract.
     getBinding(id: string): unknown | null;
 
     // Convenience helpers around the built-in UI spec.
