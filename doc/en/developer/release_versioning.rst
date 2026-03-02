@@ -16,7 +16,7 @@ Recommended practices
   - update the pinned ``forgeBase`` URL
   - ensure MIME/CORS headers are correct on the hosting origin
 
-Docs versioning (RTD)
+Docs versioning
 ---------------------
 
 If using Read the Docs:

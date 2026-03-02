@@ -54,7 +54,7 @@
   - Generator: ``tools/generate_ui_artifacts.mjs``
   - Outputs (examples): ``core/viewer_structs.mjs``, ``core/viewer_state_types.ts``
 
-Forge dist bundle（分发包）
+Forge dist bundle
 ---------------------------
 
 本仓库可能在 ``dist/<ver>/`` 下 vendor 一个或多个 forge bundle 以便本地/演示使用，但这些产物的构建流水线位于 forge 仓库（``mujoco-wasm-forge``）。

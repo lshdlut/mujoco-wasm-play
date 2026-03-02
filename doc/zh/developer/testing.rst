@@ -1,7 +1,7 @@
 测试
 =======
 
-端到端（Playwright）
+端到端
 -----------------------
 
 Playwright 安装在仓库根目录（见 ``package.json``）。

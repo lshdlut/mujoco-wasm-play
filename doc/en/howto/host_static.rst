@@ -15,7 +15,7 @@ These must be correct, otherwise the browser will refuse to load modules/WASM:
 If you see Worker or module load failures, check the response ``Content-Type``
 in DevTools Network.
 
-CORS (when using remote ``forgeBase``)
+CORS
 --------------------------------------
 
 If ``forgeBase=`` points to a different origin, the forge host must allow CORS

@@ -4,7 +4,7 @@ Architecture
 Play uses a Worker-first architecture to keep MuJoCo/WASM work off the main
 thread.
 
-Dataflow (conceptual)
+Dataflow
 ---------------------
 
 .. code-block:: text
@@ -53,4 +53,3 @@ Lifecycle
 
 For the authoritative command/event list, see
 :doc:`/api_reference/worker_messages`.
-

@@ -20,7 +20,7 @@ Then open:
 
   http://127.0.0.1:8000/index.html?model=raj
 
-Install JS dependencies (Playwright + tooling)
+Install JS dependencies
 ----------------------------------------------
 
 Dependencies are installed at the repo root:

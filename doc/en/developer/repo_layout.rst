@@ -39,7 +39,7 @@ Key runtime modules
 - ``bridge/heap_views.mjs`` / ``bridge/mj_sim_lite.mjs``: forge/WASM bridge helpers
 - ``worker/snapshot_pool.mjs``: worker snapshot pool policy/state
 
-Generated artifacts (committed)
+Generated artifacts
 -------------------------------
 
 Generated files are committed for the static runtime and GitHub Pages.

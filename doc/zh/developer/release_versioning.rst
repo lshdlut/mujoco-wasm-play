@@ -15,7 +15,7 @@
   - 更新固定的 ``forgeBase`` URL
   - 确保托管 origin 上的 MIME/CORS 响应头正确
 
-文档版本（RTD）
+文档版本
 ---------------------
 
 如果使用 Read the Docs：

@@ -1,7 +1,7 @@
 Testing
 =======
 
-End-to-end (Playwright)
+End-to-end
 -----------------------
 
 Playwright is installed at the repo root (see ``package.json``).

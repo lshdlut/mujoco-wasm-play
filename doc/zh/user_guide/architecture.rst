@@ -3,7 +3,7 @@
 
 Play 使用以 Worker 为中心（Worker-first）的架构，把 MuJoCo/WASM 的工作从主线程移开。
 
-数据流（概念）
+数据流
 ---------------------
 
 .. code-block:: text

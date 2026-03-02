@@ -13,7 +13,7 @@ MIME 类型
 
 如果你看到 Worker 或模块加载失败，请在 DevTools 的 Network 中检查响应的 ``Content-Type``。
 
-CORS（使用远程 ``forgeBase`` 时）
+CORS
 --------------------------------------
 
 如果 ``forgeBase=`` 指向不同的 origin，forge 托管端必须为以下资源允许 CORS：
