@@ -8,8 +8,8 @@ import {
   dispatchEvent,
   encodeCommand,
   encodeEvent,
-} from '../dev/dispatch.gen.mjs';
-import { COMMAND_FIELDS, EVENT_FIELDS, WORKER_COMMANDS, WORKER_EVENTS } from '../dev/protocol.gen.mjs';
+} from '../../worker/dispatch.gen.mjs';
+import { COMMAND_FIELDS, EVENT_FIELDS, WORKER_COMMANDS, WORKER_EVENTS } from '../../worker/protocol.gen.mjs';
 
 function payloadWithRequiredFields(required) {
   const payload = {};
@@ -70,4 +70,3 @@ test('protocol: dispatchCommand/dispatchEvent route to handlers', () => {
   };
   assert.equal(dispatchEvent(evtHandlers, evtMsg), 'HI');
 });
-

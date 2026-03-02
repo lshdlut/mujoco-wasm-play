@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEFAULT_VIEWER_STATE, createViewerStore, mergeBackendSnapshot } from '../dev/main_ui.mjs';
+import { DEFAULT_VIEWER_STATE, createViewerStore, mergeBackendSnapshot } from '../../ui/state.mjs';
 
 function clone(value) {
   return structuredClone(value);
@@ -73,4 +73,3 @@ test('ui: mergeBackendSnapshot is stable for identical snapshots', () => {
 
   assert.deepEqual(a, b);
 });
-

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEFAULT_VIEWER_STATE, applySpecAction, createViewerStore } from '../dev/main_ui.mjs';
+import { DEFAULT_VIEWER_STATE, applySpecAction, createViewerStore } from '../../ui/state.mjs';
 
 test('ui: applySpecAction calls backend.apply and merges snapshot', async () => {
   const store = createViewerStore(DEFAULT_VIEWER_STATE);
@@ -19,4 +19,3 @@ test('ui: applySpecAction calls backend.apply and merges snapshot', async () => 
   assert.equal(state.hud.contacts, 1);
   assert.equal(state.simulation.run, true);
 });
-
