@@ -4,13 +4,12 @@
 端到端（Playwright）
 -----------------------
 
-Playwright 安装在 ``dev/`` 下（见 ``dev/package.json``）。
+Playwright 安装在仓库根目录（见 ``package.json``）。
 
 安装依赖：
 
 .. code-block:: bash
 
-  cd dev
   npm ci
 
 运行一个小型 smoke test：
@@ -33,7 +32,7 @@ Playwright 配置支持：
 - ``PLAYWRIGHT_PORT`` / ``PLAYWRIGHT_HOST`` / ``PLAYWRIGHT_BASE_URL``
 - ``PYTHON_EXE``（或 ``PYTHON``），用于选择开发服务器所用的 Python 解释器
 
-默认配置会自动启动 ``dev/dev_server.py``。
+默认配置会自动启动 ``tools/dev_server.py``。
 
 规范/工具检查
 -------------------
@@ -45,8 +44,8 @@ Playwright 配置支持：
 Node 单元测试
 ---------------
 
-仓库在 ``test/`` 下提供了一小套无需额外依赖的 Node 测试。
+仓库在 ``tests/unit/`` 下提供了一小套无需额外依赖的 Node 测试。
 
 .. code-block:: bash
 
-  node --test test/*.test.mjs
+  node --test tests/unit/*.test.mjs

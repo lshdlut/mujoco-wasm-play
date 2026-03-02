@@ -12,7 +12,7 @@ Run the viewer
 
 .. code-block:: bash
 
-  python dev/dev_server.py --root dev --port 8000
+  python tools/dev_server.py --root . --port 8000
 
 Then open:
 
@@ -23,11 +23,10 @@ Then open:
 Install JS dependencies (Playwright + tooling)
 ----------------------------------------------
 
-Dependencies are scoped under ``dev/``:
+Dependencies are installed at the repo root:
 
 .. code-block:: bash
 
-  cd dev
   npm ci
 
 Regenerate committed artifacts
@@ -35,7 +34,6 @@ Regenerate committed artifacts
 
 .. code-block:: bash
 
-  cd dev
   npm run generate
 
 This runs:
@@ -58,4 +56,3 @@ Forge bundle selection
 
 For published demos, always pin forge by commit SHA and pass ``forgeBase=...``.
 See :doc:`/reference/compatibility`.
-

@@ -16,7 +16,12 @@ The runtime Host object includes a few utility fields that are useful when
 writing plugins:
 
 - `host.apiVersion`: numeric contract version.
+- `host.contract`: metadata for the active contract (currently `{ apiVersion: 1 }`).
 - `host.getSnapshot()`: returns the latest snapshot observed by the main thread.
+- `host.capabilities` / `host.getCapability(name)`: feature flags for optional
+  surfaces.
+- `host.extensions`: plugin-owned bag for stashing state (the Host object is
+  frozen via `Object.freeze`).
 - `host.clock`: subscription helpers:
   - `onUiTick` / `onUiMainTick`
   - `onUiControlsTick`

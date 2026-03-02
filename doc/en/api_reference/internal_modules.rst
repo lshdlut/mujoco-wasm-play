@@ -5,92 +5,109 @@ This page is an index of important runtime modules and their exported surfaces.
 For a mechanically-complete list of exports and declarations (file-scope +
 nested) across the repo, see :doc:`code_inventory`.
 
-Core runtime modules (dev/)
----------------------------
+Core runtime modules
+--------------------
 
-``dev/main.nobuild.mjs``
+``app/main.mjs``
   Main entrypoint. Wires UI/store, spawns the backend, installs clock lanes,
   and drives rendering. Also exposes ``window.__PLAY_HOST__``.
 
-``dev/viewer_backend.mjs``
-  Backend façade. Exports ``createBackend(...)`` and wraps the Worker protocol
-  with a friendlier API used by UI and plugins.
+  - Host contract helper: ``app/play_host.mjs``
 
-  - Implementation: ``dev/backend/backend_core.mjs``
+``backend/backend_core.mjs``
+  Backend (main thread). Exports ``createBackend(...)`` and wraps the Worker
+  protocol with a friendlier API used by UI and plugins.
 
-``dev/physics.worker.mjs``
+``worker/physics.worker.mjs``
   Worker runtime: resolves forge dist, loads MuJoCo/WASM, validates required
   forge exports, runs stepping, and emits events/snapshots.
 
-  - Internal helpers: ``dev/worker/snapshot_pool.mjs``
+  - Internal helpers:
+    - ``worker/snapshot_pool.mjs``
 
-``dev/viewer_runtime.mjs``
+``core/viewer_runtime.mjs``
   Shared runtime helpers used in both main and worker:
 
   - URL parameter parsing (``consumeViewerParams(...)`` and readers)
   - strict/compat/verbose/perf helpers (``strictCatch``/``perfSample``/etc)
   - logging helpers
 
-``dev/main_ui.mjs``
-  UI and state wiring. Exports:
+``ui/state.mjs``
+  Viewer store/state/actions and snapshot merge. Exports:
 
   - ``createViewerStore(...)`` (viewer store)
-  - ``createControlManager(...)`` (UI spec bindings)
   - ``applySpecAction(...)`` / ``applyGesture(...)`` (UI → backend commands)
   - ``mergeBackendSnapshot(...)`` (snapshot → store merge)
 
-  This is a façade entrypoint kept stable for imports. Internals live under
-  ``dev/ui/``.
+``ui/control_manager.mjs``
+  DOM wiring and control/panel rendering. Exports ``createControlManager(...)``.
 
-``dev/main_renderer.mjs``
-  Three.js renderer and controllers. Exports:
+  - File/model section helpers: ``ui/file_section.mjs``
 
-  - ``createRendererManager(...)``
+``renderer/pipeline.mjs``
+  Three.js renderer pipeline and renderer manager. Exports
+  ``createRendererManager(...)`` and a few shared camera helpers.
+
+  - Scene-SoA geometry/instancing/material helpers: ``renderer/scene_soa_geoms.mjs``
+
+``renderer/controllers.mjs``
+  Input controllers (camera + picking). Exports:
+
   - ``createCameraController(...)``
   - ``createPickingController(...)``
 
-  This is a façade entrypoint kept stable for imports. Internals live under
-  ``dev/renderer/``.
-
-``dev/main_environment.mjs``
+``environment/environment.mjs``
   Environment/sky management. Exports:
 
   - ``createEnvironmentManager(...)``
   - ``pushSkyDebug(...)`` (developer/debug helper)
 
-``dev/bridge.mjs``
-  forge/WASM bridge helpers and a small simulator wrapper:
+``bridge/``
+  forge/WASM bridge helpers and a small simulator wrapper live under the
+  ``bridge/`` directory:
 
   - heap view helpers (``heapViewF64``/``heapViewF32``/etc)
   - ``collectRenderAssetsFromModule(...)``
   - ``MjSimLite`` (minimal helper wrapper)
 
-  - Implementation: ``dev/bridge/bridge_core.mjs``
+Split runtime modules
+---------------------
 
-Split runtime modules (dev submodules)
---------------------------------------
-
-The repo keeps stable façade entrypoints in ``dev/*.mjs`` while splitting large
-modules into smaller submodules under ``dev/**``.
+The repo splits large runtime modules into smaller submodules under
+their respective top-level directories. The main entrypoint imports these
+submodules directly.
 
 UI internals
-  - ``dev/ui/ui_core.mjs``: aggregator
-  - ``dev/ui/state.mjs``: store/state/actions/snapshot merge
-  - ``dev/ui/control_manager.mjs``: DOM wiring + UI panels
+  - ``ui/state.mjs``: store/state/actions/snapshot merge
+  - ``ui/bindings.mjs``: binding spec parsing + value normalisation helpers
+  - ``ui/panel_sections.mjs``: section collapse persistence + DOM helpers
+  - ``ui/file_section.mjs``: file/model loading + model picker UI
+  - ``ui/control_manager.mjs``: DOM wiring + UI panels
 
 Renderer internals
-  - ``dev/renderer/renderer_core.mjs``: aggregator
-  - ``dev/renderer/pipeline.mjs``: Three.js renderer pipeline + renderer manager
-  - ``dev/renderer/controllers.mjs``: camera + picking controllers
+  - ``renderer/pipeline.mjs``: Three.js renderer pipeline + renderer manager
+  - ``renderer/controllers.mjs``: camera + picking controllers
+  - ``renderer/overlay3d.mjs``: overlay3d manager (scopes + batches)
+  - ``renderer/three_helpers.mjs``: shared Three.js helpers (dispose/bounds/scene)
+  - ``renderer/depth_sort.mjs``: depth/transparency sorting helpers
+  - ``renderer/mujoco_shadows.mjs``: MuJoCo shadow-map parity helpers
+  - ``renderer/mujoco_constants.mjs``: MuJoCo enums/constants
+  - ``renderer/mujoco_textures.mjs``: MuJoCo textures + generated texcoords helpers
+  - ``renderer/deformables.mjs``: flex/skin mesh helpers
+  - ``renderer/scene_soa_geoms.mjs``: Scene-SoA geoms/instancing/material helpers (extracted from pipeline)
 
 Backend internals
-  - ``dev/backend/backend_core.mjs``: backend implementation
+  - ``backend/backend_core.mjs``: backend implementation
+  - ``backend/snapshot_utils.mjs``: backend snapshot helper functions
+  - ``backend/model_candidates.mjs``: builtin model aliases + candidate resolution
 
 Bridge internals
-  - ``dev/bridge/bridge_core.mjs``: forge/WASM bridge implementation
+  - ``bridge/heap_views.mjs``: typed heap views and C-string helpers
+  - ``bridge/render_assets_collect.mjs``: render-assets extraction from forge module
+  - ``bridge/mj_sim_lite.mjs``: ``MjSimLite`` wrapper
 
 Worker internals
-  - ``dev/worker/snapshot_pool.mjs``: snapshot pool policy/state
+  - ``worker/snapshot_pool.mjs``: snapshot pool policy/state
 
 Module dependency direction (enforced)
 --------------------------------------
@@ -98,19 +115,17 @@ Module dependency direction (enforced)
 Play's runtime is intentionally layered. ``tools/check_module_boundaries.mjs``
 (run via ``node tools/run_checks.mjs``) enforces a coarse dependency DAG:
 
-- ``base``: shared runtime utilities (``dev/viewer_*.mjs``, ``dev/xml_refs.mjs``,
-  ``dev/fallbacks.mjs``)
-- ``bridge``: low-level forge/WASM helpers (``dev/bridge*.mjs``)
-- ``protocol``: generated worker protocol glue (``dev/protocol.gen.mjs``,
-  ``dev/dispatch.gen.mjs``)
-- ``worker``: physics worker (``dev/physics.worker.mjs``, ``dev/worker/**``)
-- ``backend``: main-thread backend wrapper (``dev/viewer_backend.mjs``,
-  ``dev/backend/**``)
-- ``environment``: presets + sky helpers (``dev/main_environment.mjs``)
-- ``ui``: store + UI (``dev/main_ui.mjs``, ``dev/ui/**``)
-- ``renderer``: Three.js renderer + controllers (``dev/main_renderer.mjs``,
-  ``dev/renderer/**``)
-- ``entry``: application assembly (``dev/main.nobuild.mjs``)
+- ``base``: shared runtime utilities (``core/viewer_*.mjs``, ``core/xml_refs.mjs``,
+  ``core/fallbacks.mjs``, ``app/play_host.mjs``)
+- ``bridge``: low-level forge/WASM helpers (``bridge/*.mjs``)
+- ``protocol``: generated worker protocol glue (``worker/protocol.gen.mjs``,
+  ``worker/dispatch.gen.mjs``)
+- ``worker``: physics worker (``worker/physics.worker.mjs``, ``worker/**``)
+- ``backend``: main-thread backend (``backend/**``)
+- ``environment``: presets + sky helpers (``environment/environment.mjs``)
+- ``ui``: store + UI (``ui/**``)
+- ``renderer``: Three.js renderer + controllers (``renderer/**``)
+- ``entry``: application assembly (``app/main.mjs``)
 
 The intent is to keep worker/backend semantics isolated and prevent UI/renderer
 from becoming mutually dependent (renderer no longer imports UI).
@@ -121,30 +136,30 @@ Protocol and generated helpers
 ``tools/worker_protocol.json``
   Command/event IDL for main ↔ worker messages.
 
-``dev/protocol.gen.mjs``
+``worker/protocol.gen.mjs``
   Generated protocol catalogs and snapshot transfer helpers.
 
-``dev/dispatch.gen.mjs``
+``worker/dispatch.gen.mjs``
   Generated encode/decode/dispatch helpers. Used to validate message shapes and
   reject unknown commands/events.
 
-``dev/spec/ui_spec.json``
+``spec/ui_spec.json``
   UI spec contract (control ids, fields, bindings).
 
-``dev/viewer_state_types.ts``
+``core/viewer_state_types.ts``
   TypeScript definition of the viewer store state (a complete field list).
 
-``dev/viewer_structs.mjs`` / ``dev/viewer_shared.mjs`` / ``dev/viewer_defaults.mjs``
+``core/viewer_structs.mjs`` / ``core/viewer_shared.mjs`` / ``core/viewer_defaults.mjs``
   Generated/utility helpers for struct layouts, defaults, and shared state
   operations.
 
 Other utilities
 ---------------
 
-``dev/xml_refs.mjs``
+``core/xml_refs.mjs``
   MJCF XML file reference parsing and bundle building (used by
   ``loadXmlBundle(...)`` style flows).
 
-``dev/dev_server.py``
+``tools/dev_server.py``
   Small Python dev server that serves static files and ensures correct MIME
   types for ESM and WASM.

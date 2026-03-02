@@ -35,5 +35,4 @@ For production/demo hosting, prefer immutable URLs (pin forge by commit SHA) and
 serve with long-lived caching headers.
 
 The included dev server is a good reference implementation:
-``dev/dev_server.py``.
-
+``tools/dev_server.py``.

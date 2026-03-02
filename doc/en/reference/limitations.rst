@@ -25,7 +25,7 @@ If you need advanced asset loading, use ``host.backend.loadXmlBundle(...)``.
 Network dependencies (Three.js CDN)
 -----------------------------------
 
-``dev/index.html`` imports Three.js from a CDN via an import map. Offline
+``index.html`` imports Three.js from a CDN via an import map. Offline
 deployments should vendor Three.js and update the import map accordingly.
 
 Reserved parameters and debug hooks
@@ -34,4 +34,3 @@ Reserved parameters and debug hooks
 Some URL parameters and globals exist for debugging or future work and may have
 no effect in the current build. See :doc:`url_parameters` and
 :doc:`configuration`.
-

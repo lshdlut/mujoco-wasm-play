@@ -2,9 +2,9 @@ English | [简体中文](README.zh-CN.md)
 
 # MuJoCo WASM Play: Simulate in the browser
 
-![mujoco-wasm-play](mujoco-wasm-play-cards.png)
+![mujoco-wasm-play](assets/mujoco-wasm-play-cards.png)
 
-[**Live demo (Rajagopal2015, MuJoCo 3.4.0)**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/)
+[**Live demo (Rajagopal2015, MuJoCo 3.4.0)**](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/)
 
 ## Overview
 
@@ -30,20 +30,20 @@ Reference numbers (best of 5 runs; each run reports the median; lower is better)
 
 ## Quickstart
 
-- Local dev (serve `dev/` on port 8000):
-  - `python dev/dev_server.py --root dev --port 8000`
+- Local dev (serve repo root on port 8000):
+  - `python tools/dev_server.py --root . --port 8000`
   - `http://127.0.0.1:8000/index.html?model=raj`
 - Public demo:
-  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/`
-- Plugins (experimental): see `plugin_dev.md` (`smocap` coming soon).
+  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/`
+- Plugins (experimental): see `doc/en/reference/plugin_contract.md` (`smocap` coming soon).
 
 ## Models
 
-- `model=` accepts either a `.xml` path under `dev/` or an alias: `raj`, `humanoid`, `humanoid100`, `cards`, `sensor`.
+- `model=` accepts either a `.xml` path under `model/` (or `local_model/` for local-only files) or an alias: `raj`, `humanoid`, `humanoid100`, `cards`, `sensor`.
 
 ## Plugins (Experimental)
 
-This repo can optionally load external UI/plugins without forking. Start from `plugin_dev.md` for the contract (mounts, Host API, section registry, UI kit primitives, worker constraints, and 3D overlays).
+This repo can optionally load external UI/plugins without forking. Start from `doc/en/reference/plugin_contract.md` for the contract (mounts, Host API, section registry, UI kit primitives, worker constraints, and 3D overlays).
 
 ## Forge dist (required)
 
@@ -63,4 +63,11 @@ Forge repo: `https://github.com/lshdlut/mujoco-wasm-forge`
 ## Development
 
 - UI artifacts: `node tools/generate_ui_artifacts.mjs`
-- Worker protocol artifacts: `node tools/generate_worker_protocol.mjs` (generates `dev/protocol.gen.mjs`, `dev/dispatch.gen.mjs`)
+- Worker protocol artifacts: `node tools/generate_worker_protocol.mjs` (generates `worker/protocol.gen.mjs`, `worker/dispatch.gen.mjs`)
+
+## Testing
+
+- `tests/unit/`: Node unit tests (fast, dependency-free)
+- `tests/e2e/`: Playwright end-to-end tests
+- Smoke: `npm run smoke`
+- Full E2E: `npm run test:e2e`

@@ -3,86 +3,102 @@
 
 本页面是运行时关键模块及其导出 surface 的索引。若需要“机械式完整”的 exports 与声明（文件级 + 嵌套）清单（覆盖仓库范围），见 :doc:`code_inventory`。
 
-核心运行时模块（dev/）
-----------------------
+核心运行时模块
+--------------
 
-``dev/main.nobuild.mjs``
+``app/main.mjs``
   主入口点。组装 UI/store，启动 backend，安装 clock lanes，并驱动渲染。同时暴露 ``window.__PLAY_HOST__``。
 
-``dev/viewer_backend.mjs``
-  backend façade。导出 ``createBackend(...)``，并把 Worker 协议包装成 UI/插件更易用的 API。
+  - Host contract 辅助：``app/play_host.mjs``
 
-  - 实现：``dev/backend/backend_core.mjs``
+``backend/backend_core.mjs``
+  主线程 backend。导出 ``createBackend(...)``，并把 Worker 协议包装成 UI/插件更易用的 API。
 
-``dev/physics.worker.mjs``
+``worker/physics.worker.mjs``
   Worker 运行时：解析 forge dist，加载 MuJoCo/WASM，校验必需的 forge 导出，运行步进，并发出 events/snapshots。
 
-  - 内部辅助：``dev/worker/snapshot_pool.mjs``
+  - 内部辅助：
+    - ``worker/snapshot_pool.mjs``
 
-``dev/viewer_runtime.mjs``
+``core/viewer_runtime.mjs``
   主线程与 worker 共享的运行时辅助函数：
 
   - URL 参数解析（``consumeViewerParams(...)`` 及各类 reader）
   - strict/compat/verbose/perf 辅助（``strictCatch``/``perfSample`` 等）
   - 日志辅助
 
-``dev/main_ui.mjs``
-  UI 与状态组装。导出：
+``ui/state.mjs``
+  viewer store/state/actions 与 snapshot merge。导出：
 
   - ``createViewerStore(...)`` （viewer store）
-  - ``createControlManager(...)`` （UI spec bindings）
   - ``applySpecAction(...)`` / ``applyGesture(...)`` （UI → backend 命令）
   - ``mergeBackendSnapshot(...)`` （snapshot → store 合并）
 
-  该文件为稳定 façade 入口点（用于保持 import 路径稳定）；内部拆分模块位于 ``dev/ui/``。
+``ui/control_manager.mjs``
+  DOM 装配与 controls/panels 渲染。导出 ``createControlManager(...)``。
 
-``dev/main_renderer.mjs``
-  Three.js renderer 与 controllers。导出：
+  - 文件/模型 section 辅助：``ui/file_section.mjs``
 
-  - ``createRendererManager(...)``
+``renderer/pipeline.mjs``
+  Three.js renderer pipeline 与 renderer manager。导出 ``createRendererManager(...)``，以及少量供 controllers 复用的相机辅助函数。
+
+  - Scene-SoA 几何/instancing/material 辅助：``renderer/scene_soa_geoms.mjs``
+
+``renderer/controllers.mjs``
+  输入 controllers（camera + picking）。导出：
+
   - ``createCameraController(...)``
   - ``createPickingController(...)``
 
-  该文件为稳定 façade 入口点（用于保持 import 路径稳定）；内部拆分模块位于 ``dev/renderer/``。
-
-``dev/main_environment.mjs``
+``environment/environment.mjs``
   Environment/sky 管理。导出：
 
   - ``createEnvironmentManager(...)``
   - ``pushSkyDebug(...)`` （开发/调试辅助）
 
-``dev/bridge.mjs``
-  forge/WASM bridge 辅助函数与一个小型 simulator wrapper：
+``bridge/``
+  forge/WASM bridge 辅助函数与一个小型 simulator wrapper 位于 ``bridge/`` 目录下：
 
   - heap view 辅助（``heapViewF64``/``heapViewF32`` 等）
   - ``collectRenderAssetsFromModule(...)``
   - ``MjSimLite`` （最小封装）
 
-  - 实现：``dev/bridge/bridge_core.mjs``
+拆分后的内部模块
+----------------
 
-拆分后的内部模块（dev 子模块）
-------------------------------
-
-仓库保留稳定的 façade 入口（``dev/*.mjs``），同时把巨型模块拆到 ``dev/**`` 下的子模块中。
+仓库把巨型运行时模块拆到各自的顶层目录下；主入口会直接 import 这些子模块。
 
 UI 内部模块
-  - ``dev/ui/ui_core.mjs``：聚合入口
-  - ``dev/ui/state.mjs``：store/state/actions/snapshot merge
-  - ``dev/ui/control_manager.mjs``：DOM 装配 + UI panels
+  - ``ui/state.mjs``：store/state/actions/snapshot merge
+  - ``ui/bindings.mjs``：binding spec 解析 + 值归一化辅助
+  - ``ui/panel_sections.mjs``：section 折叠状态持久化 + DOM 辅助
+  - ``ui/file_section.mjs``：文件/模型加载 + model picker UI
+  - ``ui/control_manager.mjs``：DOM 装配 + UI panels
 
 Renderer 内部模块
-  - ``dev/renderer/renderer_core.mjs``：聚合入口
-  - ``dev/renderer/pipeline.mjs``：Three.js renderer pipeline + renderer manager
-  - ``dev/renderer/controllers.mjs``：camera + picking controllers
+  - ``renderer/pipeline.mjs``：Three.js renderer pipeline + renderer manager
+  - ``renderer/controllers.mjs``：camera + picking controllers
+  - ``renderer/overlay3d.mjs``：overlay3d 管理器（scopes + batches）
+  - ``renderer/three_helpers.mjs``：共享 Three.js helpers（dispose/bounds/scene）
+  - ``renderer/depth_sort.mjs``：depth/transparency 排序 helpers
+  - ``renderer/mujoco_shadows.mjs``：MuJoCo shadow-map 贴近 Simulate 的辅助
+  - ``renderer/mujoco_constants.mjs``：MuJoCo enums/constants
+  - ``renderer/mujoco_textures.mjs``：MuJoCo textures + 生成 texcoords 的辅助
+  - ``renderer/deformables.mjs``：flex/skin mesh 辅助
+  - ``renderer/scene_soa_geoms.mjs``：Scene-SoA 几何/instancing/material 辅助（从 pipeline 拆出）
 
 Backend 内部模块
-  - ``dev/backend/backend_core.mjs``：backend 实现
+  - ``backend/backend_core.mjs``：backend 实现
+  - ``backend/snapshot_utils.mjs``：backend snapshot 辅助函数
+  - ``backend/model_candidates.mjs``：内建 model aliases + candidate 解析
 
 Bridge 内部模块
-  - ``dev/bridge/bridge_core.mjs``：forge/WASM bridge 实现
+  - ``bridge/heap_views.mjs``：typed heap views 与 C-string 辅助
+  - ``bridge/render_assets_collect.mjs``：从 forge module 提取 render-assets
+  - ``bridge/mj_sim_lite.mjs``：``MjSimLite`` 封装
 
 Worker 内部模块
-  - ``dev/worker/snapshot_pool.mjs``：snapshot pool 策略与状态
+  - ``worker/snapshot_pool.mjs``：snapshot pool 策略与状态
 
 模块依赖方向（强制）
 --------------------
@@ -90,15 +106,15 @@ Worker 内部模块
 Play 运行时是分层设计。``tools/check_module_boundaries.mjs``（可通过 ``node tools/run_checks.mjs`` 运行）
 会强制一个粗粒度的依赖 DAG：
 
-- ``base``：共享运行时工具（``dev/viewer_*.mjs``、``dev/xml_refs.mjs``、``dev/fallbacks.mjs``）
-- ``bridge``：低层 forge/WASM helpers（``dev/bridge*.mjs``）
-- ``protocol``：生成的 Worker 协议 glue（``dev/protocol.gen.mjs``、``dev/dispatch.gen.mjs``）
-- ``worker``：physics worker（``dev/physics.worker.mjs``、``dev/worker/**``）
-- ``backend``：主线程 backend wrapper（``dev/viewer_backend.mjs``、``dev/backend/**``）
-- ``environment``：环境 preset + sky helpers（``dev/main_environment.mjs``）
-- ``ui``：store + UI（``dev/main_ui.mjs``、``dev/ui/**``）
-- ``renderer``：Three.js renderer + controllers（``dev/main_renderer.mjs``、``dev/renderer/**``）
-- ``entry``：应用组装（``dev/main.nobuild.mjs``）
+- ``base``：共享运行时工具（``core/viewer_*.mjs``、``core/xml_refs.mjs``、``core/fallbacks.mjs``、``app/play_host.mjs``）
+- ``bridge``：低层 forge/WASM helpers（``bridge/*.mjs``）
+- ``protocol``：生成的 Worker 协议 glue（``worker/protocol.gen.mjs``、``worker/dispatch.gen.mjs``）
+- ``worker``：physics worker（``worker/physics.worker.mjs``、``worker/**``）
+- ``backend``：主线程 backend（``backend/**``）
+- ``environment``：环境 preset + sky helpers（``environment/environment.mjs``）
+- ``ui``：store + UI（``ui/**``）
+- ``renderer``：Three.js renderer + controllers（``renderer/**``）
+- ``entry``：应用组装（``app/main.mjs``）
 
 目标是隔离 worker/backend 语义，并避免 UI 与 renderer 互相依赖（renderer 不再 import UI）。
 
@@ -108,26 +124,26 @@ Play 运行时是分层设计。``tools/check_module_boundaries.mjs``（可通�
 ``tools/worker_protocol.json``
   main ↔ worker 消息的 command/event IDL。
 
-``dev/protocol.gen.mjs``
+``worker/protocol.gen.mjs``
   生成的协议目录与 snapshot transfer 辅助函数。
 
-``dev/dispatch.gen.mjs``
+``worker/dispatch.gen.mjs``
   生成的 encode/decode/dispatch 辅助函数，用于校验消息形状并拒绝未知 commands/events。
 
-``dev/spec/ui_spec.json``
+``spec/ui_spec.json``
   UI spec 契约（control ids、fields、bindings）。
 
-``dev/viewer_state_types.ts``
+``core/viewer_state_types.ts``
   viewer store state 的 TypeScript 定义（最完整的字段清单）。
 
-``dev/viewer_structs.mjs`` / ``dev/viewer_shared.mjs`` / ``dev/viewer_defaults.mjs``
+``core/viewer_structs.mjs`` / ``core/viewer_shared.mjs`` / ``core/viewer_defaults.mjs``
   struct layouts、defaults 与共享状态操作的生成/工具模块。
 
 其它工具
 --------
 
-``dev/xml_refs.mjs``
+``core/xml_refs.mjs``
   MJCF XML 文件引用解析与 bundle 构建（用于 ``loadXmlBundle(...)`` 相关流程）。
 
-``dev/dev_server.py``
+``tools/dev_server.py``
   小型 Python 开发服务器：提供静态文件并确保 ESM/WASM 的 MIME 类型正确。

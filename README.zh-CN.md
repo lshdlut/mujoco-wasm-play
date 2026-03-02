@@ -2,9 +2,9 @@
 
 # MuJoCo WASM Play：把 Simulate 搬到浏览器
 
-![mujoco-wasm-play](mujoco-wasm-play-cards.png)
+![mujoco-wasm-play](assets/mujoco-wasm-play-cards.png)
 
-[**在线演示（Rajagopal2015, MuJoCo 3.4.0）**](https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/)
+[**在线演示（Rajagopal2015, MuJoCo 3.4.0）**](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/)
 
 ## 总览
 
@@ -30,20 +30,20 @@
 
 ## 快速开始
 
-- 本地开发（在 8000 端口服务 `dev/`）：
-  - `python dev/dev_server.py --root dev --port 8000`
+- 本地开发（在 8000 端口服务仓库根目录）：
+  - `python tools/dev_server.py --root . --port 8000`
   - `http://127.0.0.1:8000/index.html?model=raj`
 - 线上演示：
-  - `https://lshdlut.github.io/mujoco-wasm-play/dev/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/`
-- 插件（实验性）：见 `plugin_dev.md`（`smocap` 即将发布）。
+  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/`
+- 插件（实验性）：见 `doc/zh/reference/plugin_contract.md`（`smocap` 即将发布）。
 
 ## 模型
 
-- `model=` 可以是 `dev/` 下的 `.xml` 路径，也可以是别名：`raj`、`humanoid`、`humanoid100`、`cards`、`sensor`。
+- `model=` 可以是 `model/` 下的 `.xml` 路径（本地私有文件可放到 `local_model/`），也可以是别名：`raj`、`humanoid`、`humanoid100`、`cards`、`sensor`。
 
 ## 插件（实验性）
 
-本仓库支持在不 fork 的情况下加载外部 UI/插件。对接契约从 `plugin_dev.md` 开始（mounts、Host API、section registry、UI kit 基础组件、worker 约束、以及 3D overlay）。
+本仓库支持在不 fork 的情况下加载外部 UI/插件。对接契约从 `doc/zh/reference/plugin_contract.md` 开始（mounts、Host API、section registry、UI kit 基础组件、worker 约束、以及 3D overlay）。
 
 ## Forge dist（必需）
 
@@ -51,7 +51,7 @@ Forge repo：`https://github.com/lshdlut/mujoco-wasm-forge`
 
 - 本仓库不自带 MuJoCo WASM 二进制；运行时需要 forge 提供的 `dist/<ver>/` bundle。
 - 通过 `forgeBase=`（推荐）或 `window.__FORGE_DIST_BASE__` 指定 dist base。
-- 本地开发默认（`localhost/127.0.0.1`）会去找 `/mujoco-wasm-forge/dist/<ver>/`（如果你本地有同级的 `../mujoco-wasm-forge` checkout，`dev/dev_server.py` 会自动把它挂载出来）。
+- 本地开发默认（`localhost/127.0.0.1`）会去找 `/mujoco-wasm-forge/dist/<ver>/`（如果你本地有同级的 `../mujoco-wasm-forge` checkout，`tools/dev_server.py` 会自动把它挂载出来）。
 - 这个查看器需要带 viewer extensions 的 forge 构建（scene + vopt pointers）。
 - 常见的远端 base 模板（jsDelivr + 固定 forge commit）：`https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
 
@@ -63,4 +63,11 @@ Forge repo：`https://github.com/lshdlut/mujoco-wasm-forge`
 ## 开发
 
 - UI 生成物：`node tools/generate_ui_artifacts.mjs`
-- Worker 协议生成物：`node tools/generate_worker_protocol.mjs`（生成 `dev/protocol.gen.mjs`、`dev/dispatch.gen.mjs`）
+- Worker 协议生成物：`node tools/generate_worker_protocol.mjs`（生成 `worker/protocol.gen.mjs`、`worker/dispatch.gen.mjs`）
+
+## 测试
+
+- `tests/unit/`：Node 单元测试（快、无额外依赖）
+- `tests/e2e/`：Playwright 端到端测试
+- Smoke：`npm run smoke`
+- 全量 E2E：`npm run test:e2e`

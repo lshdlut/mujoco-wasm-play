@@ -13,7 +13,10 @@
 运行时 Host 对象包含一些在编写插件时很有用的工具字段：
 
 - `host.apiVersion`：数值型契约版本。
+- `host.contract`：当前契约的元数据（目前为 `{ apiVersion: 1 }`）。
 - `host.getSnapshot()`：返回主线程观察到的最新 snapshot。
+- `host.capabilities` / `host.getCapability(name)`：可选 surface 的能力开关。
+- `host.extensions`：插件自用的状态存放对象（Host 对象会被 `Object.freeze` 冻结）。
 - `host.clock`：订阅辅助函数：
   - `onUiTick` / `onUiMainTick`
   - `onUiControlsTick`

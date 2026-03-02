@@ -37,9 +37,9 @@ Play validates that the loaded forge module exports a required viewer ABI set.
 If any export is missing, the Worker throws an error and reports the missing
 symbols.
 
-The canonical list lives in ``dev/physics.worker.mjs``:
+The canonical list lives in ``worker/physics.worker.mjs``:
 
-.. literalinclude:: ../../../dev/physics.worker.mjs
+.. literalinclude:: ../../../worker/physics.worker.mjs
   :language: js
   :start-after: const required = [
   :end-before: const missing =
@@ -56,8 +56,8 @@ Local dev vs hosted layouts
 When ``forgeBase=`` is omitted, the Worker uses a local fallback layout:
 
 - on ``localhost`` / ``127.0.0.1``: it tries ``/mujoco-wasm-forge/dist/<ver>/``
-  (mounted by ``dev/dev_server.py`` if you have a sibling forge checkout)
-- otherwise: it tries ``dev/dist/<ver>/`` relative to the app
+  (mounted by ``tools/dev_server.py`` if you have a sibling forge checkout)
+- otherwise: it tries ``dist/<ver>/`` relative to the app
 
 For explicit control (recommended for published demos), always pass
 ``forgeBase=...`` and pin it to an immutable forge commit.

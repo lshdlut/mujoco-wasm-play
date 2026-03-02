@@ -32,7 +32,7 @@ Play 主要通过 URL 查询参数进行配置。参数在主线程解析，并�
     - string
     - 内置默认值
     - main → worker (load)
-    - ``dev/`` 下的 MJCF 路径，或内置别名（例如 ``raj``、``cards``）。
+    - ``model/`` 下的 MJCF 路径（本地私有文件可放到 ``local_model/``），或内置别名（例如 ``raj``、``cards``）。
 
   * - ``forgeBase``
     - string (URL)
@@ -46,7 +46,7 @@ Play 主要通过 URL 查询参数进行配置。参数在主线程解析，并�
     - empty
     - main
     - 以逗号分隔的 ESM ``import()`` specifier/URL 列表。每个条目都会通过动态 ``import()`` 加载。
-      相对 specifier（``./``/``../``）相对于 ``dev/main.nobuild.mjs``（即 ``dev/`` 目录）解析。
+      相对 specifier（``./``/``../``）相对于仓库根目录（与 ``index.html`` 同级的目录）解析。
 
 开发者/调试参数
 --------------------------
@@ -60,5 +60,5 @@ Play 还支持一批开发者/调试用的 URL 参数（strict 模式、verbose 
 
 - ``mode=...``：已弃用并被忽略（Play 仅支持 Worker 模式）。
 - ``cb=...``：Worker URL 的内部 cache-bust 参数。
-- ``ver=...``：仅 Worker 使用；当省略 ``forgeBase`` 时，用于选择本地回退路径 ``dev/dist/<ver>/``。当前不会从主页面传播过去。
+- ``ver=...``：仅 Worker 使用；当省略 ``forgeBase`` 时，用于选择本地回退路径 ``dist/<ver>/``。当前不会从主页面传播过去。
 - ``hide`` / ``dump`` / ``find`` / ``hide_big`` / ``big_n`` / ``big_factor`` / ``hide_index``：会被旧参数解析器解析，但当前不会应用。

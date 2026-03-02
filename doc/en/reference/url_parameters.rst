@@ -33,7 +33,8 @@ Parameters
     - string
     - builtin default
     - main → worker (load)
-    - MJCF path under ``dev/`` or a builtin alias (e.g. ``raj``, ``cards``).
+    - MJCF path under ``model/`` (or ``local_model/`` for local-only files) or a
+      builtin alias (e.g. ``raj``, ``cards``).
 
   * - ``forgeBase``
     - string (URL)
@@ -48,7 +49,7 @@ Parameters
     - main
     - Comma-separated ESM import specifiers/URLs. Each entry is imported via
       dynamic ``import()``. Relative specifiers (``./``/``../``) resolve
-      relative to ``dev/main.nobuild.mjs`` (under ``dev/``).
+      relative to the repo root (same folder as ``index.html``).
 
 Developer/debug parameters
 --------------------------
@@ -65,7 +66,7 @@ have no user-facing effect:
 
 - ``mode=...``: deprecated and ignored (Play is Worker-only).
 - ``cb=...``: internal cache-bust parameter added to the Worker URL.
-- ``ver=...``: Worker-only; selects the local fallback ``dev/dist/<ver>/`` path
+- ``ver=...``: Worker-only; selects the local fallback ``dist/<ver>/`` path
   when ``forgeBase`` is omitted. Not currently propagated from the main page.
 - ``hide`` / ``dump`` / ``find`` / ``hide_big`` / ``big_n`` / ``big_factor`` /
   ``hide_index``: parsed by the legacy param parser but not currently applied.

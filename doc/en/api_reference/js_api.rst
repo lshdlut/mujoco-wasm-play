@@ -12,7 +12,7 @@ The backend instance is exposed as:
 
 - ``window.__PLAY_HOST__.backend``
 
-It is implemented in ``dev/viewer_backend.mjs`` and wraps a Worker that speaks
+It is implemented in ``backend/backend_core.mjs`` and wraps a Worker that speaks
 the protocol defined in :doc:`worker_messages`.
 
 Interface summary
@@ -105,8 +105,8 @@ Debug globals
 For developer debugging, Play also exposes:
 
 - ``window.__viewerStore`` (same as ``__PLAY_HOST__.store``)
-- ``window.__viewerControls`` (control-manager façade)
-- ``window.__viewerRenderer`` (renderer façade, including ``overlay3d`` helpers)
+- ``window.__viewerControls`` (control-manager instance)
+- ``window.__viewerRenderer`` (renderer manager, including ``overlay3d`` helpers)
 - ``window.__lastSnapshot`` (latest snapshot observed on the main thread)
 
 See :doc:`/reference/configuration` for the full list of debug hooks.

@@ -21,6 +21,12 @@ Docs versioning (RTD)
 
 If using Read the Docs:
 
+- This repo keeps two independent Sphinx trees:
+
+  - English: ``doc/en/`` (config: ``doc/en/.readthedocs.yaml``)
+  - Chinese: ``doc/zh/`` (config: ``doc/zh/.readthedocs.yaml``)
+
+- Read the Docs expects one config file per project. Use two RTD projects (or
+  configure each project's config file path accordingly).
 - build ``latest`` from the default branch
 - optionally build versioned docs from git tags when you start tagging releases
-

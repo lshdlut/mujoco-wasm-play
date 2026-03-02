@@ -5,7 +5,7 @@ Play includes a small Python HTTP server for local development:
 
 .. code-block:: bash
 
-  python dev/dev_server.py --root dev --port 8000
+  python tools/dev_server.py --root . --port 8000
 
 What it does
 ------------
@@ -29,5 +29,4 @@ Environment variables
 Source of truth
 ---------------
 
-See ``dev/dev_server.py``.
-
+See ``tools/dev_server.py``.

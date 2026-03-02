@@ -4,13 +4,12 @@ Testing
 End-to-end (Playwright)
 -----------------------
 
-Playwright is installed under ``dev/`` (see ``dev/package.json``).
+Playwright is installed at the repo root (see ``package.json``).
 
 Install dependencies:
 
 .. code-block:: bash
 
-  cd dev
   npm ci
 
 Run a small smoke test:
@@ -33,7 +32,7 @@ The Playwright config supports:
 - ``PLAYWRIGHT_PORT`` / ``PLAYWRIGHT_HOST`` / ``PLAYWRIGHT_BASE_URL``
 - ``PYTHON_EXE`` (or ``PYTHON``) to choose the Python interpreter for the dev server
 
-The default config starts ``dev/dev_server.py`` automatically.
+The default config starts ``tools/dev_server.py`` automatically.
 
 Spec/tooling checks
 -------------------
@@ -45,8 +44,8 @@ Spec/tooling checks
 Node unit tests
 ---------------
 
-The repo includes a small set of dependency-free Node tests under ``test/``.
+The repo includes a small set of dependency-free Node tests under ``tests/unit/``.
 
 .. code-block:: bash
 
-  node --test test/*.test.mjs
+  node --test tests/unit/*.test.mjs

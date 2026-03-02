@@ -8,30 +8,30 @@
 
 主线程：
 
-- ``dev/index.html``：静态 HTML 外壳 + import map + mount 元素。
-- ``dev/main.nobuild.mjs``：主入口点（UI 组装 + renderer + backend + 暴露插件 Host）。
+- ``index.html``：静态 HTML 外壳 + import map + mount 元素。
+- ``app/main.mjs``：主入口点（UI 组装 + renderer + backend + 暴露插件 Host）。
 
 Worker：
 
-- ``dev/physics.worker.mjs``：module Worker 入口点（forge/WASM 加载 + MuJoCo 步进 + snapshots）。
+- ``worker/physics.worker.mjs``：module Worker 入口点（forge/WASM 加载 + MuJoCo 步进 + snapshots）。
 
-后端 façade：
+后端模块：
 
-- ``dev/viewer_backend.mjs``：导出 ``createBackend(...)``，用于启动 Worker，并向 UI/插件提供更高层 API。
+- ``backend/backend_core.mjs``：导出 ``createBackend(...)``，用于启动 Worker，并向 UI/插件提供更高层 API。
 
 启动序列
 --------
 
-1. **HTML 加载** ``dev/main.nobuild.mjs`` （ESM）。
+1. **HTML 加载** ``app/main.mjs`` （ESM）。
 2. **消费 URL/全局配置**：
 
-   - URL 辅助函数在 ``dev/viewer_runtime.mjs`` （``consumeViewerParams(...)``、
+   - URL 辅助函数在 ``core/viewer_runtime.mjs`` （``consumeViewerParams(...)``、
      ``buildWorkerUrl(...)``、strict/verbose 开关等）。
 3. **创建 backend**：
 
-   - ``dev/main.nobuild.mjs`` 调用 ``dev/viewer_backend.mjs`` 的
+   - ``app/main.mjs`` 调用 ``backend/backend_core.mjs`` 的
      ``createBackend(...)``。
-   - backend 以 **module Worker** 的形式启动 ``dev/physics.worker.mjs``，并开始命令/事件握手。
+   - backend 以 **module Worker** 的形式启动 ``worker/physics.worker.mjs``，并开始命令/事件握手。
 4. **Worker 内解析并加载 forge dist**：
 
    - Worker 解析 forge ``dist/<ver>/`` 基址（来自 ``forgeBase=...`` 或本地回退）。
@@ -52,10 +52,10 @@ Worker：
 协议的单一事实来源：
 
 - ``tools/worker_protocol.json`` （IDL）。
-- 生成的运行时辅助模块：
+  - 生成的运行时辅助模块：
 
-  - ``dev/protocol.gen.mjs`` （列表 + 字段规范 + transfer 字段）
-  - ``dev/dispatch.gen.mjs`` （encode/decode/dispatch）
+  - ``worker/protocol.gen.mjs`` （列表 + 字段规范 + transfer 字段）
+  - ``worker/dispatch.gen.mjs`` （encode/decode/dispatch）
 
 见 :doc:`/api_reference/worker_messages`。
 
@@ -74,8 +74,8 @@ Worker 侧：
 - 通过 backend 的订阅 API 接收 snapshots。
 - 将 snapshot 字段合并进 viewer store：
 
-  - ``mergeBackendSnapshot(...)`` 在 ``dev/main_ui.mjs`` 中实现并导出。
-  - ``dev/main.nobuild.mjs`` 也会维护一个 ``latestSnapshot`` 便于快速访问
+  - ``mergeBackendSnapshot(...)`` 在 ``ui/state.mjs`` 中实现并导出。
+  - ``app/main.mjs`` 也会维护一个 ``latestSnapshot`` 便于快速访问
     （并为调试暴露 ``window.__lastSnapshot``）。
 
 UI tick 与“车道（lanes）”
@@ -104,12 +104,12 @@ Play 有意解耦：
 
 关键模块：
 
-- ``dev/main_renderer.mjs`` 导出：
+- ``renderer/pipeline.mjs`` 导出 ``createRendererManager(...)`` （场景 + 渲染循环）。
+- ``renderer/controllers.mjs`` 导出：
 
-  - ``createRendererManager(...)`` （场景 + 渲染循环）
   - ``createCameraController(...)`` （相机交互与同步）
   - ``createPickingController(...)`` （picking/selection）
-- ``dev/main_environment.mjs`` 导出 ``createEnvironmentManager(...)`` （sky / environment 管理）。
+- ``environment/environment.mjs`` 导出 ``createEnvironmentManager(...)`` （sky / environment 管理）。
 
 renderer 会：
 
@@ -122,7 +122,7 @@ renderer 会：
 
 终端用户：
 
-- 使用 ``model=...`` 选择内置别名，或 ``dev/`` 下的路径。
+- 使用 ``model=...`` 选择内置别名，或 ``model/`` 下的路径（本地私有文件可放到 ``local_model/``）。
 
 开发者：
 
@@ -131,8 +131,8 @@ renderer 会：
 
 相关工具：
 
-- ``dev/xml_refs.mjs``：解析 MJCF 文件引用、构建虚拟 bundle 的辅助函数。
-- ``dev/bridge.mjs``：forge/WASM FS 辅助函数，以及用于访问模块 heap 的 ``MjSimLite`` 封装。
+- ``core/xml_refs.mjs``：解析 MJCF 文件引用、构建虚拟 bundle 的辅助函数。
+- ``bridge/``：forge/WASM heap 辅助函数，以及用于访问模块 heap 的 ``MjSimLite`` 封装。
 
 插件生命周期（主线程）
 ----------------------
@@ -149,7 +149,7 @@ renderer 会：
 Strict 模式与诊断
 -----------------
 
-strict/verbose/perf 辅助函数在 ``dev/viewer_runtime.mjs``：
+strict/verbose/perf 辅助函数在 ``core/viewer_runtime.mjs``：
 
 - ``strictCatch(...)`` / ``strictEnsure(...)`` / ``strictOverride(...)``
 - ``perfMark(...)`` / ``perfSample(...)`` / ``perfSummary()``

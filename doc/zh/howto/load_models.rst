@@ -21,10 +21,10 @@ Play 为演示方便支持一小组别名：
   /index.html?model=raj
   /index.html?model=cards
 
-``dev/`` 下的路径
---------------------
+``model/`` 下的路径
+-------------------
 
-你也可以传入 ``dev/`` 下的相对 MJCF 路径：
+你也可以传入 ``model/`` 下的相对 MJCF 路径（本地私有文件可放到 ``local_model/``）：
 
 .. code-block:: text
 

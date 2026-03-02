@@ -27,6 +27,11 @@ Host 对象（v1）
 
 Host API 是一个普通的 JavaScript 对象。下面的 TypeScript-like 形状用于开发者参考：
 
+备注：
+
+- Host 对象会被 ``Object.freeze`` 冻结，用于抑制插件对契约 surface 的随意改写。
+- 插件如果需要存放状态，建议使用 ``host.extensions``。
+
 .. code-block:: ts
 
   type PanelId = "left" | "right";
@@ -133,16 +138,19 @@ Host API 是一个普通的 JavaScript 对象。下面的 TypeScript-like 形状
 
   interface PlayHostV1 {
     apiVersion: 1;
+    contract: { apiVersion: 1 };
     capabilities: {
-      mounts: true;
-      ui: true;
-      store: true;
-      backend: true;
-      controls: true;
-      renderer: true;
-      clock: true;
-      overlay3d: true;
+      mounts: boolean;
+      ui: boolean;
+      store: boolean;
+      backend: boolean;
+      controls: boolean;
+      renderer: boolean;
+      clock: boolean;
+      overlay3d: boolean;
     };
+    getCapability(name: string): boolean;
+    extensions: Record<string, unknown>;
     mounts: {
       leftPanel: HTMLElement | null;
       rightPanel: HTMLElement | null;
@@ -169,5 +177,5 @@ Viewer state 类型
 
 viewer store state 是一个很大的对象。仓库中提交了一个 TypeScript 定义用于 tooling，并作为最完整的“字段列表”参考：
 
-.. literalinclude:: ../../../dev/viewer_state_types.ts
+.. literalinclude:: ../../../core/viewer_state_types.ts
   :language: ts

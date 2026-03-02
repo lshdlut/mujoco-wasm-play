@@ -5,7 +5,7 @@ Play 内置了一个用于本地开发的小型 Python HTTP 服务器：
 
 .. code-block:: bash
 
-  python dev/dev_server.py --root dev --port 8000
+  python tools/dev_server.py --root . --port 8000
 
 功能
 ------------
@@ -29,4 +29,4 @@ Play 内置了一个用于本地开发的小型 Python HTTP 服务器：
 权威实现
 ---------------
 
-见 ``dev/dev_server.py``。
+见 ``tools/dev_server.py``。

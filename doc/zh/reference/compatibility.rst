@@ -35,9 +35,9 @@ Viewer ABI 扩展（必需）
 
 Play 会校验已加载的 forge 模块是否导出了必需的 viewer ABI 集合。若缺少任何导出，Worker 会抛出错误并报告缺失的符号。
 
-权威列表位于 ``dev/physics.worker.mjs``：
+权威列表位于 ``worker/physics.worker.mjs``：
 
-.. literalinclude:: ../../../dev/physics.worker.mjs
+.. literalinclude:: ../../../worker/physics.worker.mjs
   :language: js
   :start-after: const required = [
   :end-before: const missing =
@@ -52,7 +52,7 @@ Play 会校验已加载的 forge 模块是否导出了必需的 viewer ABI 集�
 
 当省略 ``forgeBase=`` 时，Worker 会使用本地回退布局：
 
-- 在 ``localhost`` / ``127.0.0.1``：会尝试 ``/mujoco-wasm-forge/dist/<ver>/``（如果存在同级 forge 检出，则由 ``dev/dev_server.py`` 挂载）
-- 否则：会尝试应用相对路径 ``dev/dist/<ver>/``
+- 在 ``localhost`` / ``127.0.0.1``：会尝试 ``/mujoco-wasm-forge/dist/<ver>/``（如果存在同级 forge 检出，则由 ``tools/dev_server.py`` 挂载）
+- 否则：会尝试应用相对路径 ``dist/<ver>/``
 
 为了明确控制（发布 demo 时推荐），请始终传入 ``forgeBase=...`` 并将其固定到不可变的 forge commit。

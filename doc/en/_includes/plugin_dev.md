@@ -10,7 +10,7 @@ This document defines:
 
 ## Key Constraints (Worker Backend)
 
-The default entrypoint (`dev/index.html` -> `dev/main.nobuild.mjs`) runs MuJoCo/forge inside a Web Worker.
+The default entrypoint (`index.html` -> `app/main.mjs`) runs MuJoCo/forge inside a Web Worker.
 
 Implications:
 - UI plugins run on the main thread and **cannot** directly access WASM exports (no `window.__forgeModule` in worker mode).
@@ -30,7 +30,7 @@ Example (local dev): load the built-in demo plugin:
 Notes:
 - Each entry must be a valid ESM module URL/specifier for `import()`.
 - For cross-origin URLs, the server must allow CORS and serve JavaScript with a correct MIME type.
-- Import specifiers that start with `./` or `../` are resolved relative to `dev/main.nobuild.mjs` (i.e., under `dev/`).
+- Import specifiers that start with `./` or `../` are resolved relative to the repo root (same folder as `index.html`).
 
 Plugin load failures are reported via `logError` + `strictCatch(..., { allow: true })` and do not stop the main app.
 
@@ -49,8 +49,8 @@ Core mounts (owned by the viewer):
 - `host.mounts.rightPanel`
 
 HTML source of these mounts:
-- `dev/index.html` uses `data-play-mount="leftPanel|rightPanel|overlayRoot|leftPanelPlugin|rightPanelPlugin"`.
-- `dev/main_ui.mjs` dynamically inserts `data-play-mount="leftPanelAfterFilePlugin"` after rendering the `File` section.
+- `index.html` uses `data-play-mount="leftPanel|rightPanel|overlayRoot|leftPanelPlugin|rightPanelPlugin"`.
+- `ui/control_manager.mjs` inserts `data-play-mount="leftPanelAfterFilePlugin"` immediately after rendering the built-in `File` section.
 
 ## Host API (`window.__PLAY_HOST__`)
 
@@ -70,7 +70,7 @@ Guidance:
 
 ### `host.backend`
 
-Backend instance (worker-only in `main.nobuild.mjs`).
+Backend instance (worker-only in `app/main.mjs`).
 
 Typical methods used by plugins:
 - `host.backend.apply(...)` (send UI/apply commands)
@@ -91,7 +91,7 @@ Convenience helpers around the built-in UI spec:
 - `host.controls.getControl(id)`
 - `host.controls.loadXmlTextAsModel(xmlText, label?)`
 
-Control IDs and shortcuts come from `dev/spec/ui_spec.json`.
+Control IDs and shortcuts come from `spec/ui_spec.json`.
 
 ### `host.ui` (UI sections + kit)
 
@@ -336,7 +336,7 @@ If your demo needs new functionality implemented inside the forge WASM (e.g. smo
 
 ### Why this is required
 
-In worker backend mode, MuJoCo/forge is instantiated and owned by the worker (`dev/physics.worker.mjs`). The main thread cannot access WASM exports, pointers, or heaps. Therefore any new ABI calls must be:
+In worker backend mode, MuJoCo/forge is instantiated and owned by the worker (`worker/physics.worker.mjs`). The main thread cannot access WASM exports, pointers, or heaps. Therefore any new ABI calls must be:
 1) invoked inside the worker, and
 2) driven by commands sent from the main thread, and
 3) observed either via existing snapshots (preferred) or via new events (when needed).
@@ -344,19 +344,19 @@ In worker backend mode, MuJoCo/forge is instantiated and owned by the worker (`d
 ### Protocol is generated and validated
 
 The worker command/event allow-list lives in generated files:
-- `dev/protocol.gen.mjs` (command/event lists + field schemas + transfer fields)
-- `dev/dispatch.gen.mjs` (runtime validation/dispatch)
+- `worker/protocol.gen.mjs` (command/event lists + field schemas + transfer fields)
+- `worker/dispatch.gen.mjs` (runtime validation/dispatch)
 
 Do not edit these by hand. Update the generator and re-run it:
 - Generator: `tools/generate_worker_protocol.mjs`
-- Regenerate: `cd dev && npm run generate:protocol`
+- Regenerate: `npm run generate:protocol`
 
 ### Where to implement new commands/events
 
 Typical touch points:
-- Worker handlers: `dev/physics.worker.mjs` (add a new handler under the command dispatch map).
-- Main-thread wrapper: `dev/viewer_backend.mjs` (expose a method on `backend` and/or route through `backend.apply`).
-- Optional state merge: `dev/main_ui.mjs` (only if you want to reflect worker events into `store` in a structured way).
+- Worker handlers: `worker/physics.worker.mjs` (add a new handler under the command dispatch map).
+- Main-thread wrapper: `backend/backend_core.mjs` (expose a method on `backend` and/or route through `backend.apply`).
+- Optional store merge: `ui/state.mjs` (only if you want to reflect worker snapshots/events into `store` in a structured way).
 
 ### Design rules (recommended)
 
@@ -430,10 +430,11 @@ export function registerPlayPlugin(host) {
 
 ## References
 
-- Mounts and layout: `dev/index.html`
-- Host API + plugin loader: `dev/main.nobuild.mjs`
-- Backend implementation (worker spawn, snapshot merge): `dev/viewer_backend.mjs`
-- Worker runtime (MuJoCo/forge owner): `dev/physics.worker.mjs`
+- Mounts and layout: `index.html`
+- Host API + plugin loader: `app/main.mjs`
+- Backend implementation (worker spawn, subscription API): `backend/backend_core.mjs`
+- Store snapshot merge helpers: `ui/state.mjs` (`mergeBackendSnapshot`)
+- Worker runtime (MuJoCo/forge owner): `worker/physics.worker.mjs`
 - Protocol generator: `tools/generate_worker_protocol.mjs`
-- Built-in UI controls + shortcuts: `dev/spec/ui_spec.json`
-- Overlay implementation (scopes/layers/transparency/assets): `dev/main_renderer.mjs` (`ensureOverlay3D`)
+- Built-in UI controls + shortcuts: `spec/ui_spec.json`
+- Overlay implementation (scopes/layers/transparency/assets): `renderer/overlay3d.mjs` (`ensureOverlay3D`)

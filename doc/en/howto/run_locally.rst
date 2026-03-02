@@ -1,11 +1,11 @@
 Run locally
 ===========
 
-Serve ``dev/`` with the included Python dev server:
+Serve the repo root with the included Python dev server:
 
 .. code-block:: bash
 
-  python dev/dev_server.py --root dev --port 8000
+  python tools/dev_server.py --root . --port 8000
 
 Open:
 
@@ -36,4 +36,3 @@ If you want to point at a different bundle, pass ``forgeBase=``:
   http://127.0.0.1:8000/index.html?model=raj&forgeBase=../dist/3.4.0/
 
 For full details, see :doc:`/reference/url_parameters`.
-

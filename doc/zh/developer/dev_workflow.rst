@@ -12,7 +12,7 @@
 
 .. code-block:: bash
 
-  python dev/dev_server.py --root dev --port 8000
+  python tools/dev_server.py --root . --port 8000
 
 然后打开：
 
@@ -23,11 +23,10 @@
 安装 JS 依赖（Playwright + 工具链）
 ---------------------------------------------
 
-依赖安装在 ``dev/`` 下：
+依赖安装在仓库根目录：
 
 .. code-block:: bash
 
-  cd dev
   npm ci
 
 重新生成已提交的产物
@@ -35,7 +34,6 @@
 
 .. code-block:: bash
 
-  cd dev
   npm run generate
 
 这会运行：

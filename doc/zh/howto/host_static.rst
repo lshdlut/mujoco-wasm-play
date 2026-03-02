@@ -29,4 +29,4 @@ CORS（使用远程 ``forgeBase`` 时）
 
 生产/演示托管时，推荐使用不可变 URL（用 commit SHA 固定 forge），并配合长生命周期的缓存头。
 
-内置开发服务器是一个不错的参考实现：``dev/dev_server.py``。
+内置开发服务器是一个不错的参考实现：``tools/dev_server.py``。

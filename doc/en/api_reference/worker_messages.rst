@@ -20,8 +20,8 @@ Generated helpers
 
 ``tools/generate_worker_protocol.mjs`` generates:
 
-- ``dev/protocol.gen.mjs`` (lists, field specs)
-- ``dev/dispatch.gen.mjs`` (encode/decode/dispatch helpers)
+- ``worker/protocol.gen.mjs`` (lists, field specs)
+- ``worker/dispatch.gen.mjs`` (encode/decode/dispatch helpers)
 
 These modules:
 

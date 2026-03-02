@@ -1,11 +1,11 @@
 本地运行
 ===========
 
-使用仓库内置的 Python 开发服务器为 ``dev/`` 提供静态文件服务：
+使用仓库内置的 Python 开发服务器为仓库根目录提供静态文件服务：
 
 .. code-block:: bash
 
-  python dev/dev_server.py --root dev --port 8000
+  python tools/dev_server.py --root . --port 8000
 
 打开：
 

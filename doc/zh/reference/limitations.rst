@@ -21,7 +21,7 @@ Play 当前在 module Worker 中运行 MuJoCo。旧的 ``mode=...`` 查询参数
 网络依赖（Three.js CDN）
 -----------------------------------
 
-``dev/index.html`` 通过 import map 从 CDN 导入 Three.js。离线部署时应将 Three.js vendor 到本地，并相应更新 import map。
+``index.html`` 通过 import map 从 CDN 导入 Three.js。离线部署时应将 Three.js vendor 到本地，并相应更新 import map。
 
 保留参数与调试 hook
 -----------------------------------

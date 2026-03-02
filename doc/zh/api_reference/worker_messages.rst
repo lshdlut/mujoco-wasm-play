@@ -19,8 +19,8 @@ Play 使用 module Worker 来运行 MuJoCo，并与主线程通信。消息通�
 
 ``tools/generate_worker_protocol.mjs`` generates:
 
-- ``dev/protocol.gen.mjs`` (lists, field specs)
-- ``dev/dispatch.gen.mjs`` (encode/decode/dispatch helpers)
+- ``worker/protocol.gen.mjs`` (lists, field specs)
+- ``worker/dispatch.gen.mjs`` (encode/decode/dispatch helpers)
 
 这些模块会：
 

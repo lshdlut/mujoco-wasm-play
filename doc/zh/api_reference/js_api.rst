@@ -12,7 +12,7 @@ JavaScript API（开发者）
 
 - ``window.__PLAY_HOST__.backend``
 
-它实现于 ``dev/viewer_backend.mjs``，并封装了一个 Worker，该 Worker 使用 :doc:`worker_messages` 定义的协议。
+它实现于 ``backend/backend_core.mjs``，并封装了一个 Worker，该 Worker 使用 :doc:`worker_messages` 定义的协议。
 
 接口概览
 ----------------
@@ -102,8 +102,8 @@ JavaScript API（开发者）
 为便于开发调试，Play 还暴露了：
 
 - ``window.__viewerStore`` (与 ``__PLAY_HOST__.store`` 相同)
-- ``window.__viewerControls`` (control-manager façade)
-- ``window.__viewerRenderer`` (renderer façade，包含 ``overlay3d`` 辅助)
+- ``window.__viewerControls`` (control-manager 实例)
+- ``window.__viewerRenderer`` (renderer manager，包含 ``overlay3d`` 辅助)
 - ``window.__lastSnapshot`` (主线程观察到的最新 snapshot)
 
 完整调试 hook 列表见 :doc:`/reference/configuration`。

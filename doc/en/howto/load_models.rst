@@ -21,10 +21,11 @@ Examples:
   /index.html?model=raj
   /index.html?model=cards
 
-Paths under ``dev/``
---------------------
+Paths under ``model/``
+----------------------
 
-You can also pass a relative MJCF path under ``dev/``:
+You can also pass a relative MJCF path under ``model/`` (or ``local_model/`` for
+local-only files):
 
 .. code-block:: text
 
@@ -45,4 +46,3 @@ endpoints, custom mapping), use the developer API:
 - ``host.backend.loadXmlBundle(...)``
 
 See :doc:`/api_reference/js_api` for backend methods.
-

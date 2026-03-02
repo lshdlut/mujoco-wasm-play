@@ -29,6 +29,12 @@ Host object (v1)
 The Host API is a plain JavaScript object. This TypeScript-like shape is meant
 as a developer reference:
 
+Notes:
+
+- The Host object is frozen (``Object.freeze``) to discourage plugins from
+  mutating the contract surface.
+- Plugins that need to stash state should use ``host.extensions``.
+
 .. code-block:: ts
 
   type PanelId = "left" | "right";
@@ -135,16 +141,19 @@ as a developer reference:
 
   interface PlayHostV1 {
     apiVersion: 1;
+    contract: { apiVersion: 1 };
     capabilities: {
-      mounts: true;
-      ui: true;
-      store: true;
-      backend: true;
-      controls: true;
-      renderer: true;
-      clock: true;
-      overlay3d: true;
+      mounts: boolean;
+      ui: boolean;
+      store: boolean;
+      backend: boolean;
+      controls: boolean;
+      renderer: boolean;
+      clock: boolean;
+      overlay3d: boolean;
     };
+    getCapability(name: string): boolean;
+    extensions: Record<string, unknown>;
     mounts: {
       leftPanel: HTMLElement | null;
       rightPanel: HTMLElement | null;
@@ -172,5 +181,5 @@ Viewer state types
 The viewer store state is a large object. A TypeScript definition is committed
 for tooling and serves as the most complete "field list" reference:
 
-.. literalinclude:: ../../../dev/viewer_state_types.ts
+.. literalinclude:: ../../../core/viewer_state_types.ts
   :language: ts

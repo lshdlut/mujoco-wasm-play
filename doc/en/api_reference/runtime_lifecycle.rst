@@ -10,33 +10,33 @@ Entry points
 
 Main thread:
 
-- ``dev/index.html``: static HTML shell + import map + mount elements.
-- ``dev/main.nobuild.mjs``: main entrypoint (UI wiring + renderer + backend +
+- ``index.html``: static HTML shell + import map + mount elements.
+- ``app/main.mjs``: main entrypoint (UI wiring + renderer + backend +
   plugin host exposure).
 
 Worker:
 
-- ``dev/physics.worker.mjs``: module Worker entrypoint (forge/WASM load + MuJoCo
+- ``worker/physics.worker.mjs``: module Worker entrypoint (forge/WASM load + MuJoCo
   stepping + snapshots).
 
-Backend façade:
+Backend module:
 
-- ``dev/viewer_backend.mjs``: exports ``createBackend(...)`` which spawns the
-  Worker and provides a higher-level API to the UI/plugins.
+- ``backend/backend_core.mjs``: exports ``createBackend(...)`` which spawns
+  the Worker and provides a higher-level API to the UI/plugins.
 
 Boot sequence
 -------------
 
-1. **HTML loads** ``dev/main.nobuild.mjs`` (ESM).
+1. **HTML loads** ``app/main.mjs`` (ESM).
 2. **URL/global config is consumed**:
 
-   - URL helpers live in ``dev/viewer_runtime.mjs`` (``consumeViewerParams(...)``,
+   - URL helpers live in ``core/viewer_runtime.mjs`` (``consumeViewerParams(...)``,
      ``buildWorkerUrl(...)``, strict/verbose toggles, etc).
 3. **Backend is created**:
 
-   - ``dev/main.nobuild.mjs`` calls ``createBackend(...)`` from
-     ``dev/viewer_backend.mjs``.
-   - The backend spawns ``dev/physics.worker.mjs`` as a **module Worker** and
+   - ``app/main.mjs`` calls ``createBackend(...)`` from
+     ``backend/backend_core.mjs``.
+   - The backend spawns ``worker/physics.worker.mjs`` as a **module Worker** and
      begins the command/event handshake.
 4. **Forge dist is resolved and loaded in the Worker**:
 
@@ -58,11 +58,11 @@ The main thread and the Worker communicate via ``postMessage``:
 
 Protocol source of truth:
 
-- ``tools/worker_protocol.json`` (IDL).
-- Generated runtime helpers:
+  - ``tools/worker_protocol.json`` (IDL).
+  - Generated runtime helpers:
 
-  - ``dev/protocol.gen.mjs`` (lists + field specs + transfer fields)
-  - ``dev/dispatch.gen.mjs`` (encode/decode/dispatch)
+  - ``worker/protocol.gen.mjs`` (lists + field specs + transfer fields)
+  - ``worker/dispatch.gen.mjs`` (encode/decode/dispatch)
 
 See :doc:`/api_reference/worker_messages`.
 
@@ -80,10 +80,10 @@ Worker side:
 Main thread side:
 
 - Receives snapshots via the backend subscription API.
-- Merges snapshot fields into the viewer store:
+  - Merges snapshot fields into the viewer store:
 
-  - ``mergeBackendSnapshot(...)`` is implemented/exported by ``dev/main_ui.mjs``.
-  - ``dev/main.nobuild.mjs`` also keeps a ``latestSnapshot`` for quick access
+  - ``mergeBackendSnapshot(...)`` is implemented/exported by ``ui/state.mjs``.
+  - ``app/main.mjs`` also keeps a ``latestSnapshot`` for quick access
     (and exposes it as ``window.__lastSnapshot`` for debugging).
 
 UI ticks and "lanes"
@@ -112,12 +112,13 @@ Rendering runs on the main thread and is driven by snapshots + viewer state.
 
 Key modules:
 
-- ``dev/main_renderer.mjs`` exports:
+- ``renderer/pipeline.mjs`` exports ``createRendererManager(...)`` (scene +
+  render loop).
+- ``renderer/controllers.mjs`` exports:
 
-  - ``createRendererManager(...)`` (scene + render loop)
   - ``createCameraController(...)`` (camera interaction and sync)
   - ``createPickingController(...)`` (picking/selection)
-- ``dev/main_environment.mjs`` exports ``createEnvironmentManager(...)`` for sky
+- ``environment/environment.mjs`` exports ``createEnvironmentManager(...)`` for sky
   / environment handling.
 
 The renderer:
@@ -132,7 +133,8 @@ Model loading (end-user vs developer)
 
 End-user:
 
-- Use ``model=...`` to select a builtin alias or a path under ``dev/``.
+- Use ``model=...`` to select a builtin alias or a path under ``model/`` (or
+  ``local_model/`` for local-only files).
 
 Developer:
 
@@ -142,10 +144,10 @@ Developer:
 
 Related utilities:
 
-- ``dev/xml_refs.mjs`` contains helpers for parsing MJCF file references and
+- ``core/xml_refs.mjs`` contains helpers for parsing MJCF file references and
   building virtual bundles.
-- ``dev/bridge.mjs`` contains forge/WASM FS helpers and a small ``MjSimLite``
-  wrapper for interacting with the module heap.
+- ``bridge/`` contains forge/WASM heap helpers and the ``MjSimLite`` wrapper
+  for interacting with the module heap.
 
 Plugin lifecycle (main thread)
 ------------------------------
@@ -165,7 +167,7 @@ Worker boundary constraints.
 Strict mode and diagnostics
 ---------------------------
 
-Strict/verbose/perf helpers live in ``dev/viewer_runtime.mjs``:
+Strict/verbose/perf helpers live in ``core/viewer_runtime.mjs``:
 
 - ``strictCatch(...)`` / ``strictEnsure(...)`` / ``strictOverride(...)``
 - ``perfMark(...)`` / ``perfSample(...)`` / ``perfSummary()``

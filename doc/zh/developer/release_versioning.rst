@@ -20,5 +20,11 @@
 
 如果使用 Read the Docs：
 
+- 本仓库维护两套独立的 Sphinx 文档树：
+
+  - 英文：``doc/en/``（配置：``doc/en/.readthedocs.yaml``）
+  - 中文：``doc/zh/``（配置：``doc/zh/.readthedocs.yaml``）
+
+- Read the Docs 通常每个 project 只使用一个配置文件。建议建两个 RTD project（或分别在 project 设置中指向对应的配置文件路径）。
 - 从默认分支构建 ``latest``
 - 当你开始打 release tag 时，可选地从 git tag 构建版本化文档

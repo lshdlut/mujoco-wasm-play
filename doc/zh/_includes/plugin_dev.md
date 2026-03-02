@@ -10,7 +10,7 @@
 
 ## 关键约束（Worker 后端）
 
-默认入口点（`dev/index.html` -> `dev/main.nobuild.mjs`）会在 Web Worker 内运行 MuJoCo/forge。
+默认入口点（`index.html` -> `app/main.mjs`）会在 Web Worker 内运行 MuJoCo/forge。
 
 影响：
 - UI 插件运行在主线程，**无法** 直接访问 WASM 导出（Worker 模式下没有 `window.__forgeModule`）。
@@ -30,7 +30,7 @@
 说明：
 - 每个条目必须是 `import()` 可用的有效 ESM 模块 URL/specifier。
 - 对于跨域 URL，服务器必须允许 CORS，并以正确的 MIME 类型提供 JavaScript。
-- 以 `./` 或 `../` 开头的 import specifier 会相对于 `dev/main.nobuild.mjs`（即 `dev/` 目录）解析。
+- 以 `./` 或 `../` 开头的 import specifier 会相对于仓库根目录（与 `index.html` 同级的目录）解析。
 
 插件加载失败会通过 `logError` + `strictCatch(..., { allow: true })` 上报，并不会阻止主应用继续运行。
 
@@ -49,8 +49,8 @@
 - `host.mounts.rightPanel`
 
 这些挂载点的 HTML 来源：
-- `dev/index.html` 使用 `data-play-mount="leftPanel|rightPanel|overlayRoot|leftPanelPlugin|rightPanelPlugin"`。
-- `dev/main_ui.mjs` 会在渲染 `File` 分区后，动态插入 `data-play-mount="leftPanelAfterFilePlugin"`。
+- `index.html` 使用 `data-play-mount="leftPanel|rightPanel|overlayRoot|leftPanelPlugin|rightPanelPlugin"`。
+- `ui/control_manager.mjs` 会在渲染内置 `File` 分区后，插入 `data-play-mount="leftPanelAfterFilePlugin"`。
 
 ## Host API（`window.__PLAY_HOST__`）
 
@@ -70,7 +70,7 @@
 
 ### `host.backend`
 
-后端实例（`main.nobuild.mjs` 中为 worker-only）。
+后端实例（`app/main.mjs` 中为 worker-only）。
 
 插件常用的方法：
 - `host.backend.apply(...)`（发送 UI/apply 命令）
@@ -91,7 +91,7 @@
 - `host.controls.getControl(id)`
 - `host.controls.loadXmlTextAsModel(xmlText, label?)`
 
-控件 ID 与快捷键来自 `dev/spec/ui_spec.json`。
+控件 ID 与快捷键来自 `spec/ui_spec.json`。
 
 ### `host.ui`（UI sections + kit）
 
@@ -333,7 +333,7 @@ Disposer 会在页面卸载（`beforeunload`）时被调用。插件应清理：
 
 ### 为什么必须这样做
 
-在 worker 后端模式下，MuJoCo/forge 会在 worker（`dev/physics.worker.mjs`）中被实例化并由其拥有。主线程无法访问 WASM 导出、指针或 heap。因此任何新的 ABI 调用都必须：
+在 worker 后端模式下，MuJoCo/forge 会在 worker（`worker/physics.worker.mjs`）中被实例化并由其拥有。主线程无法访问 WASM 导出、指针或 heap。因此任何新的 ABI 调用都必须：
 1) 在 worker 内调用，并且
 2) 由主线程发送的命令驱动，并且
 3) 通过现有 snapshots（推荐）或在需要时通过新的 events 来观测。
@@ -341,19 +341,19 @@ Disposer 会在页面卸载（`beforeunload`）时被调用。插件应清理：
 ### 协议由生成器生成并进行校验
 
 worker command/event allow-list 位于生成文件中：
-- `dev/protocol.gen.mjs`（command/event 列表 + 字段 schema + transfer 字段）
-- `dev/dispatch.gen.mjs`（运行时校验/dispatch）
+- `worker/protocol.gen.mjs`（command/event 列表 + 字段 schema + transfer 字段）
+- `worker/dispatch.gen.mjs`（运行时校验/dispatch）
 
 不要手工编辑这些文件。请修改生成器并重新生成：
 - Generator: `tools/generate_worker_protocol.mjs`
-- Regenerate: `cd dev && npm run generate:protocol`
+- Regenerate: `npm run generate:protocol`
 
 ### 在哪里实现新的 command/event
 
 典型触点：
-- Worker handlers: `dev/physics.worker.mjs`（在命令 dispatch map 下添加新的 handler）。
-- Main-thread wrapper: `dev/viewer_backend.mjs`（在 `backend` 上暴露方法，和/或通过 `backend.apply` 路由）。
-- 可选的 state merge: `dev/main_ui.mjs`（仅当你希望把 worker events 以结构化方式反映到 `store` 中）。
+- Worker handlers: `worker/physics.worker.mjs`（在命令 dispatch map 下添加新的 handler）。
+- Main-thread wrapper: `backend/backend_core.mjs`（在 `backend` 上暴露方法，和/或通过 `backend.apply` 路由）。
+- 可选的 store merge: `ui/state.mjs`（仅当你希望把 worker snapshots/events 以结构化方式反映到 `store` 中）。
 
 ### 设计规则（推荐）
 
@@ -427,10 +427,11 @@ export function registerPlayPlugin(host) {
 
 ## 参考
 
-- Mounts and layout: `dev/index.html`
-- Host API + plugin loader: `dev/main.nobuild.mjs`
-- Backend implementation (worker spawn, snapshot merge): `dev/viewer_backend.mjs`
-- Worker runtime (MuJoCo/forge owner): `dev/physics.worker.mjs`
+- Mounts and layout: `index.html`
+- Host API + plugin loader: `app/main.mjs`
+- Backend implementation (worker spawn, subscription API): `backend/backend_core.mjs`
+- Store snapshot merge helpers: `ui/state.mjs`（`mergeBackendSnapshot`）
+- Worker runtime (MuJoCo/forge owner): `worker/physics.worker.mjs`
 - Protocol generator: `tools/generate_worker_protocol.mjs`
-- Built-in UI controls + shortcuts: `dev/spec/ui_spec.json`
-- Overlay implementation (scopes/layers/transparency/assets): `dev/main_renderer.mjs` (`ensureOverlay3D`)
+- Built-in UI controls + shortcuts: `spec/ui_spec.json`
+- Overlay implementation (scopes/layers/transparency/assets): `renderer/overlay3d.mjs` (`ensureOverlay3D`)
