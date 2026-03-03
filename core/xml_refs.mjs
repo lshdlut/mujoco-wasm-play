@@ -183,6 +183,8 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
     throw new Error('buildMuJoCoBundle: missing readFileArrayBuffer');
   }
 
+  const DEFAULT_REF_CONCURRENCY = 16;
+
   const visitedXml = new Set();
   const fileBuffers = new Map();
   const rootModelDir = dirnamePosix(rootRel);
@@ -345,6 +347,29 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
     return out;
   }
 
+  async function runPool(items, concurrency, worker) {
+    const list = Array.isArray(items) ? items.slice() : [];
+    if (!list.length) return;
+    const limit = Number.isFinite(concurrency) ? Math.max(1, Math.floor(concurrency)) : 1;
+    const n = Math.min(limit, list.length);
+    let firstErr = null;
+    const workers = Array.from({ length: n }, async () => {
+      while (list.length) {
+        if (firstErr) return;
+        const item = list.pop();
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await worker(item);
+        } catch (err) {
+          if (!firstErr) firstErr = err;
+          return;
+        }
+      }
+    });
+    await Promise.all(workers);
+    if (firstErr) throw firstErr;
+  }
+
   while (pending.length) {
     const item = pending.pop();
     const rel = item?.rel ? normaliseMuJoCoVirtualPath(item.rel) : '';
@@ -384,18 +409,20 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
         compilerState = resolveCompilerState(modelDir, includeParsed.compiler, compilerState, resolvedRel);
       }
 
+      const refTasks = [];
       for (const ref of parsed.refs ?? []) {
         if (ref.kind === 'include') continue;
-        const candidates = resolveRefCandidates(modelDir, baseDir, compilerState, ref, rel, {
-          fallbackToBaseDir: fromInclude,
-        });
+        const candidates = resolveRefCandidates(modelDir, baseDir, compilerState, ref, rel, { fallbackToBaseDir: fromInclude });
         if (!candidates.length) continue;
-        const resolvedRel = await ensureFileBufferForCandidates(candidates, { label: 'Missing referenced file', from: rel });
-        if (ref.kind === 'model' && !visitedXml.has(resolvedRel)) {
+        refTasks.push({ ref, candidates });
+      }
+      const discoveredModels = [];
+      await runPool(refTasks, DEFAULT_REF_CONCURRENCY, async (task) => {
+        const resolvedRel = await ensureFileBufferForCandidates(task.candidates, { label: 'Missing referenced file', from: rel });
+        if (task.ref.kind === 'model' && !visitedXml.has(resolvedRel)) {
           const buf = fileBuffers.get(resolvedRel) || null;
           const modelText = decodeTextFromArrayBuffer(buf);
-          // MuJoCo loads `<model file="...">` as a separate model asset; do not inherit compiler dirs.
-          pending.push({
+          discoveredModels.push({
             type: 'xml',
             rel: resolvedRel,
             text: modelText,
@@ -404,7 +431,8 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
             fromInclude: false,
           });
         }
-      }
+      });
+      for (const entry of discoveredModels) pending.push(entry);
       continue;
     }
   }
