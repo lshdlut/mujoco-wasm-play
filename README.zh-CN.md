@@ -6,7 +6,7 @@
 
 [**在线演示（Rajagopal2015, MuJoCo 3.4.0）**](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/)
 
-> **文档（Sphinx / Read the Docs）**：源码位于 [`doc/zh/`](doc/zh/) 和 [`doc/en/`](doc/en/)；RTD 站点链接会在本次推送并完成 RTD 配置后补上。
+> **文档（Sphinx / Read the Docs）**：源码位于 [`doc/zh/`](doc/zh/) 和 [`doc/en/`](doc/en/)；在线阅读：[中文](https://mujoco-wasm-play.readthedocs.io/zh-cn/latest/)｜[英文](https://mujoco-wasm-play.readthedocs.io/en/latest/)。
 
 ## 总览
 
