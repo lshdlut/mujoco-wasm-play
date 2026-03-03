@@ -17,6 +17,10 @@ What it does
 - Adds security/cache headers:
   - ``X-Content-Type-Options: nosniff``
   - ``Cache-Control``: dev-friendly defaults
+- For ``.mjs``/``.js``/``.wasm``, it forces ``Cache-Control: no-store`` and
+  disables conditional caching (to avoid stale modules/WASM and confusing 304s).
+  This is deliberate for local development, but it will make reloads and model
+  switching slower than a production/static host.
 - Mounts stable prefixes:
   - ``/mujoco-wasm-play/`` → repo root
   - ``/mujoco-wasm-forge/`` → sibling forge repo, if present

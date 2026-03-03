@@ -27,6 +27,13 @@ CORS
 
 开发时通常最安全的做法是禁用缓存（``Cache-Control: no-store``），以避免由于 Worker/模块缓存过期或不一致导致的困惑行为。
 
-生产/演示托管时，推荐使用不可变 URL（用 commit SHA 固定 forge），并配合长生命周期的缓存头。
+本仓库自带的开发服务器（``tools/dev_server.py``）是刻意偏向开发体验的：
+
+- 对 ``.mjs``/``.js``/``.wasm`` 发送 ``Cache-Control: no-store``（避免不小心跑到旧代码），并且
+- Play 会为 Worker URL 自动添加 ``cb=...`` 的 cache-bust 参数。
+
+因此在本地开发环境里，刷新或切换模型往往会 *显得更慢*，因为浏览器无法复用缓存的模块/WASM。
+
+生产/演示托管时应当反过来：推荐使用不可变 URL（用 commit SHA 固定 forge），并配合长生命周期的缓存头（最好带 ``immutable``）。同时建议在 forge 的 ``dist/<ver>/`` 中提供 ``version.json``，这样 Play 可以用稳定的版本键对 forge 资源做标记，而不是退化到 cache-bust。
 
 内置开发服务器是一个不错的参考实现：``tools/dev_server.py``。
