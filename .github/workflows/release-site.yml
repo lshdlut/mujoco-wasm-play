@@ -1,0 +1,47 @@
+name: release-site
+
+on:
+  push:
+    tags:
+      - "mjwasm-play-*"
+
+permissions:
+  contents: write
+
+jobs:
+  site-zip:
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps (no browsers)
+        run: npm ci
+
+      - name: Validate spec + guardrails
+        run: |
+          npm run spec:lint
+          node --test tests/unit/*.test.mjs
+          npm run ci:guard
+
+      - name: Build site.zip
+        run: python3 tools/build_site_zip.py --out site.zip
+
+      - name: Publish release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: site.zip
+          fail_on_unmatched_files: true
