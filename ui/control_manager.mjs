@@ -1,6 +1,6 @@
 // UI control manager (DOM + panel wiring).
 
-import { logWarn, logError, strictCatch, strictEnsure } from '../core/viewer_runtime.mjs';
+import { logWarn, logError, strictCatch, strictEnsure, withCacheBust } from '../core/viewer_runtime.mjs';
 import { toNumber } from '../core/viewer_shared.mjs';
 import { clamp01 } from './state.mjs';
 import { getControlBindingSpec, parseVector, toBoolean } from './bindings.mjs';
@@ -718,7 +718,7 @@ function shortcutFromEvent(event) {
 
   async function loadUiSpec() {
     const specUrl = new URL('spec/ui_spec.json', DEV_ROOT_URL);
-    const res = await fetch(specUrl, { cache: 'no-store' });
+    const res = await fetch(withCacheBust(specUrl.href));
     if (!res.ok) {
       throw new Error(`Failed to load ui_spec.json (${res.status})`);
     }

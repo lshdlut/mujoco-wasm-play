@@ -3,7 +3,7 @@
 // `worker/protocol.gen.mjs` and `worker/dispatch.gen.mjs`.
 // This file is not generated.
 
-import { buildWorkerUrl, readNumericParam, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWarn, logError, logStatus, strictCatch, getStrictReport } from '../core/viewer_runtime.mjs';
+import { buildWorkerUrl, readNumericParam, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWarn, logError, logStatus, strictCatch, getStrictReport, withCacheBust } from '../core/viewer_runtime.mjs';
 import { MJ_GROUP_COUNT, SCENE_FLAG_DEFAULTS_NUMERIC } from '../core/viewer_defaults.mjs';
 import { VISUAL_FIELD_DESCRIPTORS } from '../core/viewer_structs.mjs';
 import { bool, cloneStruct, createDefaultHistoryState, createDefaultKeyframeState, createDefaultWatchState, normaliseGroupState, resolveStructPath, toNumber } from '../core/viewer_shared.mjs';
@@ -245,7 +245,7 @@ export async function createBackend(options = {}) {
       if (!file) continue;
     try {
       const url = new URL(file, ASSET_BASE_URL);
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await fetch(withCacheBust(url.href));
       if (!res.ok) {
         errors.push(`fetch ${file} status ${res.status}`);
         logWarn(`[backend] fetch ${file} failed with status ${res.status}`);
@@ -271,7 +271,7 @@ export async function createBackend(options = {}) {
             text,
             async (relPath) => {
               const refUrl = new URL(relPath, ASSET_BASE_URL);
-              const r = await fetch(refUrl, { cache: 'no-store' });
+              const r = await fetch(withCacheBust(refUrl.href));
               if (!r.ok) throw new Error(`fetch ${relPath} status ${r.status}`);
               return r.arrayBuffer();
             },
@@ -1125,10 +1125,23 @@ export async function createBackend(options = {}) {
         ? payload.center.slice(0, 3).map((n) => Number(n) || 0)
         : lastSnapshot.align?.center ?? [0, 0, 0];
       const radius = Number(payload.radius) || lastSnapshot.align?.radius || 0;
+      const cam = payload && typeof payload.camera === 'object' ? payload.camera : null;
+      const lookatSource = cam && Array.isArray(cam.lookat) ? cam.lookat : null;
+      const camera = lookatSource && lookatSource.length >= 3
+        ? {
+            type: Number.isFinite(cam.type) ? (cam.type | 0) : 0,
+            lookat: lookatSource.slice(0, 3).map((n) => Number(n) || 0),
+            distance: Number(cam.distance) || 0,
+            azimuth: Number(cam.azimuth) || 0,
+            elevation: Number(cam.elevation) || 0,
+            orthographic: !!cam.orthographic,
+          }
+        : null;
       lastSnapshot.align = {
         seq,
         center,
         radius,
+        camera,
         source: payload.source || 'backend',
         timestamp: Number(payload.timestamp) || Date.now(),
       };

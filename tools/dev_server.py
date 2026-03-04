@@ -23,11 +23,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PARENT_ROOT = REPO_ROOT.parent
+SIBLING_FORGE = PARENT_ROOT / "mujoco-wasm-forge"
+FORGE_ROOT = SIBLING_FORGE if SIBLING_FORGE.exists() else REPO_ROOT
 MOUNTS = {
     # Allow serving the repo root under a stable prefix, even when `--root` points
     # at a subdir. This keeps local dev URLs compatible with
     # GitHub Pages-style paths.
     "/mujoco-wasm-play/": REPO_ROOT,
+    # Production-style shared forge path. If a sibling forge checkout exists, serve it.
+    # Otherwise, fall back to the Play repo root so local-only dist/ mirrors can be used.
+    "/forge/": FORGE_ROOT,
     # If the sibling forge repo exists next to mujoco-wasm-play, mount it so the
     # viewer can fetch `/mujoco-wasm-forge/dist/<ver>/...` on localhost.
     "/mujoco-wasm-forge/": PARENT_ROOT / "mujoco-wasm-forge",
@@ -63,6 +68,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header("X-Content-Type-Options", "nosniff")
         if not self._has_header("Cache-Control"):
             self.send_header("Cache-Control", "public, max-age=0, must-revalidate")
+        if os.environ.get("PLAY_DEV_SERVER_COI") == "1":
+            # Cross-origin isolation (COOP+COEP) is required for SharedArrayBuffer and
+            # Emscripten pthreads builds. Keep it opt-in because it changes browser
+            # process isolation semantics for local dev.
+            if not self._has_header("Cross-Origin-Opener-Policy"):
+                self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+            if not self._has_header("Cross-Origin-Embedder-Policy"):
+                self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         # Avoid Expires header; base class doesn't add it
         super().end_headers()
 

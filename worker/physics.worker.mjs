@@ -14,7 +14,8 @@ import {
   logError,
   logStatus,
   logWarn,
-  withCacheTag,
+  resolveCacheBustMode,
+  withCacheBust,
   strictCatch,
   strictEnsure,
   getStrictReport,
@@ -109,6 +110,7 @@ let mjvPerturbBodyId = -1;
 let mjvPerturbPtrs = { modelPtr: 0, dataPtr: 0, camPtr: 0, scnPtr: 0, pertPtr: 0 };
 let mjvPerturbFns = null;
 let mjvCameraFns = null;
+let mjvCameraDefaultsFns = null;
 let lastSyncWallTime = perfNowMs() / 1000;
 let lastSyncSimTime = 0;
 let simTimeApprox = 0;
@@ -426,6 +428,42 @@ function ensureMjvCameraAbi() {
   };
   strictEnsure('ensureMjvCameraAbi', { reason: 'create' });
   return mjvCameraFns;
+}
+
+function ensureMjvCameraDefaultsAbi() {
+  if (mjvCameraDefaultsFns) return mjvCameraDefaultsFns;
+  const requiredFns = [
+    '_mjwf_mjv_defaultCamera',
+    '_mjwf_mjv_defaultFreeCamera',
+  ];
+  const missing = requiredFns.filter((name) => typeof mod?.[name] !== 'function');
+  if (missing.length) {
+    throw new Error(`[forge] Missing mjv camera default ABI exports: ${missing.join(', ')}`);
+  }
+  mjvCameraDefaultsFns = {
+    defaultCamera: mod._mjwf_mjv_defaultCamera,
+    defaultFreeCamera: mod._mjwf_mjv_defaultFreeCamera,
+  };
+  strictEnsure('ensureMjvCameraDefaultsAbi', { reason: 'create' });
+  return mjvCameraDefaultsFns;
+}
+
+function resolveMjvCameraPtr() {
+  if (!mod || !(h > 0)) return 0;
+  const ptrFn = mod._mjwf_cam_type_ptr;
+  if (typeof ptrFn !== 'function') return 0;
+  return ptrFn.call(mod, h) | 0;
+}
+
+function resetFreeCameraToSimulateDefaults() {
+  if (!sim || !mod || !(h > 0)) return null;
+  const defaults = ensureMjvCameraDefaultsAbi();
+  const camPtr = resolveMjvCameraPtr();
+  const { modelPtr } = sim.ensurePointers();
+  if (!(camPtr > 0) || !(modelPtr > 0)) return null;
+  defaults.defaultCamera.call(mod, camPtr);
+  defaults.defaultFreeCamera.call(mod, modelPtr, camPtr);
+  return readViewerFreeCameraState();
 }
 
 function mjvMouseActionFor(mode, shiftKey) {
@@ -1336,6 +1374,20 @@ function computeBoundsFromPositions(arr, n) {
 }
 
 function captureBounds() {
+  // Prefer model statistic bounds (stable, MuJoCo Simulate-like).
+  if (mod && (h > 0)) {
+    const stat = readStatisticStruct(mod, h);
+    const centerSource = Array.isArray(stat?.center) ? stat.center : null;
+    const center = centerSource && centerSource.length >= 3
+      ? [Number(centerSource[0]) || 0, Number(centerSource[1]) || 0, Number(centerSource[2]) || 0]
+      : [0, 0, 0];
+    const extent = Number(stat?.extent) || 0;
+    if (Number.isFinite(extent) && extent > 0) {
+      return { center, radius: extent };
+    }
+  }
+
+  // Fallback: derive bounds from current geom positions (state-dependent).
   const n = sim?.ngeom?.() || (ngeom | 0);
   if (!sim || !(n > 0)) {
     return { center: [0, 0, 0], radius: 0 };
@@ -1436,27 +1488,30 @@ async function loadModule() {
   const tLoadStart = perfEnabled ? perfNowMs() : 0;
   // Build absolute URLs and import dynamically to avoid ref path/caching pitfalls
   // Versioned dist base from worker URL (?ver=...) and optional forgeBase override.
-  let ver = '3.4.0';
+  let ver = '';
   let forgeBaseOverride = '';
-  let urlHost = '';
+  let cacheBustMode = 'none';
   try {
     const urlSelf = new URL(import.meta.url);
-    urlHost = urlSelf.hostname || '';
     const v = urlSelf.searchParams.get('ver');
     if (v) ver = v;
     const fb = urlSelf.searchParams.get('forgeBase');
     if (fb) forgeBaseOverride = fb;
+    cacheBustMode = resolveCacheBustMode(urlSelf.searchParams);
   } catch (err) {
     strictCatch(err, 'worker:parse_worker_url');
   }
 
   const resolveLocalDistBase = () => {
-    if (urlHost === 'localhost' || urlHost === '127.0.0.1') {
-      // Local dev: serve from the parent directory so the sibling forge repo is available.
-      return new URL(`../../mujoco-wasm-forge/dist/${ver}/`, import.meta.url);
+    if (!ver) {
+      throw new Error('Missing MuJoCo version: worker URL must include ?ver=...');
     }
-    return new URL(`../dist/${ver}/`, import.meta.url);
+    return new URL(`/forge/dist/${ver}/`, import.meta.url);
   };
+
+  if (!ver) {
+    throw new Error('[forge] Missing ver in worker URL. Ensure Play passes ?ver=... (set globalThis.PLAY_VER via site_config.js or pass ver=... in the page URL).');
+  }
 
   let distBase;
   if (forgeBaseOverride) {
@@ -1480,6 +1535,7 @@ async function loadModule() {
   }
   const jsAbs = new URL(`mujoco.js`, distBase);
   const wasmAbs = new URL(`mujoco.wasm`, distBase);
+  const isPthreadsBundle = distBase.pathname.includes('/pthreads/');
 
   const assertForgeViewerAbi = (moduleRef) => {
       const required = [
@@ -1552,29 +1608,46 @@ async function loadModule() {
     throw new Error(message);
   };
 
-  // Optional cache tag from version.json (sha8) to avoid stale caching
-  let vTag = '';
   try {
-    const vinfoUrl = new URL('version.json', distBase);
-    vinfoUrl.searchParams.set('cb', String(Date.now()));
-    const r = await fetch(vinfoUrl.href, { cache: 'no-store' });
-    if (r.ok) {
-      const j = await r.json();
-      const s = String(j.sha256 || j.git_sha || j.mujoco_git_sha || '');
-      vTag = s.slice(0, 8);
-    }
-  } catch (err) {
-    strictCatch(err, 'worker:version_json', { allow: true });
-  }
-  try {
-    const jsHref = withCacheTag(jsAbs.href, vTag);
-    const wasmHref = withCacheTag(wasmAbs.href, vTag);
+    const jsHref = withCacheBust(jsAbs.href, cacheBustMode);
+    const wasmHref = withCacheBust(wasmAbs.href, cacheBustMode);
     const loaderMod = await import(/* @vite-ignore */ jsHref);
     const load_mujoco = loaderMod.default;
-    const wasmUrl = new URL(wasmHref);
-    if (!vTag) wasmUrl.searchParams.set('cb', String(Date.now()));
-    mod = await load_mujoco({ locateFile: (p) => (p.endsWith('.wasm') ? wasmUrl.href : p) });
+    mod = await load_mujoco({
+      locateFile: (p, _prefix) => {
+        const path = String(p || '');
+        if (path.endsWith('mjwasm_forge.wasm')) {
+          // Forge glue currently requests "mjwasm_forge.wasm" even when the shipped file is named "mujoco.wasm".
+          if (!isPthreadsBundle) return wasmHref;
+        }
+        if (path.endsWith('mujoco.wasm')) return wasmHref;
+        try {
+          return withCacheBust(new URL(path, distBase).href, cacheBustMode);
+        } catch {
+          return path;
+        }
+      },
+    });
+    mod.__mujocoVer = ver;
+    mod.__forgeDistBase = distBase.href;
     assertForgeViewerAbi(mod);
+    if (perfEnabled) {
+      void (async () => {
+        try {
+          const vinfoUrl = new URL('version.json', distBase);
+          const r = await fetch(vinfoUrl.href, { cache: 'no-store' });
+          if (!r.ok) return;
+          const j = await r.json();
+          const s = String(j.sha256 || j.git_sha || j.mujoco_git_sha || '');
+          const sha8 = s.slice(0, 8);
+          if (sha8) {
+            logStatus(`worker: forge version ${sha8}`, { distBase: distBase.href });
+          }
+        } catch (err) {
+          strictCatch(err, 'worker:version_json', { allow: true });
+        }
+      })();
+    }
     try {
       const enableTimers =
         typeof mod._mjwf_enable_timers === 'function'
@@ -1588,6 +1661,13 @@ async function loadModule() {
     }
   } catch (e) {
     strictCatch(e, 'worker:loadModule');
+    if (isPthreadsBundle) {
+      const message =
+        `[forge] pthreads forge bundle missing or failed to load. ` +
+        `Expected distBase=${distBase.href} to contain mujoco.js and mujoco.wasm (and any pthread sidecars). ` +
+        `Original error: ${String(e || '')}`;
+      throw new Error(message);
+    }
     throw e;
   }
   logStatus('worker: forge module ready');
@@ -2765,6 +2845,32 @@ const commandHandlers = {
     }
     emitCameraMeta();
     emitGeomMeta();
+    // Simulate parity: reset camera to MuJoCo defaults on model load, then emit an
+    // align event so the main thread applies the exact same parameters.
+    try {
+      const info = captureBounds();
+      if (info) lastBounds = info;
+      let camera = null;
+      try {
+        camera = resetFreeCameraToSimulateDefaults();
+      } catch (err) {
+        strictCatch(err, 'worker:load_default_camera');
+        camera = null;
+      }
+      const now = Date.now();
+      const msg = {
+        kind: 'align',
+        seq: ++alignSeq,
+        center: (info && info.center) || [0, 0, 0],
+        radius: (info && info.radius) || 0,
+        timestamp: now,
+        source: 'load',
+      };
+      if (camera) msg.camera = camera;
+      safePost(msg, null, 'worker:load_align_post');
+    } catch (err) {
+      strictCatch(err, 'worker:load_align');
+    }
     snapshot();
     emitRenderAssets();
   },
@@ -3318,15 +3424,33 @@ const commandHandlers = {
   align: (payload) => {
     const info = captureBounds();
     if (info) lastBounds = info;
+    let camera = null;
+    try {
+      if (sim && mod && (h > 0)) {
+        const defaults = ensureMjvCameraDefaultsAbi();
+        const camPtr = resolveMjvCameraPtr();
+        const { modelPtr } = sim.ensurePointers();
+        if ((camPtr > 0) && (modelPtr > 0)) {
+          // Simulate 1:1: reset camera using MuJoCo defaults.
+          defaults.defaultCamera.call(mod, camPtr);
+          defaults.defaultFreeCamera.call(mod, modelPtr, camPtr);
+          camera = readViewerFreeCameraState();
+        }
+      }
+    } catch (err) {
+      strictCatch(err, 'worker:align_default_camera');
+    }
     const now = Date.now();
-    safePost({
+    const msg = {
       kind: 'align',
       seq: ++alignSeq,
       center: (info && info.center) || [0, 0, 0],
       radius: (info && info.radius) || 0,
       timestamp: now,
       source: payload.source || 'backend',
-    }, null, 'worker:align_post');
+    };
+    if (camera) msg.camera = camera;
+    safePost(msg, null, 'worker:align_post');
   },
   copyState: (payload) => {
     const precision = payload.precision === 'full' ? 'full' : 'standard';

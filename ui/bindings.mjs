@@ -1,7 +1,7 @@
 // UI binding spec parsing + value normalisation helpers.
 // Keep behaviour identical; do not swallow errors.
 
-import { isStrictEnabled, logError, logWarn, strictCatch } from '../core/viewer_runtime.mjs';
+import { isStrictEnabled, logError, logWarn, strictCatch, withCacheBust } from '../core/viewer_runtime.mjs';
 import { splitBinding, toNumber } from '../core/viewer_shared.mjs';
 
 const DEV_ROOT_URL = new URL('../', import.meta.url);
@@ -15,7 +15,7 @@ async function ensureBindingIndex() {
     // Struct/binding index lives under spec/; resolve relative to repo root so
     // both local dev and hosted layouts work.
     const url = new URL('spec/ui_bindings_index.json', DEV_ROOT_URL);
-    bindingIndexPromise = fetch(url, { cache: 'no-store' })
+    bindingIndexPromise = fetch(withCacheBust(url.href))
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load ui_bindings_index.json (${res.status})`);
         return res.json();

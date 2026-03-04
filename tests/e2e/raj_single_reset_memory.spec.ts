@@ -6,8 +6,7 @@ test('single-Raj default -> run -> reset memory behaviour', async ({ page }) => 
 
   const url =
     `/index.html?model=${encodeURIComponent('mujoco_Rajagopal2015_simple.xml')}` +
-    `&mode=worker&snapshot=1` +
-    `&forgeBase=${encodeURIComponent('/dist/3.4.0/')}`;
+    `&mode=worker&snapshot=1`;
 
   await waitForViewerReady(page, url);
 

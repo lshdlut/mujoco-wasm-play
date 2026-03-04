@@ -1,7 +1,7 @@
 // File/model UI helpers extracted from control_manager.
 // Keep behaviour identical; do not swallow errors.
 
-import { logError, strictCatch } from '../core/viewer_runtime.mjs';
+import { logError, strictCatch, withCacheBust } from '../core/viewer_runtime.mjs';
 import { buildMuJoCoBundle as buildMuJoCoBundleCore, normaliseMuJoCoVirtualPath, parseMuJoCoDirectFileRefs } from '../core/xml_refs.mjs';
 import { resetModelFrontendState } from './state.mjs';
 
@@ -345,7 +345,7 @@ export function createFileSectionManager({
       const rel = normaliseMuJoCoVirtualPath(relPath);
       if (!rel) throw new Error('Missing relPath');
       const url = new URL(rel, baseUrl);
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await fetch(withCacheBust(url.href));
       if (!res.ok) {
         throw new Error(`Failed to fetch ${rel} (${res.status})`);
       }
@@ -627,7 +627,7 @@ export function createFileSectionManager({
           }
           if (entry.kind === 'builtinUrl' && entry.file) {
             const url = new URL(entry.file, DEV_ROOT_URL);
-            const res = await fetch(url, { cache: 'no-store' });
+            const res = await fetch(withCacheBust(url.href));
             if (!res.ok) {
               pushToast?.(`Failed to fetch model: ${entry.label || entry.file}`);
               return;

@@ -327,12 +327,91 @@ export function consumeViewerParams(params = viewerSearchParams) {
 
 export { viewerSearchParams };
 
+const CACHE_BUST_KEY = 'cacheBust';
+const CACHE_BUST_ALWAYS_TOKENS = new Set(['1', 'true', 'yes', 'on', 'always']);
+const CACHE_BUST_NONE_TOKENS = new Set(['0', 'false', 'no', 'off', 'none']);
+
+export function resolveCacheBustMode(params = viewerSearchParams) {
+  const token = getParamToken(CACHE_BUST_KEY, params);
+  if (!token) return 'none';
+  if (CACHE_BUST_ALWAYS_TOKENS.has(token)) return 'always';
+  if (CACHE_BUST_NONE_TOKENS.has(token)) return 'none';
+  return 'none';
+}
+
+export function isCacheBustAlways(params = viewerSearchParams) {
+  return resolveCacheBustMode(params) === 'always';
+}
+
+function readGlobalPlayVer() {
+  if (typeof globalThis === 'undefined') return '';
+  const raw = globalThis.PLAY_VER;
+  if (typeof raw !== 'string') return '';
+  return raw.trim();
+}
+
+export function resolveVer(params = viewerSearchParams, { playVer = readGlobalPlayVer() } = {}) {
+  const urlVer = typeof params?.get === 'function' ? String(params.get('ver') || '').trim() : '';
+  const token = urlVer || String(playVer || '').trim();
+  if (token) return token;
+  throw new Error('Missing MuJoCo version: set globalThis.PLAY_VER (via site_config.js) or pass ver=... in the URL.');
+}
+
+function readGlobalForgeDistBaseOverride() {
+  if (typeof window === 'undefined') return '';
+  const raw = window.__FORGE_DIST_BASE__;
+  if (typeof raw !== 'string') return '';
+  return raw.trim();
+}
+
+export function resolveForgeBaseTemplate(params = viewerSearchParams, { forgeDistBaseOverride = readGlobalForgeDistBaseOverride() } = {}) {
+  const fromUrl = typeof params?.get === 'function' ? String(params.get('forgeBase') || '').trim() : '';
+  if (fromUrl) return fromUrl;
+  const fromGlobal = String(forgeDistBaseOverride || '').trim();
+  if (fromGlobal) return fromGlobal;
+  return '/forge/dist/{ver}/';
+}
+
+export function applyVerTemplate(template, ver) {
+  const raw = String(template || '');
+  const v = String(ver || '').trim();
+  if (!raw) return '';
+  if (!v) return raw;
+  return raw.replaceAll('{ver}', v);
+}
+
+export function resolveForgeBase(params = viewerSearchParams, options = {}) {
+  const ver = resolveVer(params, options);
+  const template = resolveForgeBaseTemplate(params, options);
+  const expanded = applyVerTemplate(template, ver);
+  return expanded.endsWith('/') ? expanded : `${expanded}/`;
+}
+
+export function withCacheBust(u, mode = resolveCacheBustMode()) {
+  if (mode !== 'always') return u;
+  try {
+    const url = new URL(String(u), location.href);
+    url.searchParams.set('cb', String(Date.now()));
+    return url.href;
+  } catch (err) {
+    strictCatch(err, 'runtime:cache_bust', { allow: true });
+    return u;
+  }
+}
+
 export function buildWorkerUrl(baseUrl, params = viewerSearchParams) {
   const url = baseUrl instanceof URL
     ? new URL(baseUrl.href)
     : new URL(String(baseUrl), typeof location !== 'undefined' ? location.href : 'http://localhost');
-  const forgeBase = params.get('forgeBase');
-  if (forgeBase) url.searchParams.set('forgeBase', forgeBase);
+  const cacheBustMode = resolveCacheBustMode(params);
+  const ver = resolveVer(params);
+  const forgeBase = resolveForgeBase(params, { playVer: ver });
+  url.searchParams.set('ver', ver);
+  url.searchParams.set('forgeBase', forgeBase);
+  if (cacheBustMode === 'always') {
+    url.searchParams.set(CACHE_BUST_KEY, 'always');
+    url.searchParams.set('cb', String(Date.now()));
+  }
   const strictMode = isStrictEnabled(params);
   if (strictMode) url.searchParams.set('strict', '1');
   const compatMode = isCompatEnabled(params);
@@ -341,28 +420,22 @@ export function buildWorkerUrl(baseUrl, params = viewerSearchParams) {
   if (logToken) url.searchParams.set('log', logToken);
   const verboseToken = params.get('verbose');
   if (verboseToken) url.searchParams.set('verbose', verboseToken);
-  url.searchParams.set('cb', String(Date.now()));
   return url;
 }
 
 export function normalizeVer(v) {
   const s = String(v || '').trim();
-  return s ? s : '3.4.0';
+  return s ? s : '';
 }
 
 export function getForgeDistBase(ver) {
   const v = normalizeVer(ver);
+  if (!v) {
+    throw new Error('getForgeDistBase(ver) requires a non-empty version.');
+  }
   const override = resolveForgeDistBaseOverride(v);
   if (override) return override;
-  const host = (typeof location !== 'undefined' && location && typeof location.hostname === 'string')
-    ? location.hostname
-    : '';
-  if (host === 'localhost' || host === '127.0.0.1') {
-    // Local dev: serve from the parent directory so sibling repos (e.g. mujoco-wasm-forge)
-    // are available under the same origin.
-    return `/mujoco-wasm-forge/dist/${v}/`;
-  }
-  return `/dist/${v}/`;
+  return `/forge/dist/${v}/`;
 }
 
 function resolveForgeDistBaseOverride(v) {
@@ -380,7 +453,6 @@ function resolveForgeDistBaseOverride(v) {
 
 export async function getVersionInfo(distBase) {
   const url = new URL('version.json', new URL(distBase, location.href));
-  url.searchParams.set('cb', String(Date.now()));
   try {
     const r = await fetch(url.href, { cache: 'no-store' });
     if (!r.ok) throw new Error('version.json fetch failed');
@@ -395,7 +467,7 @@ export function withCacheTag(u, vTag) {
   try {
     const url = new URL(u, location.href);
     if (vTag) url.searchParams.set('v', String(vTag));
-    else url.searchParams.set('cb', String(Date.now()));
+    else if (isCacheBustAlways()) url.searchParams.set('cb', String(Date.now()));
     return url.href;
   } catch (err) {
     strictCatch(err, 'runtime:cache_tag', { allow: true });
