@@ -1,7 +1,8 @@
 // Render-asset extraction from forge modules (CPU-side snapshot of model assets).
 
 import { strictCatch } from '../core/viewer_runtime.mjs';
-import { computeMeshElementCounts, heapViewF64, heapViewF32, heapViewI32, heapViewU8 } from './heap_views.mjs';
+import { computeMeshElementCounts, heapViewF64, heapViewF32, heapViewI32, heapViewI64, heapViewU8 } from './heap_views.mjs';
+import { MJMODEL_TEX_ADR_ELEMENT_KIND_BY_VER } from './forge_abi_snapshot.gen.mjs';
 
 function cloneTyped(view, Ctor) {
   if (!view) return null;
@@ -30,8 +31,51 @@ function readView(mod, fn, handle, length, reader) {
   if (!ptr) return null;
   return reader(mod, ptr, length);
 }
+
+function validateTextureAdrLayout({ adrView, widthView, heightView, nchannelView, dataLen }) {
+  if (!adrView || !widthView || !heightView || !nchannelView) return false;
+  const ntex = Math.min(adrView.length, widthView.length, heightView.length, nchannelView.length) | 0;
+  if (!(ntex > 0) || !(dataLen > 0)) return false;
+  const ranges = [];
+  for (let i = 0; i < ntex; i += 1) {
+    const w = widthView[i] | 0;
+    const h = heightView[i] | 0;
+    const ch = nchannelView[i] | 0;
+    if (!(w > 0) || !(h > 0) || !(ch > 0)) continue;
+    const start = Number(adrView[i]);
+    if (!(Number.isFinite(start) && start >= 0)) return false;
+    const byteLen = w * h * ch;
+    const end = start + byteLen;
+    if (!(end >= start && end <= dataLen)) return false;
+    ranges.push([start, end]);
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+  let prevEnd = -1;
+  for (const [start, end] of ranges) {
+    if (start < prevEnd) return false;
+    prevEnd = end;
+  }
+  return true;
+}
+
+function cloneI64ToI32(view, count, { name = 'value' } = {}) {
+  if (!view) return null;
+  const n = count | 0;
+  if (!(n > 0) || view.length < n) return null;
+  const out = new Int32Array(n);
+  for (let i = 0; i < n; i += 1) {
+    const v = view[i];
+    const num = Number(v);
+    if (!Number.isFinite(num) || !Number.isSafeInteger(num) || !(num >= 0) || num > 0x7fffffff) {
+      throw new Error(`[forge] ${name} out of int32 range at index ${i}: ${String(v)}`);
+    }
+    out[i] = num | 0;
+  }
+  return out;
+}
 export function collectRenderAssetsFromModule(mod, handle) {
   if (!mod || !(handle > 0)) return null;
+  const ver = String(mod?.__mujocoVer || '');
   const assets = {
     version: 1,
     geoms: null,
@@ -724,18 +768,46 @@ export function collectRenderAssetsFromModule(mod, handle) {
     const texWidthView = readView(mod, ensureFunc('_mjwf_model_tex_width_ptr'), handle, ntex, heapViewI32);
     const texHeightView = readView(mod, ensureFunc('_mjwf_model_tex_height_ptr'), handle, ntex, heapViewI32);
     const texNChannelView = readView(mod, ensureFunc('_mjwf_model_tex_nchannel_ptr'), handle, ntex, heapViewI32);
-    const texAdrView = readView(mod, ensureFunc('_mjwf_model_tex_adr_ptr'), handle, ntex, heapViewI32);
     const texColorspaceView = readView(mod, ensureFunc('_mjwf_model_tex_colorspace_ptr'), handle, ntex, heapViewI32);
     const dataLen = ensureFunc('_mjwf_model_ntexdata').call(mod, handle) | 0;
     const dataPtr = ensureFunc('_mjwf_model_tex_data_ptr').call(mod, handle) | 0;
     const texData = (dataLen > 0 && dataPtr > 0) ? heapViewU8(mod, dataPtr, dataLen) : null;
+
+    const kind = MJMODEL_TEX_ADR_ELEMENT_KIND_BY_VER?.[ver] || '';
+    if (!kind) {
+      throw new Error(
+        `[forge] Unsupported MuJoCo version for mjModel.tex_adr ABI: ${ver || '<missing>'}. ` +
+        `Regenerate bridge/forge_abi_snapshot.gen.mjs via tools/generate_forge_abi_snapshot.mjs.`,
+      );
+    }
+    let texAdrOut = null;
+    if (kind === 'i64') {
+      const texAdrViewI64 = readView(mod, ensureFunc('_mjwf_model_tex_adr_ptr'), handle, ntex, heapViewI64);
+      texAdrOut = cloneI64ToI32(texAdrViewI64, ntex, { name: 'tex_adr(mjtSize)' });
+    } else if (kind === 'i32') {
+      const texAdrViewI32 = readView(mod, ensureFunc('_mjwf_model_tex_adr_ptr'), handle, ntex, heapViewI32);
+      texAdrOut = cloneTyped(texAdrViewI32, Int32Array);
+    } else {
+      throw new Error(`[forge] Unsupported tex_adr element kind: ${kind}`);
+    }
+
+    const adrOk = validateTextureAdrLayout({
+      adrView: texAdrOut,
+      widthView: texWidthView,
+      heightView: texHeightView,
+      nchannelView: texNChannelView,
+      dataLen,
+    });
+    if (!adrOk) {
+      throw new Error('[forge] Invalid tex_adr layout: cannot map textures into tex_data buffer');
+    }
     assets.textures = {
       count: ntex,
       type: cloneTyped(texTypeView, Int32Array),
       width: cloneTyped(texWidthView, Int32Array),
       height: cloneTyped(texHeightView, Int32Array),
       nchannel: cloneTyped(texNChannelView, Int32Array),
-      adr: cloneTyped(texAdrView, Int32Array),
+      adr: texAdrOut,
       colorspace: cloneTyped(texColorspaceView, Int32Array),
       data: cloneTyped(texData, Uint8Array),
     };

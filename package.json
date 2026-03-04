@@ -12,6 +12,7 @@
     "dev": "python tools/dev_server.py --root . --port 8000",
     "generate": "(node tools/generate_ui_artifacts.mjs || \"%npm_node_execpath%\" tools/generate_ui_artifacts.mjs) && (node tools/generate_worker_protocol.mjs || \"%npm_node_execpath%\" tools/generate_worker_protocol.mjs)",
     "generate:protocol": "node tools/generate_worker_protocol.mjs || \"%npm_node_execpath%\" tools/generate_worker_protocol.mjs",
+    "generate:forge-abi": "node tools/generate_forge_abi_snapshot.mjs || \"%npm_node_execpath%\" tools/generate_forge_abi_snapshot.mjs",
     "generate:ui": "node tools/generate_ui_artifacts.mjs || \"%npm_node_execpath%\" tools/generate_ui_artifacts.mjs",
     "loc": "node tools/loc_report.mjs || \"%npm_node_execpath%\" tools/loc_report.mjs",
     "prebuild": "(node tools/generate_ui_artifacts.mjs || \"%npm_node_execpath%\" tools/generate_ui_artifacts.mjs) && (node tools/generate_worker_protocol.mjs || \"%npm_node_execpath%\" tools/generate_worker_protocol.mjs)",

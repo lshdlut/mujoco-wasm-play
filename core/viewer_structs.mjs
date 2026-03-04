@@ -24,31 +24,7 @@ function getFieldPtr(mod, handle, prefix, pathSegments) {
 }
 
 function resolveHeapBuffer(mod) {
-  if (!mod) return null;
-  if (mod.__heapBuffer instanceof ArrayBuffer) {
-    return mod.__heapBuffer;
-  }
-  try {
-    const mem =
-      mod.wasmExports?.memory ||
-      mod.asm?.memory ||
-      mod.asm?.wasmMemory ||
-      mod.wasmMemory;
-    if (mem?.buffer instanceof ArrayBuffer) {
-      mod.__heapBuffer = mem.buffer;
-      return mem.buffer;
-    }
-  } catch (err) {
-    strictCatch(err, 'structs:resolve_heap_buffer:memory');
-  }
-  const heaps = [mod.HEAPF64, mod.HEAPF32, mod.HEAP32, mod.HEAPU8];
-  for (const view of heaps) {
-    if (view?.buffer instanceof ArrayBuffer) {
-      mod.__heapBuffer = view.buffer;
-      return view.buffer;
-    }
-  }
-  return null;
+  return resolveSharedHeapBuffer(mod);
 }
 
 function writeTyped(mod, ptr, ArrayType, count, rawValues, { coerceInt = false } = {}) {
@@ -1026,4 +1002,3 @@ export function writeStatisticField(mod, handle, pathSegments, kind, value, size
 export function readStatisticStruct(mod, handle) {
   return readStructSnapshot(mod, handle, 'stat', STAT_FIELD_DESCRIPTORS);
 }
-

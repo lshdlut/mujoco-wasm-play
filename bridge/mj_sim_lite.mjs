@@ -150,7 +150,7 @@ export class MjSimLite {
       const bytes = encoded.length + 1;
       const h = this._withStack(bytes, (ptr) => {
         const buffer = resolveHeapBuffer(m);
-        if (!(buffer instanceof ArrayBuffer)) {
+        if (!buffer || !(buffer.byteLength > 0)) {
           throw new Error('WASM heap unavailable');
         }
         const heap = new Uint8Array(buffer);
@@ -614,7 +614,12 @@ export class MjSimLite {
     if (!mod) return null;
     const owned = this._ensureContactForceScratch();
     if (owned?.ptr) {
-      if (!owned.view || owned.view.length < 3) {
+      const heapBuf = resolveHeapBuffer(mod);
+      if (
+        !owned.view
+        || owned.view.length < 3
+        || (heapBuf && owned.view.buffer !== heapBuf)
+      ) {
         owned.view = heapViewF64(mod, owned.ptr, 6);
       }
       if (!owned.view || owned.view.length < 3) return null;
@@ -706,7 +711,7 @@ export class MjSimLite {
     diag.time = readScalar(diag.timePtr);
     diag.timestep = readScalar(diag.timestepPtr);
     const heapBuf = resolveHeapBuffer(m);
-    if (heapBuf instanceof ArrayBuffer) {
+    if (heapBuf && typeof heapBuf.byteLength === 'number') {
       diag.heapBytes = heapBuf.byteLength >>> 0;
     }
     return diag;

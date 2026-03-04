@@ -2,14 +2,18 @@
 
 import { strictCatch, strictFallback } from '../core/viewer_runtime.mjs';
 
+function isArrayBufferLike(value) {
+  if (!value) return false;
+  if (value instanceof ArrayBuffer) return true;
+  const hasSAB = typeof SharedArrayBuffer !== 'undefined';
+  return hasSAB && value instanceof SharedArrayBuffer;
+}
+
 export function resolveHeapBuffer(mod) {
   if (!mod) return null;
-  if (mod.__heapBuffer instanceof ArrayBuffer && mod.__heapBuffer.byteLength > 0) {
-    return mod.__heapBuffer;
-  }
   try {
     const mem = mod.wasmExports?.memory;
-    if (mem?.buffer instanceof ArrayBuffer && mem.buffer.byteLength > 0) {
+    if (isArrayBufferLike(mem?.buffer) && mem.buffer.byteLength > 0) {
       mod.__heapBuffer = mem.buffer;
       return mem.buffer;
     }
@@ -18,7 +22,7 @@ export function resolveHeapBuffer(mod) {
   }
   try {
     const heapU8 = mod.HEAPU8;
-    if (heapU8?.buffer instanceof ArrayBuffer && heapU8.buffer.byteLength > 0) {
+    if (isArrayBufferLike(heapU8?.buffer) && heapU8.buffer.byteLength > 0) {
       mod.__heapBuffer = heapU8.buffer;
       return heapU8.buffer;
     }
@@ -27,18 +31,21 @@ export function resolveHeapBuffer(mod) {
   }
   try {
     const heapF64 = mod.HEAPF64;
-    if (heapF64?.buffer instanceof ArrayBuffer && heapF64.buffer.byteLength > 0) {
+    if (isArrayBufferLike(heapF64?.buffer) && heapF64.buffer.byteLength > 0) {
       mod.__heapBuffer = heapF64.buffer;
       return heapF64.buffer;
     }
   } catch (err) {
     strictCatch(err, 'bridge:resolveHeapBuffer');
   }
+  if (isArrayBufferLike(mod.__heapBuffer) && mod.__heapBuffer.byteLength > 0) {
+    return mod.__heapBuffer;
+  }
   return null;
 }
 
 function ensureHeapViewCache(mod, buffer) {
-  if (!mod || !(buffer instanceof ArrayBuffer)) return null;
+  if (!mod || !isArrayBufferLike(buffer)) return null;
   const existing = mod.__heapViewCache;
   if (existing && existing.buffer === buffer && existing.map instanceof Map) {
     return existing;
@@ -59,7 +66,7 @@ function createHeapTypedArray(mod, ptr, length, Ctor) {
     return new Ctor(0);
   }
   const buffer = resolveHeapBuffer(mod);
-  if (buffer instanceof ArrayBuffer) {
+  if (isArrayBufferLike(buffer)) {
     mod.__heapBuffer = buffer;
     try {
       const cacheState = ensureHeapViewCache(mod, buffer);
@@ -92,8 +99,9 @@ function createHeapTypedArray(mod, ptr, length, Ctor) {
     Ctor === Float64Array ? 'HEAPF64'
       : Ctor === Float32Array ? 'HEAPF32'
         : Ctor === Int32Array ? 'HEAP32'
+          : Ctor === BigInt64Array ? 'HEAP64'
           : null;
-  if (heapField && mod && mod[heapField] && mod[heapField].buffer instanceof ArrayBuffer) {
+  if (heapField && mod && mod[heapField] && isArrayBufferLike(mod[heapField].buffer)) {
     const heap = mod[heapField];
     const shift = Math.log2(Ctor.BYTES_PER_ELEMENT) | 0;
     const start = ptr >> shift;
@@ -147,6 +155,9 @@ export function heapViewF32(mod, ptr, length) {
 }
 export function heapViewI32(mod, ptr, length) {
   return createHeapTypedArray(mod, ptr, length, Int32Array);
+}
+export function heapViewI64(mod, ptr, length) {
+  return createHeapTypedArray(mod, ptr, length, BigInt64Array);
 }
 export function heapViewU8(mod, ptr, length) {
   return createHeapTypedArray(mod, ptr, length, Uint8Array);
