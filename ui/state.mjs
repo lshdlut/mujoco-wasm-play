@@ -181,6 +181,7 @@ const DEFAULT_VIEWER_STATE = Object.freeze({
       seq: 0,
       center: [0, 0, 0],
       radius: 0,
+      camera: null,
       timestamp: 0,
       source: 'init',
     },
@@ -553,10 +554,23 @@ function mergeBackendSnapshot(draft, snapshot) {
     const center = Array.isArray(centerSource)
       ? centerSource.slice(0, 3).map((n) => Number(n) || 0)
       : [0, 0, 0];
+    const cam = snapshot.align && typeof snapshot.align.camera === 'object' ? snapshot.align.camera : null;
+    const lookatSource = cam && Array.isArray(cam.lookat) ? cam.lookat : null;
+    const camera = lookatSource && lookatSource.length >= 3
+      ? {
+          type: Number.isFinite(cam.type) ? (cam.type | 0) : 0,
+          lookat: lookatSource.slice(0, 3).map((n) => Number(n) || 0),
+          distance: Number(cam.distance) || 0,
+          azimuth: Number(cam.azimuth) || 0,
+          elevation: Number(cam.elevation) || 0,
+          orthographic: !!cam.orthographic,
+        }
+      : null;
     draft.runtime.lastAlign = {
       seq: Number(snapshot.align.seq) || current.seq || 0,
       center,
       radius: Number(snapshot.align.radius) || current.radius || 0,
+      camera,
       timestamp: Number(snapshot.align.timestamp) || Date.now(),
       source: snapshot.align.source || current.source || 'backend',
     };

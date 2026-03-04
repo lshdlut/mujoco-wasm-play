@@ -3030,30 +3030,31 @@ function createRendererManager({
     const root = new THREE.Group();
     sceneWorld.add(root);
 
-    Object.assign(ctx, {
-      initialized: true,
-      renderer,
-      sceneWorld,
-      scene: sceneWorld,
-      camera,
-      root,
-      ground: null,
-      grid: null,
-      light: keyLight,
-      lightTarget,
-      fill,
-      hemi,
-      ambient,
-      assetSource: null,
-      meshes: [],
-      defaultVopt: null,
-      alignSeq: 0,
-      copySeq: 0,
-      autoAligned: false,
-      bounds: null,
-      pmrem: null,
-      envRT: null,
-      envFromHDRI: false,
+      Object.assign(ctx, {
+        initialized: true,
+        renderer,
+        sceneWorld,
+        scene: sceneWorld,
+        camera,
+        root,
+        ground: null,
+        grid: null,
+        light: keyLight,
+        lightTarget,
+        fill,
+        hemi,
+        ambient,
+        assetSource: null,
+        meshes: [],
+        defaultVopt: null,
+        alignSeq: 0,
+        alignTimestamp: 0,
+        copySeq: 0,
+        autoAligned: false,
+        bounds: null,
+        pmrem: null,
+        envRT: null,
+        envFromHDRI: false,
       hdriReady: false,
       hdriLoading: false,
       hdriBackground: null,
@@ -3495,23 +3496,58 @@ function createRendererManager({
     }
 
     const alignState = state.runtime?.lastAlign;
-    if (
-      context.currentCameraMode === 0 &&
-      alignState &&
-      alignState.seq > context.alignSeq
-    ) {
+    const alignMode = context.currentCameraMode | 0;
+    const alignTimestamp = alignState ? (Number(alignState.timestamp) || 0) : 0;
+    if (alignMode <= 1 && alignState && (alignState.seq > context.alignSeq || alignTimestamp > context.alignTimestamp)) {
       context.alignSeq = alignState.seq;
+      context.alignTimestamp = alignTimestamp;
       const center = alignState.center || [0, 0, 0];
-      const radius = Math.max(
-        alignState.radius || 0,
-        context.bounds?.radius || 0,
-        0.6
-      );
-      const target = tempVecA.set(center[0], center[1], center[2]);
-      const alignOffset = tempVecB.set(radius * 0.8, -radius * 0.8, radius * 0.6);
-      context.camera.position.copy(target).add(alignOffset);
-      context.camera.lookAt(target);
-      context.cameraTarget.copy(target);
+      const alignRadiusRaw = Number(alignState.radius) || 0;
+      const boundsRadiusRaw = Number(context.bounds?.radius) || 0;
+      const radius = Math.max(alignRadiusRaw > 0 ? alignRadiusRaw : boundsRadiusRaw, 0.6);
+
+      const cam = alignState.camera;
+      const lookatSource = cam && Array.isArray(cam.lookat) ? cam.lookat : null;
+      const dist = cam ? Number(cam.distance) : NaN;
+      const az = cam ? Number(cam.azimuth) : NaN;
+      const el = cam ? Number(cam.elevation) : NaN;
+
+      const useMjvCam =
+        lookatSource &&
+        lookatSource.length >= 3 &&
+        Number.isFinite(dist) &&
+        dist > 0 &&
+        Number.isFinite(az) &&
+        Number.isFinite(el);
+
+      if (useMjvCam) {
+        // Simulate 1:1: apply MuJoCo mjvCamera parameters (azimuth/elevation/distance/lookat).
+        const azRad = az * CAMERA_RAD_PER_DEG;
+        const elRad = el * CAMERA_RAD_PER_DEG;
+        const ca = Math.cos(azRad);
+        const sa = Math.sin(azRad);
+        const ce = Math.cos(elRad);
+        const se = Math.sin(elRad);
+        const target = tempVecA.set(
+          Number(lookatSource[0]) || 0,
+          Number(lookatSource[1]) || 0,
+          Number(lookatSource[2]) || 0,
+        );
+        const forward = tempVecB.set(ce * ca, ce * sa, se);
+        context.camera.position.copy(forward).multiplyScalar(-dist).add(target);
+        context.camera.up.set(-se * ca, -se * sa, ce);
+        context.camera.lookAt(target);
+        context.cameraTarget.copy(target);
+      } else {
+        const target = tempVecA.set(center[0], center[1], center[2]);
+        const alignOffset = tempVecB.set(radius * 0.8, -radius * 0.8, radius * 0.6);
+        context.camera.position.copy(target).add(alignOffset);
+        context.camera.up.set(0, 0, 1);
+        context.camera.lookAt(target);
+        context.cameraTarget.copy(target);
+      }
+
+      context.autoAligned = true;
       cacheTrackingPoseFromCurrent(context, { radius, center });
       sendViewerCameraSync(backend, context, state, tempVecA);
     }

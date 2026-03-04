@@ -285,6 +285,19 @@ export function resolveSnapshot(state) {
             ? state.align.center.slice(0, 3).map((n) => Number(n) || 0)
             : [0, 0, 0],
           radius: Number(state.align.radius) || 0,
+          camera:
+            state.align.camera && typeof state.align.camera === 'object'
+              ? {
+                  type: Number.isFinite(state.align.camera.type) ? (state.align.camera.type | 0) : 0,
+                  lookat: Array.isArray(state.align.camera.lookat)
+                    ? state.align.camera.lookat.slice(0, 3).map((n) => Number(n) || 0)
+                    : [0, 0, 0],
+                  distance: Number(state.align.camera.distance) || 0,
+                  azimuth: Number(state.align.camera.azimuth) || 0,
+                  elevation: Number(state.align.camera.elevation) || 0,
+                  orthographic: !!state.align.camera.orthographic,
+                }
+              : null,
           source: state.align.source || 'backend',
           timestamp: Number(state.align.timestamp) || 0,
         }
