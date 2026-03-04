@@ -28,7 +28,7 @@ Play expects a forge ``dist/<ver>/`` directory that contains at least:
 
 Recommended (optional):
 
-- ``version.json`` (used for cache tagging and diagnostics)
+- ``version.json`` (optional; used for diagnostics in verbose/perf mode)
 
 Viewer ABI extensions
 --------------------------------
@@ -53,11 +53,27 @@ Notes:
 Local dev vs hosted layouts
 ---------------------------
 
-When ``forgeBase=`` is omitted, the Worker uses a local fallback layout:
+When ``forgeBase=`` is omitted, Play resolves a default forge base template and
+propagates it to the Worker:
 
-- on ``localhost`` / ``127.0.0.1``: it tries ``/mujoco-wasm-forge/dist/<ver>/``
-  (mounted by ``tools/dev_server.py`` if you have a sibling forge checkout)
-- otherwise: it tries ``dist/<ver>/`` relative to the app
+- single entry: ``/forge/dist/{ver}/``
+- pthreads entry: ``/forge/dist/{ver}/pthreads/``
+
+The local dev server (``tools/dev_server.py``) mounts ``/forge/`` to a sibling
+``../mujoco-wasm-forge`` checkout if present (otherwise it falls back to the
+Play repo root for local-only mirrors).
 
 For explicit control (recommended for published demos), always pass
 ``forgeBase=...`` and pin it to an immutable forge commit.
+
+Pthreads (SharedArrayBuffer)
+----------------------------
+
+If you use the pthreads entry (``/pthreads/index.html``):
+
+- the forge bundle must exist under ``dist/<ver>/pthreads/`` (at least
+  ``mujoco.js`` + ``mujoco.wasm``), and
+- the page must be cross-origin isolated (``crossOriginIsolated === true``),
+  which requires COOP/COEP headers.
+
+Play hard-fails early if cross-origin isolation is missing.

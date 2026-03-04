@@ -28,7 +28,7 @@ Play 期望 forge 的 ``dist/<ver>/`` 目录至少包含：
 
 推荐（可选）：
 
-- ``version.json`` (用于缓存标记与诊断)
+- ``version.json``（可选；verbose/perf 模式下可用于诊断）
 
 Viewer ABI 扩展
 --------------------------------
@@ -50,9 +50,22 @@ Play 会校验已加载的 forge 模块是否导出了必需的 viewer ABI 集�
 本地开发 vs 托管布局
 ---------------------------
 
-当省略 ``forgeBase=`` 时，Worker 会使用本地回退布局：
+当省略 ``forgeBase=`` 时，Play 会解析默认 forge base 模板并传播到 Worker：
 
-- 在 ``localhost`` / ``127.0.0.1``：会尝试 ``/mujoco-wasm-forge/dist/<ver>/``（如果存在同级 forge 检出，则由 ``tools/dev_server.py`` 挂载）
-- 否则：会尝试应用相对路径 ``dist/<ver>/``
+- single 入口：``/forge/dist/{ver}/``
+- pthreads 入口：``/forge/dist/{ver}/pthreads/``
+
+本地开发服务器（``tools/dev_server.py``）会把 ``/forge/`` 挂载到同级的
+``../mujoco-wasm-forge``（如果存在），否则回退到 Play 仓库根目录以支持本地镜像。
 
 为了明确控制（发布 demo 时推荐），请始终传入 ``forgeBase=...`` 并将其固定到不可变的 forge commit。
+
+Pthreads（SharedArrayBuffer）
+----------------------------
+
+如果你使用 pthreads 入口（``/pthreads/index.html``）：
+
+- forge bundle 必须存在于 ``dist/<ver>/pthreads/``（至少包含 ``mujoco.js`` 与 ``mujoco.wasm``），并且
+- 页面必须满足 cross-origin isolation（``crossOriginIsolated === true``），需要 COOP/COEP 头。
+
+当缺少 cross-origin isolation 时，Play 会尽早硬失败并给出明确提示。

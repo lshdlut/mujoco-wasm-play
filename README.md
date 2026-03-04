@@ -56,10 +56,18 @@ This is required.
 Forge repo: `https://github.com/lshdlut/mujoco-wasm-forge`
 
 - This repo does not ship MuJoCo WASM binaries; it expects a forge `dist/<ver>/` bundle.
-- Set the dist base via `forgeBase=` (recommended) or `window.__FORGE_DIST_BASE__`.
-- Local dev default (on `localhost/127.0.0.1`) expects `/mujoco-wasm-forge/dist/<ver>/` (served automatically if you have a sibling `../mujoco-wasm-forge` checkout).
+- Set the dist base via `forgeBase=` (recommended) or `window.__FORGE_DIST_BASE__` (must be set before the main module runs).
+- Default dist base (local and hosted) is `/forge/dist/{ver}/`, where `{ver}` comes from `site_config.js` (`globalThis.PLAY_VER`) or `ver=...`.
+- The dev server (`tools/dev_server.py`) mounts `/forge/` to a sibling `../mujoco-wasm-forge` checkout if present (otherwise it falls back to this repo root).
 - This viewer requires a forge build with viewer extensions (scene + vopt pointers).
 - Typical remote base template (jsDelivr + pinned forge commit): `https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
+- Cache debugging: append `cacheBust=always` to force cache-busting for the Worker URL and forge resource URLs. Default is cache-friendly (no `cb=...`).
+
+### Pthreads variant
+
+- Entry: `/pthreads/index.html`
+- Default dist base: `/forge/dist/{ver}/pthreads/`
+- Requires cross-origin isolation (`crossOriginIsolated === true`) via COOP/COEP headers.
 
 ## Visual sources
 

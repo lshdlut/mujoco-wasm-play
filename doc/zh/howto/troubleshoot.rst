@@ -16,7 +16,7 @@ Worker 无法加载 ``mujoco.wasm``
 
 - ``.wasm`` 的 ``Content-Type`` 错误（必须是 ``application/wasm``）
 - 使用远程 ``forgeBase=`` 时缺少 CORS 响应头
-- ``mujoco.js`` 与 ``mujoco.wasm`` 的缓存不一致（固定版本 + cache bust）
+- ``mujoco.js`` 与 ``mujoco.wasm`` 的缓存不一致（使用不可变的 forge URL；调试时可追加 ``cacheBust=always``）
 
 Forge ABI 缺少导出
 -------------------------

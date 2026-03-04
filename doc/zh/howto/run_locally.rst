@@ -21,18 +21,19 @@ Play 需要一个 forge ``dist/<ver>/`` bundle（``mujoco.js`` + ``mujoco.wasm``
 开发服务器会挂载：
 
 - ``/mujoco-wasm-play/`` → 本仓库根目录
-- ``/mujoco-wasm-forge/`` → 同级目录的 ``../mujoco-wasm-forge`` 检出（如果存在）
+- ``/forge/`` → 同级目录的 ``../mujoco-wasm-forge``（如果存在；否则回退到本仓库根目录）
+- ``/mujoco-wasm-forge/`` → 旧别名（同级 forge 检出存在时可用）
 
 因此在 ``localhost`` 上，Play 可从以下路径拉取 forge 工件：
 
 .. code-block:: text
 
-  /mujoco-wasm-forge/dist/<ver>/
+  /forge/dist/<ver>/
 
 如果你想指向不同的 bundle，可传入 ``forgeBase=``：
 
 .. code-block:: text
 
-  http://127.0.0.1:8000/index.html?model=raj&forgeBase=../dist/3.4.0/
+  http://127.0.0.1:8000/index.html?model=raj&forgeBase=/forge/dist/3.5.0/
 
 完整说明见 :doc:`/reference/url_parameters`。

@@ -23,7 +23,9 @@ What it does
   switching slower than a production/static host.
 - Mounts stable prefixes:
   - ``/mujoco-wasm-play/`` → repo root
-  - ``/mujoco-wasm-forge/`` → sibling forge repo, if present
+  - ``/forge/`` → sibling forge repo if present (otherwise falls back to the
+    Play repo root)
+  - ``/mujoco-wasm-forge/`` → legacy alias for a sibling forge repo
 
 Environment variables
 ---------------------

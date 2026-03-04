@@ -17,7 +17,8 @@ Most common causes:
 
 - wrong ``Content-Type`` for ``.wasm`` (must be ``application/wasm``)
 - missing CORS headers when using remote ``forgeBase=``
-- stale caching of ``mujoco.js`` vs ``mujoco.wasm`` (pin + cache bust)
+- stale/mismatched caching of ``mujoco.js`` vs ``mujoco.wasm`` (use immutable
+  forge URLs; for debugging append ``cacheBust=always``)
 
 Forge ABI missing exports
 -------------------------
@@ -53,4 +54,3 @@ Strict mode failures
 If ``strict=1`` is enabled, caught errors (outside allowlists) will re-throw.
 Use ``strict=0`` (default) for end-user demos, and enable strict only when
 debugging/fuzzing.
-

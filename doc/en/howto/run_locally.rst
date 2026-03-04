@@ -21,18 +21,20 @@ Play needs a forge ``dist/<ver>/`` bundle (``mujoco.js`` + ``mujoco.wasm``).
 The dev server mounts:
 
 - ``/mujoco-wasm-play/`` → this repo root
-- ``/mujoco-wasm-forge/`` → a sibling ``../mujoco-wasm-forge`` checkout (if it exists)
+- ``/forge/`` → a sibling ``../mujoco-wasm-forge`` checkout if present (otherwise
+  falls back to this repo root)
+- ``/mujoco-wasm-forge/`` → legacy alias for a sibling forge checkout (if it exists)
 
 So on ``localhost``, Play can fetch forge artifacts from:
 
 .. code-block:: text
 
-  /mujoco-wasm-forge/dist/<ver>/
+  /forge/dist/<ver>/
 
 If you want to point at a different bundle, pass ``forgeBase=``:
 
 .. code-block:: text
 
-  http://127.0.0.1:8000/index.html?model=raj&forgeBase=../dist/3.4.0/
+  http://127.0.0.1:8000/index.html?model=raj&forgeBase=/forge/dist/3.5.0/
 
 For full details, see :doc:`/reference/url_parameters`.

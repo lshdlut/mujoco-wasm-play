@@ -35,15 +35,23 @@ The local dev server (``tools/dev_server.py``) is intentionally dev-biased:
 
 - it serves ``.mjs``/``.js``/``.wasm`` with ``Cache-Control: no-store`` (so you
   never run old code by accident), and
-- Play adds a ``cb=...`` cache-bust query to the Worker URL.
+- it disables conditional caching for ESM/WASM (always returns a 200 with a body).
 
 This makes reloads and model switching *appear slower* in local dev, because the
 browser cannot reuse cached modules/WASM.
 
+Play itself is cache-friendly by default:
+
+- it does **not** add a ``cb=...`` cache-bust query unless you explicitly set
+  ``cacheBust=always``.
+
 For production/demo hosting, do the opposite: prefer immutable URLs (pin forge
 by commit SHA) and serve with long-lived caching headers (ideally
-``immutable``). Also include a forge ``version.json`` so Play can tag forge
-requests with a stable version key instead of falling back to cache-busting.
+``immutable``).
+
+``version.json`` is optional. Play may fetch it with ``no-store`` for
+diagnostics when verbose/perf logging is enabled, but it is not required for
+correct caching.
 
 The included dev server is a good reference implementation:
 ``tools/dev_server.py``.

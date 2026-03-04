@@ -41,6 +41,13 @@ Play 主要通过 URL 查询参数进行配置。参数在主线程解析，并�
     - forge ``dist/<ver>/`` 的 base URL（必须包含 ``mujoco.js`` 与 ``mujoco.wasm``）。
       若省略，Worker 会使用本地开发布局。
 
+  * - ``ver``
+    - string
+    - ``site_config.js``（``PLAY_VER``）
+    - main → worker
+    - MuJoCo/forge dist 的版本 token。用于展开默认 forge base 模板中的 ``{ver}``
+      （``/forge/dist/{ver}/``），并传播到 Worker 用于诊断信息。
+
   * - ``plugins``
     - string list
     - empty
@@ -53,12 +60,16 @@ Play 主要通过 URL 查询参数进行配置。参数在主线程解析，并�
 
 Play 还支持一批开发者/调试用的 URL 参数（strict 模式、verbose 日志、渲染器调试、tick-rate clamp 等）。为避免本页过于“开发者向”，这些参数统一记录在 :doc:`configuration`。
 
+其中一个常用的调试开关：
+
+- ``cacheBust=always``：强制对 Worker URL 与 forge 资源 URL 做 cache-bust（添加 ``cb=...``）。
+  默认模式不会自动添加 ``cb``。
+
 已弃用 / 保留参数
 --------------------------------
 
 这些参数会被运行时识别，但当前处于弃用/内部使用状态，或对用户无可见效果：
 
 - ``mode=...``：已弃用并被忽略（Play 仅支持 Worker 模式）。
-- ``cb=...``：Worker URL 的内部 cache-bust 参数。
-- ``ver=...``：仅 Worker 使用；当省略 ``forgeBase`` 时，用于选择本地回退路径 ``dist/<ver>/``。当前不会从主页面传播过去。
+- ``cb=...``：内部 cache-bust 参数（仅在启用 ``cacheBust=always`` 时使用）。
 - ``hide`` / ``dump`` / ``find`` / ``hide_big`` / ``big_n`` / ``big_factor`` / ``hide_index``：会被旧参数解析器解析，但当前不会应用。

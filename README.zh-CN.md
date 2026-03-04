@@ -56,10 +56,18 @@
 Forge repo：`https://github.com/lshdlut/mujoco-wasm-forge`
 
 - 本仓库不自带 MuJoCo WASM 二进制；运行时需要 forge 提供的 `dist/<ver>/` bundle。
-- 通过 `forgeBase=`（推荐）或 `window.__FORGE_DIST_BASE__` 指定 dist base。
-- 本地开发默认（`localhost/127.0.0.1`）会去找 `/mujoco-wasm-forge/dist/<ver>/`（如果你本地有同级的 `../mujoco-wasm-forge` checkout，`tools/dev_server.py` 会自动把它挂载出来）。
+- 通过 `forgeBase=`（推荐）或 `window.__FORGE_DIST_BASE__` 指定 dist base（必须在主模块运行前设置）。
+- 默认 dist base（本地与线上一致）为 `/forge/dist/{ver}/`，其中 `{ver}` 来自 `site_config.js`（`globalThis.PLAY_VER`）或 URL 参数 `ver=...`。
+- 开发服务器 `tools/dev_server.py` 会把 `/forge/` 挂载到同级的 `../mujoco-wasm-forge`（如果存在），否则回退到本仓库根目录。
 - 这个查看器需要带 viewer extensions 的 forge 构建（scene + vopt pointers）。
 - 常见的远端 base 模板（jsDelivr + 固定 forge commit）：`https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
+- 缓存排查：追加 `cacheBust=always` 会强制对 Worker URL 与 forge 资源 URL 做 cache-bust。默认模式不会自动添加 `cb=...`。
+
+### Pthreads 版本
+
+- 入口：`/pthreads/index.html`
+- 默认 dist base：`/forge/dist/{ver}/pthreads/`
+- 依赖 cross-origin isolation（`crossOriginIsolated === true`），需要 COOP/COEP 头。
 
 ## 视觉来源
 
