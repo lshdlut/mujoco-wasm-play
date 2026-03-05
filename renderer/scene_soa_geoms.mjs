@@ -574,6 +574,197 @@ function applyDynamicSizeScale(mesh, gtype, sizeVec) {
   }
 }
 
+function createHfieldGeometryFromAssets(assets, dataId) {
+  if (!assets || !assets.hfields) return null;
+  const hid = dataId | 0;
+  if (!(hid >= 0)) return null;
+  const hfields = assets.hfields;
+  const countGuess = Number.isFinite(hfields.count)
+    ? (hfields.count | 0)
+    : (hfields.nrow ? (hfields.nrow.length | 0) : 0);
+  if (!(countGuess > 0) || hid >= countGuess) return null;
+
+  const size = hfields.size || null;
+  const nrow = hfields.nrow || null;
+  const ncol = hfields.ncol || null;
+  const adr = hfields.adr || null;
+  const data = hfields.data || null;
+  if (!size || !nrow || !ncol || !adr || !data) return null;
+
+  const nr = nrow[hid] | 0;
+  const nc = ncol[hid] | 0;
+  const start = adr[hid] | 0;
+  if (!(nr > 1) || !(nc > 1) || start < 0) return null;
+
+  const total = nr * nc;
+  const end = start + total;
+  if (end > data.length) return null;
+
+  const base = 4 * hid;
+  if (base + 3 >= size.length) return null;
+  const sx = Number(size[base + 0]) || 0;
+  const sy = Number(size[base + 1]) || 0;
+  const szTop = Number(size[base + 2]) || 0;
+  const szBottom = Number(size[base + 3]) || 0;
+
+  const EPS = 1e-9;
+  const halfX = Math.max(Math.abs(sx), EPS);
+  const halfY = Math.max(Math.abs(sy), EPS);
+  const zScale = Number.isFinite(szTop) ? szTop : 0;
+  const bottomDepth = Number.isFinite(szBottom) ? Math.max(0, szBottom) : 0;
+  const includeSides = bottomDepth > EPS;
+  const includeBottom = bottomDepth > EPS;
+
+  const topVertexCount = total;
+  const topIndexCount = (nr - 1) * (nc - 1) * 6;
+  const sideQuadCount = includeSides ? (2 * (nr - 1) + 2 * (nc - 1)) : 0;
+  const sideVertexCount = sideQuadCount * 4;
+  const sideIndexCount = sideQuadCount * 6;
+  const bottomVertexCount = includeBottom ? 4 : 0;
+  const bottomIndexCount = includeBottom ? 6 : 0;
+
+  const vertexCount = topVertexCount + sideVertexCount + bottomVertexCount;
+  const indexCount = topIndexCount + sideIndexCount + bottomIndexCount;
+  const IndexArray = vertexCount > 65535 ? Uint32Array : Uint16Array;
+
+  const positions = new Float32Array(vertexCount * 3);
+  const indices = new IndexArray(indexCount);
+
+  const invNr1 = 1 / Math.max(1, nr - 1);
+  const invNc1 = 1 / Math.max(1, nc - 1);
+  for (let r = 0; r < nr; r += 1) {
+    const y = halfY * (2 * (r * invNr1) - 1);
+    const rowBase = start + r * nc;
+    const vRowBase = r * nc;
+    for (let c = 0; c < nc; c += 1) {
+      const x = halfX * (2 * (c * invNc1) - 1);
+      const raw = data[rowBase + c];
+      const h = Number.isFinite(raw) ? Number(raw) : 0;
+      const z = h * zScale;
+      const v = vRowBase + c;
+      const p = 3 * v;
+      positions[p + 0] = x;
+      positions[p + 1] = y;
+      positions[p + 2] = z;
+    }
+  }
+
+  let k = 0;
+  for (let r = 0; r < nr - 1; r += 1) {
+    const base0 = r * nc;
+    const base1 = (r + 1) * nc;
+    for (let c = 0; c < nc - 1; c += 1) {
+      const i0 = base0 + c;
+      const i1 = i0 + 1;
+      const i2 = base1 + c;
+      const i3 = i2 + 1;
+      indices[k++] = i0;
+      indices[k++] = i1;
+      indices[k++] = i2;
+      indices[k++] = i1;
+      indices[k++] = i3;
+      indices[k++] = i2;
+    }
+  }
+
+  const zBottom = -bottomDepth;
+  const writeVertex = (v, x, y, z) => {
+    const p = 3 * v;
+    positions[p + 0] = x;
+    positions[p + 1] = y;
+    positions[p + 2] = z;
+  };
+  let vBase = topVertexCount;
+
+  const emitQuad = (v0, v1, v2, v3) => {
+    indices[k++] = v0;
+    indices[k++] = v1;
+    indices[k++] = v2;
+    indices[k++] = v0;
+    indices[k++] = v2;
+    indices[k++] = v3;
+  };
+
+  if (includeSides) {
+    // Left side (x = -halfX)
+    for (let r = 0; r < nr - 1; r += 1) {
+      const a = (r * nc + 0) * 3;
+      const b = ((r + 1) * nc + 0) * 3;
+      const y0 = positions[a + 1];
+      const y1 = positions[b + 1];
+      const z0 = positions[a + 2];
+      const z1 = positions[b + 2];
+      writeVertex(vBase + 0, -halfX, y0, zBottom);
+      writeVertex(vBase + 1, -halfX, y0, z0);
+      writeVertex(vBase + 2, -halfX, y1, z1);
+      writeVertex(vBase + 3, -halfX, y1, zBottom);
+      emitQuad(vBase + 0, vBase + 1, vBase + 2, vBase + 3);
+      vBase += 4;
+    }
+    // Right side (x = +halfX)
+    for (let r = 0; r < nr - 1; r += 1) {
+      const a = (r * nc + (nc - 1)) * 3;
+      const b = ((r + 1) * nc + (nc - 1)) * 3;
+      const y0 = positions[a + 1];
+      const y1 = positions[b + 1];
+      const z0 = positions[a + 2];
+      const z1 = positions[b + 2];
+      writeVertex(vBase + 0, +halfX, y0, zBottom);
+      writeVertex(vBase + 1, +halfX, y1, zBottom);
+      writeVertex(vBase + 2, +halfX, y1, z1);
+      writeVertex(vBase + 3, +halfX, y0, z0);
+      emitQuad(vBase + 0, vBase + 1, vBase + 2, vBase + 3);
+      vBase += 4;
+    }
+    // Front side (y = -halfY): row 0
+    for (let c = 0; c < nc - 1; c += 1) {
+      const a = (0 * nc + c) * 3;
+      const b = (0 * nc + (c + 1)) * 3;
+      const x0 = positions[a + 0];
+      const x1 = positions[b + 0];
+      const z0 = positions[a + 2];
+      const z1 = positions[b + 2];
+      writeVertex(vBase + 0, x0, -halfY, zBottom);
+      writeVertex(vBase + 1, x1, -halfY, zBottom);
+      writeVertex(vBase + 2, x1, -halfY, z1);
+      writeVertex(vBase + 3, x0, -halfY, z0);
+      emitQuad(vBase + 0, vBase + 1, vBase + 2, vBase + 3);
+      vBase += 4;
+    }
+    // Back side (y = +halfY): last row
+    for (let c = 0; c < nc - 1; c += 1) {
+      const a = ((nr - 1) * nc + c) * 3;
+      const b = ((nr - 1) * nc + (c + 1)) * 3;
+      const x0 = positions[a + 0];
+      const x1 = positions[b + 0];
+      const z0 = positions[a + 2];
+      const z1 = positions[b + 2];
+      writeVertex(vBase + 0, x0, +halfY, zBottom);
+      writeVertex(vBase + 1, x0, +halfY, z0);
+      writeVertex(vBase + 2, x1, +halfY, z1);
+      writeVertex(vBase + 3, x1, +halfY, zBottom);
+      emitQuad(vBase + 0, vBase + 1, vBase + 2, vBase + 3);
+      vBase += 4;
+    }
+  }
+
+  if (includeBottom) {
+    writeVertex(vBase + 0, -halfX, -halfY, zBottom);
+    writeVertex(vBase + 1, -halfX, +halfY, zBottom);
+    writeVertex(vBase + 2, +halfX, +halfY, zBottom);
+    writeVertex(vBase + 3, +halfX, -halfY, zBottom);
+    emitQuad(vBase + 0, vBase + 1, vBase + 2, vBase + 3);
+    vBase += 4;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  geometry.computeVertexNormals();
+  computeGeometryBounds(geometry);
+  return geometry;
+}
+
 function createMeshGeometryFromAssets(assets, dataId) {
   if (!assets || !assets.meshes) return null;
   const rawDataId = dataId | 0;
@@ -971,6 +1162,18 @@ function syncRendererAssets(ctx, assets) {
     }
     ctx.assetCache.meshGeometries.clear();
   }
+  if (ctx.assetCache && ctx.assetCache.hfieldGeometries instanceof Map) {
+    for (const geometry of ctx.assetCache.hfieldGeometries.values()) {
+      if (geometry && typeof geometry.dispose === 'function') {
+        try {
+          geometry.dispose();
+        } catch (err) {
+          strictCatch(err, 'main:assetCache_dispose');
+        }
+      }
+    }
+    ctx.assetCache.hfieldGeometries.clear();
+  }
   if (ctx.assetCache && ctx.assetCache.mjTextures instanceof Map) {
     for (const texture of ctx.assetCache.mjTextures.values()) {
       if (texture && typeof texture.dispose === 'function') {
@@ -985,6 +1188,7 @@ function syncRendererAssets(ctx, assets) {
   }
   ctx.assetCache = {
     meshGeometries: new Map(),
+    hfieldGeometries: new Map(),
     mjTextures: new Map(),
   };
 }
@@ -1342,16 +1546,31 @@ function resolveGeomWorldPose(ctx, geomIndex, outPos, outQuat, outScale) {
   return true;
 }
 
-function getSharedMeshGeometry(ctx, assets, dataId) {
-  if (!ctx.assetCache || !(ctx.assetCache.meshGeometries instanceof Map)) {
-    ctx.assetCache = {
-      meshGeometries: new Map(),
-      mjTextures: new Map(),
-    };
+function ensureAssetCache(ctx) {
+  if (!ctx || !ctx.assetCache || typeof ctx.assetCache !== 'object') {
+    ctx.assetCache = {};
   }
-  const cache = ctx.assetCache.meshGeometries;
+  const cache = ctx.assetCache;
+  if (!(cache.meshGeometries instanceof Map)) cache.meshGeometries = new Map();
+  if (!(cache.hfieldGeometries instanceof Map)) cache.hfieldGeometries = new Map();
+  if (!(cache.mjTextures instanceof Map)) cache.mjTextures = new Map();
+  return cache;
+}
+
+function getSharedMeshGeometry(ctx, assets, dataId) {
+  const cache = ensureAssetCache(ctx).meshGeometries;
   if (cache.has(dataId)) return cache.get(dataId);
   const geometry = createMeshGeometryFromAssets(assets, dataId);
+  if (geometry) {
+    cache.set(dataId, geometry);
+  }
+  return geometry || null;
+}
+
+function getSharedHfieldGeometry(ctx, assets, dataId) {
+  const cache = ensureAssetCache(ctx).hfieldGeometries;
+  if (cache.has(dataId)) return cache.get(dataId);
+  const geometry = createHfieldGeometryFromAssets(assets, dataId);
   if (geometry) {
     cache.set(dataId, geometry);
   }
@@ -1559,13 +1778,32 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
           };
         } else if (!ctx.meshAssetMissingLogged) {
           logDebug('[render] mesh geometry missing', { dataId });
-          ctx.meshAssetMissingLogged = true;
-        }
-      }
-      if (!geometryInfo) {
-        geometryInfo = createPrimitiveGeometry(gtype, sizeVec);
-        geometryInfo.ownGeometry = true;
-      }
+           ctx.meshAssetMissingLogged = true;
+         }
+       }
+       if (!geometryInfo && gtype === MJ_GEOM.HFIELD && assets && dataId >= 0) {
+         const hfieldGeometry = getSharedHfieldGeometry(ctx, assets, dataId);
+         if (hfieldGeometry) {
+           const lightGray = 0xd0d0d0;
+           geometryInfo = {
+             geometry: hfieldGeometry,
+             materialOpts: {
+               color: lightGray,
+               metalness: 0.0,
+               roughness: 0.82,
+             },
+             postCreate: null,
+             ownGeometry: false,
+           };
+         } else if (!ctx.hfieldAssetMissingLogged) {
+           logDebug('[render] hfield geometry missing', { dataId });
+           ctx.hfieldAssetMissingLogged = true;
+         }
+       }
+       if (!geometryInfo) {
+         geometryInfo = createPrimitiveGeometry(gtype, sizeVec);
+         geometryInfo.ownGeometry = true;
+       }
       const objectKind = geometryInfo.objectKind || 'mesh';
 
       let material;

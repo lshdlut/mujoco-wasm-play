@@ -89,6 +89,7 @@ export function collectRenderAssetsFromModule(mod, handle) {
     lights: null,
     materials: null,
     meshes: null,
+    hfields: null,
     textures: null,
     bvh: null,
     extras: {},
@@ -695,6 +696,25 @@ export function collectRenderAssetsFromModule(mod, handle) {
       polyvertadr: cloneTyped(polyVertAdrView, Int32Array),
       polyvertnum: cloneTyped(polyVertNumView, Int32Array),
       polyvert: cloneTyped(polyVertView, Int32Array),
+    };
+  }
+  const nhfield = ensureFunc('_mjwf_model_nhfield').call(mod, handle) | 0;
+  if (nhfield > 0) {
+    const sizeView = readView(mod, ensureFunc('_mjwf_model_hfield_size_ptr'), handle, nhfield * 4, heapViewF64);
+    const nrowView = readView(mod, ensureFunc('_mjwf_model_hfield_nrow_ptr'), handle, nhfield, heapViewI32);
+    const ncolView = readView(mod, ensureFunc('_mjwf_model_hfield_ncol_ptr'), handle, nhfield, heapViewI32);
+    const adrView = readView(mod, ensureFunc('_mjwf_model_hfield_adr_ptr'), handle, nhfield, heapViewI32);
+    const dataLen = ensureFunc('_mjwf_model_nhfielddata').call(mod, handle) | 0;
+    const dataView = dataLen > 0
+      ? readView(mod, ensureFunc('_mjwf_model_hfield_data_ptr'), handle, dataLen, heapViewF32)
+      : null;
+    assets.hfields = {
+      count: nhfield,
+      size: cloneTyped(sizeView, Float64Array),
+      nrow: cloneTyped(nrowView, Int32Array),
+      ncol: cloneTyped(ncolView, Int32Array),
+      adr: cloneTyped(adrView, Int32Array),
+      data: cloneTyped(dataView, Float32Array),
     };
   }
   const nbvh = ensureFunc('_mjwf_model_nbvh').call(mod, handle) | 0;

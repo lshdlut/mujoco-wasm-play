@@ -2407,6 +2407,13 @@ function collectAssetBuffersForTransfer(assets) {
     push(assets.meshes.polyvertnum);
     push(assets.meshes.polyvert);
   }
+  if (assets?.hfields) {
+    push(assets.hfields.size);
+    push(assets.hfields.nrow);
+    push(assets.hfields.ncol);
+    push(assets.hfields.adr);
+    push(assets.hfields.data);
+  }
   if (assets?.textures) {
     push(assets.textures.type);
     push(assets.textures.width);

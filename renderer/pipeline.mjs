@@ -2820,7 +2820,7 @@ function createRendererManager({
   if (!ctx) throw new Error('renderCtx is required');
   ctx.cameraTarget = ctx.cameraTarget || new THREE.Vector3(0, 0, 0);
   ctx.meshes = ctx.meshes || [];
-  ctx.assetCache = ctx.assetCache || { meshGeometries: new Map(), mjTextures: new Map() };
+  ctx.assetCache = ctx.assetCache || { meshGeometries: new Map(), hfieldGeometries: new Map(), mjTextures: new Map() };
   ctx._frameCounter = ctx._frameCounter || 0;
   ctx.boundsEvery = typeof ctx.boundsEvery === 'number' && ctx.boundsEvery > 0 ? ctx.boundsEvery : 2;
   ctx.currentCameraMode = typeof ctx.currentCameraMode === 'number' ? ctx.currentCameraMode : 0;
@@ -3664,6 +3664,14 @@ function createRendererManager({
       }
       ctx.assetCache.meshGeometries.clear();
     }
+    if (ctx.assetCache && ctx.assetCache.hfieldGeometries instanceof Map) {
+      for (const geometry of ctx.assetCache.hfieldGeometries.values()) {
+        if (geometry && typeof geometry.dispose === 'function') {
+          try { geometry.dispose(); } catch (err) { strictCatch(err, 'main:assetCache_dispose'); }
+        }
+      }
+      ctx.assetCache.hfieldGeometries.clear();
+    }
     if (ctx.assetCache && ctx.assetCache.mjTextures instanceof Map) {
       for (const texture of ctx.assetCache.mjTextures.values()) {
         if (texture && typeof texture.dispose === 'function') {
@@ -3712,7 +3720,7 @@ function createRendererManager({
     ctx.hdriBackground = null;
     ctx.skyBackground = null;
     ctx.skyCube = null;
-    ctx.assetCache = { meshGeometries: new Map(), mjTextures: new Map() };
+    ctx.assetCache = { meshGeometries: new Map(), hfieldGeometries: new Map(), mjTextures: new Map() };
 
     if (ctx.renderer && typeof ctx.renderer.dispose === 'function') {
       try { ctx.renderer.dispose(); } catch (err) { strictCatch(err, 'main:renderer_dispose'); }
