@@ -16,6 +16,30 @@ Recommended practices
   - update the pinned ``forgeBase`` URL
   - ensure MIME/CORS headers are correct on the hosting origin
 
+Release artifact: ``site.zip``
+------------------------------
+
+This repo publishes a ready-to-deploy static bundle as a GitHub Release asset.
+
+- Trigger: tag ``mjwasm-play-*`` (for example ``mjwasm-play-3.5.0``).
+- Workflow: ``.github/workflows/release-site.yml``.
+- Output: ``site.zip`` (does **not** include forge ``dist/``).
+
+The zip contains:
+
+- ``index.html`` (single) and ``pthreads/index.html`` (pthreads)
+- ``site_config.js`` (sets the default ``globalThis.PLAY_VER``)
+- runtime directories: ``app/``, ``assets/``, ``backend/``, ``bridge/``,
+  ``core/``, ``environment/``, ``model/``, ``plugins/``, ``renderer/``,
+  ``spec/``, ``ui/``, ``worker/``
+
+Deployment expectations:
+
+- The host should provide forge artifacts under a shared site-level path
+  (recommended): ``/forge/dist/<ver>/`` (and ``/forge/dist/<ver>/pthreads/`` for
+  the pthreads entry), or pass ``forgeBase=...`` explicitly.
+- Extract the zip under your app subpath (for example ``/mujoco-wasm-play/``).
+
 Docs versioning
 ---------------------
 

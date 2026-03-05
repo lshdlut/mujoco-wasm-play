@@ -15,6 +15,30 @@
   - 更新固定的 ``forgeBase`` URL
   - 确保托管 origin 上的 MIME/CORS 响应头正确
 
+发布产物：``site.zip``
+------------------------------
+
+本仓库会在 GitHub Release 中发布一个可直接部署的静态产物包。
+
+- 触发：打 tag ``mjwasm-play-*``（例如 ``mjwasm-play-3.5.0``）。
+- Workflow：``.github/workflows/release-site.yml``。
+- 输出：``site.zip``（**不包含** forge 的 ``dist/``）。
+
+``site.zip`` 的内容包括：
+
+- ``index.html``（single）与 ``pthreads/index.html``（pthreads）
+- ``site_config.js``（设置默认 ``globalThis.PLAY_VER``）
+- 运行时目录：``app/``、``assets/``、``backend/``、``bridge/``、``core/``、
+  ``environment/``、``model/``、``plugins/``、``renderer/``、``spec/``、
+  ``ui/``、``worker/``
+
+部署预期：
+
+- 托管端应在站点级共享路径提供 forge 工件（推荐）：
+  ``/forge/dist/<ver>/``（pthreads 入口还需要 ``/forge/dist/<ver>/pthreads/``），
+  或者显式传入 ``forgeBase=...``。
+- 将 zip 解压到你的 app 子路径下（例如 ``/mujoco-wasm-play/``）。
+
 文档版本
 ---------------------
 

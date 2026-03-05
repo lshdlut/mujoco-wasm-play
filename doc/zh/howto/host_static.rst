@@ -20,7 +20,7 @@ CORS
 
 - ``mujoco.js``
 - ``mujoco.wasm``
-- ``version.json`` (optional but recommended)
+- ``version.json``（可选；用于诊断时推荐）
 
 缓存
 -------
