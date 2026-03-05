@@ -4,7 +4,7 @@
 
 ![mujoco-wasm-play](assets/mujoco-wasm-play-cards.png)
 
-[**在线演示（Rajagopal2015, MuJoCo 3.4.0）**](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/)
+[**在线演示（Rajagopal2015, MuJoCo 3.5.0）**](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/)
 
 > **文档（Sphinx / Read the Docs）**：源码位于 [`doc/zh/`](doc/zh/) 和 [`doc/en/`](doc/en/)；在线阅读：[中文](https://mujoco-wasm-play.readthedocs.io/zh-cn/latest/)｜[英文](https://mujoco-wasm-play.readthedocs.io/en/latest/)。
 
@@ -21,14 +21,14 @@
 
 ## 性能
 
-下表为参考数值（共测 5 次；每次取中位数；取最好的一次；越小越好）：在 MuJoCo 3.4.0 下交互式测得（有渲染、非 headless），且左右面板收起。每次预热 35 秒并采样 8 秒。CPU 耗时以 ms/step 的形式显示在 Simulate 风格 HUD 中（按 `F2`，Running 状态）。结果会随硬件、浏览器以及电源/温控策略而波动，仅供参考。
+下表为参考数值（共测 5 次；每次取中位数；取最好的一次；越小越好）：交互式测得（有渲染、非 headless），且左右面板收起。每次预热 35 秒并采样 8 秒。Web Play 使用 MuJoCo 3.5.0，forge dist ver=3.5.0。CPU 耗时以 ms/step 的形式显示在 Simulate 风格 HUD 中（按 `F2`，Running 状态）。结果会随硬件、浏览器以及电源/温控策略而波动，仅供参考。
 
 > 重要提示：浏览器扩展以及站点级功能（例如“增强安全性”/ 效率或省电模式）可能会显著影响 Worker/WASM 的计时表现；同一台机器上，GitHub Pages 的在线演示也可能比 `localhost` 更容易受到影响。做公平对比时建议用隐私窗口（private window）或临时禁用扩展，并保持标签页在前台。
 
 | 模型 | 原生 `simulate` (ms/step) | Web Play (ms/step) |
 |---|---:|---:|
-| `cards` | 0.542 | 0.718 |
-| `humanoid` | 0.062 | 0.076 |
+| `cards` | 0.542 | 0.580 |
+| `humanoid` | 0.062 | 0.078 |
 
 ## 快速开始
 
@@ -36,7 +36,7 @@
   - `python tools/dev_server.py --root . --port 8000`
   - `http://127.0.0.1:8000/index.html?model=raj`
 - 线上演示：
-  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/`
+  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/`
 - 插件：实验性。见 `doc/zh/reference/plugin_contract.md`。`smocap` 即将发布。
 
 ## 模型

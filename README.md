@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 ![mujoco-wasm-play](assets/mujoco-wasm-play-cards.png)
 
-[**Live demo (Rajagopal2015, MuJoCo 3.4.0)**](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/)
+[**Live demo (Rajagopal2015, MuJoCo 3.5.0)**](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/)
 
 > **Documentation (Sphinx / Read the Docs)**: source lives in [`doc/en/`](doc/en/) and [`doc/zh/`](doc/zh/). Read online: [EN](https://mujoco-wasm-play.readthedocs.io/en/latest/) | [ZH](https://mujoco-wasm-play.readthedocs.io/zh-cn/latest/).
 
@@ -21,14 +21,14 @@ A performance-first MuJoCo viewer that brings most of the **MuJoCo Simulate** wo
 
 ## Performance
 
-Reference numbers (best of 5 runs; each run reports the median; lower is better), measured interactively (rendered, not headless) with MuJoCo 3.4.0 after 35s warm-up + 8s sampling, with both side panels collapsed. CPU time is reported as ms/step in the Simulate-style HUD (press `F2`, while Running). Numbers vary with hardware, browser, and power/thermal settings.
+Reference numbers (best of 5 runs; each run reports the median; lower is better), measured interactively (rendered, not headless) after 35s warm-up + 8s sampling, with both side panels collapsed. Web Play uses MuJoCo 3.5.0 via forge dist ver=3.5.0. CPU time is reported as ms/step in the Simulate-style HUD (press `F2`, while Running). Numbers vary with hardware, browser, and power/thermal settings.
 
 > Important: browser extensions and site-level features (e.g. enhanced security modes / efficiency or power-saving modes) can heavily impact Worker/WASM timing, and may affect the GitHub Pages demo more than `localhost`. For fair comparisons, try a private window, disable extensions, and keep the tab in the foreground.
 
 | Model | Native `simulate` (ms/step) | Web Play (ms/step) |
 |---|---:|---:|
-| `cards` | 0.542 | 0.718 |
-| `humanoid` | 0.062 | 0.076 |
+| `cards` | 0.542 | 0.580 |
+| `humanoid` | 0.062 | 0.078 |
 
 ## Quickstart
 
@@ -36,7 +36,7 @@ Reference numbers (best of 5 runs; each run reports the median; lower is better)
   - `python tools/dev_server.py --root . --port 8000`
   - `http://127.0.0.1:8000/index.html?model=raj`
 - Public demo:
-  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@3a963f1cd3379e10e63f6c5f5c7d6d9006aa3680/dist/3.4.0/`
+  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/`
 - Plugins: experimental. See `doc/en/reference/plugin_contract.md`. `smocap` is coming soon.
 
 ## Models
