@@ -1477,12 +1477,6 @@ function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, 
     }
     userData.segmentGroundGrid = null;
   }
-  // Ensure infinite ground remains blended by alpha
-  if (mesh.material) {
-    mesh.material.transparent = true;
-    if ('depthWrite' in mesh.material) mesh.material.depthWrite = true;
-    if ('needsUpdate' in mesh.material) mesh.material.needsUpdate = true;
-  }
 }
 
 function getDefaultVopt(ctx, state) {
@@ -2434,7 +2428,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
           if (perfEnabled) colorUpdates += 1;
         }
       }
-      const nextTransparent = a < 0.999;
+      // Infinite ground uses shader-driven alpha (haze, underside fade, edge cutoffs).
+      // Keep it in the transparent render pass regardless of the MuJoCo RGBA alpha.
+      const nextTransparent = isInfinitePlane ? true : (a < 0.999);
       if (mat && ('opacity' in mat)) {
         const changedOpacity = mat.opacity !== a;
         const changedTransparent = mat.transparent !== nextTransparent;
@@ -2442,11 +2438,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
         if (changedTransparent) mat.transparent = nextTransparent;
         if (perfEnabled && (changedOpacity || changedTransparent)) opacityUpdates += 1;
       }
-      if (mat && typeof mat.depthWrite === 'boolean') {
+      if (mat && typeof mat.depthWrite === 'boolean' && !isInfinitePlane) {
         const nextDepthWrite = !nextTransparent;
-        if (mat.depthWrite !== nextDepthWrite) {
-          mat.depthWrite = nextDepthWrite;
-        }
+        if (mat.depthWrite !== nextDepthWrite) mat.depthWrite = nextDepthWrite;
       }
       const userData = mesh.userData || (mesh.userData = {});
       let transparentBinKey = -1;
@@ -2454,7 +2448,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       if (ignoreTransparentOrdering) {
         userData.transparentBin = -1;
         if (userData.infinitePlane) {
-          mesh.renderOrder = RENDER_ORDER.GROUND;
+          // Infinite ground ordering is handled by tuneInfiniteGroundForCamera().
         } else if (userData.infiniteGrid && typeof userData.infiniteGrid === 'object') {
           const ro = userData.infiniteGrid.renderOrder;
           if (Number.isFinite(ro)) mesh.renderOrder = ro;
@@ -2780,6 +2774,39 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   return drawn;
 }
 
+function tuneInfiniteGroundForCamera(ctx) {
+  const ground = ctx?.ground || null;
+  if (!ground?.userData?.infinitePlane) return;
+  const mat = ground.material || null;
+  if (!mat) return;
+
+  const camera = ctx?.camera || null;
+  const camPos = camera?.position || null;
+  const uniforms =
+    ground.userData?.infiniteGround?.uniforms ||
+    mat?.userData?.infiniteUniforms ||
+    null;
+  const origin = uniforms?.uPlaneOrigin?.value || null;
+  const normal = uniforms?.uPlaneNormal?.value || null;
+  if (!camPos || !origin || !normal) return;
+
+  const vx = (camPos.x - origin.x);
+  const vy = (camPos.y - origin.y);
+  const vz = (camPos.z - origin.z);
+  const side = vx * normal.x + vy * normal.y + vz * normal.z;
+  const camBelow = side < -0.01;
+
+  if (typeof mat.depthWrite === 'boolean') {
+    const desiredDepthWrite = !camBelow;
+    if (mat.depthWrite !== desiredDepthWrite) mat.depthWrite = desiredDepthWrite;
+  }
+  const baseGroundOrder = RENDER_ORDER.GROUND | 0;
+  const desiredOrder = camBelow ? (-baseGroundOrder) : baseGroundOrder;
+  if (typeof ground.renderOrder === 'number' && ground.renderOrder !== desiredOrder) {
+    ground.renderOrder = desiredOrder;
+  }
+}
+
 function createRendererManager({
   canvas,
   backend,
@@ -2906,6 +2933,7 @@ function createRendererManager({
         overlay3d.onFrame({ camera: ctx.camera, frame });
       }
       // Background/environment is managed by environment manager (ensureEnvIfNeeded)
+      tuneInfiniteGroundForCamera(ctx);
       renderWorldScene(ctx, ctx.renderer, { camera: ctx.camera });
       if (perfEnabled) {
         const info = ctx.renderer?.info?.render || null;
