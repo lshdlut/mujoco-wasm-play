@@ -59,6 +59,27 @@ Parameters
       dynamic ``import()``. Relative specifiers (``./``/``../``) resolve
       relative to the repo root (same folder as ``index.html``).
 
+  * - ``embed``
+    - bool
+    - false
+    - main
+    - Embed mode for iframe/container hosting. Play sizes to the parent
+      container instead of forcing a ``100vh`` shell. Runtime behavior and
+      default panel visibility stay unchanged.
+
+  * - ``theme``
+    - string
+    - dark
+    - main
+    - Initial UI theme. Supported values: ``dark`` and ``light``.
+
+  * - ``font``
+    - string
+    - ``100``
+    - main
+    - Initial UI font scale preset. Supported values: ``50``, ``75``, ``100``,
+      ``150``, ``200`` (percent presets matching the built-in font selector).
+
 Developer/debug parameters
 --------------------------
 
