@@ -3,7 +3,8 @@
 // `worker/protocol.gen.mjs` and `worker/dispatch.gen.mjs`.
 // This file is not generated.
 
-import { buildWorkerUrl, readNumericParam, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWarn, logError, logStatus, strictCatch, getStrictReport, withCacheBust } from '../core/viewer_runtime.mjs';
+import { buildWorkerUrl, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWarn, logError, logStatus, strictCatch, getStrictReport, withCacheBust } from '../core/viewer_runtime.mjs';
+import { getRuntimeConfig } from '../core/runtime_config.mjs';
 import { MJ_GROUP_COUNT, SCENE_FLAG_DEFAULTS_NUMERIC } from '../core/viewer_defaults.mjs';
 import { VISUAL_FIELD_DESCRIPTORS } from '../core/viewer_structs.mjs';
 import { bool, cloneStruct, createDefaultHistoryState, createDefaultKeyframeState, createDefaultWatchState, normaliseGroupState, resolveStructPath, toNumber } from '../core/viewer_shared.mjs';
@@ -17,15 +18,8 @@ const ASSET_BASE_URL = new URL('../', import.meta.url);
 const WORKER_URL = new URL('worker/physics.worker.mjs', ASSET_BASE_URL);
 export async function createBackend(options = {}) {
   const perfEnabled = isPerfEnabled();
-  const snapshotDebug =
-    typeof window !== 'undefined'
-    && (
-      (window.location?.search?.includes('snapshot=1'))
-      || (window.location?.search?.includes('snapshot=debug'))
-    );
-  if (typeof window !== 'undefined') {
-    window.PLAY_SNAPSHOT_DEBUG = snapshotDebug;
-  }
+  const runtimeConfig = getRuntimeConfig();
+  const snapshotDebug = !!runtimeConfig.snapshotDebug;
   const modelToken = typeof options.model === 'string' ? options.model.trim() : '';
   const modelFile = resolveModelFileName(modelToken);
   const modelCandidates = buildModelCandidates(modelToken, modelFile);
@@ -58,11 +52,7 @@ export async function createBackend(options = {}) {
   let lastXmlText = null;
   let strictRequestSeq = 0;
   const strictRequests = new Map();
-  const SNAPSHOT_ADAPT_MAX_HZ = readNumericParam(
-    'snapshot_hz_max',
-    120,
-    { parser: (value) => Number.parseInt(value, 10), min: 30, max: 120 }
-  );
+  const SNAPSHOT_ADAPT_MAX_HZ = runtimeConfig.timing?.snapshotHzMax ?? 120;
   const SNAPSHOT_ADAPT_DEFAULT_HZ = SNAPSHOT_ADAPT_MAX_HZ;
   const SNAPSHOT_ADAPT_ALPHA = 0.2;
   const SNAPSHOT_ADAPT_UPGRADE_HOLD_MS = 180;

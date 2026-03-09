@@ -79,4 +79,3 @@ test('runtime: buildWorkerUrl throws if ver is missing', () => {
   const base = new URL('worker/physics.worker.mjs', 'http://example.test/');
   assert.throws(() => buildWorkerUrl(base, new URLSearchParams('forgeBase=/forge/dist/3.5.0/')), /Missing MuJoCo version/i);
 });
-

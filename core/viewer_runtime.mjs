@@ -1,10 +1,12 @@
+import { getRuntimeConfig, getRuntimeParamSource } from './runtime_config.mjs';
+
 const LOG_BOOL_TRUE = new Set(['1', 'true', 'yes', 'on', 'debug']);
 let cachedVerbose = null;
 
 export function isVerboseDebug() {
   if (cachedVerbose !== null) return cachedVerbose;
-  if (typeof globalThis !== 'undefined' && globalThis.PLAY_VERBOSE_DEBUG != null) {
-    cachedVerbose = !!globalThis.PLAY_VERBOSE_DEBUG;
+  if (typeof document !== 'undefined') {
+    cachedVerbose = !!getRuntimeConfig().verboseDebug;
     return cachedVerbose;
   }
   let flag = false;
@@ -14,9 +16,6 @@ export function isVerboseDebug() {
     flag = token ? LOG_BOOL_TRUE.has(token) : false;
   }
   cachedVerbose = flag;
-  if (typeof globalThis !== 'undefined') {
-    globalThis.PLAY_VERBOSE_DEBUG = cachedVerbose;
-  }
   return cachedVerbose;
 }
 
@@ -231,15 +230,7 @@ if (typeof globalThis !== 'undefined' && isPerfEnabled()) {
   }
 }
 
-const viewerSearchParams = (() => {
-  if (typeof window !== 'undefined' && window?.location?.search != null) {
-    return new URLSearchParams(window.location.search);
-  }
-  if (typeof location !== 'undefined' && typeof location.search === 'string') {
-    return new URLSearchParams(location.search);
-  }
-  return new URLSearchParams();
-})();
+const viewerSearchParams = getRuntimeParamSource();
 
 const PARAM_BOOL_TRUE = new Set(['1', 'true', 'yes', 'on']);
 const PARAM_BOOL_FALSE = new Set(['0', 'false', 'no', 'off']);
@@ -343,28 +334,14 @@ export function isCacheBustAlways(params = viewerSearchParams) {
   return resolveCacheBustMode(params) === 'always';
 }
 
-function readGlobalPlayVer() {
-  if (typeof globalThis === 'undefined') return '';
-  const raw = globalThis.PLAY_VER;
-  if (typeof raw !== 'string') return '';
-  return raw.trim();
-}
-
-export function resolveVer(params = viewerSearchParams, { playVer = readGlobalPlayVer() } = {}) {
+export function resolveVer(params = viewerSearchParams, { playVer = '' } = {}) {
   const urlVer = typeof params?.get === 'function' ? String(params.get('ver') || '').trim() : '';
   const token = urlVer || String(playVer || '').trim();
   if (token) return token;
   throw new Error('Missing MuJoCo version: set globalThis.PLAY_VER (via site_config.js) or pass ver=... in the URL.');
 }
 
-function readGlobalForgeDistBaseOverride() {
-  if (typeof window === 'undefined') return '';
-  const raw = window.__FORGE_DIST_BASE__;
-  if (typeof raw !== 'string') return '';
-  return raw.trim();
-}
-
-export function resolveForgeBaseTemplate(params = viewerSearchParams, { forgeDistBaseOverride = readGlobalForgeDistBaseOverride() } = {}) {
+export function resolveForgeBaseTemplate(params = viewerSearchParams, { forgeDistBaseOverride = '' } = {}) {
   const fromUrl = typeof params?.get === 'function' ? String(params.get('forgeBase') || '').trim() : '';
   if (fromUrl) return fromUrl;
   const fromGlobal = String(forgeDistBaseOverride || '').trim();
@@ -433,22 +410,9 @@ export function getForgeDistBase(ver) {
   if (!v) {
     throw new Error('getForgeDistBase(ver) requires a non-empty version.');
   }
-  const override = resolveForgeDistBaseOverride(v);
-  if (override) return override;
-  return `/forge/dist/${v}/`;
-}
-
-function resolveForgeDistBaseOverride(v) {
-  if (typeof window !== 'undefined' && typeof window.__FORGE_DIST_BASE__ === 'string' && window.__FORGE_DIST_BASE__) {
-    return window.__FORGE_DIST_BASE__.replace('{ver}', v);
-  }
-  if (typeof location !== 'undefined') {
-    const search = typeof location.search === 'string' ? location.search : '';
-    const params = new URLSearchParams(search);
-    const tpl = params.get('forgeBase');
-    if (tpl) return tpl.replace('{ver}', v);
-  }
-  return null;
+  const template = resolveForgeBaseTemplate();
+  const expanded = applyVerTemplate(template, v);
+  return expanded.endsWith('/') ? expanded : `${expanded}/`;
 }
 
 export async function getVersionInfo(distBase) {
@@ -479,9 +443,6 @@ const STRICT_STATE_KEY = '__PLAY_STRICT_STATE';
 const STRICT_CATCH_ALLOWLIST = new Set([]);
 
 function resolveStrictFlag(params = viewerSearchParams) {
-  if (typeof globalThis !== 'undefined' && globalThis.PLAY_STRICT != null) {
-    return !!globalThis.PLAY_STRICT;
-  }
   return readBoolean('strict', params) === true;
 }
 
@@ -490,9 +451,6 @@ export function isStrictEnabled(params = viewerSearchParams) {
 }
 
 function resolveCompatFlag(params = viewerSearchParams) {
-  if (typeof globalThis !== 'undefined' && globalThis.PLAY_COMPAT != null) {
-    return !!globalThis.PLAY_COMPAT;
-  }
   return readBoolean('compat', params) === true;
 }
 

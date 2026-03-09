@@ -2,6 +2,7 @@
 
 import { logWarn, logError, strictCatch, strictEnsure, withCacheBust } from '../core/viewer_runtime.mjs';
 import { toNumber } from '../core/viewer_shared.mjs';
+import { resolveFontPresetValue } from '../core/runtime_config.mjs';
 import { clamp01 } from './state.mjs';
 import { getControlBindingSpec, parseVector, toBoolean } from './bindings.mjs';
 import { readPersistedSectionCollapsed, resolvePlayPanelId, setPlaySectionCollapsed, toggleAllPlaySections } from './panel_sections.mjs';
@@ -67,44 +68,9 @@ function createControlManager({
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
     if (!root || typeof root.style?.setProperty !== 'function') return;
-    let scale = 1;
-    let panelScale = 1;
-    const raw = value;
-    if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))) {
-      const idx = Number(raw) | 0;
-      const lookup = [50, 75, 100, 150, 200];
-      const pct = lookup[idx] ?? 100;
-      if (pct > 0) scale = pct / 100;
-      const panelLookup = {
-        50: 0.7,
-        75: 0.85,
-        100: 1.0,
-        150: 1.3,
-        200: 1.6,
-      };
-      panelScale = panelLookup[pct] ?? 1.0;
-    } else if (typeof raw === 'string') {
-      const token = raw.trim().toLowerCase();
-      const match = token.match(/(\d+)\s*%/);
-      if (match) {
-        const pct = Number(match[1]);
-        if (Number.isFinite(pct) && pct > 0) {
-          scale = pct / 100;
-          const panelLookup = {
-            50: 0.7,
-            75: 0.85,
-            100: 1.0,
-            150: 1.3,
-            200: 1.6,
-          };
-          panelScale = panelLookup[pct] ?? 1.0;
-        }
-      }
-    }
-    if (!Number.isFinite(scale) || scale <= 0) scale = 1;
-    if (!Number.isFinite(panelScale) || panelScale <= 0) panelScale = 1;
-    root.style.setProperty('--viewer-font-scale', String(scale));
-    root.style.setProperty('--viewer_panel_scale', String(panelScale));
+    const preset = resolveFontPresetValue(value, 2);
+    root.style.setProperty('--viewer-font-scale', String(preset.scale));
+    root.style.setProperty('--viewer_panel_scale', String(preset.panelScale));
   }
 
   function sanitiseName(name) {
@@ -963,7 +929,7 @@ function shortcutFromEvent(event) {
   }
 
   function resolveFontLabel(value, options) {
-    const labels = options.length > 0 ? options : ['50 %', '100 %', '150 %', '200 %', '250 %', '300 %'];
+    const labels = options.length > 0 ? options : ['50 %', '75 %', '100 %', '150 %', '200 %'];
     let label;
     if (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value))) {
       const idx = Number(value) | 0;
@@ -1004,7 +970,7 @@ function shortcutFromEvent(event) {
       apply: applySpacingFromControl,
     },
     'option.font': {
-      defaultOptions: ['50 %', '100 %', '150 %', '200 %', '250 %', '300 %'],
+      defaultOptions: ['50 %', '75 %', '100 %', '150 %', '200 %'],
       resolveLabel: resolveFontLabel,
       apply: applyFontFromControl,
     },

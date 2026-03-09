@@ -26,6 +26,11 @@ import {
   toNumber,
 } from '../core/viewer_shared.mjs';
 import { STAT_FIELD_DESCRIPTORS, VISUAL_FIELD_DESCRIPTORS } from '../core/viewer_structs.mjs';
+import {
+  getFontPresetByIndex,
+  getRuntimeConfig,
+  updateRuntimeConfig,
+} from '../core/runtime_config.mjs';
 import { FALLBACK_PRESETS } from '../environment/environment.mjs';
 import { buildMuJoCoBundle as buildMuJoCoBundleCore, normaliseMuJoCoVirtualPath, parseMuJoCoDirectFileRefs } from '../core/xml_refs.mjs';
 import { getControlBindingSpec, normaliseControlInput, resolveBindingSpec } from './bindings.mjs';
@@ -357,7 +362,80 @@ function resetModelFrontendState(store) {
   lastVisualDefaultsVersion = null;
   lastStatisticVersion = null;
   if (!store || typeof store.replace !== 'function') return;
-  store.replace(DEFAULT_VIEWER_STATE);
+  store.replace(createRuntimeViewerState());
+}
+
+function applyRuntimeConfigState(target, runtimeConfig) {
+  const config = runtimeConfig && typeof runtimeConfig === 'object' ? runtimeConfig : null;
+  if (!config) return target;
+  const ui = config.ui && typeof config.ui === 'object' ? config.ui : null;
+  const rendering = config.rendering && typeof config.rendering === 'object' ? config.rendering : null;
+  if (ui) {
+    target.theme = {
+      ...target.theme,
+      color: Number.isFinite(ui.themeColor) ? (ui.themeColor | 0) : target.theme.color,
+      spacing: Number.isFinite(ui.spacing) ? (ui.spacing | 0) : target.theme.spacing,
+      font: getFontPresetByIndex(ui.fontIndex).index,
+    };
+  }
+  if (rendering) {
+    target.rendering = {
+      ...target.rendering,
+      hideAllGeometry: !!rendering.hideAllGeometryDefault,
+      options: {
+        ...cloneStruct(target.rendering.options),
+        materials: {
+          ...cloneStruct(target.rendering.options?.materials),
+          forceBasic: !!rendering.forceBasic,
+        },
+        instancing: {
+          ...cloneStruct(target.rendering.options?.instancing),
+          enabled: !!rendering.instancingEnabled,
+        },
+        transparency: {
+          ...cloneStruct(target.rendering.options?.transparency),
+          bins: Number.isFinite(rendering.transparentBins)
+            ? Math.max(0, Math.trunc(rendering.transparentBins))
+            : DEFAULT_VIEWER_STATE.rendering.options.transparency.bins,
+          sortMode: typeof rendering.transparentSortMode === 'string'
+            ? rendering.transparentSortMode
+            : DEFAULT_VIEWER_STATE.rendering.options.transparency.sortMode,
+        },
+      },
+    };
+  }
+  return target;
+}
+
+function createRuntimeViewerState() {
+  const runtimeConfig = getRuntimeConfig();
+  const base = cloneViewerState(DEFAULT_VIEWER_STATE);
+  return applyRuntimeConfigState(base, runtimeConfig);
+}
+
+export function syncRuntimeConfigFromViewerState(state) {
+  if (!state || typeof state !== 'object') return;
+  const theme = state.theme && typeof state.theme === 'object' ? state.theme : DEFAULT_VIEWER_STATE.theme;
+  const rendering = state.rendering && typeof state.rendering === 'object' ? state.rendering : DEFAULT_VIEWER_STATE.rendering;
+  const renderingOptions = rendering.options && typeof rendering.options === 'object'
+    ? rendering.options
+    : DEFAULT_VIEWER_STATE.rendering.options;
+  const font = getFontPresetByIndex(theme.font);
+
+  updateRuntimeConfig((config) => {
+    config.ui.themeColor = Number.isFinite(theme.color) ? (theme.color | 0) : 0;
+    config.ui.spacing = Number.isFinite(theme.spacing) ? (theme.spacing | 0) : 0;
+    config.ui.fontIndex = font.index;
+    config.rendering.hideAllGeometryDefault = !!rendering.hideAllGeometry;
+    config.rendering.forceBasic = !!renderingOptions?.materials?.forceBasic;
+    config.rendering.instancingEnabled = !!renderingOptions?.instancing?.enabled;
+    config.rendering.transparentBins = Number.isFinite(renderingOptions?.transparency?.bins)
+      ? Math.max(0, Math.trunc(renderingOptions.transparency.bins))
+      : DEFAULT_VIEWER_STATE.rendering.options.transparency.bins;
+    config.rendering.transparentSortMode = typeof renderingOptions?.transparency?.sortMode === 'string'
+      ? renderingOptions.transparency.sortMode
+      : DEFAULT_VIEWER_STATE.rendering.options.transparency.sortMode;
+  });
 }
 
 function cameraLabelFromIndex(index, cameras = []) {
@@ -941,7 +1019,7 @@ function ensureThemeState(target) {
     target.theme = {
       color: 0,
       spacing: 0,
-      font: 0,
+      font: DEFAULT_VIEWER_STATE.theme.font,
     };
     created = true;
   } else {
@@ -953,8 +1031,10 @@ function ensureThemeState(target) {
       target.theme.spacing = 0;
       repairs.push('spacing');
     }
-    if (typeof target.theme.font !== 'number' || !Number.isFinite(target.theme.font)) {
-      target.theme.font = 0;
+    const rawFont = target.theme.font;
+    const nextFont = getFontPresetByIndex(rawFont).index;
+    if (!Number.isFinite(rawFont) || nextFont !== (rawFont | 0)) {
+      target.theme.font = nextFont;
       repairs.push('font');
     }
   }
@@ -1209,7 +1289,7 @@ const LOCAL_CONTROL_IDS = new Set([
 ]);
 
 function createViewerStore(initialState) {
-  let state = applyViewerStateOverrides(cloneViewerState(DEFAULT_VIEWER_STATE), initialState);
+  let state = applyViewerStateOverrides(createRuntimeViewerState(), initialState);
   latestHudTime = Math.max(0, Number(state?.hud?.time) || 0);
   const listeners = new Set();
 
@@ -1230,7 +1310,7 @@ function createViewerStore(initialState) {
     },
     replace(next) {
       if (!next) return;
-      state = applyViewerStateOverrides(cloneViewerState(DEFAULT_VIEWER_STATE), next);
+      state = applyViewerStateOverrides(createRuntimeViewerState(), next);
       notify();
     },
     update(mutator) {

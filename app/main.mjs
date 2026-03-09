@@ -3,7 +3,6 @@ import {
   consumeViewerParams,
   isPerfEnabled,
   isStrictEnabled,
-  readNumericParam,
   perfMarkOnce,
   perfNow,
   perfSample,
@@ -15,6 +14,7 @@ import {
   strictEnsure,
   strictOverride,
 } from '../core/viewer_runtime.mjs';
+import { applyRuntimeUiToDocument, getRuntimeConfig } from '../core/runtime_config.mjs';
 import { compatFallback } from '../core/fallbacks.mjs';
 import { DEFAULT_REALTIME_INDEX, DEFAULT_VOPT_FLAGS, REALTIME_LEVELS, SCENE_FLAG_DEFAULTS } from '../core/viewer_defaults.mjs';
 import {
@@ -41,6 +41,7 @@ import {
   createViewerStore,
   mergeBackendSnapshot,
   readControlValue,
+  syncRuntimeConfigFromViewerState,
 } from '../ui/state.mjs';
 import { prepareBindingUpdate } from '../ui/bindings.mjs';
 import {
@@ -182,6 +183,8 @@ const {
   requestedModel,
   skyDebugModeParam,
 } = consumeViewerParams();
+const runtimeConfig = getRuntimeConfig();
+applyRuntimeUiToDocument(document, { clearPrepaintThemeAttr: true });
 
 const dumpBigParam = dumpToken === 'big' || findToken === 'big';
 const skyOffParam = skyOverride === true;
@@ -209,54 +212,10 @@ const { applyFallbackAppearance, ensureEnvIfNeeded } = createEnvironmentManager(
   skyDebugModeParam,
 });
 
-const parseTransparentBins = (search, fallbackBins = 16) => {
-  const match = String(search || '').match(/(?:^|[?&])tbins=(\d+)/);
-  if (!match) return fallbackBins;
-  const parsed = Number(match[1]);
-  if (!Number.isFinite(parsed)) return fallbackBins;
-  const clamped = Math.max(0, Math.min(16, parsed | 0));
-  if (clamped === 0) return 0;
-  if (clamped <= 1) return 1;
-  if (clamped <= 4) return 4;
-  if (clamped <= 8) return 8;
-  return 16;
-};
-
-const parseTransparentSortMode = (search) => {
-  const s = String(search || '');
-  if (s.includes('tmode=nosort') || s.includes('tmode=fast')) return 'nosort';
-  if (s.includes('tmode=bins')) return 'bins';
-  return 'strict';
-};
-
 if (store && typeof store.update === 'function') {
-  const search = (typeof window !== 'undefined') ? (window.location?.search || '') : '';
-  const forceBasic = search.includes('forceBasic=1');
-  let disableInstancing = search.includes('inst=0') || search.includes('instancing=0') || search.includes('noinst=1');
-  if (typeof globalThis !== 'undefined') {
-    const override = globalThis.PLAY_DISABLE_INSTANCING;
-    if (override === true) disableInstancing = true;
-    if (override === false) disableInstancing = false;
-  }
-  let transparentBins = parseTransparentBins(search, 16);
-  let transparentSortMode = parseTransparentSortMode(search);
-  if (typeof globalThis !== 'undefined') {
-    const bins = globalThis.PLAY_TRANSPARENT_BINS;
-    if (Number.isFinite(bins)) transparentBins = Math.max(0, Math.min(16, bins | 0));
-    const mode = globalThis.PLAY_TRANSPARENT_SORT_MODE;
-    if (mode === 'strict' || mode === 'bins' || mode === 'nosort') transparentSortMode = mode;
-  }
   store.update((draft) => {
     if (!draft.rendering) draft.rendering = { ...DEFAULT_VIEWER_STATE.rendering };
     draft.rendering.hideAllGeometry = !!hideAllGeometryDefault;
-    if (!draft.rendering.options) draft.rendering.options = { ...DEFAULT_VIEWER_STATE.rendering.options };
-    if (!draft.rendering.options.materials) draft.rendering.options.materials = { ...DEFAULT_VIEWER_STATE.rendering.options.materials };
-    draft.rendering.options.materials.forceBasic = !!forceBasic;
-    if (!draft.rendering.options.instancing) draft.rendering.options.instancing = { ...DEFAULT_VIEWER_STATE.rendering.options.instancing };
-    draft.rendering.options.instancing.enabled = !disableInstancing;
-    if (!draft.rendering.options.transparency) draft.rendering.options.transparency = { ...DEFAULT_VIEWER_STATE.rendering.options.transparency };
-    draft.rendering.options.transparency.bins = transparentBins;
-    draft.rendering.options.transparency.sortMode = transparentSortMode;
   });
 }
 
@@ -735,16 +694,8 @@ let lastRightCtrlRef = null;
 let lastRightActsRef = null;
 let lastRightQposRef = null;
 let lastRightEqActiveRef = null;
-const UI_UPDATE_INTERVAL_MS = readNumericParam(
-  'ui_ms',
-  33,
-  { parser: (value) => Number.parseInt(value, 10), min: 16, max: 2000 },
-);
-const UI_SLOW_UPDATE_INTERVAL_MS = readNumericParam(
-  'ui_slow_ms',
-  1000,
-  { parser: (value) => Number.parseInt(value, 10), min: 200, max: 10000 },
-);
+const UI_UPDATE_INTERVAL_MS = runtimeConfig.timing?.uiUpdateIntervalMs ?? 33;
+const UI_SLOW_UPDATE_INTERVAL_MS = runtimeConfig.timing?.uiSlowUpdateIntervalMs ?? 1000;
 const CONTROLS_UPDATE_INTERVAL_MS = Math.max(UI_UPDATE_INTERVAL_MS, 120);
 
 function scheduleUiUpdate(state) {
@@ -923,6 +874,7 @@ function scheduleUiUpdate(state) {
 store.subscribe((state) => {
   const perfEnabled = isPerfEnabled();
   const tSubStart = perfEnabled ? perfNow() : 0;
+  syncRuntimeConfigFromViewerState(state);
   if (typeof rendererManager?.requestRenderScene === 'function') {
     rendererManager.requestRenderScene(latestSnapshot, state);
   }
@@ -1865,7 +1817,7 @@ if (typeof window !== 'undefined') {
 
 async function loadPlayPlugins(host) {
   if (!host) return;
-  const urls = [];
+  const urls = Array.isArray(runtimeConfig.plugins) ? runtimeConfig.plugins.slice() : [];
   if (typeof window !== 'undefined' && !pluginDisposeInstalled) {
     pluginDisposeInstalled = true;
     window.addEventListener('beforeunload', () => {
@@ -1880,33 +1832,6 @@ async function loadPlayPlugins(host) {
         }
       }
     }, { capture: true });
-  }
-  try {
-    const rawList = (typeof globalThis !== 'undefined' && Array.isArray(globalThis.PLAY_PLUGINS))
-      ? globalThis.PLAY_PLUGINS
-      : [];
-    for (const entry of rawList) {
-      const s = String(entry || '').trim();
-      if (s) urls.push(s);
-    }
-  } catch (err) {
-    logWarn('[plugins] PLAY_PLUGINS parse failed', err);
-    strictCatch(err, 'main:plugins_parse_global', { allow: true });
-  }
-  try {
-    if (typeof location !== 'undefined' && location?.search != null) {
-      const params = new URLSearchParams(location.search);
-      const token = params.get('plugins');
-      if (token) {
-        for (const raw of token.split(',')) {
-          const s = String(raw || '').trim();
-          if (s) urls.push(s);
-        }
-      }
-    }
-  } catch (err) {
-    logWarn('[plugins] query parse failed', err);
-    strictCatch(err, 'main:plugins_parse_query', { allow: true });
   }
   if (!urls.length) return;
   const unique = Array.from(new Set(urls));

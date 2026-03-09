@@ -17,6 +17,7 @@ import {
   strictEnsure,
   strictOverride,
 } from '../core/viewer_runtime.mjs';
+import { getRuntimeConfig } from '../core/runtime_config.mjs';
 import { pushSkyDebug } from '../environment/environment.mjs';
 import {
   depthFromSoAPos,
@@ -2984,11 +2985,7 @@ function createRendererManager({
   function initRenderer() {
     if (ctx.initialized || !canvas) return ctx;
 
-    const wantPreserve = (typeof window !== 'undefined') && (
-      window.PLAY_SNAPSHOT_DEBUG === true || window.PLAY_SNAPSHOT_DEBUG === 1 || window.PLAY_SNAPSHOT_DEBUG === '1' ||
-      window.__snapshot === 1 || window.__snapshot === true ||
-      (typeof window.location?.search === 'string' && window.location.search.includes('snapshot=1'))
-    );
+    const wantPreserve = !!getRuntimeConfig().snapshotDebug;
     const renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
