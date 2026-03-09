@@ -74,3 +74,5 @@ doc/*/_build/
 !/README.md
 !/README.zh-CN.md
 !/PLAY_SIMULATE_AUDIT.md
+!/ARCHITECTURE.md
+!/AUDIT.md
