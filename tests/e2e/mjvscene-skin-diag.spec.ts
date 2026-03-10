@@ -15,10 +15,9 @@ test('diag: mjvScene types and skin asset sizes (worker)', async ({ page }) => {
 
   // eslint-disable-next-line no-console
   console.log('mjvscene-skin-diag', await page.evaluate(() => {
-    const store = (window as any).__viewerStore;
-    const state = store?.get ? store.get() : null;
-    const assets = state?.rendering?.assets || null;
-    const snap = (window as any).__lastSnapshot || null;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+    const assets = snapshot?.renderAssets || null;
+    const snap = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     const types = snap?.scn_type || null;
     const typeCounts: Record<string, number> = {};
     if (types && typeof types.length === 'number') {

@@ -13,7 +13,7 @@ test('worker simulation time advances', async ({ page }) => {
   await waitForViewerReady(page, url);
 
   const t0 = await page.evaluate(() => {
-    const snap = (window as any).__lastSnapshot ?? null;
+    const snap = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     return typeof snap?.t === 'number' ? snap.t : null;
   });
   expect(t0).not.toBeNull();
@@ -21,9 +21,10 @@ test('worker simulation time advances', async ({ page }) => {
   await page.waitForTimeout(750);
 
   const t1 = await page.evaluate(() => {
-    const snap = (window as any).__lastSnapshot ?? null;
+    const snap = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     return typeof snap?.t === 'number' ? snap.t : null;
   });
   expect(t1).not.toBeNull();
   expect((t1 as number) - (t0 as number)).toBeGreaterThan(1e-3);
 });
+

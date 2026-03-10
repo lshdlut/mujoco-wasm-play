@@ -7,69 +7,34 @@ function clone(value) {
   return structuredClone(value);
 }
 
-test('ui: mergeBackendSnapshot applies basic HUD + runtime fields', () => {
-  // Reset module-level time tracking.
-  createViewerStore(DEFAULT_VIEWER_STATE);
+test('ui: mergeBackendSnapshot only clamps tracking geom against current snapshot geoms', () => {
+  createViewerStore(clone(DEFAULT_VIEWER_STATE));
 
   const draft = clone(DEFAULT_VIEWER_STATE);
+  draft.runtime.trackingGeom = 8;
   const snapshot = {
-    t: 0,
-    rate: 1,
-    measuredSlowdown: 0.5,
-    ngeom: 10,
-    contacts: { n: 2 },
-    paused: false,
-    pausedSource: 'test',
-    rateSource: 'test',
-    gesture: { mode: 'rotate', phase: 'update', pointer: { x: 1, y: 2, dx: 3, dy: 4, buttons: 1, pressure: 0.25 } },
-    drag: { dx: 0.1, dy: -0.2 },
+    geoms: [
+      { index: 0, name: 'g0' },
+      { index: 1, name: 'g1' },
+      { index: 2, name: 'g2' },
+    ],
   };
 
   mergeBackendSnapshot(draft, snapshot);
 
-  assert.equal(draft.hud.time, 0);
-  assert.equal(draft.hud.rate, 1);
-  assert.equal(draft.hud.measuredSlowdown, 0.5);
-  assert.equal(draft.hud.ngeom, 10);
-  assert.equal(draft.hud.contacts, 2);
-  assert.equal(draft.hud.pausedSource, 'test');
-  assert.equal(draft.hud.rateSource, 'test');
-  assert.equal(draft.simulation.run, true);
-  assert.deepEqual(draft.runtime.gesture, {
-    mode: 'rotate',
-    phase: 'update',
-    pointer: { x: 1, y: 2, dx: 3, dy: 4, buttons: 1, pressure: 0.25 },
-  });
-  assert.deepEqual(draft.runtime.drag, { dx: 0.1, dy: -0.2 });
+  assert.equal(draft.runtime.trackingGeom, 2);
+  assert.equal(draft.theme.color, DEFAULT_VIEWER_STATE.theme.color);
+  assert.equal(draft.panels.left, DEFAULT_VIEWER_STATE.panels.left);
+  assert.equal('simulation' in draft, false);
+  assert.equal('hud' in draft, false);
 });
 
-test('ui: mergeBackendSnapshot is stable for identical snapshots', () => {
-  createViewerStore(DEFAULT_VIEWER_STATE);
+test('ui: mergeBackendSnapshot clears tracking geom when snapshot geom metadata disappears', () => {
+  createViewerStore(clone(DEFAULT_VIEWER_STATE));
 
   const draft = clone(DEFAULT_VIEWER_STATE);
-  const snapshot = {
-    t: 0,
-    rate: 1,
-    ngeom: 3,
-    contacts: { n: 0 },
-    paused: true,
-    pausedSource: 'test',
-    rateSource: 'test',
-  };
+  draft.runtime.trackingGeom = 3;
 
-  mergeBackendSnapshot(draft, snapshot);
-  const a = clone({
-    hud: draft.hud,
-    simulation: draft.simulation,
-    runtime: draft.runtime,
-  });
-
-  mergeBackendSnapshot(draft, snapshot);
-  const b = clone({
-    hud: draft.hud,
-    simulation: draft.simulation,
-    runtime: draft.runtime,
-  });
-
-  assert.deepEqual(a, b);
+  mergeBackendSnapshot(draft, { geoms: [] });
+  assert.equal(draft.runtime.trackingGeom, -1);
 });

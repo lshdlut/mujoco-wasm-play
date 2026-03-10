@@ -11,9 +11,8 @@ async function pauseSimulation(page: Page) {
     await controls.toggleControl('simulation.run', 0);
   });
   await page.waitForFunction(() => {
-    const store: any = (window as any).__viewerStore;
-    const state = store?.get ? store.get() : null;
-    return state?.simulation?.run === false;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+    return snapshot?.paused === true;
   }, { timeout: 20_000, polling: 250 });
 }
 
@@ -90,3 +89,4 @@ test('transparent strict mode sorts instanced batches by depth', async ({ page }
   expect(diag.found, diag.reason || '').toBeGreaterThan(0);
   expect(diag.bad, JSON.stringify(diag.bad, null, 2)).toHaveLength(0);
 });
+

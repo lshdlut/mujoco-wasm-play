@@ -2,6 +2,14 @@ import { Page } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+export async function readCurrentSnapshot(page: Page) {
+  return page.evaluate(() => {
+    const hostSnapshot = (window as any).__PLAY_HOST__?.getSnapshot?.();
+    if (hostSnapshot) return hostSnapshot;
+    return (window as any).__lastSnapshot ?? null;
+  });
+}
+
 export async function ensureSectionExpanded(page: Page, sectionId: string) {
   const rootSelector = `[data-testid="section-${sectionId}"]`;
   await page.waitForFunction((sid) => {
@@ -25,20 +33,73 @@ export async function waitForViewerReady(
   url = '/index.html?model=demo_box.xml',
   { timeoutMs = 60_000 }: { timeoutMs?: number } = {},
 ) {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  const onConsole = (msg: any) => {
+    const text = msg?.text?.() || '';
+    if (msg?.type?.() === 'error') {
+      consoleErrors.push(text);
+      if (consoleErrors.length > 10) consoleErrors.shift();
+    }
+  };
+  const onPageError = (err: Error) => {
+    pageErrors.push(err?.stack || String(err));
+    if (pageErrors.length > 10) pageErrors.shift();
+  };
+  page.on('console', onConsole);
+  page.on('pageerror', onPageError);
   const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 60_000;
   const normalizedUrl =
     typeof url === 'string' && url.startsWith('/index.html')
       ? `/${url.slice('/index.html'.length)}`
       : url;
   await page.goto(normalizedUrl as string, { waitUntil: 'load', timeout });
-  await page.waitForFunction(() => {
-    const store = (window as any).__viewerStore;
-    const ctx = (window as any).__renderCtx;
-    const controls = (window as any).__viewerControls;
-    const snap = (window as any).__lastSnapshot;
-    const scnNgeom = Number(snap?.scn_ngeom) | 0;
-    return !!ctx?.initialized && !!store?.get && !!controls && scnNgeom > 0;
-  }, { timeout });
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const diag = await page.evaluate(() => {
+      const store = (window as any).__viewerStore;
+      const ctx = (window as any).__renderCtx;
+      const controls = (window as any).__viewerControls;
+      const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? (window as any).__lastSnapshot;
+      const scnNgeom = Number(snapshot?.scn_ngeom) | 0;
+      return {
+        ready: !!ctx?.initialized && !!store?.get && !!controls && scnNgeom > 0,
+        hasStore: !!store?.get,
+        hasCtx: !!ctx,
+        ctxInitialized: !!ctx?.initialized,
+        hasControls: !!controls,
+        hasHost: !!(window as any).__PLAY_HOST__,
+        hasRuntimeConfig: !!(window as any).__PLAY_RUNTIME_CONFIG__,
+        scnNgeom,
+        ngeom: Number(snapshot?.ngeom) | 0,
+        hasModelSelect: !!document.querySelector('[data-testid="file.model_select"]'),
+      };
+    });
+    if (diag.ready) {
+      page.off('console', onConsole);
+      page.off('pageerror', onPageError);
+      return;
+    }
+    await page.waitForTimeout(100);
+  }
+  const diag = await page.evaluate(() => {
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? (window as any).__lastSnapshot;
+    return {
+      hasStore: !!(window as any).__viewerStore?.get,
+      hasCtx: !!(window as any).__renderCtx,
+      ctxInitialized: !!(window as any).__renderCtx?.initialized,
+      hasControls: !!(window as any).__viewerControls,
+      hasHost: !!(window as any).__PLAY_HOST__,
+      hasRuntimeConfig: !!(window as any).__PLAY_RUNTIME_CONFIG__,
+      scnNgeom: Number(snapshot?.scn_ngeom) | 0,
+      ngeom: Number(snapshot?.ngeom) | 0,
+      bodyClass: document.body?.className || '',
+      hasModelSelect: !!document.querySelector('[data-testid="file.model_select"]'),
+    };
+  }).catch(() => null);
+  page.off('console', onConsole);
+  page.off('pageerror', onPageError);
+  throw new Error(`Viewer did not become ready within ${timeout} ms: ${JSON.stringify({ diag, consoleErrors, pageErrors })}`);
 }
 
 export async function loadXmlFromFileInput(page: Page, filePath: string) {

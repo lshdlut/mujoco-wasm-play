@@ -12,7 +12,7 @@ test('single-Raj default -> run -> reset memory behaviour', async ({ page }) => 
 
   const readTime = async () => {
     return page.evaluate(() => {
-      const snap = (window as any).__lastSnapshot;
+      const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
       const t = Number(snap?.t);
       return Number.isFinite(t) ? t : NaN;
     });
@@ -39,3 +39,4 @@ test('single-Raj default -> run -> reset memory behaviour', async ({ page }) => 
   expect(afterRun).toBeGreaterThanOrEqual(init);
   expect(afterReset).toBeLessThanOrEqual(init + 1e-3);
 });
+

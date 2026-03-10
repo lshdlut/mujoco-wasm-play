@@ -28,6 +28,34 @@ function fileExists(relPath) {
   return fs.existsSync(path.resolve(process.cwd(), relPath));
 }
 
+function readFactoryParamCount(relPath, factoryName) {
+  const absPath = path.resolve(process.cwd(), relPath);
+  const source = fs.readFileSync(absPath, 'utf8');
+  const pattern = new RegExp(
+    `export\\s+function\\s+${factoryName}\\s*\\(\\s*\\{([\\s\\S]*?)\\}\\s*\\)`,
+  );
+  const match = source.match(pattern);
+  if (!match) {
+    throw new Error(`[checks] ${factoryName} not found in ${relPath}`);
+  }
+  return match[1]
+    .split(',')
+    .map((token) => token.trim())
+    .filter(Boolean).length;
+}
+
+function assertFactoryParamLimit(relPath, factoryName, max) {
+  const count = readFactoryParamCount(relPath, factoryName);
+  if (count > max) {
+    throw new Error(
+      `[checks] ${factoryName} in ${relPath} declares ${count} injected params; max is ${max}`,
+    );
+  }
+}
+
+assertFactoryParamLimit('ui/control_widgets.mjs', 'createControlWidgetsRuntime', 12);
+assertFactoryParamLimit('backend/backend_runtime.mjs', 'createBackendRuntime', 12);
+
 run('forbid_patterns', ['tools/forbid_patterns.mjs']);
 
 if (fileExists('tools/check_module_boundaries.mjs')) {
@@ -46,6 +74,9 @@ if (fileExists('ui/state.mjs')) {
 if (fileExists('ui/control_manager.mjs')) {
   run('syntax: ui_control_manager', ['--check', 'ui/control_manager.mjs']);
 }
+if (fileExists('ui/control_widgets.mjs')) {
+  run('syntax: ui_control_widgets', ['--check', 'ui/control_widgets.mjs']);
+}
 if (fileExists('renderer/pipeline.mjs')) {
   run('syntax: renderer_pipeline', ['--check', 'renderer/pipeline.mjs']);
 }
@@ -59,6 +90,9 @@ if (fileExists('worker/snapshot_pool.mjs')) {
 run('syntax: app_main', ['--check', 'app/main.mjs']);
 if (fileExists('backend/backend_core.mjs')) {
   run('syntax: backend_core', ['--check', 'backend/backend_core.mjs']);
+}
+if (fileExists('backend/backend_runtime.mjs')) {
+  run('syntax: backend_runtime', ['--check', 'backend/backend_runtime.mjs']);
 }
 if (fileExists('bridge/heap_views.mjs')) {
   run('syntax: bridge_heap_views', ['--check', 'bridge/heap_views.mjs']);

@@ -11,9 +11,8 @@ async function pauseSimulation(page: Page) {
     await controls.toggleControl('simulation.run', 0);
   });
   await page.waitForFunction(() => {
-    const store: any = (window as any).__viewerStore;
-    const state = store?.get ? store.get() : null;
-    return state?.simulation?.run === false;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+    return snapshot?.paused === true;
   }, { timeout: 20_000, polling: 250 });
 }
 
@@ -32,7 +31,7 @@ test('instancing keeps tendon/site colors and renderOrder consistent', async ({ 
       const tbins = 8;
     const ctx: any = (window as any).__renderCtx;
     const inst: any = ctx?._instancing || null;
-    const snap: any = (window as any).__lastSnapshot || null;
+    const snap: any = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     const n = Number(snap?.scn_ngeom) | 0;
     const baseNgeom = Number(snap?.ngeom) | 0;
     if (!ctx || !inst || !(inst.batches instanceof Map)) return { ok: false, reason: 'instancing not active' };
@@ -198,3 +197,4 @@ test('instancing keeps tendon/site colors and renderOrder consistent', async ({ 
 	  expect(diag.orderMismatches, JSON.stringify(diag.orderMismatches, null, 2)).toHaveLength(0);
 	  expect(diag.colorMismatches, JSON.stringify(diag.colorMismatches, null, 2)).toHaveLength(0);
 	});
+

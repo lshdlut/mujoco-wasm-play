@@ -6,7 +6,7 @@ const FORGE_BASE = '/dist/3.4.0/';
 
 function sceneTendonCounts() {
   const MJ_OBJ_TENDON = 18;
-  const snap = (window as any).__lastSnapshot || null;
+  const snap = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
   const n = Number(snap?.scn_ngeom) | 0;
   const objType = snap?.scn_objtype || null;
   const objId = snap?.scn_objid || null;
@@ -56,7 +56,7 @@ test('tendon catenary collapses to straight segments when gravity disabled', asy
 
   await page.waitForFunction((id: number) => {
     const MJ_OBJ_TENDON = 18;
-    const v = (window as any).__lastSnapshot || null;
+    const v = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     const n = Number(v?.scn_ngeom) | 0;
     const objType = v?.scn_objtype || null;
     const objId = v?.scn_objid || null;
@@ -78,7 +78,7 @@ test('tendon catenary collapses to straight segments when gravity disabled', asy
 
   await page.waitForFunction((id: number) => {
     const MJ_OBJ_TENDON = 18;
-    const v = (window as any).__lastSnapshot || null;
+    const v = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     const n = Number(v?.scn_ngeom) | 0;
     const objType = v?.scn_objtype || null;
     const objId = v?.scn_objid || null;
@@ -92,3 +92,4 @@ test('tendon catenary collapses to straight segments when gravity disabled', asy
     return total === 1;
   }, tendonId, { timeout: 30_000, polling: 250 });
 });
+

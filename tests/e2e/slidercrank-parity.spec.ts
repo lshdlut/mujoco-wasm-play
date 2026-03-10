@@ -7,9 +7,8 @@ const MODEL = 'model/slider_crank/slider_crank.xml';
 const FORGE_BASE = '/dist/3.4.0/';
 
 function readSlidercrankSummary() {
-  const store = (window as any).__viewerStore;
-  const state = store?.get ? store.get() : null;
-  const vopt = Array.isArray(state?.rendering?.voptFlags) ? state.rendering.voptFlags : [];
+  const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+  const vopt = Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : [];
   const actuatorFlag = !!vopt[4];
 
   const renderer = (window as any).__viewerRenderer;
@@ -37,10 +36,9 @@ test('slidercrank renders even when mjVIS_ACTUATOR is off', async ({ page }) => 
   let lastDiag: any = null;
   while (Date.now() < deadline) {
     lastDiag = await page.evaluate(() => {
-      const snap = (window as any).__lastSnapshot;
-      const store = (window as any).__viewerStore;
-      const state = store?.get ? store.get() : null;
-      const actuators = state?.rendering?.assets?.actuators || null;
+      const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
+      const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() || snap || null;
+      const actuators = snapshot?.renderAssets?.actuators || null;
       const trntype = actuators?.trntype;
       const hasSlider = trntype
         ? Array.from(trntype).some((v: any) => (Number(v) | 0) === 2)
@@ -50,13 +48,13 @@ test('slidercrank renders even when mjVIS_ACTUATOR is off', async ({ page }) => 
       const group = ctx?.slidercrankGroup || null;
       const pool = Array.isArray(ctx?.slidercrankPool) ? ctx.slidercrankPool : [];
       const visible = pool.filter((child: any) => !!child?.visible).length;
-      const diagnostics = state?.rendering?.assets?.extras?.diagnostics || null;
+      const diagnostics = snapshot?.renderAssets?.extras?.diagnostics || null;
       return {
         href: location.href,
         search: location.search,
         params: Array.from(new URLSearchParams(location.search).entries()),
         requestedModel: new URLSearchParams(location.search).get('model'),
-        runtimeModelLabel: state?.runtime?.modelLabel || '',
+        runtimeModelLabel: (window as any).__viewerStore?.get?.()?.shell?.modelLabel || '',
         frame: Number.isFinite(snap?.frame) ? snap.frame : null,
         hasSiteXpos: !!snap?.site_xpos,
         hasSiteXmat: !!snap?.site_xmat,
@@ -91,3 +89,4 @@ test('slidercrank renders even when mjVIS_ACTUATOR is off', async ({ page }) => 
   expect(summary.total).toBeGreaterThan(0);
   expect(summary.visible).toBeGreaterThan(0);
 });
+

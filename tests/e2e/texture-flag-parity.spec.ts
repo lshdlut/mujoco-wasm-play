@@ -6,9 +6,8 @@ const FORGE_BASE = '/dist/3.4.0/';
 
 function pickMeshWithMap() {
   const win = window as any;
-  const store = win.__viewerStore;
-  const state = store?.get ? store.get() : null;
-  const vopt = Array.isArray(state?.rendering?.voptFlags) ? state.rendering.voptFlags : null;
+  const snapshot = win.__PLAY_HOST__?.getSnapshot?.() ?? null;
+  const vopt = Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : null;
   const voptTextureFlag = vopt && vopt.length > 1 ? !!vopt[1] : null;
   const ctx = win.__renderCtx || win.__viewerRenderer?.getContext?.();
   const meshes = Array.isArray(ctx?.meshes) ? ctx.meshes : [];
@@ -38,9 +37,8 @@ function pickMeshWithMap() {
 
 function meshMapState(geomIndex: number) {
   const win = window as any;
-  const store = win.__viewerStore;
-  const state = store?.get ? store.get() : null;
-  const vopt = Array.isArray(state?.rendering?.voptFlags) ? state.rendering.voptFlags : null;
+  const snapshot = win.__PLAY_HOST__?.getSnapshot?.() ?? null;
+  const vopt = Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : null;
   const voptTextureFlag = vopt && vopt.length > 1 ? !!vopt[1] : null;
   const ctx = win.__renderCtx || win.__viewerRenderer?.getContext?.();
   const mesh = Array.isArray(ctx?.meshes) ? ctx.meshes[geomIndex] : null;
@@ -57,7 +55,7 @@ async function forceRender(page: any) {
     const win = window as any;
     const renderer = win.__viewerRenderer;
     const store = win.__viewerStore;
-    const snap = win.__lastSnapshot;
+    const snap = win.__PLAY_HOST__?.getSnapshot?.();
     if (renderer?.renderScene && store?.get && snap) {
       renderer.renderScene(snap, store.get());
     }
@@ -73,9 +71,8 @@ test('mjVIS_TEXTURE toggles material.map (basic)', async ({ page }) => {
 
   await page.waitForFunction(() => {
     const win = window as any;
-    const store = win.__viewerStore;
-    const state = store?.get ? store.get() : null;
-    const assets = state?.rendering?.assets || null;
+    const snapshot = win.__PLAY_HOST__?.getSnapshot?.() ?? null;
+    const assets = snapshot?.renderAssets || null;
     return !!assets?.textures && !!assets?.materials;
   }, { timeout: 30_000 });
 
@@ -108,3 +105,4 @@ test('mjVIS_TEXTURE toggles material.map (basic)', async ({ page }) => {
     return page.evaluate(meshMapState, (picked as any).index);
   }, { timeout: 10_000 }).toMatchObject({ ok: true, hasMap: true, voptTextureFlag: true });
 });
+

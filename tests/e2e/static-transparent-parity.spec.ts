@@ -17,22 +17,20 @@ test('mjVIS_STATIC hides static-body geoms; mjVIS_TRANSPARENT fades dynamic', as
   await waitForViewerReady(page, url);
 
   await page.waitForFunction(() => {
-    const store = (window as any).__viewerStore;
-    const state = store?.get ? store.get() : null;
-    const assets = state?.rendering?.assets || null;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+    const assets = snapshot?.renderAssets || null;
     const bodies = assets?.bodies || null;
     return (bodies?.count | 0) > 0 && !!bodies?.weldid && !!bodies?.mocapid;
   }, { timeout: 20_000, polling: 250 });
 
   const diag = await page.evaluate(() => {
-    const store = (window as any).__viewerStore;
-    const state = store?.get ? store.get() : null;
-    const assets = state?.rendering?.assets || null;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+    const assets = snapshot?.renderAssets || null;
     const bodies = assets?.bodies || null;
     const weldid = bodies?.weldid || null;
     const mocapid = bodies?.mocapid || null;
-    const alpha = Number(state?.model?.vis?.map?.alpha);
-    const geomBodyId = state?.model?.geomBodyId || null;
+    const alpha = Number(snapshot?.visual?.map?.alpha);
+    const geomBodyId = snapshot?.geom_bodyid || null;
     return {
       nbody: Number(bodies?.count) || 0,
       worldStatic: weldid && mocapid ? ((weldid[0] | 0) === 0 && (mocapid[0] | 0) === -1) : null,
@@ -44,9 +42,8 @@ test('mjVIS_STATIC hides static-body geoms; mjVIS_TRANSPARENT fades dynamic', as
   expect(diag.worldStatic).toBeTruthy();
 
   const picked = await page.evaluate(() => {
-    const store = (window as any).__viewerStore;
-    const state = store?.get ? store.get() : null;
-    const bodies = state?.rendering?.assets?.bodies || null;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+    const bodies = snapshot?.renderAssets?.bodies || null;
     const weldid = bodies?.weldid || null;
     const mocapid = bodies?.mocapid || null;
     const ctx = (window as any).__renderCtx;
@@ -72,7 +69,7 @@ test('mjVIS_STATIC hides static-body geoms; mjVIS_TRANSPARENT fades dynamic', as
     if (staticGeom < 0 || dynamicGeom < 0) return null;
     const dynMat = meshes[dynamicGeom]?.material;
     const dynOpacity = typeof dynMat?.opacity === 'number' ? dynMat.opacity : null;
-    const rawAlpha = Number(state?.model?.vis?.map?.alpha);
+    const rawAlpha = Number(snapshot?.visual?.map?.alpha);
     const alphaScale = Number.isFinite(rawAlpha) ? rawAlpha : 0;
     return { staticGeom, dynamicGeom, dynOpacity, alphaScale };
   });
@@ -114,10 +111,9 @@ test('mjVIS_STATIC hides static-body geoms; mjVIS_TRANSPARENT fades dynamic', as
   let last: any = null;
   while (Date.now() < deadline) {
     last = await page.evaluate(({ geomIndex }: { geomIndex: number }) => {
-      const store = (window as any).__viewerStore;
-      const state = store?.get ? store.get() : null;
-      const flags = Array.isArray(state?.rendering?.voptFlags) ? state.rendering.voptFlags : [];
-      const alphaRaw = Number(state?.model?.vis?.map?.alpha);
+      const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+      const flags = Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : [];
+      const alphaRaw = Number(snapshot?.visual?.map?.alpha);
       const alphaScale = Number.isFinite(alphaRaw) ? alphaRaw : 0;
       const ctx = (window as any).__renderCtx;
       const mesh = Array.isArray(ctx?.meshes) ? ctx.meshes[geomIndex] : null;
@@ -155,3 +151,4 @@ test('mjVIS_STATIC hides static-body geoms; mjVIS_TRANSPARENT fades dynamic', as
     }
   }
 });
+

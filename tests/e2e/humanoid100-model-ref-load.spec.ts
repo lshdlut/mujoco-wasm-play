@@ -20,7 +20,7 @@ test('loads humanoid100 model references', async ({ page }) => {
 
   await page.waitForFunction(
     () => {
-      const snap = (window as any).__lastSnapshot;
+      const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
       return snap && ((snap.scn_ngeom | 0) > 0);
     },
     null,
@@ -30,3 +30,4 @@ test('loads humanoid100 model references', async ({ page }) => {
   const combined = consoleErrors.join('\n');
   expect(combined).not.toContain('XML load failed:');
 });
+

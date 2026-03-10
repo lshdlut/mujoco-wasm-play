@@ -11,9 +11,8 @@ async function pauseSimulation(page: Page) {
     await controls.toggleControl('simulation.run', 0);
   });
   await page.waitForFunction(() => {
-    const store: any = (window as any).__viewerStore;
-    const state = store?.get ? store.get() : null;
-    return state?.simulation?.run === false;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+    return snapshot?.paused === true;
   }, { timeout: 20_000, polling: 250 });
 }
 
@@ -54,7 +53,7 @@ test('instancing keeps site/tendon pixels close to non-instanced (forceBasic)', 
     const MJ_OBJ_SITE = 6;
     const MJ_OBJ_TENDON = 18;
     const ctx: any = (window as any).__renderCtx;
-    const snap: any = (window as any).__lastSnapshot || null;
+    const snap: any = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     const store: any = (window as any).__viewerStore;
     const state = store?.get ? store.get() : null;
     const rendererApi: any = (window as any).__viewerRenderer;
@@ -297,3 +296,4 @@ test('instancing keeps site/tendon pixels close to non-instanced (forceBasic)', 
   expect(typeof compared.p90 === 'number' && Number.isFinite(compared.p90)).toBeTruthy();
   expect(compared.p90, JSON.stringify(compared.worst, null, 2)).toBeLessThan(0.3);
 });
+

@@ -11,19 +11,17 @@ test('convex hull toggles mesh geometry variant', async ({ page }) => {
   await waitForViewerReady(page, url);
 
   const hasGraphAssets = await page.evaluate(() => {
-    const store = (window as any).__viewerStore;
-    const state = store?.get?.() || null;
-    const assets = state?.rendering?.assets || null;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+    const assets = snapshot?.renderAssets || null;
     return !!assets?.meshes?.graphadr && !!assets?.meshes?.graph;
   });
   expect(hasGraphAssets).toBeTruthy();
 
-  await page.waitForFunction(() => !!(window as any).__lastSnapshot, { timeout: 30_000, polling: 250 });
+  await page.waitForFunction(() => !!(window as any).__PLAY_HOST__?.getSnapshot?.(), { timeout: 30_000, polling: 250 });
   const status = await page.evaluate(() => {
-    const store = (window as any).__viewerStore;
-    const state = store?.get?.() || null;
-    const assets = state?.rendering?.assets || null;
-    const snap = (window as any).__lastSnapshot || null;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+    const assets = snapshot?.renderAssets || null;
+    const snap = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     const gtype = snap?.gtype;
     let meshTypes = 0;
     const gtLen = gtype && typeof gtype.length === 'number' ? (gtype.length | 0) : 0;
@@ -53,15 +51,14 @@ test('convex hull toggles mesh geometry variant', async ({ page }) => {
     const win = window as any;
     const renderer = win.__viewerRenderer;
     const store = win.__viewerStore;
-    const snap = win.__lastSnapshot;
+    const snap = win.__PLAY_HOST__?.getSnapshot?.();
     if (renderer?.renderScene && store?.get && snap) {
       renderer.renderScene(snap, store.get());
     }
   });
 
   const candidate = await page.evaluate(() => {
-    const store = (window as any).__viewerStore;
-    const assets = store?.get?.()?.rendering?.assets || null;
+    const assets = (window as any).__PLAY_HOST__?.getSnapshot?.()?.renderAssets || null;
     const ctx = (window as any).__viewerRenderer?.getContext?.();
     const meshes = ctx?.meshes;
     if (!assets || !ctx || !Array.isArray(meshes)) return null;
@@ -148,3 +145,4 @@ test('convex hull toggles mesh geometry variant', async ({ page }) => {
     return !!mesh && encoded && !hull && hasIndex;
   }, candidate!.geomIndex, { timeout: 20_000, polling: 200 });
 });
+

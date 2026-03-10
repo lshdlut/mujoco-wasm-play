@@ -15,7 +15,7 @@ test('dump MuJoCo-like geomorder (Raj)', async ({ page }) => {
   await waitForViewerReady(page, url);
 
   const diag = await page.evaluate(() => {
-    const snap = (window as any).__lastSnapshot || null;
+    const snap = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     if (!snap) return { ok: false, reason: 'no-snapshot' };
     const n = Number(snap.scn_ngeom) | 0;
     const camdist = snap.scn_camdist || null;
@@ -84,3 +84,4 @@ test('dump MuJoCo-like geomorder (Raj)', async ({ page }) => {
   // eslint-disable-next-line no-console
   console.log('geomorder dump written', { outPath });
 });
+

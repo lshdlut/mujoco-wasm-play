@@ -19,7 +19,7 @@ test('mjvScene SoA snapshot exists and drives base meshes', async ({ page }) => 
   // One-off diagnostics (kept lightweight) to help debug missing scn_* fields.
   // eslint-disable-next-line no-console
   console.log('mjvscene-export diag', await page.evaluate(() => {
-    const snap = (window as any).__lastSnapshot || null;
+    const snap = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     const keys = snap ? Object.keys(snap).filter((k) => k.startsWith('scn_')).sort() : [];
     return {
       hasSnap: !!snap,
@@ -31,7 +31,7 @@ test('mjvScene SoA snapshot exists and drives base meshes', async ({ page }) => 
 
   // eslint-disable-next-line no-console
   console.log('mjvscene-export poll sample', await page.evaluate(() => {
-    const snap = (window as any).__lastSnapshot || null;
+    const snap = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     const ngeom = snap?.ngeom ?? 0;
     const scn = snap?.scn_ngeom ?? 0;
     return {
@@ -50,7 +50,7 @@ test('mjvScene SoA snapshot exists and drives base meshes', async ({ page }) => 
     let last: any = null;
     while (Date.now() < deadline) {
       last = await page.evaluate(() => {
-        const snap = (window as any).__lastSnapshot || null;
+        const snap = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
         if (!snap) return { ok: false, reason: 'no-snapshot' };
         const ngeom = snap.ngeom ?? 0;
         const scn = snap.scn_ngeom ?? 0;
@@ -82,7 +82,7 @@ test('mjvScene SoA snapshot exists and drives base meshes', async ({ page }) => 
     let last: any = null;
     while (Date.now() < deadline) {
       last = await page.evaluate(() => {
-        const snap = (window as any).__lastSnapshot || null;
+        const snap = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
         const store = (window as any).__viewerStore;
         const renderer = (window as any).__viewerRenderer;
         const ctx = renderer?.getContext?.() || null;
@@ -110,3 +110,4 @@ test('mjvScene SoA snapshot exists and drives base meshes', async ({ page }) => 
     expect(last?.ok, `renderer not driven by mjvScene: ${JSON.stringify(last)}`).toBe(true);
   }
 });
+

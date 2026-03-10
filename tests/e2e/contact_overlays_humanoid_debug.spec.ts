@@ -35,10 +35,10 @@ async function waitForContacts(page: import('@playwright/test').Page, label: str
   await page.waitForFunction(
     (modelLabel) => {
       const win: any = window;
-      const snap = win.__lastSnapshot || null;
+      const snap = win.__PLAY_HOST__?.getSnapshot?.() ?? null;
       const contacts = snap?.contacts || null;
       const n = Number(contacts?.n ?? 0);
-      const labelNow = String(win.__viewerStore?.get?.()?.hud?.modelLabel || '');
+      const labelNow = String(win.__viewerStore?.get?.()?.shell?.modelLabel || '');
       return n > 0 && (!modelLabel || labelNow.includes(modelLabel));
     },
     label,
@@ -59,7 +59,7 @@ test.describe('contact overlay snapshot debug (Raj -> humanoid)', () => {
 
     const rajSnapshot = await page.evaluate(() => {
       const win: any = window;
-      const snap = win.__lastSnapshot || null;
+      const snap = win.__PLAY_HOST__?.getSnapshot?.() ?? null;
       const dbg = win.__contactDebug || null;
       const contacts = snap?.contacts || null;
       return {
@@ -91,7 +91,7 @@ test.describe('contact overlay snapshot debug (Raj -> humanoid)', () => {
     await page.waitForFunction((label) => {
       const win: any = window;
       const store = win.__viewerStore;
-      const modelLabel = store?.get?.()?.hud?.modelLabel || '';
+      const modelLabel = store?.get?.()?.shell?.modelLabel || '';
       return typeof modelLabel === 'string' && modelLabel.includes(label);
     }, 'humanoid_nofreejnt', { timeout: 60_000 });
 
@@ -100,7 +100,7 @@ test.describe('contact overlay snapshot debug (Raj -> humanoid)', () => {
 
     const humanoidSnapshot = await page.evaluate(() => {
       const win: any = window;
-      const snap = win.__lastSnapshot || null;
+      const snap = win.__PLAY_HOST__?.getSnapshot?.() ?? null;
       const dbg = win.__contactDebug || null;
       const contacts = snap?.contacts || null;
       return {
@@ -123,3 +123,4 @@ test.describe('contact overlay snapshot debug (Raj -> humanoid)', () => {
   });
 }
 );
+

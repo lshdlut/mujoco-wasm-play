@@ -43,8 +43,8 @@ test('headlight vec3 helper clamps and reverts invalid edits', async ({ page }) 
 
   await expect.poll(async () => {
     return page.evaluate(() => {
-      const store = (window as any).__viewerStore;
-      return store?.get?.()?.model?.vis?.headlight?.ambient;
+      const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+      return snapshot?.visual?.headlight?.ambient ?? null;
     });
   }).toEqual([expect.closeTo(0.6, 3), expect.closeTo(0.2, 3), expect.closeTo(0.1, 3)]);
 
@@ -55,3 +55,4 @@ test('headlight vec3 helper clamps and reverts invalid edits', async ({ page }) 
   await expect(toast).toContainText('invalid vector input');
   await expect(ambientInput).toHaveValue('0.6 0.2 0.1');
 });
+

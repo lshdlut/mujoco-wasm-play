@@ -20,7 +20,7 @@ test('loading a new xml resets timer and registers dropdown entry', async ({ pag
   await ensureSectionExpanded(page, 'file');
 
   await page.waitForTimeout(700);
-  const beforeTime = await page.evaluate(() => Number((window as any).__lastSnapshot?.t) || 0);
+  const beforeTime = await page.evaluate(() => Number((window as any).__PLAY_HOST__?.getSnapshot?.()?.t) || 0);
   expect(beforeTime).toBeGreaterThan(0);
 
   const pendulumPath = path.join(__dirname, '..', '..', 'pendulum.xml');
@@ -40,7 +40,8 @@ test('loading a new xml resets timer and registers dropdown entry', async ({ pag
 
   // Timer should drop near zero shortly after reload.
   await page.waitForFunction(() => {
-    const t = Number((window as any).__lastSnapshot?.t);
+    const t = Number((window as any).__PLAY_HOST__?.getSnapshot?.()?.t);
     return Number.isFinite(t) && t < 0.1;
   }, { timeout: 10_000 });
 });
+

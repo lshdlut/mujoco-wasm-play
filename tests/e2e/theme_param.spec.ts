@@ -32,7 +32,7 @@ async function switchBuiltinModel(page: any, labelFragment: string) {
     select.dispatchEvent(new Event('change', { bubbles: true }));
   }, labelFragment);
   await page.waitForFunction((fragment) => {
-    const label = (window as any).__viewerStore?.get?.()?.hud?.modelLabel || '';
+    const label = (window as any).__viewerStore?.get?.()?.shell?.modelLabel || '';
     return String(label).includes(fragment);
   }, labelFragment);
 }
@@ -48,8 +48,8 @@ async function loadInlineModel(page: any, label: string) {
     </mujoco>
   `;
   const before = await page.evaluate(() => ({
-    frame: Number((window as any).__lastSnapshot?.frame) || 0,
-    time: Number((window as any).__lastSnapshot?.t) || 0,
+    frame: Number((window as any).__PLAY_HOST__?.getSnapshot?.()?.frame) || 0,
+    time: Number((window as any).__PLAY_HOST__?.getSnapshot?.()?.t) || 0,
   }));
   await page.evaluate(async ({ xmlText, modelLabel }) => {
     const controls = (window as any).__viewerControls;
@@ -63,7 +63,7 @@ async function loadInlineModel(page: any, label: string) {
     const hasEntry = select instanceof HTMLSelectElement
       && Array.from(select.options).some((entry) => (entry.textContent || '') === expectedLabel);
     if (!hasEntry) return false;
-    const snapshot = (window as any).__lastSnapshot;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     const frame = Number(snapshot?.frame) || 0;
     const time = Number(snapshot?.t);
     if (!Number.isFinite(time)) return false;
@@ -140,3 +140,4 @@ test('user theme and font changes persist across builtin model switches', async 
   expect(result.runtimeConfig?.ui?.themeColor).toBe(0);
   expect(result.runtimeConfig?.ui?.fontIndex).toBe(3);
 });
+

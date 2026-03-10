@@ -35,7 +35,7 @@ test('raj site/tendon scn_rgba ranges', async ({ page }) => {
   const diag = await page.evaluate(() => {
     const MJ_OBJ_SITE = 6;
     const MJ_OBJ_TENDON = 18;
-    const snap: any = (window as any).__lastSnapshot || null;
+    const snap: any = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     if (!snap) return { ok: false, reason: 'no snapshot' };
     const n = Number(snap.scn_ngeom) | 0;
     const objType: any = snap.scn_objtype || null;
@@ -97,4 +97,5 @@ test('raj site/tendon scn_rgba ranges', async ({ page }) => {
   expect(siteStats.n).toBeGreaterThan(0);
   expect(tendonStats.n).toBeGreaterThan(0);
 });
+
 

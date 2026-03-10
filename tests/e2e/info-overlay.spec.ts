@@ -74,19 +74,15 @@ test.describe('F2 info overlay stats', () => {
 
   test('Raj debug snapshot pipeline carries info payload', async ({ page }) => {
     // Mirror the user flow: debug=1&snapshot=1, default model (Raj alias).
-    await waitForViewerReady(page, '/index.html?debug=1&snapshot=1');
     const card = await openInfoOverlay(page, '/index.html?debug=1&snapshot=1');
     await page.waitForTimeout(800);
     const infoDump = await page.evaluate(() => {
-      const store = (window as any).__viewerStore;
-      const state = store?.get?.();
-      const hudInfo = state?.hud?.info ?? null;
-      const lastSnap = (window as any).__lastSnapshot ?? null;
+      const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
       return {
-        hudInfo,
-        hudTime: state?.hud?.time ?? null,
-        simRun: !!state?.simulation?.run,
-        snapshotInfo: lastSnap?.info ?? null,
+        hudInfo: snapshot?.info ?? null,
+        hudTime: snapshot?.t ?? null,
+        simRun: snapshot?.paused === false,
+        snapshotInfo: snapshot?.info ?? null,
         debugInfo: (window as any).__infoDebug ?? null,
       };
     });
@@ -97,3 +93,4 @@ test.describe('F2 info overlay stats', () => {
     expect(infoDump.simRun).toBe(true);
   });
 });
+

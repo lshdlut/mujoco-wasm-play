@@ -15,7 +15,7 @@ test('perf: init + render phase timings', async ({ page }) => {
   });
   await page.waitForTimeout(6000);
   const sceneStats = await page.evaluate(() => {
-    const snap: any = (window as any).__lastSnapshot;
+    const snap: any = (window as any).__PLAY_HOST__?.getSnapshot?.();
     const n = (snap?.scn_ngeom | 0) || 0;
     const baseNgeom = (snap?.ngeom | 0) || 0;
     const type: any = snap?.scn_type || null;
@@ -23,9 +23,8 @@ test('perf: init + render phase timings', async ({ page }) => {
     const matid: any = snap?.scn_matid || null;
     const objtype: any = snap?.scn_objtype || null;
     const objid: any = snap?.scn_objid || null;
-    const store: any = (window as any).__viewerStore;
-    const state: any = store && typeof store.get === 'function' ? store.get() : null;
-    const assets: any = state?.rendering?.assets || null;
+    const snapshot: any = (window as any).__PLAY_HOST__?.getSnapshot?.() || snap || null;
+    const assets: any = snapshot?.renderAssets || null;
     const materials: any = assets?.materials || null;
     const texIdView: any = materials?.texid || null;
     const matCount: number = (materials?.count | 0) || 0;
@@ -196,3 +195,4 @@ test('perf: init + render phase timings', async ({ page }) => {
   // eslint-disable-next-line no-console
   console.log('[perf-steady]', JSON.stringify(stable, null, 2));
 });
+

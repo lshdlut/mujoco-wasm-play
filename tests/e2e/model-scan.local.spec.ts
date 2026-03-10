@@ -56,7 +56,7 @@ test('scan model/ xml loadability (local)', async ({ page }, testInfo) => {
       await page.goto(url);
       await page.waitForFunction(
         () => {
-          const snap = (window as any).__lastSnapshot;
+          const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
           return snap && ((snap.scn_ngeom | 0) > 0);
         },
         null,
@@ -90,3 +90,4 @@ test('scan model/ xml loadability (local)', async ({ page }, testInfo) => {
   // eslint-disable-next-line no-console
   console.log(`[model-scan] wrote report: ${reportPath}`);
 });
+

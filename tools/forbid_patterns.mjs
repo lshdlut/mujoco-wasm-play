@@ -7,9 +7,15 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 
 const scanRoots = [
-  path.join(repoRoot, 'dev'),
+  path.join(repoRoot, 'app'),
+  path.join(repoRoot, 'backend'),
+  path.join(repoRoot, 'bridge'),
+  path.join(repoRoot, 'core'),
+  path.join(repoRoot, 'environment'),
+  path.join(repoRoot, 'renderer'),
+  path.join(repoRoot, 'ui'),
+  path.join(repoRoot, 'worker'),
   path.join(repoRoot, 'tools'),
-  path.join(repoRoot, 'src'),
   path.join(repoRoot, 'tests'),
 ];
 
@@ -31,6 +37,15 @@ const excludeDirs = new Set([
 ]);
 
 const includeExt = new Set(['.js', '.mjs', '.ts', '.tsx']);
+
+function toRepoRel(file) {
+  return path.relative(repoRoot, file).replace(/\\/g, '/');
+}
+
+function isRuntimeModule(file) {
+  const rel = toRepoRel(file);
+  return /^(app|backend|bridge|core|environment|renderer|ui|worker)\//.test(rel);
+}
 
 const forbiddenPatterns = [
   {
@@ -57,6 +72,88 @@ const forbiddenPatterns = [
     id: 'monkey-patch',
     message: 'Prototype monkey patching is forbidden',
     regex: /\bprototype\s*\.\s*[A-Za-z_$][\w$]*\s*=/g,
+  },
+  {
+    id: 'snapshot-ownership',
+    message: 'latestSnapshot-style duplicate snapshot holders are forbidden',
+    regex: /\blatestSnapshot\b/g,
+  },
+  {
+    id: 'snapshot-ownership',
+    message: 'snapshot/store selection fallback is forbidden',
+    regex: /snapshot\?\.\s*selection\s*\|\|\s*state\?\.\s*runtime\?\.\s*selection/g,
+  },
+  {
+    id: 'store-backend-shadow',
+    message: 'viewer store must not be treated as a backend snapshot source',
+    regex: /state\?\.\s*(?:simulation|hud|history|watch|keyframes)\b/g,
+  },
+  {
+    id: 'store-backend-shadow',
+    message: 'viewer store rendering mirrors are forbidden; read backend snapshot selectors instead',
+    regex: /state\?\.\s*rendering\?\.\s*(?:assets|voptFlags|sceneFlags)\b/g,
+  },
+  {
+    id: 'store-backend-shadow',
+    message: 'viewer store model visual mirrors are forbidden; read backend snapshot selectors instead',
+    regex: /state\?\.\s*model\?\.\s*vis\b/g,
+  },
+  {
+    id: 'runtime-inputs',
+    message: 'runtime modules must not consumeViewerParams; read getRuntimeConfig instead',
+    regex: /\bconsumeViewerParams\b/g,
+    exclude: (file) => !isRuntimeModule(file),
+  },
+  {
+    id: 'runtime-inputs',
+    message: 'runtime modules must not read location.search directly',
+    regex: /\blocation\.search\b/g,
+    exclude: (file) => {
+      const rel = toRepoRel(file);
+      return !isRuntimeModule(file) || rel === 'app/entry_bootstrap.js';
+    },
+  },
+  {
+    id: 'runtime-inputs',
+    message: 'runtime modules must not instantiate URLSearchParams directly',
+    regex: /\bnew\s+URLSearchParams\s*\(/g,
+    exclude: (file) => {
+      const rel = toRepoRel(file);
+      return !isRuntimeModule(file) || rel === 'app/entry_bootstrap.js';
+    },
+  },
+  {
+    id: 'runtime-inputs',
+    message: 'runtime modules must not read PLAY_* globals directly',
+    regex: /\b(?:window|globalThis)\.PLAY_[A-Z0-9_]+\b/g,
+    exclude: (file) => {
+      const rel = toRepoRel(file);
+      return !isRuntimeModule(file) || rel === 'app/entry_bootstrap.js';
+    },
+  },
+  {
+    id: 'snapshot-ownership',
+    message: 'runtime modules must not read window.__lastSnapshot',
+    regex: /\bwindow\.__lastSnapshot\b(?!\s*=)/g,
+    exclude: (file) => !isRuntimeModule(file),
+  },
+  {
+    id: 'control-ownership',
+    message: 'ui/control_manager.mjs must not re-own widget renderer implementations',
+    regex: /\bfunction\s+(?:renderCheckbox|renderRunToggle|renderButton|renderSelect|renderRadio|renderSlider|renderEditInput|renderWatchField|renderKeyframeSelect)\b/g,
+    exclude: (file) => toRepoRel(file) !== 'ui/control_manager.mjs',
+  },
+  {
+    id: 'control-ownership',
+    message: 'ui/control_manager.mjs must not re-own widget-local helper bodies',
+    regex: /\bfunction\s+(?:isOptionBinding|applyOptionAvailability|appendUpdateOptions|attachCommitHandlers|createControlRow|createFullRow|createLabeledRow|ensureDynamicList|ensureDynamicSliders|resolveCameraModeEntries|syncCameraSelectOptions|resolveTrackingGeomEntries|syncTrackingGeomSelectOptions)\b/g,
+    exclude: (file) => toRepoRel(file) !== 'ui/control_manager.mjs',
+  },
+  {
+    id: 'backend-ownership',
+    message: 'backend/backend_core.mjs must not re-own binding/ui command adapters',
+    regex: /\b(?:uiHandlers|bindingExactHandlers|bindingRegexHandlers|dispatchBinding)\b/g,
+    exclude: (file) => toRepoRel(file) !== 'backend/backend_core.mjs',
   },
 ];
 
@@ -237,6 +334,7 @@ for (const file of files) {
   const sanitized = stripStringsAndComments(content);
   const lineStarts = buildLineIndex(content);
   for (const rule of forbiddenPatterns) {
+    if (typeof rule.exclude === 'function' && rule.exclude(file)) continue;
     const regex = new RegExp(rule.regex.source, rule.regex.flags);
     let match = null;
     while ((match = regex.exec(sanitized))) {

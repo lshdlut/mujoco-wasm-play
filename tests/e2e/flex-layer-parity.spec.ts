@@ -20,14 +20,14 @@ test('flex_layer slider updates backend option state', async ({ page }) => {
   await waitForViewerReady(page, url);
 
   await page.waitForFunction(() => {
-    const snap = (window as any).__lastSnapshot;
+    const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
     return typeof snap?.options?.flex_layer === 'number';
   }, { timeout: 20_000, polling: 250 });
 
   const before = await page.evaluate(() => {
     const store = (window as any).__viewerStore;
     const state = store?.get ? store.get() : null;
-    const snap = (window as any).__lastSnapshot;
+    const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
     return {
       storeFlexLayer: state?.rendering?.flexLayer ?? null,
       snapFlexLayer: snap?.options?.flex_layer ?? null,
@@ -42,7 +42,7 @@ test('flex_layer slider updates backend option state', async ({ page }) => {
 
   await page.waitForFunction(
     (v: number) => {
-      const snap = (window as any).__lastSnapshot;
+      const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
       const store = (window as any).__viewerStore;
       const state = store?.get ? store.get() : null;
       return (snap?.options?.flex_layer | 0) === v && (state?.rendering?.flexLayer | 0) === v;
@@ -51,3 +51,4 @@ test('flex_layer slider updates backend option state', async ({ page }) => {
     { timeout: 20_000, polling: 250 },
   );
 });
+

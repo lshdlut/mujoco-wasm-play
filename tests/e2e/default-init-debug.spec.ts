@@ -22,7 +22,7 @@ test('default index init debug', async ({ page }) => {
     const store = (window as any).__viewerStore;
     const ctx = (window as any).__renderCtx;
     const controls = (window as any).__viewerControls;
-    const snap = (window as any).__lastSnapshot;
+    const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
     const scnNgeom = Number(snap?.scn_ngeom) | 0;
     return !!ctx?.initialized && !!store?.get && !!controls && scnNgeom > 0;
   }, { timeout });
@@ -40,3 +40,4 @@ test('default index init debug', async ({ page }) => {
   expect(pageErrors, pageErrors.join('\n\n')).toEqual([]);
   await page.waitForTimeout(1500);
 });
+

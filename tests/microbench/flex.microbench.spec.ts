@@ -59,11 +59,10 @@ async function readPerfSummary(page: Page): Promise<PerfSummary> {
 
 async function ensureSimRunning(page: Page) {
   await page.evaluate(async () => {
-    const store = (window as any).__viewerStore;
     const controls = (window as any).__viewerControls;
-    if (!store?.get || !controls?.toggleControl) throw new Error('viewer controls missing');
-    const state = store.get();
-    if (!state?.simulation?.run) {
+    if (!controls?.toggleControl) throw new Error('viewer controls missing');
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+    if (snapshot?.paused === true) {
       await controls.toggleControl('simulation.run', true);
     }
   });
@@ -204,3 +203,4 @@ test('microbench: flex snapshot vs render (idle/rotate)', async ({ page }) => {
     await rotateCameraFor(page, durationMs);
   });
 });
+

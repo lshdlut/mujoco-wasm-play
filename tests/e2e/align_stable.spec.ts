@@ -23,17 +23,17 @@ function expectedPosFromMjv(cam: any) {
 }
 
 async function triggerAlignAndReadCamera(page: any) {
-  const beforeSeq = await page.evaluate(() => Number((window as any).__viewerStore?.get()?.runtime?.lastAlign?.seq) || 0);
+  const beforeSeq = await page.evaluate(() => Number((window as any).__PLAY_HOST__?.getSnapshot?.()?.align?.seq) || 0);
   await page.evaluate(() => (window as any).__PLAY_HOST__?.backend?.apply?.({ kind: 'ui', id: 'simulation.align' }));
   await page.waitForFunction((seq) => {
-    const next = Number((window as any).__viewerStore?.get()?.runtime?.lastAlign?.seq) || 0;
+    const next = Number((window as any).__PLAY_HOST__?.getSnapshot?.()?.align?.seq) || 0;
     return next > (Number(seq) || 0);
   }, beforeSeq, { timeout: 60_000 });
   await page.waitForTimeout(150);
   return page.evaluate(() => {
     const ctx = (window as any).__renderCtx;
     const cam = ctx?.camera;
-    const alignCam = (window as any).__viewerStore?.get()?.runtime?.lastAlign?.camera ?? null;
+    const alignCam = (window as any).__PLAY_HOST__?.getSnapshot?.()?.align?.camera ?? null;
     if (!cam) return null;
     return {
       pos: { x: Number(cam.position?.x) || 0, y: Number(cam.position?.y) || 0, z: Number(cam.position?.z) || 0 },
@@ -60,7 +60,7 @@ test('Align view is stable across joint translation', async ({ page }) => {
   expect(da).toBeLessThan(1e-3);
 
   const moved = await page.evaluate(async () => {
-    const snap: any = (window as any).__lastSnapshot;
+    const snap: any = (window as any).__PLAY_HOST__?.getSnapshot?.();
     const names: any = snap?.jnt_names;
     const adr: any = snap?.jnt_qposadr;
     if (!Array.isArray(names) || !adr) {
@@ -106,3 +106,4 @@ test('Align view is stable across joint translation', async ({ page }) => {
   const dz = Math.abs(Number(posA.pos.z) - Number(posB.pos.z));
   expect(dx + dy + dz).toBeLessThan(1e-3);
 });
+

@@ -31,13 +31,13 @@ test('switching builtin model resets camera via load-align', async ({ page }) =>
   // Ensure renderer has seen align seq > 1, so a worker restart would normally wrap.
   await page.evaluate(() => (window as any).__PLAY_HOST__?.backend?.apply?.({ kind: 'ui', id: 'simulation.align' }));
   await page.waitForFunction(() => {
-    const seq = Number((window as any).__viewerStore?.get()?.runtime?.lastAlign?.seq) || 0;
+    const seq = Number((window as any).__PLAY_HOST__?.getSnapshot?.()?.align?.seq) || 0;
     return seq >= 2;
   }, { timeout: 60_000 });
 
   const before = await page.evaluate(() => {
-    const store = (window as any).__viewerStore?.get?.();
-    const alignTs = Number(store?.runtime?.lastAlign?.timestamp) || 0;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() || null;
+    const alignTs = Number(snapshot?.align?.timestamp) || 0;
     const ctx = (window as any).__renderCtx;
     const cam = ctx?.camera;
     return {
@@ -57,12 +57,12 @@ test('switching builtin model resets camera via load-align', async ({ page }) =>
   });
 
   await page.waitForFunction(() => {
-    const label = (window as any).__viewerStore?.get()?.hud?.modelLabel || '';
+    const label = (window as any).__viewerStore?.get()?.shell?.modelLabel || '';
     return String(label) === 'humanoid/humanoid';
   }, { timeout: 120_000 });
 
   await page.waitForFunction((prevTs) => {
-    const a = (window as any).__viewerStore?.get()?.runtime?.lastAlign;
+    const a = (window as any).__PLAY_HOST__?.getSnapshot?.()?.align;
     if (!a) return false;
     const ts = Number(a.timestamp) || 0;
     return a.source === 'load' && !!a.camera && ts > (Number(prevTs) || 0);
@@ -71,8 +71,8 @@ test('switching builtin model resets camera via load-align', async ({ page }) =>
   await page.waitForTimeout(200);
 
   const after = await page.evaluate(() => {
-    const store = (window as any).__viewerStore?.get?.();
-    const alignCam = store?.runtime?.lastAlign?.camera ?? null;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() || null;
+    const alignCam = snapshot?.align?.camera ?? null;
     const ctx = (window as any).__renderCtx;
     const cam = ctx?.camera;
     return {
@@ -97,4 +97,3 @@ test('switching builtin model resets camera via load-align', async ({ page }) =>
     Math.abs(Number(before.pos!.z) - Number(after.pos!.z));
   expect(moved).toBeGreaterThan(1e-2);
 });
-

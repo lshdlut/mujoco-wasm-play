@@ -97,6 +97,9 @@ function resolveRelativeImport(fromRel, spec) {
 
 function shouldSkipFile(relPath) {
   const p = toPosix(relPath);
+  // Tooling-only type facade; ownership is defined by the JS runtime modules,
+  // not by this editor-facing surface.
+  if (p === 'core/viewer_state_types.ts') return true;
   if (p.startsWith('node_modules/')) return true;
   if (p.startsWith('dist/')) return true;
   if (p.startsWith('local_tools/')) return true;

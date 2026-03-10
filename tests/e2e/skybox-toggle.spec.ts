@@ -5,9 +5,9 @@ const SKYBOX_TEST_ID = 'rendering.opengl_flags.Skybox';
 const VISUAL_SOURCE_TEST_ID = 'option.visual_source';
 
 function readSkyState() {
-  const store = (window as any).__viewerStore;
+  const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
   const ctx = (window as any).__renderCtx;
-  const state = store?.get?.();
+  const state = (window as any).__viewerStore?.get?.();
   const scene = ctx?.sceneWorld || ctx?.scene || null;
   const background = scene?.background;
   const backgroundType = !background
@@ -16,7 +16,7 @@ function readSkyState() {
     ? 'color'
     : (background.constructor && background.constructor.name) || 'other';
   return {
-    flag: !!state?.rendering?.sceneFlags?.[4],
+    flag: !!snapshot?.sceneFlags?.[4],
     skyVisible: !!ctx?.sky?.visible,
     hasEnv: !!scene?.environment,
     backgroundType,
@@ -26,8 +26,8 @@ function readSkyState() {
 
 function readSkyDebug() {
   const ctx = (window as any).__renderCtx;
-  const store = (window as any).__viewerStore;
-  const assets = store?.get?.()?.rendering?.assets;
+  const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+  const assets = snapshot?.renderAssets || null;
   const scene = ctx?.sceneWorld || ctx?.scene || null;
   const bg = scene?.background;
   const dbg = Array.isArray(ctx?._skyDebug) ? ctx._skyDebug : [];
@@ -129,7 +129,7 @@ test.skip('model skybox uses MuJoCo sky texture when available (requires local m
   await setSkyboxState(page, true);
 
   const assetSummary = await page.evaluate(() => {
-    const assets = (window as any).__viewerStore?.get?.()?.rendering?.assets || null;
+    const assets = (window as any).__PLAY_HOST__?.getSnapshot?.()?.renderAssets || null;
     const tex = assets?.textures;
     return {
       hasAssets: !!assets,
@@ -162,3 +162,4 @@ test.skip('model skybox uses MuJoCo sky texture when available (requires local m
     ['cube', 'texture'].includes(info.bgType);
   expect(hasTexture || skyOk).toBeTruthy();
 });
+

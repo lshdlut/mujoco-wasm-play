@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test('strict gate: six action sequences', async ({ page }) => {
   await page.goto('/index.html?model=simplest.xml&strict=1&compat=0');
-  await page.waitForFunction(() => window.__viewerControls && window.__viewerStore && window.__lastSnapshot);
+  await page.waitForFunction(() => window.__viewerControls && window.__viewerStore && window.__PLAY_HOST__?.getSnapshot?.());
 
   await page.evaluate(() => {
     if (typeof window.__PLAY_STRICT_CLEAR__ === 'function') {
@@ -14,7 +14,7 @@ test('strict gate: six action sequences', async ({ page }) => {
   await canvas.click({ position: { x: 10, y: 10 } });
 
   // 1) Load minimal model (initial URL already sets simplest.xml).
-  await page.waitForFunction(() => window.__lastSnapshot && typeof window.__lastSnapshot.ngeom === 'number');
+  await page.waitForFunction(() => window.__PLAY_HOST__?.getSnapshot?.() && typeof window.__PLAY_HOST__?.getSnapshot?.().ngeom === 'number');
 
   // 2) Run/pause/step.
   await page.keyboard.press('Space');
@@ -75,3 +75,4 @@ test('strict gate: six action sequences', async ({ page }) => {
   const fallbackCount = counts.filter((entry) => entry.kind === 'fallback').length;
   expect(fallbackCount).toBe(0);
 });
+

@@ -12,10 +12,11 @@ test('pthreads-Raj exposes real joint names (SharedArrayBuffer heap)', async ({ 
   await waitForViewerReady(page, url, { timeoutMs: 120_000 });
 
   const ok = await page.evaluate(() => {
-    const names = (window as any).__lastSnapshot?.jnt_names;
+    const names = (window as any).__PLAY_HOST__?.getSnapshot?.()?.jnt_names;
     if (!Array.isArray(names)) return false;
     return names.some((name) => typeof name === 'string' && name.length > 0 && !/^jnt\\s+\\d+$/.test(name));
   });
   expect(ok).toBeTruthy();
 });
+
 

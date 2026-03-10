@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { waitForViewerReady } from './test-utils';
+import { ensureSectionExpanded, waitForViewerReady } from './test-utils';
 
 const RAJ_MODEL = 'mujoco_Rajagopal2015_simple.xml';
 const FORGE_BASE = '/dist/3.4.0/';
 
 function readEqualitySnapshot() {
-  const snap = (window as any).__lastSnapshot;
+  const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
   if (!snap) return null;
   const eqType: any = snap.eq_type;
   const eqActive: any = snap.eq_active;
@@ -40,6 +40,7 @@ test('equality snapshot and UI plumbing for Rajagopal2015', async ({ page }) => 
     `&forgeBase=${encodeURIComponent(FORGE_BASE)}`;
 
   await waitForViewerReady(page, url);
+  await ensureSectionExpanded(page, 'equality');
 
   let eqSnap = await page.evaluate(readEqualitySnapshot);
 
@@ -66,3 +67,4 @@ test('equality snapshot and UI plumbing for Rajagopal2015', async ({ page }) => 
     return next?.eqActive?.[0] ?? null;
   }, { timeout: 10_000 }).not.toBe(before);
 });
+
