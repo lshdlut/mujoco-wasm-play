@@ -14,13 +14,10 @@ import {
   DEFAULT_VIEWER_STATE,
   createViewerStore,
 } from '../ui/state.mjs';
+import { createPanelStateManager } from '../ui/panel_state.mjs';
 import { applyGesture, applySpecAction, readControlValue } from '../ui/viewer_actions.mjs';
 import { prepareBindingUpdate } from '../ui/bindings.mjs';
-import {
-  installPanelSectionDblclickDelegation,
-  setPlaySectionCollapsed,
-  toggleAllPlaySections,
-} from '../ui/panel_sections.mjs';
+import { installPanelSectionDblclickDelegation } from '../ui/panel_sections.mjs';
 import { createControlManager } from '../ui/control_manager.mjs';
 import { createRendererManager } from '../renderer/pipeline.mjs';
 import { createCameraController, createPickingController } from '../renderer/controllers.mjs';
@@ -73,9 +70,6 @@ const snapshotSubscribers = new Set();
 const pluginDisposers = [];
 let pluginDisposeInstalled = false;
 
-installPanelSectionDblclickDelegation(leftPanel);
-installPanelSectionDblclickDelegation(rightPanel);
-
 function subscribeClock(set, fn) {
   if (typeof fn !== 'function') {
     return () => {};
@@ -122,6 +116,7 @@ const skyDebugModeParam = startupConfig.skyDebugMode || null;
 const backend = await createBackend({ model: requestedModel, prepareBindingUpdate });
 const getCurrentSnapshot = () => (typeof backend?.snapshot === 'function' ? backend.snapshot() : null);
 const store = createViewerStore({});
+const panelState = createPanelStateManager({ store, runtimeConfig });
 if (typeof window !== 'undefined') {
   window.__viewerStore = store;
   window.__PLAY_STRICT_REPORT__ = () => backend.getStrictReport();
@@ -175,6 +170,7 @@ const controlManager = createControlManager({
   readControlValue,
   leftPanel: leftPanelMount,
   rightPanel: rightPanelMount,
+  panelState,
   cameraPresets: CAMERA_PRESETS,
   getSnapshot: getCurrentSnapshot,
   onSnapshot: (snapshot) => applySnapshot(snapshot),
@@ -191,7 +187,7 @@ if (initialInfo && (initialInfo.label || initialInfo.file)) {
   });
 }
 
-const rightPanelRuntime = createRightPanelRuntime({ controlManager });
+const rightPanelRuntime = createRightPanelRuntime({ controlManager, store });
 uiRuntime = createUiRuntime({
   store,
   rendererManager,
@@ -233,7 +229,14 @@ store.subscribe((state) => {
 });
 
 const spec = await loadUiSpec();
+panelState.initializeFromSpec(spec);
 renderPanels(spec);
+installPanelSectionDblclickDelegation(leftPanel, {
+  onToggleAll: () => controlManager.toggleAllSections('left'),
+});
+installPanelSectionDblclickDelegation(rightPanel, {
+  onToggleAll: () => controlManager.toggleAllSections('right'),
+});
 scheduleUiUpdate(store.get());
 
 const cameraController = createCameraController({
@@ -286,13 +289,11 @@ if (typeof registerGlobalShortcut === 'function') {
 
   const togglePanelsWithTab = (event) => {
     event?.preventDefault?.();
-    store.update((draft) => {
-      if (event?.shiftKey) {
-        draft.panels.right = !draft.panels.right;
-      } else {
-        draft.panels.left = !draft.panels.left;
-      }
-    });
+    if (event?.shiftKey) {
+      panelState.togglePanelVisible('right');
+      return;
+    }
+    panelState.togglePanelVisible('left');
   };
 
   registerGlobalShortcut(['Tab'], togglePanelsWithTab);
@@ -487,9 +488,9 @@ function createUiApi() {
     const root = uiPanelRoot(p);
     return {
       root,
-      collapseAll: () => (root ? toggleAllPlaySections(root, { nextCollapsed: true }) : { changed: 0, collapsed: true }),
-      expandAll: () => (root ? toggleAllPlaySections(root, { nextCollapsed: false }) : { changed: 0, collapsed: false }),
-      toggleAll: () => (root ? toggleAllPlaySections(root) : { changed: 0, collapsed: null }),
+      collapseAll: () => controlManager.collapseAllSections(p),
+      expandAll: () => controlManager.expandAllSections(p),
+      toggleAll: () => controlManager.toggleAllSections(p),
     };
   };
 
@@ -565,7 +566,7 @@ function createUiApi() {
       }
     }
 
-    const { sectionEl, body } = controlManager.createSection({
+    const { sectionEl, body, dispose: disposeSection } = controlManager.createSection({
       container,
       panel,
       sectionId,
@@ -604,10 +605,10 @@ function createUiApi() {
       sectionId,
       sectionEl,
       body,
-      setCollapsed: (collapsed) => setPlaySectionCollapsed(sectionEl, !!collapsed, { panel }),
-      collapse: () => setPlaySectionCollapsed(sectionEl, true, { panel }),
-      expand: () => setPlaySectionCollapsed(sectionEl, false, { panel }),
-      toggle: () => setPlaySectionCollapsed(sectionEl, !sectionEl.classList.contains('is-collapsed'), { panel }),
+      setCollapsed: (collapsed) => controlManager.setSectionCollapsed(panel, sectionId, !!collapsed),
+      collapse: () => controlManager.setSectionCollapsed(panel, sectionId, true),
+      expand: () => controlManager.setSectionCollapsed(panel, sectionId, false),
+      toggle: () => controlManager.toggleSectionCollapsed(panel, sectionId),
       dispose: () => {
         try {
           const cleanup = renderCleanup;
@@ -621,7 +622,7 @@ function createUiApi() {
             }
           }
           uiSectionRegistry.delete(sectionId);
-          sectionEl.remove();
+          disposeSection?.();
         } catch (err) {
           logWarn('[ui] plugin section dispose failed', { sectionId, err });
           strictCatch(err, 'main:ui_plugin_section_dispose', { allow: true });

@@ -60,6 +60,11 @@ export interface PanelState {
   right: boolean;
 }
 
+export interface SectionCollapsedState {
+  left: Record<string, boolean>;
+  right: Record<string, boolean>;
+}
+
 export interface ShellState {
   modelLabel: string;
 }
@@ -108,6 +113,7 @@ export interface ViewerState {
   visualBackups: VisualCacheState;
   visualBaselines: VisualCacheState;
   panels: PanelState;
+  sectionsCollapsed: SectionCollapsedState;
   shell: ShellState;
   rendering: RenderingState;
   toast: ToastState | null;

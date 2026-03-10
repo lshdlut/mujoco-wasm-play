@@ -26,6 +26,11 @@ const EMPTY_RUNTIME_CONFIG = Object.freeze({
     themeColor: 0,
     spacing: 0,
     fontIndex: 2,
+    profileId: 'play',
+    builtInDefaultOpen: true,
+    panelDefaults: Object.freeze({ left: true, right: true }),
+    sectionDefaultOpen: Object.freeze({ left: Object.freeze({}), right: Object.freeze({}) }),
+    storageNamespace: 'play',
   }),
   timing: Object.freeze({
     uiUpdateIntervalMs: 33,

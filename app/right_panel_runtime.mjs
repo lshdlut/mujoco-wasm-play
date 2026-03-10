@@ -8,7 +8,10 @@ import {
   perfSample,
 } from '../core/viewer_runtime.mjs';
 
-export function createRightPanelRuntime({ controlManager }) {
+export function createRightPanelRuntime({ controlManager, store }) {
+  if (!store || typeof store.get !== 'function') {
+    throw new Error('createRightPanelRuntime: missing store');
+  }
   let visibleLastFrame = false;
   let lastCtrlRef = null;
   let lastActsRef = null;
@@ -40,10 +43,8 @@ export function createRightPanelRuntime({ controlManager }) {
   function syncDynamicSection(sectionId, panelVisible) {
     const state = dynamicSectionState[sectionId];
     if (!state) return false;
-    const expanded =
-      !!panelVisible &&
-      typeof controlManager?.isSectionExpanded === 'function' &&
-      !!controlManager.isSectionExpanded(sectionId);
+    const collapsed = store.get()?.sectionsCollapsed?.right?.[sectionId] === true;
+    const expanded = !!panelVisible && !collapsed;
     if (expanded && !state.expanded) {
       state.dirty = true;
     }

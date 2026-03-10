@@ -104,6 +104,43 @@
     return new URL(value, repoRootUrl).href;
   }
 
+  function normalisePanelDefaults(source) {
+    const input = source && typeof source === 'object' ? source : null;
+    return {
+      left: typeof input?.left === 'boolean' ? input.left : true,
+      right: typeof input?.right === 'boolean' ? input.right : true,
+    };
+  }
+
+  function normaliseSectionDefaultOpen(source) {
+    const target = { left: {}, right: {} };
+    if (!source || typeof source !== 'object') return target;
+    for (const panel of ['left', 'right']) {
+      const input = source[panel];
+      if (!input || typeof input !== 'object') continue;
+      for (const [sectionId, open] of Object.entries(input)) {
+        if (!sectionId || typeof open !== 'boolean') continue;
+        target[panel][sectionId] = open;
+      }
+    }
+    return target;
+  }
+
+  function normaliseProfileId(raw) {
+    const token = String(raw || '').trim().toLowerCase();
+    return token || 'play';
+  }
+
+  function normaliseBooleanOverride(raw, fallback) {
+    if (typeof raw === 'boolean') return raw;
+    if (typeof raw === 'number') return raw !== 0;
+    const token = String(raw ?? '').trim().toLowerCase();
+    if (!token) return fallback;
+    if (BOOL_TRUE.has(token)) return true;
+    if (BOOL_FALSE.has(token)) return false;
+    return fallback;
+  }
+
   function collectPlugins() {
     const entries = [];
     if (Array.isArray(globalThis.PLAY_PLUGINS)) {
@@ -136,6 +173,13 @@
       : 0;
   const font = resolveFontPreset(getRaw('font'));
   const embedMode = readTruthy('embed');
+  const profileId = normaliseProfileId(globalThis.PLAY_UI_PROFILE);
+  const storageNamespace =
+    String(globalThis.PLAY_UI_STORAGE_NAMESPACE || profileId || 'play').trim()
+    || profileId;
+  const builtInDefaultOpen = normaliseBooleanOverride(globalThis.PLAY_UI_BUILTIN_DEFAULT_OPEN, true);
+  const panelDefaults = normalisePanelDefaults(globalThis.PLAY_UI_PANEL_DEFAULTS);
+  const sectionDefaultOpen = normaliseSectionDefaultOpen(globalThis.PLAY_UI_SECTION_DEFAULT_OPEN);
   const hideAllGeometryDefault = readTruthy(['nogeom', 'no_geom', 'no-geom', 'hideall', 'hide_all']);
   const forceBasic = readTruthy('forceBasic');
 
@@ -225,6 +269,11 @@
       themeColor,
       spacing,
       fontIndex: font.index,
+      profileId,
+      builtInDefaultOpen,
+      panelDefaults,
+      sectionDefaultOpen,
+      storageNamespace,
     },
     timing: {
       uiUpdateIntervalMs,

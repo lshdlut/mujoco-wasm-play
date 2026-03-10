@@ -2,7 +2,7 @@
 
 import { logWarn, strictCatch, withCacheBust } from '../core/viewer_runtime.mjs';
 import { getControlBindingSpec, toBoolean } from './bindings.mjs';
-import { readPersistedSectionCollapsed, resolvePlayPanelId, setPlaySectionCollapsed } from './panel_sections.mjs';
+import { resolvePlayPanelId, setPlaySectionCollapsed } from './panel_sections.mjs';
 import { createFileSectionManager } from './file_section.mjs';
 import { createControlWidgetsRuntime } from './control_widgets.mjs';
 
@@ -15,13 +15,21 @@ function createControlManager({
   readControlValue,
   leftPanel,
   rightPanel,
+  panelState,
   cameraPresets = [],
   shortcutRoot = null,
   getSnapshot = null,
   onSnapshot = null,
 }) {
+  if (!panelState || typeof panelState.ensureSection !== 'function') {
+    throw new Error('createControlManager: missing panelState');
+  }
   const controlById = new Map();
   const controlBindings = new Map();
+  const sectionRegistry = {
+    left: new Map(),
+    right: new Map(),
+  };
   const eventCleanup = [];
   const currentSnapshot = () => (typeof getSnapshot === 'function' ? getSnapshot() : null);
   const applyControlSpecAction = (control, value) => applySpecAction(store, backend, control, value, onSnapshot, currentSnapshot);
@@ -355,9 +363,56 @@ function shortcutFromEvent(event) {
     return widgetRuntime.renderWidget(container, control);
   }
 
+  function syncSectionDom(panel, sectionId, defaultOpen = true, options = null) {
+    const sectionEl = sectionRegistry[panel]?.get(sectionId) || null;
+    if (!sectionEl) return null;
+    const collapsed = panelState.resolveSectionCollapsed(panel, sectionId, defaultOpen, options);
+    setPlaySectionCollapsed(sectionEl, collapsed);
+    return collapsed;
+  }
+
+  function syncPanelSections(panel) {
+    const registry = sectionRegistry[panel];
+    if (!registry) return;
+    for (const [sectionId, meta] of registry.entries()) {
+      syncSectionDom(panel, sectionId, meta.defaultOpen, meta.options);
+    }
+  }
+
+  function setSectionCollapsed(panel, sectionId, collapsed) {
+    const registry = sectionRegistry[panel];
+    const meta = registry?.get(sectionId) || null;
+    const defaultOpen = meta?.defaultOpen ?? true;
+    const options = meta?.options || null;
+    const next = panelState.setSectionCollapsed(panel, sectionId, collapsed);
+    const sectionEl = meta?.element || null;
+    if (sectionEl) setPlaySectionCollapsed(sectionEl, next);
+    else syncSectionDom(panel, sectionId, defaultOpen, options);
+    return next;
+  }
+
+  function toggleSectionCollapsed(panel, sectionId) {
+    const registry = sectionRegistry[panel];
+    const meta = registry?.get(sectionId) || null;
+    const defaultOpen = meta?.defaultOpen ?? true;
+    const options = meta?.options || null;
+    const next = panelState.toggleSectionCollapsed(panel, sectionId, defaultOpen, options);
+    const sectionEl = meta?.element || null;
+    if (sectionEl) setPlaySectionCollapsed(sectionEl, next);
+    else syncSectionDom(panel, sectionId, defaultOpen, options);
+    return next;
+  }
+
+  function setAllSectionsCollapsed(panel, nextCollapsed = null) {
+    const registry = sectionRegistry[panel];
+    const ids = registry ? Array.from(registry.keys()) : [];
+    const result = panelState.setAllSectionsCollapsed(panel, ids, nextCollapsed);
+    syncPanelSections(panel);
+    return result;
+  }
+
   function renderSection(container, section, options = null) {
     const panel = options?.panel ?? null;
-    const persist = options?.persist !== false;
     const sectionEl = document.createElement('section');
     sectionEl.className = 'ui-section';
     sectionEl.dataset.sectionId = section.section_id;
@@ -399,27 +454,21 @@ function shortcutFromEvent(event) {
       (panel === 'left' || panel === 'right')
         ? panel
         : resolvePlayPanelId(container);
+    if (resolvedPanel !== 'left' && resolvedPanel !== 'right') {
+      throw new Error(`renderSection: invalid panel for section "${section.section_id}"`);
+    }
+    const defaultOpen = typeof section?.default_open === 'boolean' ? section.default_open : true;
+    const isPluginSection = String(section?.section_id || '').startsWith('plugin:');
+    const sectionOptions = { builtIn: !isPluginSection };
+    const initialCollapsed = panelState.ensureSection(resolvedPanel, section.section_id, defaultOpen, sectionOptions);
+    setPlaySectionCollapsed(sectionEl, initialCollapsed);
+    sectionRegistry[resolvedPanel].set(section.section_id, {
+      element: sectionEl,
+      defaultOpen,
+      options: sectionOptions,
+    });
 
-    const setCollapsed = (collapsed, { persistState = true, flush = false } = {}) => {
-      setPlaySectionCollapsed(sectionEl, collapsed, {
-        panel: resolvedPanel,
-        persist: persistState && persist,
-        flush,
-      });
-    };
-
-    const persistedCollapsed = resolvedPanel ? readPersistedSectionCollapsed(resolvedPanel, section.section_id) : null;
-    const defaultOpen = typeof section?.default_open === 'boolean' ? section.default_open : null;
-    const initialCollapsed =
-      typeof persistedCollapsed === 'boolean'
-        ? persistedCollapsed
-        : (typeof defaultOpen === 'boolean' ? !defaultOpen : false);
-    setCollapsed(initialCollapsed, { persistState: false, flush: false });
-
-    const toggleCollapsed = () => {
-      const next = !sectionEl.classList.contains('is-collapsed');
-      setCollapsed(next);
-    };
+    const toggleCollapsed = () => toggleSectionCollapsed(resolvedPanel, section.section_id);
 
     if (section?.shortcut) {
       registerShortcutHandlers(section.shortcut, (event) => {
@@ -494,6 +543,8 @@ function shortcutFromEvent(event) {
     controlById.clear();
     controlBindings.clear();
     shortcutHandlers.clear();
+    sectionRegistry.left.clear();
+    sectionRegistry.right.clear();
     leftPanel.innerHTML = '';
     rightPanel.innerHTML = '';
     for (const section of spec.left) {
@@ -508,6 +559,8 @@ function shortcutFromEvent(event) {
     for (const section of spec.right) {
       renderSection(rightPanel, section, { panel: 'right' });
     }
+    syncPanelSections('left');
+    syncPanelSections('right');
     installShortcuts();
   }
 
@@ -614,6 +667,8 @@ function shortcutFromEvent(event) {
     }
     controlById.clear();
     controlBindings.clear();
+    sectionRegistry.left.clear();
+    sectionRegistry.right.clear();
     shortcutHandlers.clear();
     shortcutsInstalled = false;
   }
@@ -649,8 +704,20 @@ function shortcutFromEvent(event) {
         sectionEl?.querySelector?.('[data-play-role="section-body"]')
         || sectionEl?.querySelector?.('.section-body')
         || null;
-      return { sectionEl, body };
+      return {
+        sectionEl,
+        body,
+        dispose: () => {
+          sectionRegistry[panel]?.delete(sid);
+          sectionEl?.remove?.();
+        },
+      };
     },
+    collapseAllSections: (panel) => setAllSectionsCollapsed(panel, true),
+    expandAllSections: (panel) => setAllSectionsCollapsed(panel, false),
+    toggleAllSections: (panel) => setAllSectionsCollapsed(panel, null),
+    setSectionCollapsed,
+    toggleSectionCollapsed,
     ensureActuatorSliders: (actuators, ctrlValues = []) => {
       widgetRuntime.ensureActuatorSliders(actuators, ctrlValues);
     },
@@ -659,12 +726,6 @@ function shortcutFromEvent(event) {
     },
     ensureEqualityToggles: (eqs = []) => {
       widgetRuntime.ensureEqualityToggles(eqs);
-    },
-    isSectionExpanded: (sectionId) => {
-      if (!rightPanel) return false;
-      const sectionEl = rightPanel.querySelector(`[data-section-id="${sectionId}"]`);
-      if (!sectionEl) return false;
-      return !sectionEl.classList.contains('is-collapsed');
     },
     dispose,
   };

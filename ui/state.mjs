@@ -72,6 +72,10 @@ export const DEFAULT_VIEWER_STATE = Object.freeze({
     left: true,
     right: true,
   },
+  sectionsCollapsed: {
+    left: {},
+    right: {},
+  },
   shell: {
     modelLabel: '',
   },
@@ -129,12 +133,19 @@ function applyRuntimeConfigState(target, runtimeConfig) {
   const ui = config.ui && typeof config.ui === 'object' ? config.ui : null;
   const rendering = config.rendering && typeof config.rendering === 'object' ? config.rendering : null;
   if (ui) {
+    const panelDefaults = ui.panelDefaults && typeof ui.panelDefaults === 'object' ? ui.panelDefaults : null;
     target.theme = {
       ...target.theme,
       color: Number.isFinite(ui.themeColor) ? (ui.themeColor | 0) : target.theme.color,
       spacing: Number.isFinite(ui.spacing) ? (ui.spacing | 0) : target.theme.spacing,
       font: getFontPresetByIndex(ui.fontIndex).index,
     };
+    if (panelDefaults) {
+      target.panels = {
+        left: typeof panelDefaults.left === 'boolean' ? panelDefaults.left : target.panels.left,
+        right: typeof panelDefaults.right === 'boolean' ? panelDefaults.right : target.panels.right,
+      };
+    }
   }
   if (rendering) {
     target.rendering = {
@@ -173,7 +184,15 @@ function createRuntimeViewerState() {
 
 export function resetModelFrontendState(store) {
   if (!store || typeof store.replace !== 'function') return;
-  store.replace(createRuntimeViewerState());
+  const next = createRuntimeViewerState();
+  const current = typeof store.get === 'function' ? store.get() : null;
+  if (current?.panels && typeof current.panels === 'object') {
+    next.panels = cloneStruct(current.panels);
+  }
+  if (current?.sectionsCollapsed && typeof current.sectionsCollapsed === 'object') {
+    next.sectionsCollapsed = cloneStruct(current.sectionsCollapsed);
+  }
+  store.replace(next);
 }
 
 export function syncRuntimeConfigFromViewerState(state) {

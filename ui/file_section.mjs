@@ -72,7 +72,7 @@ export function createFileSectionManager({
         modelSelectEl.value = entry.id;
       }
       const label = entry.label || entry.file || entry.id || '';
-      if (label) {
+      if (select && label) {
         store.update((draft) => {
           if (!draft.shell) draft.shell = {};
           draft.shell.modelLabel = label;
