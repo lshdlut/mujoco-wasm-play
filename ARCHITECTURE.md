@@ -92,7 +92,8 @@ Responsibilities:
 - Delegates UI tick scheduling, overlay updates, panel layout updates, and
   toast/info overlay refresh to `app/ui_runtime.mjs`
 - Delegates right-panel snapshot-driven controls to
-  `app/right_panel_runtime.mjs`
+  `app/right_panel_runtime.mjs`, which now reads section expansion from the
+  store-backed panel state instead of DOM visibility
 - Exposes the public/debug host surfaces
 - Drives model load and plugin boot
 
@@ -163,6 +164,7 @@ Current caveat:
 State:
 
 - `ui/state.mjs`
+- `ui/panel_state.mjs`
 - `ui/viewer_actions.mjs`
 
 DOM control layer:
@@ -176,11 +178,15 @@ DOM control layer:
 Responsibilities:
 
 - Defines the viewer store and state transitions
+- Owns panel visibility, section collapsed state defaults, app-scoped
+  persistence, and section-state initialization in `ui/panel_state.mjs`
 - Owns control-driven viewer actions and visual-source switching in
   `ui/viewer_actions.mjs`
 - Keeps `ui/control_manager.mjs` as the top-level panel/control orchestrator
 - Keeps `ui/control_widgets.mjs` as the coarse widget-rendering and local
   widget-behavior module
+- Keeps right-panel dynamic section invalidation driven by store-backed panel
+  state, not DOM visibility queries
 - Keeps widget-local helper ownership inside `ui/control_widgets.mjs`; the
   factory boundary is intentionally capped to a small injected surface and must
   not grow back into a helper-threading sink
@@ -196,6 +202,7 @@ Responsibilities:
 Ownership:
 
 - Viewer state owner: `ui/state.mjs`
+- Panel/section UI state owner: `ui/panel_state.mjs`
 - Viewer action owner: `ui/viewer_actions.mjs`
 - Sticky UI-facing runtime config sync owner: `ui/state.mjs`
 
@@ -263,6 +270,7 @@ Rule:
 | Runtime config buffer (`__PLAY_RUNTIME_CONFIG__`) | `app/entry_bootstrap.js` + `core/runtime_config.mjs` | Persists for the page lifetime |
 | Latest backend snapshot | `backend/backend_core.mjs` | Reinitialized on worker restart, then refilled from worker |
 | Viewer store state (UI/shell only) | `ui/state.mjs` | Rebuilt from runtime-derived baseline on model switch / reload |
+| Panel visibility + section collapsed state | `ui/panel_state.mjs` + `ui/state.mjs` | Rebuilt from app profile defaults, then overridden by app-scoped persisted UI state |
 | DOM shell state (`theme`, `font`, `embed`, layout classes) | bootstrap + `core/runtime_config.mjs` + `app/main.mjs` + `ui/control_manager.mjs` | Reapplied from runtime config / store |
 | MuJoCo sim state | `worker/physics.worker.mjs` | Recreated on worker restart / reload |
 
@@ -302,6 +310,11 @@ Consumer rules:
 - renderer, overlays, dynamic control panels, and plugin clocks must consume the
   published backend snapshot
 - shell/layout/theme/font/panel state must consume the viewer store
+- section collapse defaults and persistence must enter through `ui/panel_state.mjs`,
+  not direct `localStorage` reads in control rendering
+- app-specific panel behavior must be expressed through generic UI profile
+  inputs (`profileId`, `storageNamespace`, built-in default policy, section
+  overrides), not hard-coded downstream names inside Play
 - sticky preferences must be restored from runtime config, not from store-backed
   backend mirrors
 

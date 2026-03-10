@@ -157,16 +157,22 @@ Current shape:
 
 - `ui/state.mjs` owns store state, snapshot merge, actions, and runtime-aware
   reset behavior
+- `ui/panel_state.mjs` now owns panel visibility, section collapsed state
+  defaults, app-scoped persistence, and section initialization policy
 - `ui/viewer_actions.mjs` now owns binding readers/appliers, spec actions,
   gestures, and visual-source switching
 - `ui/control_widgets.mjs` now owns the coarse widget-rendering and local
   widget-behavior layer
 - `ui/control_manager.mjs` owns panel DOM rendering, some shell styling side
   effects, and binding-driven widget behavior
+- `app/right_panel_runtime.mjs` now derives dynamic section visibility from the
+  store-backed panel state rather than asking the DOM for section expansion
 
 What is good:
 
 - Viewer-state reset now has a single explicit baseline source
+- Panel visibility and section collapsed state now have a single app-scoped
+  owner instead of being split across store, DOM, and shared localStorage keys
 - Runtime sticky replay no longer rides on the general store subscription path
 - Dynamic controls and renderer consumers now read backend-owned values from
   snapshot selectors instead of store mirrors
@@ -188,6 +194,7 @@ Current deviation from the ideal:
 Evidence:
 
 - `ui/state.mjs`
+- `ui/panel_state.mjs`
 - `ui/viewer_actions.mjs`
 - `ui/control_manager.mjs`
 - `ui/control_widgets.mjs`
@@ -276,6 +283,11 @@ Recommended next action:
   mental model
 - Reload semantics are now better than before, but are still encoded across
   `app/main.mjs`, `backend/backend_core.mjs`, and `ui/state.mjs`
+- UI panel/section state is now centralized, but app profiles and plugin
+  section fallbacks still rely on a documented contract rather than a stronger
+  schema guard
+- Downstream-specific names must not leak into Play runtime logic; UI profiles
+  should stay generic and data-driven
 - Visual-source switching still carries compatibility-style local caches inside
   store state even though published snapshot data is the formal renderer truth
 
