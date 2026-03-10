@@ -1,4 +1,4 @@
-import { getRuntimeConfig, getRuntimeParamSource } from './runtime_config.mjs';
+import { getRuntimeConfig } from './runtime_config.mjs';
 
 const LOG_BOOL_TRUE = new Set(['1', 'true', 'yes', 'on', 'debug']);
 let cachedVerbose = null;
@@ -230,19 +230,43 @@ if (typeof globalThis !== 'undefined' && isPerfEnabled()) {
   }
 }
 
-const viewerSearchParams = getRuntimeParamSource();
-
 const PARAM_BOOL_TRUE = new Set(['1', 'true', 'yes', 'on']);
 const PARAM_BOOL_FALSE = new Set(['0', 'false', 'no', 'off']);
 
 const normaliseKey = (key) => String(key ?? '').trim();
 
-export function getParamToken(key, params = viewerSearchParams) {
+function isParamSource(value) {
+  return !!value && typeof value.get === 'function';
+}
+
+function resolveDefaultInputSource() {
+  if (typeof document === 'undefined' && typeof location !== 'undefined' && location?.href) {
+    try {
+      return new URL(location.href).searchParams;
+    } catch (err) {
+      strictCatch(err, 'runtime:worker_default_params', { allow: true });
+    }
+  }
+  return getRuntimeConfig();
+}
+
+function readStartupField(source, key, fallback = null) {
+  if (isParamSource(source)) return fallback;
+  const config = source && typeof source === 'object' ? source : getRuntimeConfig();
+  const startup = config.startup && typeof config.startup === 'object' ? config.startup : null;
+  return startup && Object.prototype.hasOwnProperty.call(startup, key)
+    ? startup[key]
+    : fallback;
+}
+
+export function getParamToken(key, params = resolveDefaultInputSource()) {
+  if (!isParamSource(params)) return '';
   const raw = params.get(normaliseKey(key));
   return (raw ?? '').trim().toLowerCase();
 }
 
-export function readBoolean(keys, params = viewerSearchParams) {
+export function readBoolean(keys, params = resolveDefaultInputSource()) {
+  if (!isParamSource(params)) return null;
   const list = Array.isArray(keys) ? keys : [keys];
   for (const key of list) {
     const token = getParamToken(key, params);
@@ -253,11 +277,12 @@ export function readBoolean(keys, params = viewerSearchParams) {
   return null;
 }
 
-export function readTruthyFlag(keys, params = viewerSearchParams) {
+export function readTruthyFlag(keys, params = resolveDefaultInputSource()) {
   return readBoolean(keys, params) === true;
 }
 
-export function readListParam(name, params = viewerSearchParams) {
+export function readListParam(name, params = resolveDefaultInputSource()) {
+  if (!isParamSource(params)) return [];
   const raw = getParamToken(name, params);
   if (!raw) return [];
   return raw
@@ -266,14 +291,15 @@ export function readListParam(name, params = viewerSearchParams) {
     .filter(Boolean);
 }
 
-export function readIndexSet(name, params = viewerSearchParams) {
+export function readIndexSet(name, params = resolveDefaultInputSource()) {
   const values = readListParam(name, params)
     .map((token) => Number.parseInt(token, 10))
     .filter((n) => Number.isFinite(n) && n >= 0);
   return new Set(values);
 }
 
-export function readNumericParam(name, defaultValue, options = {}, params = viewerSearchParams) {
+export function readNumericParam(name, defaultValue, options = {}, params = resolveDefaultInputSource()) {
+  if (!isParamSource(params)) return defaultValue;
   const raw = params.get(normaliseKey(name));
   if (raw == null || raw === '') return defaultValue;
   const parseFn =
@@ -288,62 +314,48 @@ export function readNumericParam(name, defaultValue, options = {}, params = view
   return result;
 }
 
-export function consumeViewerParams(params = viewerSearchParams) {
-  const fallbackModeParam = (params.get('fallback') || 'auto').toLowerCase();
-
-  return {
-    fallbackModeParam,
-    debugMode: readBoolean('debug', params) === true,
-    hideAllGeometryDefault: readTruthyFlag(
-      ['nogeom', 'no_geom', 'no-geom', 'hideall', 'hide_all'],
-      params
-    ),
-    hiddenTypeTokens: readListParam('hide', params),
-    dumpToken: getParamToken('dump', params),
-    findToken: getParamToken('find', params),
-    hideBigParam: readTruthyFlag(['hide_big', 'hidebig'], params),
-    bigN: readNumericParam(
-      'big_n',
-      8,
-      { parser: (value) => Number.parseInt(value, 10), min: 1, max: 64 },
-      params
-    ),
-    bigFactorRaw: readNumericParam('big_factor', 8, {}, params),
-    hiddenIndexSet: readIndexSet('hide_index', params),
-    skyOverride: readBoolean(['nosky', 'sky_off'], params),
-    requestedModel: params.get('model'),
-    skyDebugModeParam: getParamToken('skydebug', params) || null,
-  };
-}
-
-export { viewerSearchParams };
-
 const CACHE_BUST_KEY = 'cacheBust';
 const CACHE_BUST_ALWAYS_TOKENS = new Set(['1', 'true', 'yes', 'on', 'always']);
 const CACHE_BUST_NONE_TOKENS = new Set(['0', 'false', 'no', 'off', 'none']);
 
-export function resolveCacheBustMode(params = viewerSearchParams) {
-  const token = getParamToken(CACHE_BUST_KEY, params);
+function readRuntimeToken(source, key) {
+  if (isParamSource(source)) {
+    const raw = source.get(normaliseKey(key));
+    return (raw ?? '').trim().toLowerCase();
+  }
+  const value = readStartupField(source, key, '');
+  return String(value ?? '').trim().toLowerCase();
+}
+
+export function resolveCacheBustMode(source = resolveDefaultInputSource()) {
+  const token = isParamSource(source)
+    ? getParamToken(CACHE_BUST_KEY, source)
+    : readRuntimeToken(source, 'cacheBustMode');
   if (!token) return 'none';
   if (CACHE_BUST_ALWAYS_TOKENS.has(token)) return 'always';
   if (CACHE_BUST_NONE_TOKENS.has(token)) return 'none';
   return 'none';
 }
 
-export function isCacheBustAlways(params = viewerSearchParams) {
-  return resolveCacheBustMode(params) === 'always';
+export function isCacheBustAlways(source = resolveDefaultInputSource()) {
+  return resolveCacheBustMode(source) === 'always';
 }
 
-export function resolveVer(params = viewerSearchParams, { playVer = '' } = {}) {
-  const urlVer = typeof params?.get === 'function' ? String(params.get('ver') || '').trim() : '';
-  const token = urlVer || String(playVer || '').trim();
+export function resolveVer(source = resolveDefaultInputSource(), { playVer = '' } = {}) {
+  const fromParam = isParamSource(source) ? String(source.get('ver') || '').trim() : '';
+  const fromConfig = !isParamSource(source) ? String(readStartupField(source, 'ver', '') || '').trim() : '';
+  const token = fromParam || fromConfig || String(playVer || '').trim();
   if (token) return token;
   throw new Error('Missing MuJoCo version: set globalThis.PLAY_VER (via site_config.js) or pass ver=... in the URL.');
 }
 
-export function resolveForgeBaseTemplate(params = viewerSearchParams, { forgeDistBaseOverride = '' } = {}) {
-  const fromUrl = typeof params?.get === 'function' ? String(params.get('forgeBase') || '').trim() : '';
+export function resolveForgeBaseTemplate(source = resolveDefaultInputSource(), { forgeDistBaseOverride = '' } = {}) {
+  const fromUrl = isParamSource(source) ? String(source.get('forgeBase') || '').trim() : '';
   if (fromUrl) return fromUrl;
+  const fromConfig = !isParamSource(source)
+    ? String(readStartupField(source, 'forgeBaseTemplate', '') || '').trim()
+    : '';
+  if (fromConfig) return fromConfig;
   const fromGlobal = String(forgeDistBaseOverride || '').trim();
   if (fromGlobal) return fromGlobal;
   return '/forge/dist/{ver}/';
@@ -357,9 +369,9 @@ export function applyVerTemplate(template, ver) {
   return raw.replaceAll('{ver}', v);
 }
 
-export function resolveForgeBase(params = viewerSearchParams, options = {}) {
-  const ver = resolveVer(params, options);
-  const template = resolveForgeBaseTemplate(params, options);
+export function resolveForgeBase(source = resolveDefaultInputSource(), options = {}) {
+  const ver = resolveVer(source, options);
+  const template = resolveForgeBaseTemplate(source, options);
   const expanded = applyVerTemplate(template, ver);
   return expanded.endsWith('/') ? expanded : `${expanded}/`;
 }
@@ -376,26 +388,31 @@ export function withCacheBust(u, mode = resolveCacheBustMode()) {
   }
 }
 
-export function buildWorkerUrl(baseUrl, params = viewerSearchParams) {
+export function buildWorkerUrl(baseUrl, source = resolveDefaultInputSource()) {
   const url = baseUrl instanceof URL
     ? new URL(baseUrl.href)
     : new URL(String(baseUrl), typeof location !== 'undefined' ? location.href : 'http://localhost');
-  const cacheBustMode = resolveCacheBustMode(params);
-  const ver = resolveVer(params);
-  const forgeBase = resolveForgeBase(params, { playVer: ver });
+  const cacheBustMode = resolveCacheBustMode(source);
+  const ver = resolveVer(source);
+  const forgeBase = resolveForgeBase(source, { playVer: ver });
   url.searchParams.set('ver', ver);
   url.searchParams.set('forgeBase', forgeBase);
   if (cacheBustMode === 'always') {
     url.searchParams.set(CACHE_BUST_KEY, 'always');
     url.searchParams.set('cb', String(Date.now()));
   }
-  const strictMode = isStrictEnabled(params);
+  const strictMode = isStrictEnabled(source);
   if (strictMode) url.searchParams.set('strict', '1');
-  const compatMode = isCompatEnabled(params);
+  const compatMode = isCompatEnabled(source);
   if (compatMode) url.searchParams.set('compat', '1');
-  const logToken = params.get('log');
+  const logToken = isParamSource(source)
+    ? String(source.get('log') || '').trim()
+    : String(readStartupField(source, 'logToken', '') || '').trim();
   if (logToken) url.searchParams.set('log', logToken);
-  const verboseToken = params.get('verbose');
+  const config = !isParamSource(source) && source && typeof source === 'object' ? source : getRuntimeConfig();
+  const verboseToken = isParamSource(source)
+    ? String(source.get('verbose') || '').trim()
+    : (config.verboseDebug ? '1' : '');
   if (verboseToken) url.searchParams.set('verbose', verboseToken);
   return url;
 }
@@ -410,7 +427,7 @@ export function getForgeDistBase(ver) {
   if (!v) {
     throw new Error('getForgeDistBase(ver) requires a non-empty version.');
   }
-  const template = resolveForgeBaseTemplate();
+  const template = resolveForgeBaseTemplate(resolveDefaultInputSource());
   const expanded = applyVerTemplate(template, v);
   return expanded.endsWith('/') ? expanded : `${expanded}/`;
 }
@@ -442,20 +459,22 @@ export function withCacheTag(u, vTag) {
 const STRICT_STATE_KEY = '__PLAY_STRICT_STATE';
 const STRICT_CATCH_ALLOWLIST = new Set([]);
 
-function resolveStrictFlag(params = viewerSearchParams) {
-  return readBoolean('strict', params) === true;
+function resolveStrictFlag(source = resolveDefaultInputSource()) {
+  if (isParamSource(source)) return readBoolean('strict', source) === true;
+  return !!readStartupField(source, 'strict', false);
 }
 
-export function isStrictEnabled(params = viewerSearchParams) {
-  return resolveStrictFlag(params);
+export function isStrictEnabled(source = resolveDefaultInputSource()) {
+  return resolveStrictFlag(source);
 }
 
-function resolveCompatFlag(params = viewerSearchParams) {
-  return readBoolean('compat', params) === true;
+function resolveCompatFlag(source = resolveDefaultInputSource()) {
+  if (isParamSource(source)) return readBoolean('compat', source) === true;
+  return !!readStartupField(source, 'compat', false);
 }
 
-export function isCompatEnabled(params = viewerSearchParams) {
-  return resolveCompatFlag(params);
+export function isCompatEnabled(source = resolveDefaultInputSource()) {
+  return resolveCompatFlag(source);
 }
 
 function ensureStrictState() {

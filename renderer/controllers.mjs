@@ -1,8 +1,9 @@
 // Renderer controllers (camera + picking).
 
 import * as THREE from 'three';
-import { consumeViewerParams, isPerfEnabled, isStrictEnabled, perfMarkOnce, perfNow, perfSample, logDebug, logWarn, logStatus, logError, strictCatch, strictEnsure, strictOverride } from '../core/viewer_runtime.mjs';
+import { isPerfEnabled, isStrictEnabled, perfMarkOnce, perfNow, perfSample, logDebug, logWarn, logStatus, logError, strictCatch, strictEnsure, strictOverride } from '../core/viewer_runtime.mjs';
 import { compatFallback } from '../core/fallbacks.mjs';
+import { getSnapshotBodyJointAdr, getSnapshotBodyJointNum, getSnapshotGeoms, getSnapshotGeomBodyIds, getSnapshotJointTypes, getSnapshotSelection } from '../core/snapshot_selectors.mjs';
 import { pushSkyDebug } from '../environment/environment.mjs';
 import { buildViewerCameraPayload, normalizeDeltaByViewportHeight, resolveTrackingBodyId } from './pipeline.mjs';
 import { geomNameFromLookup, getOrCreateGeomNameLookup } from './geom_names.mjs';
@@ -15,6 +16,7 @@ function createCameraController({
   onGesture,
   renderCtx,
   debugMode = false,
+  getSnapshot = null,
   useWasmCamera = false,
   globalUp = new THREE_NS.Vector3(0, 0, 1),
   // new options (high‑leverage changes)
@@ -119,8 +121,9 @@ function createCameraController({
   function buildCameraPayloadIfNeeded() {
     if (!useWasmCamera || !renderCtx) return null;
     const state = typeof store?.get === 'function' ? store.get() : null;
+    const snapshot = typeof getSnapshot === 'function' ? getSnapshot() : null;
     const mode = Number(state?.runtime?.cameraIndex ?? 0) | 0;
-    const trackingBodyId = mode === 1 ? resolveTrackingBodyId(state) : null;
+    const trackingBodyId = mode === 1 ? resolveTrackingBodyId(snapshot, state) : null;
     const trackingChanged =
       mode === 1 && Number.isFinite(trackingBodyId) && trackingBodyId !== renderCtx.viewerCameraTrackId;
     const needsSync = trackingChanged || !renderCtx.viewerCameraSynced;
@@ -133,7 +136,7 @@ function createCameraController({
     const syncInFlight = seqSent > 0 && seqAck < seqSent;
     if (syncInFlight && !trackingChanged) return null;
 
-    const cam = buildViewerCameraPayload(renderCtx, state, tempVecE);
+    const cam = buildViewerCameraPayload(renderCtx, snapshot, state, tempVecE);
     if (!cam) return null;
     const camSyncSeq = seqSent + 1;
     renderCtx.viewerCameraSyncSeqSent = camSyncSeq;
@@ -482,12 +485,27 @@ function createPickingController({
   const tempVecLocal = new THREE_NS.Vector3();
 
   function hasSelection() {
-    const sel = store.get()?.runtime?.selection;
+    const sel = currentSelection();
     return !!sel && Number.isInteger(sel.body) && sel.body > 0;
   }
 
   function currentSelection() {
-    return store.get()?.runtime?.selection || null;
+    const snapshot = typeof getSnapshot === 'function' ? getSnapshot() : null;
+    const sel = getSnapshotSelection(snapshot);
+    if (!sel || typeof sel !== 'object') return null;
+    const geom = Number(sel.geomId) | 0;
+    const body = Number(sel.bodyId) | 0;
+    const point = Array.isArray(sel.point) ? sel.point.slice(0, 3).map((n) => Number(n) || 0) : [0, 0, 0];
+    const anchorLocal = Array.isArray(sel.localpos) ? sel.localpos.slice(0, 3).map((n) => Number(n) || 0) : null;
+    return {
+      geom,
+      body,
+      name: geom >= 0 ? geomNameFor(geom) : (body >= 0 ? `Body ${body}` : ''),
+      point,
+      anchorLocal,
+      seq: Number(sel.seq) || 0,
+      timestamp: Number(sel.timestamp) || 0,
+    };
   }
 
   function selectionSeq(nextSeq) {
@@ -497,15 +515,14 @@ function createPickingController({
   function clearSelection({ toast = false } = {}) {
     const ts = Date.now();
     store.update((draft) => {
-      const runtime = draft.runtime || (draft.runtime = {});
-      runtime.selection = { ...defaultSelection(), seq: 0, timestamp: ts };
-      runtime.lastAction = 'select-none';
+      if (!draft.runtime) draft.runtime = { ...(draft.runtime || {}) };
+      draft.runtime.lastAction = 'select-none';
       if (toast) {
         draft.toast = { message: 'Selection cleared', ts };
       }
     });
     dragState.bodyId = -1;
-    backend.setSelection?.({ bodyId: 0 });
+    backend.setSelection?.({ bodyId: 0, seq: 0, timestamp: ts });
   }
 
   function showToast(message) {
@@ -521,34 +538,24 @@ function createPickingController({
     const ts = Date.now();
     let anchor = null;
     dragState.bodyId = -1;
+    const nextSeq = (Number(currentSelection()?.seq) || 0) + 1;
     if (pick.bodyId > 0 && setAnchorLocalFromWorld(pick.bodyId, pick.worldPoint)) {
       dragState.bodyId = pick.bodyId;
       anchor = [dragState.anchorLocal.x, dragState.anchorLocal.y, dragState.anchorLocal.z];
     }
     store.update((draft) => {
-      const runtime = draft.runtime || (draft.runtime = {});
-      const seq = (runtime.selection?.seq || 0) + 1;
-      runtime.selection = {
-        geom: pick.geomIndex,
-        body: pick.bodyId,
-        joint: pick.jointId,
-        name: pick.geomName,
-        kind: 'geom',
-        point: [pick.worldPoint.x, pick.worldPoint.y, pick.worldPoint.z],
-        localPoint: [pick.localPoint.x, pick.localPoint.y, pick.localPoint.z],
-        anchorLocal: anchor,
-        normal: [pick.worldNormal.x, pick.worldNormal.y, pick.worldNormal.z],
-        seq,
-        timestamp: ts,
-      };
-      runtime.lastAction = 'select';
+      if (!draft.runtime) draft.runtime = { ...(draft.runtime || {}) };
+      draft.runtime.lastAction = 'select';
       draft.toast = { message: `Selected ${pick.geomName}`, ts };
     });
-    if (anchor) {
-      backend.setSelection?.({ bodyId: pick.bodyId, localpos: anchor });
-    } else {
-      backend.setSelection?.({ bodyId: 0 });
-    }
+    backend.setSelection?.({
+      bodyId: pick.bodyId,
+      geomId: pick.geomIndex,
+      point: [pick.worldPoint.x, pick.worldPoint.y, pick.worldPoint.z],
+      localpos: anchor || [pick.localPoint.x, pick.localPoint.y, pick.localPoint.z],
+      seq: nextSeq,
+      timestamp: ts,
+    });
   }
 
   const meshList = [];
@@ -597,8 +604,8 @@ function createPickingController({
     if (mesh?.userData?.geomName) {
       return mesh.userData.geomName;
     }
-    const state = store.get();
-    const lookup = getOrCreateGeomNameLookup(renderCtx, state?.model?.geoms || null);
+    const snapshot = typeof getSnapshot === 'function' ? getSnapshot() : null;
+    const lookup = getOrCreateGeomNameLookup(renderCtx, getSnapshotGeoms(snapshot) || null);
     return geomNameFromLookup(lookup, index);
   }
 
@@ -607,7 +614,7 @@ function createPickingController({
     if (Number.isFinite(mesh?.userData?.geomBodyId)) {
       return mesh.userData.geomBodyId | 0;
     }
-    const arr = store.get()?.model?.geomBodyId || null;
+    const arr = getSnapshotGeomBodyIds(typeof getSnapshot === 'function' ? getSnapshot() : null) || null;
     if (!arr || !(index >= 0) || index >= arr.length) return -1;
     const bodyId = arr[index];
     return Number.isFinite(bodyId) ? (bodyId | 0) : -1;
@@ -615,10 +622,10 @@ function createPickingController({
 
   function jointIdFor(bodyId) {
     if (!(bodyId >= 0)) return -1;
-    const state = store.get();
-    const bodyAdr = state?.model?.bodyJntAdr;
-    const bodyNum = state?.model?.bodyJntNum;
-    const jtype = state?.model?.jntType;
+    const snapshot = typeof getSnapshot === 'function' ? getSnapshot() : null;
+    const bodyAdr = getSnapshotBodyJointAdr(snapshot);
+    const bodyNum = getSnapshotBodyJointNum(snapshot);
+    const jtype = getSnapshotJointTypes(snapshot);
     if (!bodyAdr || !bodyNum || !jtype) return -1;
     const base = bodyAdr[bodyId] ?? -1;
     const num = bodyNum[bodyId] ?? 0;

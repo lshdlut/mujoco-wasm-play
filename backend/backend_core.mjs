@@ -5,15 +5,14 @@
 
 import { buildWorkerUrl, isPerfEnabled, perfMarkOnce, perfNow, perfSample, logWarn, logError, logStatus, strictCatch, getStrictReport, withCacheBust } from '../core/viewer_runtime.mjs';
 import { getRuntimeConfig } from '../core/runtime_config.mjs';
-import { MJ_GROUP_COUNT, SCENE_FLAG_DEFAULTS_NUMERIC } from '../core/viewer_defaults.mjs';
-import { VISUAL_FIELD_DESCRIPTORS } from '../core/viewer_structs.mjs';
-import { bool, cloneStruct, createDefaultHistoryState, createDefaultKeyframeState, createDefaultWatchState, normaliseGroupState, resolveStructPath, toNumber } from '../core/viewer_shared.mjs';
+import { SCENE_FLAG_DEFAULTS_NUMERIC } from '../core/viewer_defaults.mjs';
+import { cloneStruct, createDefaultHistoryState, createDefaultKeyframeState, createDefaultWatchState, normaliseGroupState } from '../core/viewer_shared.mjs';
 import { dispatchEvent } from '../worker/dispatch.gen.mjs';
 import { GEOM_VIEW_FIELDS_OPTIONAL, GEOM_VIEW_FIELDS_ALWAYS } from '../worker/protocol.gen.mjs';
 import { parseMuJoCoDirectFileRefs, buildMuJoCoBundle } from '../core/xml_refs.mjs';
 import { buildModelCandidates, resolveModelFileName, MODEL_POOL } from './model_candidates.mjs';
 import { applyHistoryPayload, applyKeyframesPayload, applyWatchPayload, applyViewFields, createInitialSnapshot, resolveSnapshot } from './snapshot_utils.mjs';
-
+import { createBackendRuntime } from './backend_runtime.mjs';
 const ASSET_BASE_URL = new URL('../', import.meta.url);
 const WORKER_URL = new URL('worker/physics.worker.mjs', ASSET_BASE_URL);
 export async function createBackend(options = {}) {
@@ -30,10 +29,6 @@ export async function createBackend(options = {}) {
     label: initialCandidate ? initialCandidate.label : (modelToken || ''),
   };
   const listeners = new Set();
-  const normaliseInt = (value, fallback = 0) => {
-    const num = Number(value);
-    return Number.isFinite(num) ? (num | 0) : fallback;
-  };
   const sampleIfFinite = (bucket, value, detail = null) => {
     if (!perfEnabled) return null;
     if (typeof value !== 'number' || !Number.isFinite(value)) return null;
@@ -42,6 +37,8 @@ export async function createBackend(options = {}) {
   let client = null;
   const kind = 'worker';
   let lastSnapshot = createInitialSnapshot();
+  let publishedSnapshot = resolveSnapshot(lastSnapshot);
+  let publishedSnapshotDirty = false;
   let lastFrameId = -1;
   let lastSnapshotRecvWallMs = 0;
   let lastSnapshotSentWallMs = null;
@@ -63,6 +60,21 @@ export async function createBackend(options = {}) {
   let adaptiveGoodSinceWallMs = null;
   let adaptiveBadStreak = 0;
   let adaptiveLastChangeWallMs = 0;
+
+  function readPublishedSnapshot(markDirty = false) {
+    if (markDirty) {
+      publishedSnapshotDirty = true;
+    }
+    if (publishedSnapshotDirty) {
+      publishedSnapshot = resolveSnapshot(lastSnapshot);
+      publishedSnapshotDirty = false;
+    }
+    return publishedSnapshot;
+  }
+
+  function publishMutation() {
+    return readPublishedSnapshot(true);
+  }
 
   function resetAdaptiveSnapshotState() {
     adaptiveSnapshotHz = SNAPSHOT_ADAPT_DEFAULT_HZ;
@@ -157,39 +169,30 @@ export async function createBackend(options = {}) {
     }
   }
 
-  function applySimulateMaskBinding(binding, value, prefix, field, invert, warnLabel) {
-    if (!binding || !binding.startsWith(`${prefix}[`)) return false;
-    const start = prefix.length + 1;
-    const end = binding.indexOf(']', start);
-    const bitIndex = end > start ? normaliseInt(binding.slice(start, end), -1) : -1;
-    if (bitIndex >= 0 && bitIndex < 32) {
-      const active = bool(value);
-      const bit = 1 << bitIndex;
-      const currentMask =
-        typeof lastSnapshot.options?.[field] === 'number'
-          ? (lastSnapshot.options[field] | 0)
-          : 0;
-      const nextMask = invert
-        ? (active ? (currentMask & ~bit) : (currentMask | bit))
-        : (active ? (currentMask | bit) : (currentMask & ~bit));
-      try {
-        client.postMessage?.({
-          cmd: 'setField',
-          target: 'mjOption',
-          path: [field],
-          kind: 'int',
-          size: 1,
-          value: [nextMask],
-        });
-      } catch (err) {
-        logWarn(`[backend ${warnLabel}] post failed`, err);
-        strictCatch(err, `backend:setField:${warnLabel}`);
-        throw err;
-      }
-    }
-    return true;
-  }
-
+  const clientRef = {
+    get current() {
+      return client;
+    },
+    set current(value) {
+      client = value;
+    },
+  };
+  const lastSnapshotRef = {
+    get current() {
+      return lastSnapshot;
+    },
+    set current(value) {
+      lastSnapshot = value;
+    },
+  };
+  const lastXmlTextRef = {
+    get current() {
+      return lastXmlText;
+    },
+    set current(value) {
+      lastXmlText = value;
+    },
+  };
   function spawnWorkerBackend() {
     const workerUrl = buildWorkerUrl(WORKER_URL);
     return new Worker(workerUrl, { type: 'module' });
@@ -299,7 +302,7 @@ export async function createBackend(options = {}) {
     if (perfEnabled) {
       perfSample('backend:listeners_count', listeners.size || 0);
     }
-    const snapshot = resolveSnapshot(lastSnapshot);
+    const snapshot = readPublishedSnapshot(true);
     let listenerIndex = 0;
     for (const fn of listeners) {
       const tListenerStart = perfEnabled ? perfNow() : 0;
@@ -328,7 +331,7 @@ export async function createBackend(options = {}) {
   async function restartWorkerWithLoadPayload(loadPayload) {
     const xmlText = typeof loadPayload?.xmlText === 'string' ? loadPayload.xmlText : String(loadPayload?.xmlText ?? '');
     if (!xmlText || xmlText.trim().length === 0) {
-      return resolveSnapshot(lastSnapshot);
+      return readPublishedSnapshot(false);
     }
     // Tear down old worker (if any).
     try { detachClient(); } catch (err) { strictCatch(err, 'backend:detach_client'); }
@@ -353,6 +356,8 @@ export async function createBackend(options = {}) {
     const loadRate = Number.isFinite(lastSnapshot.rate) ? lastSnapshot.rate : 1;
     // Reset local snapshot state and kick off load on the fresh worker.
     lastSnapshot = createInitialSnapshot();
+    publishedSnapshot = resolveSnapshot(lastSnapshot);
+    publishedSnapshotDirty = false;
     lastFrameId = -1;
     lastSnapshot.visualDefaults = null;
     resetAdaptiveSnapshotState();
@@ -374,7 +379,7 @@ export async function createBackend(options = {}) {
       strictCatch(err, 'backend:load');
       throw err;
     }
-    return resolveSnapshot(lastSnapshot);
+    return publishMutation();
   }
 
   async function restartWorkerWithXml(xmlText) {
@@ -489,10 +494,13 @@ export async function createBackend(options = {}) {
     if (data.options) {
       lastSnapshot.options = data.options;
     }
+    publishedSnapshotDirty = true;
   }
 
   function setRunState(run, source = 'ui', notifyBackend = true) {
     const nextPaused = !run;
+    lastSnapshot.paused = nextPaused;
+    lastSnapshot.pausedSource = source || 'backend';
     if (notifyBackend) {
       try {
         client.postMessage?.({ cmd: 'setPaused', paused: nextPaused, source });
@@ -501,19 +509,21 @@ export async function createBackend(options = {}) {
         strictCatch(err, 'backend:setPaused');
       }
     }
-    return resolveSnapshot(lastSnapshot);
+    return publishMutation();
   }
 
   function setRate(nextRate, source = 'ui') {
     const raw = Number(nextRate);
     const clamped = Number.isFinite(raw) ? Math.max(0.0625, Math.min(16, raw)) : 1;
+    lastSnapshot.rate = clamped;
+    lastSnapshot.rateSource = source || 'backend';
     try {
       client.postMessage?.({ cmd: 'setRate', rate: clamped, source });
     } catch (err) {
       logWarn('[backend] setRate post failed', err);
       strictCatch(err, 'backend:setRate');
     }
-    return resolveSnapshot(lastSnapshot);
+    return publishMutation();
   }
 
   async function loadXmlText(xmlText) {
@@ -524,48 +534,11 @@ export async function createBackend(options = {}) {
 
   async function loadXmlBundle(loadPayload) {
     if (!loadPayload || typeof loadPayload !== 'object') {
-      return resolveSnapshot(lastSnapshot);
+      return readPublishedSnapshot(false);
     }
     const xmlText = typeof loadPayload.xmlText === 'string' ? loadPayload.xmlText : String(loadPayload.xmlText ?? '');
     lastXmlText = xmlText;
     return restartWorkerWithLoadPayload(loadPayload);
-  }
-
-  function applyVisualStatePayload(payload) {
-    if (!payload || typeof client?.postMessage !== 'function') {
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (payload.visual && typeof payload.visual === 'object') {
-      for (const descriptor of VISUAL_FIELD_DESCRIPTORS) {
-        const value = resolveStructPath(payload.visual, descriptor.path);
-        if (value == null) continue;
-        try {
-          client.postMessage({
-            cmd: 'setField',
-            target: 'mjVisual',
-            path: descriptor.path,
-            kind: descriptor.kind,
-            size: descriptor.size,
-            value,
-          });
-        } catch (err) {
-          logWarn('[backend setField] failed', descriptor.path, err);
-          strictCatch(err, 'backend:setField_descriptor');
-        }
-      }
-    }
-    if (Array.isArray(payload.sceneFlags)) {
-      for (let i = 0; i < payload.sceneFlags.length; i += 1) {
-        const enabled = !!payload.sceneFlags[i];
-        try {
-          client.postMessage?.({ cmd: 'setSceneFlag', index: i, enabled });
-        } catch (err) {
-          logWarn('[backend setSceneFlag] failed', { index: i, enabled }, err);
-          strictCatch(err, 'backend:setSceneFlag');
-        }
-      }
-    }
-    return resolveSnapshot(lastSnapshot);
   }
 
   function updateGeometryCaches(data = {}) {
@@ -1197,578 +1170,49 @@ export async function createBackend(options = {}) {
   lastXmlText = typeof initialLoad?.xmlText === 'string' ? initialLoad.xmlText : String(initialLoad?.xmlText ?? '');
   await restartWorkerWithLoadPayload(initialLoad);
 
-  const uiHandlers = new Map([
-    ['simulation.history_scrubber', (value) => {
-      const offset = Math.min(0, normaliseInt(value, 0));
-      try { client.postMessage?.({ cmd: 'historyScrub', offset }); } catch (err) {
-        logWarn('[backend history] post failed', err);
-        strictCatch(err, 'backend:history_scrub');
-        throw err;
-      }
-      return true;
-    }],
-    ['simulation.key_slider', (value) => {
-      const index = Math.max(-1, normaliseInt(value, -1));
-      try {
-        client.postMessage?.({ cmd: 'keyframeSelect', index });
-      } catch (err) {
-        logWarn('[backend keyframe select] failed', err);
-        strictCatch(err, 'backend:keyframe_select');
-        throw err;
-      }
-      return true;
-    }],
-    ['simulation.save_key', () => {
-      const index = normaliseInt(lastSnapshot.keyIndex ?? -1, -1);
-      try { client.postMessage?.({ cmd: 'keyframeSave', index }); } catch (err) {
-        logWarn('[backend keyframe save] failed', err);
-        strictCatch(err, 'backend:keyframe_save');
-        throw err;
-      }
-      return true;
-    }],
-    ['simulation.load_key', () => {
-      const index = Math.max(0, normaliseInt(lastSnapshot.keyIndex ?? 0, 0));
-      try { client.postMessage?.({ cmd: 'keyframeLoad', index }); } catch (err) {
-        logWarn('[backend keyframe load] failed', err);
-        strictCatch(err, 'backend:keyframe_load');
-        throw err;
-      }
-      return true;
-    }],
-    ['watch.field', (value) => {
-      const field = typeof value === 'string' ? value.trim() : '';
-      const nextField = field.length > 0 ? field : (lastSnapshot.watch?.field || '');
-      if (!nextField) return true;
-      try {
-        client.postMessage?.({
-          cmd: 'setWatch',
-          field: nextField,
-          index: Number.isFinite(lastSnapshot.watch?.index) ? (lastSnapshot.watch.index | 0) : 0,
-        });
-      } catch (err) {
-        logWarn('[backend watch field] failed', err);
-        strictCatch(err, 'backend:watch_field');
-        throw err;
-      }
-      return true;
-    }],
-    ['watch.index', (value) => {
-      const target = Math.max(0, normaliseInt(value, 0));
-      try {
-        client.postMessage?.({
-          cmd: 'setWatch',
-          field: lastSnapshot.watch?.field,
-          index: target,
-        });
-      } catch (err) {
-        logWarn('[backend watch index] failed', err);
-        strictCatch(err, 'backend:watch_index');
-        throw err;
-      }
-      return true;
-    }],
-    ['control.actuator', (value) => {
-      try {
-        const idx = Number(value?.index ?? value?.i ?? value?.id);
-        const v = Number(value?.value ?? value?.v ?? 0);
-        if (Number.isFinite(idx) && idx >= 0) {
-          client.postMessage?.({ cmd: 'setCtrl', index: idx | 0, value: v });
-        }
-      } catch (err) {
-        logWarn('[backend control.actuator] failed', err);
-        strictCatch(err, 'backend:control_actuator');
-        throw err;
-      }
-      return true;
-    }],
-    ['joint.slider', (value) => {
-      try {
-        const idx = Number(value?.index ?? value?.qposIndex ?? value?.i);
-        const v = Number(value?.value ?? value?.v);
-        if (Number.isFinite(idx) && idx >= 0 && Number.isFinite(v)) {
-          const min = Number.isFinite(value?.min) ? Number(value.min) : null;
-          const max = Number.isFinite(value?.max) ? Number(value.max) : null;
-          client.postMessage?.({ cmd: 'setQpos', index: idx | 0, value: v, min, max });
-        }
-      } catch (err) {
-        logWarn('[backend joint.slider] failed', err);
-        strictCatch(err, 'backend:joint_slider');
-        throw err;
-      }
-      return true;
-    }],
-    ['equality.toggle', (value) => {
-      try {
-        const idx = Number(value?.index ?? value?.i);
-        const active = !!(value?.active ?? value?.value ?? value?.v);
-        if (Number.isFinite(idx) && idx >= 0) {
-          client.postMessage?.({ cmd: 'setEqualityActive', index: idx | 0, active });
-        }
-      } catch (err) {
-        logWarn('[backend equality.toggle] failed', err);
-        strictCatch(err, 'backend:equality_toggle');
-        throw err;
-      }
-      return true;
-    }],
-    ['control.clear', () => {
-      try {
-        const acts = Array.isArray(lastSnapshot.actuators) ? lastSnapshot.actuators : [];
-        for (let i = 0; i < acts.length; i += 1) {
-          client.postMessage?.({ cmd: 'setCtrl', index: i, value: 0 });
-        }
-      } catch (err) {
-        logWarn('[backend control.clear] failed', err);
-        strictCatch(err, 'backend:control_clear');
-        throw err;
-      }
-      return true;
-    }],
-  ]);
-
-  const bindingExactHandlers = new Map([
-    ['Simulate::camera', (value) => {
-      const totalModes = Math.max(1, 2 + (lastSnapshot.cameras?.length || 0));
-      const modeValue = Math.max(0, Math.min(totalModes - 1, Math.trunc(toNumber(value))));
-      try {
-        client.postMessage?.({ cmd: 'setCameraMode', mode: modeValue });
-      } catch (err) {
-        logWarn('[backend camera] post failed', err);
-        strictCatch(err, 'backend:camera');
-        throw err;
-      }
-      return true;
-    }],
-    ['Simulate::tracking_geom', () => true],
-    ['mjvOption::label', (value) => {
-      const mode = Math.max(0, Math.trunc(toNumber(value)));
-      try {
-        client.postMessage?.({ cmd: 'setLabelMode', mode });
-      } catch (err) {
-        logWarn('[backend label mode] post failed', err);
-        strictCatch(err, 'backend:label_mode');
-        throw err;
-      }
-      return true;
-    }],
-    ['mjvOption::frame', (value) => {
-      const mode = Math.max(0, Math.trunc(toNumber(value)));
-      try {
-        client.postMessage?.({ cmd: 'setFrameMode', mode });
-      } catch (err) {
-        logWarn('[backend frame mode] post failed', err);
-        strictCatch(err, 'backend:frame_mode');
-        throw err;
-      }
-      return true;
-    }],
-  ]);
-
-  const bindingRegexHandlers = [
-    {
-      pattern: /^Simulate::opt\.(flex_layer|bvh_depth)$/,
-      handle: (match, value) => {
-        const field = match[1];
-        const nextValue = Math.max(0, Math.trunc(toNumber(value)));
-        try {
-          client.postMessage?.({
-            cmd: 'setVisualOption',
-            field,
-            value: nextValue,
-          });
-        } catch (err) {
-          logWarn('[backend setVisualOption] post failed', err);
-          strictCatch(err, 'backend:set_visual_option');
-          throw err;
-        }
-        return true;
-      },
-    },
-    {
-      pattern: /^mjvOption::(geom|site|joint|tendon|actuator|flex|skin)group\[(\d+)\]$/,
-      handle: (match, value) => {
-        const type = match[1];
-        const idx = Math.max(0, Math.trunc(toNumber(match[2])));
-        if (idx < MJ_GROUP_COUNT) {
-          try {
-            client.postMessage?.({ cmd: 'setGroupState', group: type, index: idx, enabled: bool(value) });
-          } catch (err) {
-            logWarn('[backend group] post failed', err);
-            strictCatch(err, 'backend:group');
-            throw err;
-          }
-        }
-        return true;
-      },
-    },
-    {
-      pattern: /^mjvOption::flags\[(\d+)\]$/,
-      handle: (match, value) => {
-        const idx = Number(match[1]);
-        const enabled = bool(value);
-        try {
-          client.postMessage?.({ cmd: 'setVoptFlag', index: idx, enabled });
-        } catch (err) {
-          logWarn('[backend vopt flag] post failed', err);
-          strictCatch(err, 'backend:vopt_flag');
-          throw err;
-        }
-        return true;
-      },
-    },
-    {
-      pattern: /^mjvScene::flags\[(\d+)\]$/,
-      handle: (match, value) => {
-        const idx = Number(match[1]);
-        const enabled = bool(value);
-        try {
-          client.postMessage?.({ cmd: 'setSceneFlag', index: idx, enabled });
-        } catch (err) {
-          logWarn('[backend scene flag] post failed', err);
-          strictCatch(err, 'backend:scene_flag');
-          throw err;
-        }
-        return true;
-      },
-    },
-  ];
-
-  function dispatchBinding(binding, value) {
-    if (!binding) return false;
-    const exactHandler = bindingExactHandlers.get(binding);
-    if (exactHandler) {
-      exactHandler(value);
-      return true;
-    }
-    if (applySimulateMaskBinding(binding, value, 'Simulate::disable', 'disableflags', false, 'disableflags')) {
-      return true;
-    }
-    if (applySimulateMaskBinding(binding, value, 'Simulate::enable', 'enableflags', false, 'enableflags')) {
-      return true;
-    }
-    if (applySimulateMaskBinding(binding, value, 'Simulate::enableactuator', 'disableactuator', true, 'disableactuator')) {
-      return true;
-    }
-    for (const entry of bindingRegexHandlers) {
-      const match = binding.match(entry.pattern);
-      if (!match) continue;
-      entry.handle(match, value);
-      return true;
-    }
-    return false;
-  }
-
-  async function apply(payload) {
-    if (!payload) {
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (payload.kind === 'gesture') {
-      const mode = payload.mode ?? payload.gesture?.mode ?? 'idle';
-      const phase = payload.phase ?? payload.gesture?.phase ?? 'update';
-      const gestureType = typeof payload.gestureType === 'string' ? payload.gestureType : null;
-      const pointerSource = payload.pointer ?? payload.gesture?.pointer ?? null;
-      const pointer = pointerSource
-        ? {
-            x: Number(pointerSource.x) || 0,
-            y: Number(pointerSource.y) || 0,
-            dx: Number(pointerSource.dx) || 0,
-            dy: Number(pointerSource.dy) || 0,
-            buttons: Number(pointerSource.buttons ?? 0),
-            pressure: Number(pointerSource.pressure ?? 0),
-          }
-        : null;
-      const dragSource = payload.drag ?? (pointer ? { dx: pointer.dx, dy: pointer.dy } : null);
-      const gesture = {
-        mode: phase === 'end' ? 'idle' : mode,
-        phase,
-        pointer,
-      };
-      const drag = dragSource
-        ? {
-            dx: Number(dragSource.dx) || 0,
-            dy: Number(dragSource.dy) || 0,
-          }
-        : (phase === 'end' ? { dx: 0, dy: 0 } : null);
-      try {
-        client.postMessage?.({
-          cmd: 'gesture',
-          gesture,
-          pointer,
-          drag,
-          gestureType,
-          reldx: Number(payload.reldx),
-          reldy: Number(payload.reldy),
-          shiftKey: !!payload.shiftKey,
-          cam: payload.cam || null,
-          camSyncSeq: Number.isFinite(payload.camSyncSeq) ? Math.trunc(payload.camSyncSeq) : null,
-        });
-      } catch (err) {
-        logError('[backend gesture] failed', err);
-        strictCatch(err, 'backend:gesture');
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    if (payload.kind !== 'ui') {
-      return resolveSnapshot(lastSnapshot);
-    }
-    const { id, value, control } = payload;
-    const binding = typeof control?.binding === 'string' ? control.binding : null;
-    if (dispatchBinding(binding, value)) {
-      return resolveSnapshot(lastSnapshot);
-    }
-    const uiHandler = uiHandlers.get(id);
-    if (uiHandler) {
-      uiHandler(value);
-      return resolveSnapshot(lastSnapshot);
-    }
-    const prepared = typeof options.prepareBindingUpdate === 'function'
-      ? await options.prepareBindingUpdate(control, value)
-      : null;
-    if (prepared) {
-      try {
-        client.postMessage?.({
-          cmd: 'setField',
-          target: prepared.meta.scope,
-          path: prepared.meta.path,
-          kind: prepared.meta.kind,
-          size: prepared.meta.size,
-          value: prepared.value,
-        });
-        // Force a fresh snapshot so UI can observe the updated struct fields,
-        // even when the worker is paused or snapshot delivery is delayed.
-        client.postMessage?.({ cmd: 'snapshot' });
-      } catch (err) {
-        logWarn('[backend setField] post failed', err);
-        strictCatch(err, 'backend:setField_post');
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-    switch (id) {
-      case 'simulation.run': {
-        const run = value === 'Run' || value === true || value === 1;
-        return setRunState(run, 'ui');
-      }
-      case 'simulation.reset':
-        client.postMessage?.({ cmd: 'reset' });
-        break;
-      case 'simulation.reload': {
-        if (lastXmlText && typeof lastXmlText === 'string' && lastXmlText.trim().length > 0) {
-          return restartWorkerWithXml(lastXmlText);
-        }
-        const loadPayload = await loadDefaultXml();
-        lastXmlText = typeof loadPayload?.xmlText === 'string' ? loadPayload.xmlText : String(loadPayload?.xmlText ?? '');
-        return restartWorkerWithLoadPayload(loadPayload);
-      }
-      case 'simulation.align': {
-        try {
-          client.postMessage?.({ cmd: 'align', source: 'ui' });
-        } catch (err) {
-          logWarn('[backend align] post failed', err);
-          strictCatch(err, 'backend:align');
-        }
-        break;
-      }
-      case 'simulation.copy_state': {
-        const meta = value && typeof value === 'object' ? value : {};
-        const precision = meta.shiftKey ? 'full' : 'standard';
-        try {
-          client.postMessage?.({ cmd: 'copyState', precision, source: 'ui' });
-        } catch (err) {
-          logWarn('[backend copyState] post failed', err);
-          strictCatch(err, 'backend:copy_state');
-        }
-        break;
-      }
-      case 'simulation.noise_scale':
-      case 'simulation.noise_rate':
-        // Noise controls are disabled in this build; UI state is still
-        // tracked via Simulate::ctrl_noise_* bindings but no messages are
-        // sent to the worker.
-        break;
-      case 'rendering.camera_mode':
-      case 'option.help':
-      default:
-        break;
-    }
-    return resolveSnapshot(lastSnapshot);
-  }
-
+  const backendRuntime = createBackendRuntime({
+    clientRef,
+    lastSnapshotRef,
+    lastXmlTextRef,
+    prepareBindingUpdate: options.prepareBindingUpdate,
+    readPublishedSnapshot,
+    publishMutation,
+    loadDefaultXml,
+    restartWorkerWithXml,
+    restartWorkerWithLoadPayload,
+    setRunState,
+    setRate,
+  });
   function snapshot() {
-    return resolveSnapshot(lastSnapshot);
+    return readPublishedSnapshot(false);
   }
 
   function subscribe(fn) {
     listeners.add(fn);
-    fn(resolveSnapshot(lastSnapshot));
+    fn(readPublishedSnapshot(false));
     return () => listeners.delete(fn);
-  }
-
-  async function step(direction = 1) {
-    const dir = direction >= 0 ? 1 : -1;
-    const history = lastSnapshot.history || createDefaultHistoryState();
-    const currentOffset = Number.isFinite(history.scrubIndex) ? history.scrubIndex : 0;
-    const count = Number.isFinite(history.count) ? history.count : 0;
-    let nextOffset = currentOffset;
-
-    if (currentOffset !== 0 || (dir < 0 && count > 0)) {
-      if (currentOffset === 0) {
-        if (dir < 0) {
-          nextOffset = -1;
-        }
-      } else if (dir > 0) {
-        nextOffset = Math.min(0, currentOffset + 1);
-      } else if (dir < 0) {
-        const minOffset = -Math.max(0, count);
-        nextOffset = Math.max(minOffset, currentOffset - 1);
-      }
-
-      if (nextOffset === currentOffset) {
-        return resolveSnapshot(lastSnapshot);
-      }
-
-      try {
-        client.postMessage?.({ cmd: 'historyScrub', offset: nextOffset });
-      } catch (err) {
-        logWarn('[backend history step] post failed', err);
-        strictCatch(err, 'backend:history_step');
-      }
-      return resolveSnapshot(lastSnapshot);
-    }
-
-    setRunState(false, 'ui');
-    const n = Math.max(1, Math.abs(direction | 0) || 1);
-    try {
-      client.postMessage?.({ cmd: 'step', n });
-    } catch (err) {
-      logWarn('[backend step] post failed', err);
-      strictCatch(err, 'backend:step');
-    }
-    return resolveSnapshot(lastSnapshot);
-  }
-
-  async function setCameraIndex() {
-    return resolveSnapshot(lastSnapshot);
-  }
-
-  const toVec3 = (value) => {
-    if (Array.isArray(value)) {
-      return [
-        Number(value[0]) || 0,
-        Number(value[1]) || 0,
-        Number(value[2]) || 0,
-      ];
-    }
-    return [0, 0, 0];
-  };
-
-  async function applyPerturbCommand(options = {}) {
-    const phase = typeof options.phase === 'string' ? options.phase : '';
-    if (!phase) return resolveSnapshot(lastSnapshot);
-
-    const msg = { cmd: 'applyPerturb', phase };
-    const mode = options.mode === 'rotate' ? 'rotate' : 'translate';
-    const cam = options.cam && typeof options.cam === 'object' ? options.cam : null;
-    const camPayload = cam
-      ? {
-          lookat: toVec3(cam.lookat),
-          distance: Number(cam.distance) || 0,
-          azimuth: Number(cam.azimuth) || 0,
-          elevation: Number(cam.elevation) || 0,
-          orthographic: !!cam.orthographic,
-        }
-      : null;
-
-    if (phase === 'begin') {
-      msg.mode = mode;
-      msg.shiftKey = !!options.shiftKey;
-      const bodyIdRaw = Number(options.bodyId);
-      if (Number.isFinite(bodyIdRaw) && (bodyIdRaw | 0) > 0) {
-        msg.bodyId = bodyIdRaw | 0;
-        if (Array.isArray(options.localpos)) {
-          msg.localpos = toVec3(options.localpos);
-        }
-      }
-      const scaleRaw = Number(options.scale);
-      if (Number.isFinite(scaleRaw) && scaleRaw > 0) {
-        msg.scale = scaleRaw;
-      }
-      if (camPayload) msg.cam = camPayload;
-    } else if (phase === 'move') {
-      msg.mode = mode;
-      msg.shiftKey = !!options.shiftKey;
-      msg.reldx = Number(options.reldx) || 0;
-      msg.reldy = Number(options.reldy) || 0;
-      if (camPayload) msg.cam = camPayload;
-    } else if (phase === 'end') {
-      // nothing else
-    } else {
-      return resolveSnapshot(lastSnapshot);
-    }
-
-    try {
-      client.postMessage?.(msg);
-    } catch (err) {
-      logWarn('[backend applyPerturb] failed', err);
-      strictCatch(err, 'backend:applyPerturb');
-    }
-    return resolveSnapshot(lastSnapshot);
-  }
-
-  async function setSelectionCommand(options = {}) {
-    const bodyId = Number(options.bodyId) | 0;
-    const msg = { cmd: 'setSelection', bodyId };
-    if (Array.isArray(options.localpos)) {
-      msg.localpos = toVec3(options.localpos);
-    }
-    try {
-      client.postMessage?.(msg);
-    } catch (err) {
-      logWarn('[backend setSelection] failed', err);
-      strictCatch(err, 'backend:setSelection');
-    }
-    return resolveSnapshot(lastSnapshot);
-  }
-
-  async function selectAtCommand(options = {}) {
-    const relxRaw = Number(options.relx);
-    const relyRaw = Number(options.rely);
-    const aspectRaw = Number(options.aspect);
-    const msg = {
-      cmd: 'selectAt',
-      relx: Number.isFinite(relxRaw) ? relxRaw : 0,
-      rely: Number.isFinite(relyRaw) ? relyRaw : 0,
-      aspect: Number.isFinite(aspectRaw) && aspectRaw > 0 ? aspectRaw : 1,
-    };
-    try {
-      client.postMessage?.(msg);
-    } catch (err) {
-      logWarn('[backend selectAt] failed', err);
-      strictCatch(err, 'backend:selectAt');
-    }
-    return resolveSnapshot(lastSnapshot);
   }
 
   function dispose() {
     if (messageHandler) {
-      try { client.removeEventListener?.('message', messageHandler); } catch (err) { strictCatch(err, 'backend:dispose_listener'); }
+      try { client?.removeEventListener?.('message', messageHandler); } catch (err) { strictCatch(err, 'backend:dispose_listener'); }
     }
     client?.terminate?.();
   }
 
   return {
     kind,
-    apply,
+    apply: backendRuntime.apply,
     snapshot,
     subscribe,
-    step,
-    setCameraIndex,
+    step: backendRuntime.step,
+    setCameraIndex: async () => readPublishedSnapshot(false),
     setRunState,
     setRate,
-    applyPerturb: applyPerturbCommand,
-    setSelection: setSelectionCommand,
-    selectAt: selectAtCommand,
-    setVisualState: applyVisualStatePayload,
+    applyPerturb: backendRuntime.applyPerturb,
+    setSelection: backendRuntime.setSelection,
+    selectAt: backendRuntime.selectAt,
+    setVisualState: backendRuntime.setVisualState,
     loadXmlText,
     loadXmlBundle,
     getStrictReport: async () => ({

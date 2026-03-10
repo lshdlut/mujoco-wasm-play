@@ -1,8 +1,23 @@
 const RUNTIME_CONFIG_KEY = '__PLAY_RUNTIME_CONFIG__';
-const EMPTY_PARAMS = Object.freeze({});
 const EMPTY_PLUGINS = Object.freeze([]);
 const EMPTY_RUNTIME_CONFIG = Object.freeze({
-  params: EMPTY_PARAMS,
+  startup: Object.freeze({
+    entryVariant: 'single',
+    model: '',
+    fallbackMode: 'auto',
+    debugMode: false,
+    dumpToken: '',
+    findToken: '',
+    bigN: 8,
+    skyOverride: null,
+    skyDebugMode: null,
+    cacheBustMode: 'none',
+    ver: '',
+    forgeBaseTemplate: '',
+    strict: false,
+    compat: false,
+    logToken: '',
+  }),
   verboseDebug: false,
   snapshotDebug: false,
   plugins: EMPTY_PLUGINS,
@@ -51,26 +66,6 @@ export function updateRuntimeConfig(mutator) {
   }
   mutator(config);
   return config;
-}
-
-export function getRuntimeParamValue(name) {
-  const key = String(name ?? '').trim();
-  if (!key) return null;
-  const params = readRuntimeConfigObject().params;
-  const value = params && Object.prototype.hasOwnProperty.call(params, key)
-    ? params[key]
-    : null;
-  return value == null ? null : String(value);
-}
-
-const RUNTIME_PARAM_SOURCE = Object.freeze({
-  get(name) {
-    return getRuntimeParamValue(name);
-  },
-});
-
-export function getRuntimeParamSource() {
-  return RUNTIME_PARAM_SOURCE;
 }
 
 export function getFontPresetByIndex(index) {

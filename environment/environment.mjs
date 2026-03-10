@@ -239,8 +239,8 @@ let LAST_SKYBOX_KEY = null;
 let LAST_SKYBOX_BUFFER = null;
 let WARNED_SKYBOX_BYTES = false;
 
-function readSkyboxTextureFromAssets(state) {
-  const textures = state?.rendering?.assets?.textures || null;
+function readSkyboxTextureFromAssets(snapshot) {
+  const textures = snapshot?.renderAssets?.textures || null;
   if (!textures || !textures.type || !textures.data) {
     return LAST_SKYBOX_TEXTURE;
   }
@@ -392,7 +392,7 @@ function createCubeTextureFromSkybox(THREE_NS, skyTex) {
   return cube;
 }
 
-function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
+function ensureModelSkyFromAssets(ctx, state, snapshot, THREE_NS, options = {}) {
   const cache = ensureSkyCache(ctx);
   const worldScene = getWorldScene(ctx);
   if (!ctx || !worldScene || !THREE_NS) return false;
@@ -401,7 +401,7 @@ function ensureModelSkyFromAssets(ctx, state, THREE_NS, options = {}) {
     : (ctx.skyDebugMode || null);
   const forceCube = skyDebugMode === 'cube' || skyDebugMode === 'off';
   const forceShader = skyDebugMode === 'mj-sky-shader' || skyDebugMode === 'shader';
-  const skyTex = readSkyboxTextureFromAssets(state);
+  const skyTex = readSkyboxTextureFromAssets(snapshot);
   if (!skyTex) {
     pushSkyDebug(ctx, { mode: 'model-sky-missing' });
     return false;
@@ -1209,6 +1209,7 @@ function createEnvironmentManager({
 
   function ensureEnvIfNeeded(ctx, state, options = {}) {
     const appearance = state?.rendering?.appearance || null;
+    const snapshot = options.snapshot ?? null;
     const presetMode = !!(appearance && typeof appearance.hdri === 'string' && appearance.hdri.length);
     const desiredEnvIntensity = Number.isFinite(appearance?.envIntensity) ? Number(appearance.envIntensity) : null;
     const skyboxEnabled = options.skyboxEnabled !== false;
@@ -1281,7 +1282,7 @@ function createEnvironmentManager({
     // Model mode: prefer MuJoCo-driven sky; clear any HDRI state but keep caches
     ctx.envFromHDRI = false;
     ctx.hdriReady = false;
-    const skyOk = ensureModelSkyFromAssets(ctx, state, THREE_NS, { skyDebugMode });
+    const skyOk = ensureModelSkyFromAssets(ctx, state, snapshot, THREE_NS, { skyDebugMode });
     if (!skyOk) {
       // MuJoCo: if there is no skybox texture, skybox rendering is skipped and
       // the clear color (black by default) shows through.

@@ -103,7 +103,7 @@ function hideFlexGroup(ctx) {
   }
 }
 
-function ensureFlexEntry(ctx, index, assets, state) {
+function ensureFlexEntry(ctx, index, assets, sceneFlags = null) {
   const flexAssets = assets?.flexes || null;
   const count = flexAssets?.count | 0;
   if (!(count > 0) || index < 0 || index >= count) return null;
@@ -204,8 +204,7 @@ function ensureFlexEntry(ctx, index, assets, state) {
     });
   }
 
-  const sceneFlags = state?.rendering?.sceneFlags || [];
-  const wire = !!sceneFlags[1];
+  const wire = !!(Array.isArray(sceneFlags) && sceneFlags[1]);
   if (entry?.faces?.material && 'wireframe' in entry.faces.material) {
     entry.faces.material.wireframe = wire;
   }
@@ -371,7 +370,7 @@ function fillFlexFaceTexcoords(uvOut, faceIndex, texcoordArr, baseOffset, texcoo
   writeUV(4, i2);
 }
 
-function updateFlexFaces(entry, flexIndex, snapshot, state, assets, useSkin, flexLayer) {
+function updateFlexFaces(entry, flexIndex, snapshot, assets, useSkin, flexLayer) {
   const flexAssets = assets?.flexes || null;
   if (!entry || !flexAssets) return;
   const dim = entry.dim | 0;
@@ -708,7 +707,7 @@ function hideSkinGroup(ctx) {
   }
 }
 
-function ensureSkinEntry(ctx, index, assets, state) {
+function ensureSkinEntry(ctx, index, assets, sceneFlags = null) {
   const skinAssets = assets?.skins || null;
   const count = skinAssets?.count | 0;
   if (!(count > 0) || index < 0 || index >= count) return null;
@@ -750,8 +749,7 @@ function ensureSkinEntry(ctx, index, assets, state) {
       }
     }
 
-    const sceneFlags = state?.rendering?.sceneFlags || [];
-    const wire = !!sceneFlags[1];
+    const wire = !!(Array.isArray(sceneFlags) && sceneFlags[1]);
     const material = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       roughness: 0.8,
@@ -792,8 +790,7 @@ function ensureSkinEntry(ctx, index, assets, state) {
     });
   }
 
-  const sceneFlags = state?.rendering?.sceneFlags || [];
-  const wire = !!sceneFlags[1];
+  const wire = !!(Array.isArray(sceneFlags) && sceneFlags[1]);
   if (entry?.mesh?.material && 'wireframe' in entry.mesh.material) {
     entry.mesh.material.wireframe = wire;
   }

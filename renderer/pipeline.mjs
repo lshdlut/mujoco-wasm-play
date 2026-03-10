@@ -3,7 +3,6 @@
 
 import * as THREE from 'three';
 import {
-  consumeViewerParams,
   isPerfEnabled,
   isStrictEnabled,
   perfMarkOnce,
@@ -18,6 +17,7 @@ import {
   strictOverride,
 } from '../core/viewer_runtime.mjs';
 import { getRuntimeConfig } from '../core/runtime_config.mjs';
+import { getSnapshotAlign, getSnapshotBvhDepth, getSnapshotCameraMode, getSnapshotCameras, getSnapshotCopyState, getSnapshotFlexLayer, getSnapshotGeomBodyIds, getSnapshotGeoms, getSnapshotGroups, getSnapshotLabelMode, getSnapshotOptions, getSnapshotRenderAssets, getSnapshotSceneFlags, getSnapshotSelection, getSnapshotStatistic, getSnapshotStructValue, getSnapshotVisual, getSnapshotVoptFlags } from '../core/snapshot_selectors.mjs';
 import { pushSkyDebug } from '../environment/environment.mjs';
 import {
   depthFromSoAPos,
@@ -361,11 +361,11 @@ function ensureCameraTarget(ctx) {
 const CAMERA_RAD_PER_DEG = Math.PI / 180;
 const CAMERA_DEG_PER_RAD = 180 / Math.PI;
 
-export function resolveTrackingBodyId(state) {
-  const selectionBody = Number(state?.runtime?.selection?.body);
+export function resolveTrackingBodyId(snapshot, state) {
+  const selectionBody = Number(getSnapshotSelection(snapshot)?.bodyId);
   if (Number.isFinite(selectionBody) && selectionBody >= 0) return selectionBody | 0;
   const geomIndex = Number(state?.runtime?.trackingGeom);
-  const geomBodyIds = state?.model?.geomBodyId;
+  const geomBodyIds = getSnapshotGeomBodyIds(snapshot);
   if (
     Number.isFinite(geomIndex)
     && geomIndex >= 0
@@ -378,7 +378,7 @@ export function resolveTrackingBodyId(state) {
   return 0;
 }
 
-export function buildViewerCameraPayload(ctx, state, scratchVec = null) {
+export function buildViewerCameraPayload(ctx, snapshot, state, scratchVec = null) {
   if (!ctx?.camera) return null;
   const target = ensureCameraTarget(ctx);
   if (!target) return null;
@@ -400,7 +400,7 @@ export function buildViewerCameraPayload(ctx, state, scratchVec = null) {
   const mode = Number(state?.runtime?.cameraIndex ?? 0) | 0;
   if (mode === 1) {
     payload.type = 1;
-    payload.trackbodyid = resolveTrackingBodyId(state);
+    payload.trackbodyid = resolveTrackingBodyId(snapshot, state);
   } else if (mode === 0) {
     payload.type = 0;
     payload.trackbodyid = -1;
@@ -408,9 +408,9 @@ export function buildViewerCameraPayload(ctx, state, scratchVec = null) {
   return payload;
 }
 
-function sendViewerCameraSync(backend, ctx, state, scratchVec = null) {
+function sendViewerCameraSync(backend, ctx, snapshot, state, scratchVec = null) {
   if (!ctx || !backend || typeof backend.apply !== 'function') return;
-  const payload = buildViewerCameraPayload(ctx, state, scratchVec);
+  const payload = buildViewerCameraPayload(ctx, snapshot, state, scratchVec);
   if (!payload) return;
   const prevSeqSource = Number(ctx.viewerCameraSyncSeqSent);
   const prevSeq = Number.isFinite(prevSeqSource) ? Math.max(0, Math.trunc(prevSeqSource)) : 0;
@@ -525,10 +525,10 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
   return true;
 }
 
-  function syncCameraPoseFromMode(backend, ctx, state, bounds, helpers, trackingCtx = {}) {
+  function syncCameraPoseFromMode(backend, ctx, snapshot, state, bounds, helpers, trackingCtx = {}) {
     if (!ctx?.camera || !state) return;
     const runtimeMode = Number(state.runtime?.cameraIndex ?? 0) | 0;
-  const cameraList = Array.isArray(state.model?.cameras) ? state.model.cameras : [];
+  const cameraList = getSnapshotCameras(snapshot);
   const maxMode = FIXED_CAMERA_OFFSET + cameraList.length - 1;
   const desired = Math.max(
     0,
@@ -550,7 +550,7 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
       ctx.viewerCameraSynced = false;
       ctx.viewerCameraTrackId = null;
       if (desired <= 1) {
-        sendViewerCameraSync(backend, ctx, state, helpers.tempVecA);
+        sendViewerCameraSync(backend, ctx, snapshot, state, helpers.tempVecA);
       }
     }
   if (desired >= FIXED_CAMERA_OFFSET) {
@@ -560,10 +560,10 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
     return;
   }
   if (desired === 1) {
-    const trackingBodyId = resolveTrackingBodyId(state);
+    const trackingBodyId = resolveTrackingBodyId(snapshot, state);
     if (Number.isFinite(trackingBodyId) && trackingBodyId !== ctx.viewerCameraTrackId) {
       ctx.viewerCameraSynced = false;
-      sendViewerCameraSync(backend, ctx, state, helpers.tempVecA);
+      sendViewerCameraSync(backend, ctx, snapshot, state, helpers.tempVecA);
     }
     applyTrackingCamera(ctx, trackingCtx.trackingBounds || bounds, helpers, trackingCtx.trackingOverride || null);
     return;
@@ -666,7 +666,7 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
   }
 
   const camera = ctx?.camera || null;
-  const headlight = state?.model?.vis?.headlight || null;
+  const headlight = getSnapshotVisual(snapshot)?.headlight || null;
   const headActive = !!camera && headlight && ((headlight.active ?? 1) !== 0);
   const headDiffuse = rgbFromArray(headlight?.diffuse, [1, 1, 1]);
   const headAmbient = rgbFromArray(headlight?.ambient, [0.2, 0.2, 0.2]);
@@ -718,17 +718,17 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
   let slotCursor = 1;
   let shadowCasters = 0;
   if (nlight > 0 && xpos && xdir) {
-    const statExtent = Number(state?.model?.stat?.extent);
+    const statExtent = Number(getSnapshotStatistic(snapshot)?.extent);
     const extentFallback = Number.isFinite(statExtent) && statExtent > 1e-6
       ? statExtent
       : Math.max(0.1, Number(bounds?.radius) || 1);
-    const shadowclipFactor = Number(state?.model?.vis?.map?.shadowclip);
+    const shadowclipFactor = Number(getSnapshotVisual(snapshot)?.map?.shadowclip);
     const shadowClip = extentFallback * (Number.isFinite(shadowclipFactor) && shadowclipFactor > 1e-6 ? shadowclipFactor : 1);
-    const znearFactor = Number(state?.model?.vis?.map?.znear);
-    const zfarFactor = Number(state?.model?.vis?.map?.zfar);
+    const znearFactor = Number(getSnapshotVisual(snapshot)?.map?.znear);
+    const zfarFactor = Number(getSnapshotVisual(snapshot)?.map?.zfar);
     const frustumNear = Math.max(0.01, (Number.isFinite(znearFactor) && znearFactor > 1e-6 ? znearFactor : 0.01) * extentFallback);
     const frustumFar = Math.max(frustumNear + 0.1, (Number.isFinite(zfarFactor) && zfarFactor > 0 ? zfarFactor : 50) * extentFallback);
-    const shadowscale = Number(state?.model?.vis?.map?.shadowscale);
+    const shadowscale = Number(getSnapshotVisual(snapshot)?.map?.shadowscale);
     const shadowScale = Number.isFinite(shadowscale) && shadowscale > 1e-6 ? shadowscale : 0.6;
     const max = Math.min(nlight, Math.floor(xpos.length / 3), Math.floor(xdir.length / 3));
     for (let i = 0; i < max && slotCursor < MJ_MAXLIGHT; i += 1) {
@@ -792,7 +792,7 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
       if (shouldCastShadow) {
         shadowCasters += 1;
         const shadow = slot.light.shadow || null;
-        const modelShadowSize = Number(state?.model?.vis?.quality?.shadowsize);
+        const modelShadowSize = Number(getSnapshotVisual(snapshot)?.quality?.shadowsize);
         const desiredShadowSize = (Number.isFinite(modelShadowSize) && modelShadowSize > 0)
           ? Math.max(16, modelShadowSize | 0)
           : 2048;
@@ -952,7 +952,7 @@ function applyFixedCameraPreset(ctx, state, { tempVecA, tempVecB, tempVecC, temp
     ctx.fixedCameraActive = false;
     return false;
   }
-  const list = Array.isArray(state.model?.cameras) ? state.model.cameras : [];
+  const list = getSnapshotCameras(snapshot);
   const preset = list[mode - FIXED_CAMERA_OFFSET];
   if (!preset || !Array.isArray(preset.pos) || preset.pos.length < 3) {
     ctx.fixedCameraActive = false;
@@ -999,7 +999,7 @@ function applyViewerCameraSnapshot(ctx, snapshot, state, bounds, { tempVecA, tem
   if (mode > 1) return false;
   // Keep THREE projection aligned with MuJoCo frustum math:
   // `mjv_updateCamera` uses `mjVisual.global.fovy` for free/tracking cameras.
-  const fovy = Number(state?.model?.vis?.global?.fovy);
+  const fovy = Number(getSnapshotVisual(snapshot)?.global?.fovy);
   if (Number.isFinite(fovy) && fovy > 0 && ctx.camera.fov !== fovy) {
     ctx.camera.fov = fovy;
     if (typeof ctx.camera.updateProjectionMatrix === 'function') {
@@ -1102,8 +1102,8 @@ function computeBoundsFromSceneSoA(snapshot, { ignoreStatic = false } = {}) {
     return Math.min(max, Math.max(min, r * factor));
   }
 
-function scaleAllFactor(state) {
-  const value = Number(state?.model?.vis?.scale?.all);
+function scaleAllFactor(snapshot) {
+  const value = Number(getSnapshotVisual(snapshot)?.scale?.all);
   if (Number.isFinite(value) && value > 1e-6) return value;
   return 1;
 }
@@ -1119,25 +1119,23 @@ export function normalizeDeltaByViewportHeight(canvas, dx, dy, invertY = false) 
   return { reldx: dx / heightDen, reldy: dyEff / heightDen };
 }
 
-function meanSizeFromState(state, context = null) {
-  const statSize = Number(state?.model?.stat?.meansize);
+function meanSizeFromState(snapshot, context = null) {
+  const statSize = Number(getSnapshotStatistic(snapshot)?.meansize);
   if (Number.isFinite(statSize) && statSize > 0) return statSize;
   const radius = Number(context?.bounds?.radius);
   if (Number.isFinite(radius) && radius > 0) return radius;
   return 1;
 }
 
-  function computeMeanScale(state, context = null) {
-    const meanSize = meanSizeFromState(state, context);
-    const scaleAll = scaleAllFactor(state);
+  function computeMeanScale(snapshot, context = null) {
+    const meanSize = meanSizeFromState(snapshot, context);
+    const scaleAll = scaleAllFactor(snapshot);
     return { meanSize, scaleAll };
   }
 
 function computeScenePolicy(snapshot, state, context) {
-  const sceneFlags = Array.isArray(state.rendering?.sceneFlags) ? state.rendering.sceneFlags : [];
-  const voptFlags = Array.isArray(state.rendering?.voptFlags)
-    ? state.rendering.voptFlags
-    : (Array.isArray(snapshot?.voptFlags) ? snapshot.voptFlags : (getDefaultVopt(context, state) || []));
+  const sceneFlags = getSnapshotSceneFlags(snapshot);
+  const voptFlags = getSnapshotVoptFlags(snapshot) || getDefaultVopt(context, snapshot) || [];
     const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
     const skyboxFlag = sceneFlags[4] !== false;
     const shadowEnabled = segmentEnabled ? false : sceneFlags[0] !== false;
@@ -1345,7 +1343,7 @@ function updateSceneLabelOverlays(context, snapshot, state, options = {}) {
 }
 
 
-function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, model, sceneFlags = null) {
+function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, sceneFlags = null) {
   const groundData = mesh.userData?.infiniteGround;
   if (!groundData) return;
   const xpos = snapshot?.scn_pos;
@@ -1412,8 +1410,8 @@ function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, 
     } else if (repeatY === 0) {
       repeatY = repeatX;
     }
-    const mapZfar = Number(model?.vis?.map?.zfar);
-    const extent = Number(model?.stat?.extent);
+    const mapZfar = Number(getSnapshotVisual(snapshot)?.map?.zfar);
+    const extent = Number(getSnapshotStatistic(snapshot)?.extent);
     let zfar = (Number.isFinite(mapZfar) ? mapZfar : 0) * (Number.isFinite(extent) ? extent : 1);
     if (!(Number.isFinite(zfar) && zfar > 0)) {
       const fallbackFar = Number(ctx?.camera?.far);
@@ -1480,10 +1478,11 @@ function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, 
   }
 }
 
-function getDefaultVopt(ctx, state) {
-  if (!state?.rendering?.voptFlags) return null;
+function getDefaultVopt(ctx, snapshot) {
+  const flags = getSnapshotVoptFlags(snapshot);
+  if (!flags) return null;
   if (!ctx.defaultVopt) {
-    ctx.defaultVopt = state.rendering.voptFlags.slice();
+    ctx.defaultVopt = flags.slice();
   }
   return ctx.defaultVopt;
 }
@@ -1555,16 +1554,14 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     texPerf.texUvSkip = 0;
   }
 
-  const flags = Array.isArray(sceneFlags) ? sceneFlags : state?.rendering?.sceneFlags || [];
+  const flags = Array.isArray(sceneFlags) ? sceneFlags : [];
   const segmentEnabled = typeof segmentEnabledOverride === 'boolean'
     ? segmentEnabledOverride
     : !!flags[SEGMENT_FLAG_INDEX];
-  const vopt = Array.isArray(voptFlags)
-    ? voptFlags
-    : (Array.isArray(state?.rendering?.voptFlags) ? state.rendering.voptFlags : []);
+  const vopt = Array.isArray(voptFlags) ? voptFlags : [];
   const showStatic = voptEnabled(vopt, MJ_VIS.STATIC);
   const transparentDynamic = voptEnabled(vopt, MJ_VIS.TRANSPARENT);
-  const alphaScale = transparentDynamic ? clampUnit(Number(state?.model?.vis?.map?.alpha)) : 1;
+  const alphaScale = transparentDynamic ? clampUnit(Number(getSnapshotVisual(snapshot)?.map?.alpha)) : 1;
   const textureEnabled = voptEnabled(vopt, MJ_VIS.TEXTURE);
   const showFlexVert = voptEnabled(vopt, MJ_VIS.FLEXVERT);
   const showFlexEdge = voptEnabled(vopt, MJ_VIS.FLEXEDGE);
@@ -1572,22 +1569,14 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   const showFlexSkin = voptEnabled(vopt, MJ_VIS.FLEXSKIN);
   const showFlexAny = showFlexVert || showFlexEdge || showFlexFace || showFlexSkin;
   const showSkin = voptEnabled(vopt, MJ_VIS.SKIN);
-  const flexLayerValue = Number.isFinite(state?.rendering?.flexLayer)
-    ? (state.rendering.flexLayer | 0)
-    : 0;
+  const flexLayerValue = getSnapshotFlexLayer(snapshot);
   const baseNgeom = snapshot?.ngeom | 0;
-  const geomNameLookup = getOrCreateGeomNameLookup(ctx, state?.model?.geoms || null);
-  const geomBodyIdView = state?.model?.geomBodyId || null;
+  const geomNameLookup = getOrCreateGeomNameLookup(ctx, getSnapshotGeoms(snapshot) || null);
+  const geomBodyIdView = getSnapshotGeomBodyIds(snapshot) || null;
   const weldIdView =
-    assets?.bodies?.weldid ||
-    snapshot?.renderAssets?.bodies?.weldid ||
-    state?.rendering?.assets?.bodies?.weldid ||
-    null;
+    assets?.bodies?.weldid || null;
   const mocapIdView =
-    assets?.bodies?.mocapid ||
-    snapshot?.renderAssets?.bodies?.mocapid ||
-    state?.rendering?.assets?.bodies?.mocapid ||
-    null;
+    assets?.bodies?.mocapid || null;
   const hasBodyCategory =
     !!weldIdView &&
     !!mocapIdView &&
@@ -1795,7 +1784,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
           if (flexIndex < 0 || flexIndex >= flexCount) continue;
           if (seenFlex.has(flexIndex)) continue;
           seenFlex.add(flexIndex);
-          const entry = ensureFlexEntry(ctx, flexIndex, assets, state);
+          const entry = ensureFlexEntry(ctx, flexIndex, assets, flags);
           if (!entry) continue;
           entry.group.visible = true;
           applyFlexAppearance(entry, flexIndex, assets, ctx, textureEnabled);
@@ -1823,9 +1812,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
           entry.points.visible = showFlexVert;
           entry.edges.visible = showFlexEdge;
           if (showFlexSkin) {
-            updateFlexFaces(entry, flexIndex, snapshot, state, assets, true, flexLayerValue);
+            updateFlexFaces(entry, flexIndex, snapshot, assets, true, flexLayerValue);
           } else if (showFlexFace) {
-            updateFlexFaces(entry, flexIndex, snapshot, state, assets, false, flexLayerValue);
+            updateFlexFaces(entry, flexIndex, snapshot, assets, false, flexLayerValue);
           } else {
             entry.faces.visible = false;
           }
@@ -1835,7 +1824,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
           if (skinIndex < 0 || skinIndex >= skinCount) continue;
           if (seenSkin.has(skinIndex)) continue;
           seenSkin.add(skinIndex);
-          const entry = ensureSkinEntry(ctx, skinIndex, assets, state);
+          const entry = ensureSkinEntry(ctx, skinIndex, assets, flags);
           if (!entry) continue;
           applySkinAppearance(entry, skinIndex, assets, ctx, textureEnabled);
           const ok = updateSkinMesh(entry, skinIndex, snapshot, assets);
@@ -2261,7 +2250,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       return false;
     }
 
-    const mesh = ensureGeomMesh(ctx, meshIndex, gtypeRaw, assets, dataId, sizeVec, { geomMeta, dynamicSizeScale: true }, state);
+    const mesh = ensureGeomMesh(ctx, meshIndex, gtypeRaw, assets, dataId, sizeVec, { geomMeta, dynamicSizeScale: true }, state, flags);
     if (perfEnabled) meshMs += perfNow() - tEnsureStart;
     if (!mesh) return false;
     if (perfEnabled && mesh !== meshBefore) {
@@ -2363,7 +2352,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     const tXformStart = perfEnabled ? perfNow() : 0;
     const isInfinitePlane = !!mesh.userData?.infinitePlane;
     if (isInfinitePlane) {
-      updateInfinitePlaneFromSceneSoA(ctx, mesh, si, snapshot, assets, state?.model || null, flags);
+      updateInfinitePlaneFromSceneSoA(ctx, mesh, si, snapshot, assets, flags);
       if (perfEnabled) infiniteXformUpdates += 1;
     } else {
       const posBase = si * 3;
@@ -2533,7 +2522,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
         }
       }
       if (view) view.__dirty = false;
-      applyMaterialFlags(mesh, meshIndex, state, flags);
+      applyMaterialFlags(mesh, meshIndex, flags);
       const texcoordMode =
         (gtypeRaw === MJ_GEOM.MESH || gtypeRaw === MJ_GEOM.SDF) && mesh.geometry && typeof mesh.geometry.getAttribute === 'function' && mesh.geometry.getAttribute('uv')
           ? 'explicit'
@@ -3135,21 +3124,22 @@ function createRendererManager({
     context.reflectionActive = reflectionEnabled;
     const ngeom = snapshot?.ngeom | 0;
 
-    const assets = state.rendering?.assets || null;
+    const assets = getSnapshotRenderAssets(snapshot);
     const tAssetsStart = perfEnabled ? perfNow() : 0;
     syncRendererAssets(context, assets);
     if (perfEnabled) {
       perfSample('renderer:sync_assets_ms', perfNow() - tAssetsStart);
     }
     const geomGroupIds = assets?.geoms?.group || null;
-    const geomGroupMask = Array.isArray(state.rendering?.groups?.geom) ? state.rendering.groups.geom : null;
+    const groupState = getSnapshotGroups(snapshot);
+    const geomGroupMask = Array.isArray(groupState?.geom) ? groupState.geom : null;
     const flexGroupIds = assets?.flexes?.group || null;
-    const flexGroupMask = Array.isArray(state.rendering?.groups?.flex) ? state.rendering.groups.flex : null;
+    const flexGroupMask = Array.isArray(groupState?.flex) ? groupState.flex : null;
     const skinGroupIds = assets?.skins?.group || null;
-    const skinGroupMask = Array.isArray(state.rendering?.groups?.skin) ? state.rendering.groups.skin : null;
+    const skinGroupMask = Array.isArray(groupState?.skin) ? groupState.skin : null;
 
     if (typeof ensureEnvIfNeeded === 'function') {
-      ensureEnvIfNeeded(context, state, { skyboxEnabled });
+      ensureEnvIfNeeded(context, state, { skyboxEnabled, snapshot });
     }
     const worldScene = getWorldScene(context);
     if (segmentEnabled) {
@@ -3221,8 +3211,8 @@ function createRendererManager({
     // Haze-driven fade parameters for the infinite ground. The base cutoff
     // disc is controlled by uQuadDistance and stays active even when haze is
     // disabled; here we only configure the optional fade inside that disc.
-    const visStruct = state.model?.vis || null;
-    const statStruct = state.model?.stat || null;
+    const visStruct = getSnapshotVisual(snapshot);
+    const statStruct = getSnapshotStatistic(snapshot);
     const hazeConfig = resolveHazeConfig(visStruct, statStruct, context.bounds, hazeEnabled);
     const baseRadius =
       (groundUniforms?.uQuadDistance && Number(groundUniforms.uQuadDistance.value))
@@ -3333,6 +3323,7 @@ function createRendererManager({
     syncCameraPoseFromMode(
       backend,
       context,
+      snapshot,
       state,
       nextBounds,
       { tempVecA, tempVecB, tempVecC, tempVecD },
@@ -3520,7 +3511,7 @@ function createRendererManager({
       }
     }
 
-    const alignState = state.runtime?.lastAlign;
+    const alignState = getSnapshotAlign(snapshot);
     const alignMode = context.currentCameraMode | 0;
     const alignTimestamp = alignState ? (Number(alignState.timestamp) || 0) : 0;
     if (alignMode <= 1 && alignState && (alignState.seq > context.alignSeq || alignTimestamp > context.alignTimestamp)) {
@@ -3574,10 +3565,10 @@ function createRendererManager({
 
       context.autoAligned = true;
       cacheTrackingPoseFromCurrent(context, { radius, center });
-      sendViewerCameraSync(backend, context, state, tempVecA);
+      sendViewerCameraSync(backend, context, snapshot, state, tempVecA);
     }
 
-    const copyState = state.runtime?.lastCopy;
+    const copyState = getSnapshotCopyState(snapshot);
     if (copyState && copyState.seq > context.copySeq) {
       context.copySeq = copyState.seq;
     }

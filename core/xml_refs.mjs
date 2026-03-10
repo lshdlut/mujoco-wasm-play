@@ -361,6 +361,7 @@ export async function buildMuJoCoBundle(xmlRel, xmlText, readFileArrayBuffer) {
           // eslint-disable-next-line no-await-in-loop
           await worker(item);
         } catch (err) {
+          strictCatch(err, 'xml_refs:runPool');
           if (!firstErr) firstErr = err;
           return;
         }

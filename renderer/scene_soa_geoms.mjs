@@ -1622,9 +1622,9 @@ function ensureSegmentMaterial(mesh, sceneFlags) {
   return material;
 }
 
-function applyMaterialFlags(mesh, index, state, sceneFlagsOverride = null) {
+function applyMaterialFlags(mesh, index, sceneFlagsOverride = null) {
   if (!mesh || !mesh.material) return;
-  const sceneFlags = sceneFlagsOverride || state.rendering?.sceneFlags || [];
+  const sceneFlags = Array.isArray(sceneFlagsOverride) ? sceneFlagsOverride : [];
   mesh.material.wireframe = !!sceneFlags[1];
 }
 
@@ -1699,7 +1699,7 @@ function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
   }
 }
 
-function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}, state = null) {
+function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}, state = null, sceneFlagsOverride = null) {
   if (!ctx.meshes) ctx.meshes = [];
   const infinitePlane = gtype === MJ_GEOM.PLANE && isInfinitePlaneSize(sizeVec);
   let mesh = ctx.meshes[index];
@@ -1812,12 +1812,12 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
           ? geometryInfo.materialOpts.shadowOpacity
           : 0.5;
         material = new THREE.ShadowMaterial({ opacity: op });
-      } else {
-        const baseOpts = geometryInfo.materialOpts || {};
-        const useStandard = gtype === MJ_GEOM.PLANE || gtype === MJ_GEOM.HFIELD;
-        const sceneFlags = state?.rendering?.sceneFlags || [];
-        const wire = !!sceneFlags[1];
-        const kind = baseOpts.kind || null;
+        } else {
+          const baseOpts = geometryInfo.materialOpts || {};
+          const useStandard = gtype === MJ_GEOM.PLANE || gtype === MJ_GEOM.HFIELD;
+          const sceneFlags = Array.isArray(sceneFlagsOverride) ? sceneFlagsOverride : [];
+          const wire = !!sceneFlags[1];
+          const kind = baseOpts.kind || null;
         if (objectKind === 'line' || kind === 'line') {
           material = new THREE.LineBasicMaterial({
             color: baseOpts.color ?? 0xffffff,

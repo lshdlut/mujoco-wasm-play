@@ -199,31 +199,24 @@
   const snapshotHzMax = readNumeric('snapshot_hz_max', 120, { parser: (value) => Number.parseInt(value, 10), min: 30, max: 120 });
   const plugins = collectPlugins();
 
-  const paramsCanonical = {
-    model: getRaw('model'),
-    fallback: fallbackMode,
-    debug: debugMode ? '1' : '',
-    nogeom: hideAllGeometryDefault ? '1' : '',
-    hide: readList('hide').join(','),
-    dump: dumpToken,
-    find: findToken,
-    hide_big: hideBigParam ? '1' : '',
-    big_n: String(bigN),
-    big_factor: String(bigFactorRaw),
-    hide_index: readIndexList('hide_index').join(','),
-    nosky: skyOverride === true ? '1' : (skyOverride === false ? '0' : ''),
-    skydebug: skyDebugModeParam || '',
-    cacheBust: cacheBustMode,
-    ver,
-    forgeBase: forgeBaseTemplate,
-    strict: strict ? '1' : '',
-    compat: compat ? '1' : '',
-    log: logToken,
-    verbose: verboseDebug ? '1' : '',
-  };
-
   globalThis.__PLAY_RUNTIME_CONFIG__ = {
-    params: paramsCanonical,
+    startup: {
+      entryVariant,
+      model: getRaw('model'),
+      fallbackMode,
+      debugMode,
+      dumpToken,
+      findToken,
+      bigN,
+      skyOverride,
+      skyDebugMode: skyDebugModeParam || null,
+      cacheBustMode,
+      ver,
+      forgeBaseTemplate,
+      strict,
+      compat,
+      logToken,
+    },
     verboseDebug,
     snapshotDebug,
     plugins,
