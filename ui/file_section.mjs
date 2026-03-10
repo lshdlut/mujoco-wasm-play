@@ -74,8 +74,8 @@ export function createFileSectionManager({
       const label = entry.label || entry.file || entry.id || '';
       if (label) {
         store.update((draft) => {
-          if (!draft.hud) draft.hud = {};
-          draft.hud.modelLabel = label;
+          if (!draft.shell) draft.shell = {};
+          draft.shell.modelLabel = label;
         });
       }
     };
@@ -601,16 +601,16 @@ export function createFileSectionManager({
               lastModelXmlFileHandle = null;
               pushToast?.(`Loaded model: ${entry.label || id}`);
               store.update((draft) => {
-                if (!draft.hud) draft.hud = {};
-                draft.hud.modelLabel = entry.label || entry.id || '';
+                if (!draft.shell) draft.shell = {};
+                draft.shell.modelLabel = entry.label || entry.id || '';
               });
               return;
             }
             if (entry.file) {
               await loadXmlTextWithUrlRefs(entry.xmlText, entry.file, entry.label || id);
               store.update((draft) => {
-                if (!draft.hud) draft.hud = {};
-                draft.hud.modelLabel = entry.label || entry.file || entry.id || '';
+                if (!draft.shell) draft.shell = {};
+                draft.shell.modelLabel = entry.label || entry.file || entry.id || '';
               });
             } else {
               resetModelFrontendState(store);
@@ -618,8 +618,8 @@ export function createFileSectionManager({
                 await backend.loadXmlText(entry.xmlText);
                 pushToast?.(`Loaded model: ${entry.label || id}`);
                 store.update((draft) => {
-                  if (!draft.hud) draft.hud = {};
-                  draft.hud.modelLabel = entry.label || entry.id || '';
+                  if (!draft.shell) draft.shell = {};
+                  draft.shell.modelLabel = entry.label || entry.id || '';
                 });
               }
             }
@@ -637,8 +637,8 @@ export function createFileSectionManager({
             entry.xmlText = text;
             await loadXmlTextWithUrlRefs(text, entry.file, entry.label || id);
             store.update((draft) => {
-              if (!draft.hud) draft.hud = {};
-              draft.hud.modelLabel = entry.label || entry.file || entry.id || '';
+              if (!draft.shell) draft.shell = {};
+              draft.shell.modelLabel = entry.label || entry.file || entry.id || '';
             });
           }
         } catch (err) {
