@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { waitForViewerReady } from './test-utils';
 
-async function openInfoOverlay(page: any, url = '/index.html?model=demo_box.xml') {
+const MODEL_URL = '/index.html?model=model/mujoco_Rajagopal2015_simple.xml';
+
+async function openInfoOverlay(page: any, url = MODEL_URL) {
   await waitForViewerReady(page, url);
   // Ensure viewer loop is running for FPS and info updates.
   await page.evaluate(() => {

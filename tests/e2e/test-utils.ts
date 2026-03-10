@@ -30,7 +30,7 @@ export async function ensureSectionExpanded(page: Page, sectionId: string) {
 
 export async function waitForViewerReady(
   page: Page,
-  url = '/index.html?model=demo_box.xml',
+  url = '/index.html?model=model/mujoco_Rajagopal2015_simple.xml',
   { timeoutMs = 60_000 }: { timeoutMs?: number } = {},
 ) {
   const consoleErrors: string[] = [];

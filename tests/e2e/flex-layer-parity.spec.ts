@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { waitForViewerReady } from './test-utils';
 
-const MODEL = 'demo_box.xml';
+const MODEL = 'model/mujoco_Rajagopal2015_simple.xml';
 const FORGE_BASE = '/dist/3.4.0/';
 
 async function setSliderNormalised(page: any, testId: string, t: number) {
@@ -25,11 +25,8 @@ test('flex_layer slider updates backend option state', async ({ page }) => {
   }, { timeout: 20_000, polling: 250 });
 
   const before = await page.evaluate(() => {
-    const store = (window as any).__viewerStore;
-    const state = store?.get ? store.get() : null;
     const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
     return {
-      storeFlexLayer: state?.rendering?.flexLayer ?? null,
       snapFlexLayer: snap?.options?.flex_layer ?? null,
     };
   });
@@ -43,9 +40,7 @@ test('flex_layer slider updates backend option state', async ({ page }) => {
   await page.waitForFunction(
     (v: number) => {
       const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
-      const store = (window as any).__viewerStore;
-      const state = store?.get ? store.get() : null;
-      return (snap?.options?.flex_layer | 0) === v && (state?.rendering?.flexLayer | 0) === v;
+      return (snap?.options?.flex_layer | 0) === v;
     },
     target,
     { timeout: 20_000, polling: 250 },

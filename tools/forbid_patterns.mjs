@@ -155,6 +155,24 @@ const forbiddenPatterns = [
     regex: /\b(?:uiHandlers|bindingExactHandlers|bindingRegexHandlers|dispatchBinding)\b/g,
     exclude: (file) => toRepoRel(file) !== 'backend/backend_core.mjs',
   },
+  {
+    id: 'panel-state',
+    message: 'legacy section-collapsed persistence helpers are forbidden',
+    regex: /\b(?:readPersistedSectionCollapsed|writePersistedSectionCollapsed|UI_SECTION_COLLAPSED_STORAGE_KEY)\b/g,
+    exclude: (file) => toRepoRel(file) === 'tools/forbid_patterns.mjs',
+  },
+  {
+    id: 'panel-state',
+    message: 'ui/control_manager.mjs must not reintroduce persisted/default_open collapse init logic',
+    regex: /\b(?:persistedCollapsed|readPersistedSectionCollapsed)\b/g,
+    exclude: (file) => toRepoRel(file) !== 'ui/control_manager.mjs',
+  },
+  {
+    id: 'panel-state',
+    message: 'app/right_panel_runtime.mjs must read section visibility from store-backed panel state, not controlManager DOM helpers',
+    regex: /\bcontrolManager\.\s*isSectionExpanded\b/g,
+    exclude: (file) => toRepoRel(file) !== 'app/right_panel_runtime.mjs',
+  },
 ];
 
 function stripStringsAndComments(source) {

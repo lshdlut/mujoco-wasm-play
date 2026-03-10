@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 
 import { waitForViewerReady } from './test-utils';
 
+const MODEL_URL = '/index.html?model=model/mujoco_Rajagopal2015_simple.xml&mode=worker';
+
 test('ui: kit primitives available (plugin)', async ({ page }) => {
   await page.addInitScript(() => {
     (globalThis as any).PLAY_PLUGINS = [];
@@ -9,7 +11,7 @@ test('ui: kit primitives available (plugin)', async ({ page }) => {
 
   await waitForViewerReady(
     page,
-    '/index.html?model=demo_box.xml&mode=worker&plugins=./plugins/test_ui_sections_plugin.mjs',
+    `${MODEL_URL}&plugins=./plugins/test_ui_sections_plugin.mjs`,
   );
 
   const sel = page.locator('[data-testid="plugin.test_ui_kit.select"]');
@@ -30,4 +32,3 @@ test('ui: kit primitives available (plugin)', async ({ page }) => {
   await expect(pre).toHaveClass(/codebox/);
   await expect(pre).toContainText('codebox');
 });
-

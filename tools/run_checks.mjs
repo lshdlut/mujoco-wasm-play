@@ -77,6 +77,9 @@ if (fileExists('ui/control_manager.mjs')) {
 if (fileExists('ui/control_widgets.mjs')) {
   run('syntax: ui_control_widgets', ['--check', 'ui/control_widgets.mjs']);
 }
+if (fileExists('ui/panel_state.mjs')) {
+  run('syntax: ui_panel_state', ['--check', 'ui/panel_state.mjs']);
+}
 if (fileExists('renderer/pipeline.mjs')) {
   run('syntax: renderer_pipeline', ['--check', 'renderer/pipeline.mjs']);
 }
