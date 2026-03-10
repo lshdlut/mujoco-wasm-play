@@ -89,24 +89,31 @@ Responsibilities:
   control manager
 - Wires clock lanes (`onSnapshot`, `onFrame`, `onUiTick`, `onUiControlsTick`,
   `onUiSlowTick`)
+- Delegates UI tick scheduling, overlay updates, panel layout updates, and
+  toast/info overlay refresh to `app/ui_runtime.mjs`
+- Delegates right-panel snapshot-driven controls to
+  `app/right_panel_runtime.mjs`
 - Exposes the public/debug host surfaces
-- Drives model load, UI scheduling, panel layout classes, and plugin boot
+- Drives model load and plugin boot
 
 Ownership:
 
 - Assembly owner: `app/main.mjs`
+- UI runtime owner: `app/ui_runtime.mjs`
+- Right-panel runtime owner: `app/right_panel_runtime.mjs`
 - Public host owner: `app/play_host.mjs` via `window.__PLAY_HOST__`
 
 Current caveat:
 
-- `app/main.mjs` is not a pure assembler. It still contains UI scheduling,
-  layout side effects, debug global registration, and plugin boot logic.
+- `app/main.mjs` is much narrower than before, but it still owns top-level
+  plugin boot, host wiring, and some debug/global registration.
 
 ### 3. Backend transport and restart orchestration
 
 Backend:
 
 - `backend/backend_core.mjs`
+- `backend/backend_runtime.mjs`
 
 Responsibilities:
 
@@ -115,6 +122,7 @@ Responsibilities:
 - Encodes main → worker commands and decodes worker → main events
 - Owns the latest main-thread snapshot cache
 - Owns worker restart and XML reload orchestration
+- Delegates UI-facing command adaptation to `backend/backend_runtime.mjs`
 - Adapts snapshot delivery rate and exposes high-level backend methods to UI and
   plugins
 
@@ -155,10 +163,12 @@ Current caveat:
 State:
 
 - `ui/state.mjs`
+- `ui/viewer_actions.mjs`
 
 DOM control layer:
 
 - `ui/control_manager.mjs`
+- `ui/control_widgets.mjs`
 - `ui/file_section.mjs`
 - `ui/panel_sections.mjs`
 - `ui/bindings.mjs`
@@ -166,7 +176,18 @@ DOM control layer:
 Responsibilities:
 
 - Defines the viewer store and state transitions
-- Merges backend snapshots into viewer state
+- Owns control-driven viewer actions and visual-source switching in
+  `ui/viewer_actions.mjs`
+- Keeps `ui/control_manager.mjs` as the top-level panel/control orchestrator
+- Keeps `ui/control_widgets.mjs` as the coarse widget-rendering and local
+  widget-behavior module
+- Keeps widget-local helper ownership inside `ui/control_widgets.mjs`; the
+  factory boundary is intentionally capped to a small injected surface and must
+  not grow back into a helper-threading sink
+- Owns UI/shell state only; backend snapshot data is read through snapshot
+  selectors instead of being mirrored into the store
+- Owns shell-local labels such as `shell.modelLabel` for currently selected
+  model identity in the UI
 - Applies spec-driven control actions and gestures
 - Derives the runtime-aware reset baseline for model switches and reloads
 - Syncs sticky runtime-facing UI choices back into the runtime config buffer
@@ -175,12 +196,16 @@ Responsibilities:
 Ownership:
 
 - Viewer state owner: `ui/state.mjs`
+- Viewer action owner: `ui/viewer_actions.mjs`
 - Sticky UI-facing runtime config sync owner: `ui/state.mjs`
 
-Rule:
+Rules:
 
 - Model switches and XML reloads reset viewer state to a runtime-derived
-  baseline, not raw defaults.
+  baseline, not raw defaults
+- Store-backed consumers must only read UI/shell state
+- Snapshot-backed consumers must read backend snapshot selectors directly and
+  must not reintroduce state/snapshot fallbacks
 
 ### 6. Renderer and environment
 
@@ -197,7 +222,7 @@ Environment:
 
 Responsibilities:
 
-- Consumes snapshots plus viewer state
+- Consumes backend snapshots plus viewer UI state
 - Owns Three.js scene application and frame orchestration
 - Owns camera interaction and picking
 - Owns environment/sky and renderer-visible debug hooks
@@ -237,7 +262,7 @@ Rule:
 | --- | --- | --- |
 | Runtime config buffer (`__PLAY_RUNTIME_CONFIG__`) | `app/entry_bootstrap.js` + `core/runtime_config.mjs` | Persists for the page lifetime |
 | Latest backend snapshot | `backend/backend_core.mjs` | Reinitialized on worker restart, then refilled from worker |
-| Viewer store state | `ui/state.mjs` | Rebuilt from runtime-derived baseline on model switch / reload |
+| Viewer store state (UI/shell only) | `ui/state.mjs` | Rebuilt from runtime-derived baseline on model switch / reload |
 | DOM shell state (`theme`, `font`, `embed`, layout classes) | bootstrap + `core/runtime_config.mjs` + `app/main.mjs` + `ui/control_manager.mjs` | Reapplied from runtime config / store |
 | MuJoCo sim state | `worker/physics.worker.mjs` | Recreated on worker restart / reload |
 
@@ -263,10 +288,32 @@ These are output/debug surfaces, not configuration inputs:
 - `window.__viewerControls`
 - `window.__viewerRenderer`
 - `window.__lastSnapshot`
-- `window.__renderCtx`
-- `window.__envDebug`
-- `window.__skyDebug`
-- perf / strict debug globals from `core/viewer_runtime.mjs`
+
+## Snapshot-centric owner contract
+
+Main-thread ownership is intentionally split into three authorities:
+
+- `backend snapshot`: the only physical/model truth on the main thread
+- `viewer store`: UI/shell state only
+- `runtime config`: sticky runtime preferences only
+
+Consumer rules:
+
+- renderer, overlays, dynamic control panels, and plugin clocks must consume the
+  published backend snapshot
+- shell/layout/theme/font/panel state must consume the viewer store
+- sticky preferences must be restored from runtime config, not from store-backed
+  backend mirrors
+
+Explicit non-goals:
+
+- The store is not a backend snapshot cache
+- `window.__lastSnapshot` is not a formal owner
+- `app/main.mjs` must not maintain a second snapshot alias
+- `ui/control_manager.mjs` must not re-own widget renderer bodies
+- `ui/control_widgets.mjs` must stay self-contained enough to avoid
+  helper-by-helper injection drift
+- `backend/backend_core.mjs` must not re-own UI/binding command adapters
 
 ## Allowed side-effect surfaces
 

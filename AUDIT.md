@@ -37,23 +37,25 @@ Interpretation:
 
 ### Boot & Config
 
-Verdict: `Consolidate`
+Verdict: `Keep as-is`
 
 Current shape:
 
-- `app/entry_bootstrap.js` now collects startup inputs and builds
+- `app/entry_bootstrap.js` collects startup inputs and builds
   `__PLAY_RUNTIME_CONFIG__`
-- `core/runtime_config.mjs` replays runtime UI state and exposes typed access
-- `core/viewer_runtime.mjs` still retains a compatibility-style `params` reader
+- `core/runtime_config.mjs` owns the sticky runtime config buffer and DOM replay
+- `core/viewer_runtime.mjs` has been reduced to runtime helpers
+  (logging/perf/strict/cache-bust/worker URL helpers)
 
 What is good:
 
 - Runtime input collection is now explicit and centralized at startup
 - Sticky UI-facing runtime settings survive model switches and reloads
+- Runtime modules no longer consume `consumeViewerParams()` or a startup
+  `params` mirror
 
 Current deviation from the ideal:
 
-- The old `params` compatibility mirror remains in `core/viewer_runtime.mjs`
 - A small pre-paint duplication remains for font presets across bootstrap and
   runtime config
 - Some debug-oriented globals are still accepted as bootstrap inputs
@@ -66,47 +68,57 @@ Evidence:
 
 Recommended next action:
 
-- Remove the `params` compatibility layer after the audit guardrails are fixed
 - Keep the bootstrap-only preset duplication unless a zero-cost pre-paint
   alternative appears
+- Keep bootstrap as the only input ingress and resist reintroducing direct URL /
+  global reads elsewhere
 
 ### Assembly & Main Thread
 
-Verdict: `Split later`
+Verdict: `Consolidate`
 
 Current shape:
 
 - `app/main.mjs` assembles the application
-- It also owns layout shell classes, UI lane scheduling, overlay updates, plugin
-  boot, and several debug globals
+- `app/ui_runtime.mjs` now owns UI tick scheduling, overlays, toast/info, and
+  panel layout updates
+- `app/right_panel_runtime.mjs` now owns snapshot-driven right-panel controls
 
 What is good:
 
 - There is one obvious application entrypoint
 - The worker/backend split stays visible from the top level
+- `app/main.mjs` is now materially smaller and closer to a real assembler
 
 Current deviation from the ideal:
 
-- `app/main.mjs` is not a thin assembler
-- It owns too many side effects and too many “last mile” responsibilities
+- `app/main.mjs` still owns plugin boot, host wiring, and a noticeable amount of
+  top-level orchestration/debug hookup
+- The new coarse runtime modules are correct in shape, but they still depend on
+  `app/main.mjs` for lifecycle ownership
 
 Evidence:
 
 - `app/main.mjs`
+- `app/ui_runtime.mjs`
+- `app/right_panel_runtime.mjs`
 
 Recommended next action:
 
-- Keep `app/main.mjs` as the entry module, but later split out lane scheduling
-  and shell/global registration into explicit submodules
+- Keep the current coarse split
+- Only split further if a full lifecycle owner can move with the code, not just
+  a few helpers
 
 ### Backend & Worker
 
-Verdict: `Split later`
+Verdict: `Consolidate`
 
 Current shape:
 
 - `backend/backend_core.mjs` owns worker spawn, transport, restart, snapshot
   cache, binding routing, and adaptive snapshot scheduling
+- `backend/backend_runtime.mjs` now owns UI-facing command adaptation and
+  binding-side routing
 - `worker/physics.worker.mjs` owns forge loading, XML load/init, step loop,
   snapshot packing, selection, perturbation, alignment, and command dispatch
 
@@ -115,11 +127,12 @@ What is good:
 - Main ↔ worker transport is explicit
 - Worker-side simulation ownership is structurally correct
 - Snapshot delivery is clearly separated from DOM work
+- `backend/backend_core.mjs` now exposes one published canonical snapshot to main-thread consumers
 
 Current deviation from the ideal:
 
-- `backend/backend_core.mjs` mixes transport, orchestration, and UI-facing
-  semantics
+- `backend/backend_core.mjs` is narrower, but worker event handling and some
+  payload-specific helpers still live beside transport/restart ownership
 - `worker/physics.worker.mjs` remains a monolith with several internal
   subsystems collapsed into one file
 
@@ -130,8 +143,9 @@ Evidence:
 
 Recommended next action:
 
-- Backend should later be split into transport/restart + command adapters +
-  snapshot adaptation
+- Backend should stay the sole main-thread physical owner; later cleanup should
+  split transport/restart from command adapters and snapshot adaptation without
+  reintroducing second snapshot holders
 - Worker should later be split internally into load/init, step/snapshot, and
   interactive command subsystems while keeping one worker entrypoint
 
@@ -143,32 +157,51 @@ Current shape:
 
 - `ui/state.mjs` owns store state, snapshot merge, actions, and runtime-aware
   reset behavior
+- `ui/viewer_actions.mjs` now owns binding readers/appliers, spec actions,
+  gestures, and visual-source switching
+- `ui/control_widgets.mjs` now owns the coarse widget-rendering and local
+  widget-behavior layer
 - `ui/control_manager.mjs` owns panel DOM rendering, some shell styling side
   effects, and binding-driven widget behavior
 
 What is good:
 
 - Viewer-state reset now has a single explicit baseline source
-- Snapshot merge and runtime sticky replay live in the same conceptual area
+- Runtime sticky replay no longer rides on the general store subscription path
+- Dynamic controls and renderer consumers now read backend-owned values from
+  snapshot selectors instead of store mirrors
+- `ui/state.mjs` is now substantially narrower and closer to a real store owner
+- `ui/control_widgets.mjs` now owns widget-local helper behavior directly
+  instead of accepting dozens of threaded helpers from `ui/control_manager.mjs`
 
 Current deviation from the ideal:
 
-- `ui/control_manager.mjs` still bundles widget rendering, DOM presentation, and
-  shell-facing effects
-- DOM side effects are better than before, but still spread across more than one
-  module by design
+- `ui/control_manager.mjs` is narrower, but still owns panel orchestration plus
+  some shell-facing DOM effects
+- `ui/control_widgets.mjs` is now the coarse widget layer, but it still needs
+  long-term cleanup to stay cohesive instead of becoming another kitchen-sink
+  module
+- The store is now materially narrower, but visual-source preset caches still
+  live inside the store and need to stay explicitly documented as JS-only local
+  buffers
 
 Evidence:
 
 - `ui/state.mjs`
+- `ui/viewer_actions.mjs`
 - `ui/control_manager.mjs`
+- `ui/control_widgets.mjs`
 - `ui/file_section.mjs`
 
 Recommended next action:
 
-- Preserve `ui/state.mjs` as the state owner
-- Later extract control presentation helpers from `ui/control_manager.mjs`
-  without breaking the top-level control manager contract
+- Preserve `ui/state.mjs` as the UI/shell owner only
+- Preserve `ui/viewer_actions.mjs` as the coarse action layer instead of pushing
+  that logic back into the store
+- Keep `ui/control_manager.mjs` as the orchestrator and `ui/control_widgets.mjs`
+  as the widget layer; only split again if a whole ownership slice can move
+- Keep the store narrow and explicitly document the remaining JS-only preset
+  buffers as local rendering state, not backend mirrors
 
 ### Renderer & Environment
 
@@ -243,6 +276,8 @@ Recommended next action:
   mental model
 - Reload semantics are now better than before, but are still encoded across
   `app/main.mjs`, `backend/backend_core.mjs`, and `ui/state.mjs`
+- Visual-source switching still carries compatibility-style local caches inside
+  store state even though published snapshot data is the formal renderer truth
 
 ### Duplication
 
@@ -253,9 +288,10 @@ Recommended next action:
 
 ### Redundancy
 
-- `app/main.mjs` and `core/viewer_runtime.mjs` both expose debug/report helpers
-- The `params` compatibility mirror duplicates part of the typed runtime config
-  surface
+- `app/main.mjs`, `app/ui_runtime.mjs`, and `core/viewer_runtime.mjs` still
+  expose debug/report helpers from different ownership layers
+- Some visual-source preset caches still duplicate backend visual structs on the
+  JS side by design; they should remain clearly scoped to preset switching only
 
 ### Inefficiency
 
@@ -304,19 +340,40 @@ Why:
 
 ### `tools/forbid_patterns.mjs`
 
-Status: `Stale / blind`
+Status: `Partially trusted`
 
 Why:
 
-- It still scans `dev/`, `src/`, `tools/`, and `tests/`
-- It does not scan the current runtime directories such as `app/`, `backend/`,
-  `bridge/`, `core/`, `environment/`, `renderer/`, `ui/`, and `worker/`
-- As a result, `ci:guard` currently misses most of the live runtime tree
+- It now scans the live runtime tree (`app/`, `backend/`, `bridge/`, `core/`,
+  `environment/`, `renderer/`, `ui/`, `worker/`) instead of the removed
+  `dev/` / `src/` tree
+- It now blocks two ownership regressions explicitly:
+  - `latestSnapshot`-style duplicate snapshot holders
+  - direct `snapshot || state.runtime.selection` fallback patterns
+- It now also blocks:
+  - runtime use of `consumeViewerParams`
+  - runtime reads of `location.search`, `new URLSearchParams(...)`, and
+    `PLAY_*` globals outside bootstrap
+  - runtime reads of `window.__lastSnapshot`
+- It now also adds coarse ownership checks for:
+  - widget renderer bodies drifting back into `ui/control_manager.mjs`
+  - widget-local helper bodies drifting back into `ui/control_manager.mjs`
+  - binding/ui command adapters drifting back into `backend/backend_core.mjs`
+- `tools/run_checks.mjs` now enforces a hard cap on factory injection surface:
+  - `createControlWidgetsRuntime(...) <= 12`
+  - `createBackendRuntime(...) <= 12`
+- It now also blocks reintroducing viewer-store reads for backend-owned
+  categories such as `state.simulation`, `state.hud`, `state.history`,
+  `state.watch`, `state.keyframes`, `state.rendering.assets`,
+  `state.rendering.voptFlags`, `state.rendering.sceneFlags`, and
+  `state.model.vis`
+- It is still pattern-based and therefore cannot prove full ownership
+  correctness by itself
 
 Impact:
 
-- The project appears to have a pattern guard, but the current runtime is mostly
-  outside its coverage
+- The project now has a minimally credible runtime pattern guard again, but it
+  remains a coarse backstop rather than a full architecture proof
 
 ### `tools/run_checks.mjs`
 
@@ -325,7 +382,8 @@ Status: `Partially trusted`
 Why:
 
 - It is a useful wrapper for boundaries, unit tests, and syntax checks
-- Its confidence is currently limited by the stale `forbid_patterns` scan roots
+- Its confidence is now limited by the coarseness of the underlying checks, not
+  by stale scan roots
 - Syntax checks only touch a small set of hot modules
 
 ### `package.json` scripts
@@ -342,29 +400,30 @@ Why:
 
 Priority order for future implementation:
 
-1. Fix `tools/forbid_patterns.mjs` scan roots so the live runtime tree is
-   actually covered
-2. Keep `tools/check_module_boundaries.mjs`, but treat it as a coarse layer
+1. Keep `tools/check_module_boundaries.mjs`, but treat it as a coarse layer
    guard only
-3. Replace placeholder `lint` / `test` / `build` scripts with wrappers to real
+2. Replace placeholder `lint` / `test` / `build` scripts with wrappers to real
    commands, or remove them
-4. Add a dedicated guard that forbids new runtime input reads outside bootstrap
+3. Add a dedicated guard that forbids new runtime input reads outside bootstrap
    and forbids new direct DOM/global writes outside documented ownership
+4. Add a selector-usage guard for new snapshot consumers if the current
+   coarse-pattern approach starts regressing again
 
 ## Recommended next work queue
 
 ### Queue A — Guardrail first
 
-- Fix stale guard coverage
 - Align docs, scripts, and actual checks
-- Add explicit ownership-oriented checks around runtime input and shell side
-  effects
+- Add explicit ownership-oriented checks around shell side effects and new
+  snapshot-consumer patterns
+- Keep the live runtime-tree coverage in `tools/forbid_patterns.mjs`
 
 ### Queue B — Ownership consolidation
 
-- Remove the `params` compatibility layer in `core/viewer_runtime.mjs`
 - Keep `core/runtime_config.mjs` as the only runtime input surface
 - Reduce debug global sprawl where the host contract already covers the use case
+- Continue moving snapshot-backed reads behind coarse selectors where it
+  meaningfully reduces ownership ambiguity
 
 ### Queue C — Module reshaping
 
