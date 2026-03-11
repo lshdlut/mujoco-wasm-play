@@ -1221,8 +1221,8 @@ function sampleWatch() {
     valid: !!watchState.valid,
     summary:
       watchState.valid && typeof watchState.value === 'number'
-        ? `${(resolved || watchState.field || 'qpos')}[${watchState.index}] = ${watchState.value}`
-        : 'n/a',
+        ? watchState.value.toPrecision(6)
+        : '—',
   };
 }
 

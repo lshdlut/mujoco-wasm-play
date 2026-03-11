@@ -1,6 +1,7 @@
 // UI control manager (DOM + panel wiring).
 
 import { logWarn, strictCatch, withCacheBust } from '../core/viewer_runtime.mjs';
+import { getSnapshotCameraMode } from '../core/snapshot_selectors.mjs';
 import { getControlBindingSpec, toBoolean } from './bindings.mjs';
 import { resolvePlayPanelId, setPlaySectionCollapsed } from './panel_sections.mjs';
 import { createFileSectionManager } from './file_section.mjs';
@@ -614,7 +615,7 @@ function shortcutFromEvent(event) {
   async function cycleCamera(delta) {
     const control = controlById.get('rendering.camera_mode');
     if (!control) return;
-    const current = store.get().runtime.cameraIndex | 0;
+    const current = getSnapshotCameraMode(currentSnapshot()) ?? 0;
     const total = getCameraModeCount();
     const next = (current + delta + total) % total;
     await applyControlSpecAction(control, next);

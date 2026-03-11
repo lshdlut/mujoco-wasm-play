@@ -397,7 +397,7 @@ export function buildViewerCameraPayload(ctx, snapshot, state, scratchVec = null
     elevation,
     orthographic: !!camera.isOrthographicCamera,
   };
-  const mode = Number(state?.runtime?.cameraIndex ?? 0) | 0;
+  const mode = getSnapshotCameraMode(snapshot) | 0;
   if (mode === 1) {
     payload.type = 1;
     payload.trackbodyid = resolveTrackingBodyId(snapshot, state);
@@ -527,7 +527,7 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
 
   function syncCameraPoseFromMode(backend, ctx, snapshot, state, bounds, helpers, trackingCtx = {}) {
     if (!ctx?.camera || !state) return;
-    const runtimeMode = Number(state.runtime?.cameraIndex ?? 0) | 0;
+    const runtimeMode = getSnapshotCameraMode(snapshot) | 0;
   const cameraList = getSnapshotCameras(snapshot);
   const maxMode = FIXED_CAMERA_OFFSET + cameraList.length - 1;
   const desired = Math.max(
@@ -553,12 +553,12 @@ function applyTrackingCamera(ctx, bounds, { tempVecA, tempVecB }, trackingOverri
         sendViewerCameraSync(backend, ctx, snapshot, state, helpers.tempVecA);
       }
     }
-  if (desired >= FIXED_CAMERA_OFFSET) {
-    if (!applyFixedCameraPreset(ctx, state, helpers)) {
-      ctx.fixedCameraActive = false;
-    }
-    return;
-  }
+	  if (desired >= FIXED_CAMERA_OFFSET) {
+	    if (!applyFixedCameraPreset(ctx, snapshot, state, helpers)) {
+	      ctx.fixedCameraActive = false;
+	    }
+	    return;
+	  }
   if (desired === 1) {
     const trackingBodyId = resolveTrackingBodyId(snapshot, state);
     if (Number.isFinite(trackingBodyId) && trackingBodyId !== ctx.viewerCameraTrackId) {
@@ -945,9 +945,9 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
   return shadowCasters;
 }
 
-function applyFixedCameraPreset(ctx, state, { tempVecA, tempVecB, tempVecC, tempVecD }) {
+function applyFixedCameraPreset(ctx, snapshot, state, { tempVecA, tempVecB, tempVecC, tempVecD }) {
   if (!ctx || !ctx.camera) return false;
-  const mode = state.runtime?.cameraIndex | 0;
+  const mode = getSnapshotCameraMode(snapshot) | 0;
   if (mode < FIXED_CAMERA_OFFSET) {
     ctx.fixedCameraActive = false;
     return false;
@@ -995,7 +995,7 @@ function applyFixedCameraPreset(ctx, state, { tempVecA, tempVecB, tempVecC, temp
 
 function applyViewerCameraSnapshot(ctx, snapshot, state, bounds, { tempVecA, tempVecB }) {
   if (!ctx?.camera) return false;
-  const mode = state?.runtime?.cameraIndex | 0;
+  const mode = getSnapshotCameraMode(snapshot) | 0;
   if (mode > 1) return false;
   // Keep THREE projection aligned with MuJoCo frustum math:
   // `mjv_updateCamera` uses `mjVisual.global.fovy` for free/tracking cameras.

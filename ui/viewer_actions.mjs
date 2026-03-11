@@ -12,7 +12,8 @@ import {
   toNumber,
 } from '../core/viewer_shared.mjs';
 import { SCENE_FLAG_DEFAULTS } from '../core/viewer_defaults.mjs';
-import {
+ import {
+  getSnapshotCameraMode,
   getSnapshotFrameMode,
   getSnapshotGroups,
   getSnapshotHistory,
@@ -121,7 +122,7 @@ const BINDING_READERS = {
     }
     return run;
   },
-  camera: (state) => state.runtime.cameraIndex | 0,
+  camera: (state, snapshot) => getSnapshotCameraMode(snapshot) ?? 0,
   tracking_geom: (state) => (Number.isFinite(state.runtime.trackingGeom) ? state.runtime.trackingGeom : -1),
   scrub_index: (state, snapshot) => getSnapshotSimulation(snapshot).scrubIndex | 0,
   key_index: (state, snapshot) => getSnapshotSimulation(snapshot).keyIndex | 0,

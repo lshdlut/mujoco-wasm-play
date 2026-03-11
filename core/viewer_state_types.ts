@@ -41,7 +41,6 @@ export interface PerturbState {
 }
 
 export interface RuntimeState {
-  cameraIndex: number;
   trackingGeom: number;
   lastAction: string;
   gesture: GestureState;

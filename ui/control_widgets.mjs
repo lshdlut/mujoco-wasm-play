@@ -1,7 +1,8 @@
 import { logWarn, strictCatch, strictEnsure } from '../core/viewer_runtime.mjs';
 import { toNumber } from '../core/viewer_shared.mjs';
 import { resolveFontPresetValue } from '../core/runtime_config.mjs';
-import {
+ import {
+  getSnapshotCameraMode,
   getSnapshotCameras,
   getSnapshotGeoms,
   getSnapshotHistory,
@@ -72,7 +73,6 @@ export function createControlWidgetsRuntime({
     if (!root || typeof root.style?.setProperty !== 'function') return;
     const preset = resolveFontPresetValue(value, 2);
     root.style.setProperty('--viewer-font-scale', String(preset.scale));
-    root.style.setProperty('--viewer_panel_scale', String(preset.panelScale));
   }
 
   function sanitiseName(name) {
@@ -966,7 +966,8 @@ function createBoolToggleElements(control, { disabled = false } = {}) {
       attachOptionAvailability(control, select, binding);
       if (control.item_id === 'rendering.tracking_geom') {
         appendUpdateOptions(binding, (state) => {
-          const isTracking = (state?.runtime?.cameraIndex | 0) === 1;
+          const snapshot = currentSnapshot();
+          const isTracking = (getSnapshotCameraMode(snapshot) | 0) === 1;
           const disabled = !isTracking || select.options.length <= 1;
           select.disabled = disabled;
           row.classList.toggle('is-disabled', disabled);

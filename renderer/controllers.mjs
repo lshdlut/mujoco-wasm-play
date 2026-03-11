@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { isPerfEnabled, isStrictEnabled, perfMarkOnce, perfNow, perfSample, logDebug, logWarn, logStatus, logError, strictCatch, strictEnsure, strictOverride } from '../core/viewer_runtime.mjs';
 import { compatFallback } from '../core/fallbacks.mjs';
-import { getSnapshotBodyJointAdr, getSnapshotBodyJointNum, getSnapshotGeoms, getSnapshotGeomBodyIds, getSnapshotJointTypes, getSnapshotSelection } from '../core/snapshot_selectors.mjs';
+import { getSnapshotBodyJointAdr, getSnapshotBodyJointNum, getSnapshotCameraMode, getSnapshotGeoms, getSnapshotGeomBodyIds, getSnapshotJointTypes, getSnapshotSelection } from '../core/snapshot_selectors.mjs';
 import { pushSkyDebug } from '../environment/environment.mjs';
 import { buildViewerCameraPayload, normalizeDeltaByViewportHeight, resolveTrackingBodyId } from './pipeline.mjs';
 import { geomNameFromLookup, getOrCreateGeomNameLookup } from './geom_names.mjs';
@@ -61,7 +61,8 @@ function createCameraController({
 
   const cameraModeIndex = () => {
     try {
-      return store.get()?.runtime?.cameraIndex ?? 0;
+      const snapshot = typeof getSnapshot === 'function' ? getSnapshot() : null;
+      return getSnapshotCameraMode(snapshot) ?? 0;
     } catch (err) {
       strictCatch(err, 'main:cameraModeIndex');
       return 0;
@@ -122,7 +123,7 @@ function createCameraController({
     if (!useWasmCamera || !renderCtx) return null;
     const state = typeof store?.get === 'function' ? store.get() : null;
     const snapshot = typeof getSnapshot === 'function' ? getSnapshot() : null;
-    const mode = Number(state?.runtime?.cameraIndex ?? 0) | 0;
+    const mode = getSnapshotCameraMode(snapshot) | 0;
     const trackingBodyId = mode === 1 ? resolveTrackingBodyId(snapshot, state) : null;
     const trackingChanged =
       mode === 1 && Number.isFinite(trackingBodyId) && trackingBodyId !== renderCtx.viewerCameraTrackId;

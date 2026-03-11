@@ -53,6 +53,10 @@ export function createBackendRuntime({
       const nextMask = invert
         ? (active ? (currentMask & ~bit) : (currentMask | bit))
         : (active ? (currentMask | bit) : (currentMask & ~bit));
+      if (!lastSnapshot.options || typeof lastSnapshot.options !== 'object') {
+        lastSnapshot.options = {};
+      }
+      lastSnapshot.options[field] = nextMask;
       try {
         client.postMessage?.({
           cmd: 'setField',
@@ -114,7 +118,7 @@ export function createBackendRuntime({
         }
       }
     }
-    return publishMutation();
+    return publishMutation(true);
   }
 
   const uiHandlers = new Map([
@@ -373,28 +377,29 @@ export function createBackendRuntime({
   ];
 
   function dispatchBinding(binding, value) {
-    if (!binding) return false;
+    if (!binding) return { handled: false, updated: false, notify: false };
     const exactHandler = bindingExactHandlers.get(binding);
     if (exactHandler) {
       exactHandler(value);
-      return true;
+      const updated = binding !== 'Simulate::tracking_geom';
+      return { handled: true, updated, notify: updated };
     }
     if (applySimulateMaskBinding(binding, value, 'Simulate::disable', 'disableflags', false, 'disableflags')) {
-      return true;
+      return { handled: true, updated: true, notify: true };
     }
     if (applySimulateMaskBinding(binding, value, 'Simulate::enable', 'enableflags', false, 'enableflags')) {
-      return true;
+      return { handled: true, updated: true, notify: true };
     }
     if (applySimulateMaskBinding(binding, value, 'Simulate::enableactuator', 'disableactuator', true, 'disableactuator')) {
-      return true;
+      return { handled: true, updated: true, notify: true };
     }
     for (const entry of bindingRegexHandlers) {
       const match = binding.match(entry.pattern);
       if (!match) continue;
       entry.handle(match, value);
-      return true;
+      return { handled: true, updated: true, notify: true };
     }
-    return false;
+    return { handled: false, updated: false, notify: false };
   }
 
   async function apply(payload) {
@@ -445,20 +450,24 @@ export function createBackendRuntime({
         logError('[backend gesture] failed', err);
         strictCatch(err, 'backend:gesture');
       }
-      return publishMutation();
+      return readPublishedSnapshot(false);
     }
     if (payload.kind !== 'ui') {
       return readPublishedSnapshot(false);
     }
     const { id, value, control } = payload;
     const binding = typeof control?.binding === 'string' ? control.binding : null;
-    if (dispatchBinding(binding, value)) {
-      return publishMutation();
+    const dispatchResult = dispatchBinding(binding, value);
+    if (dispatchResult.handled) {
+      if (!dispatchResult.updated) {
+        return readPublishedSnapshot(false);
+      }
+      return publishMutation(dispatchResult.notify);
     }
     const uiHandler = uiHandlers.get(id);
     if (uiHandler) {
       uiHandler(value);
-      return publishMutation();
+      return readPublishedSnapshot(false);
     }
     const prepared = typeof prepareBindingUpdate === 'function'
       ? await prepareBindingUpdate(control, value)
@@ -582,7 +591,7 @@ export function createBackendRuntime({
       logWarn('[backend step] post failed', err);
       strictCatch(err, 'backend:step');
     }
-    return publishMutation();
+    return readPublishedSnapshot(false);
   }
 
   async function setCameraIndex() {
@@ -676,7 +685,7 @@ export function createBackendRuntime({
       logWarn('[backend setSelection] failed', err);
       strictCatch(err, 'backend:setSelection');
     }
-    return publishMutation();
+    return publishMutation(true);
   }
 
   async function selectAtCommand(options = {}) {

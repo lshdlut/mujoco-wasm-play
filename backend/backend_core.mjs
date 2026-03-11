@@ -72,7 +72,14 @@ export async function createBackend(options = {}) {
     return publishedSnapshot;
   }
 
-  function publishMutation() {
+  function publishMutation(options = false) {
+    const notify =
+      typeof options === 'object' && options !== null
+        ? !!options.notify
+        : !!options;
+    if (notify) {
+      return notifyListeners();
+    }
     return readPublishedSnapshot(true);
   }
 
@@ -509,7 +516,7 @@ export async function createBackend(options = {}) {
         strictCatch(err, 'backend:setPaused');
       }
     }
-    return publishMutation();
+    return publishMutation(true);
   }
 
   function setRate(nextRate, source = 'ui') {
@@ -523,7 +530,7 @@ export async function createBackend(options = {}) {
       logWarn('[backend] setRate post failed', err);
       strictCatch(err, 'backend:setRate');
     }
-    return publishMutation();
+    return publishMutation(true);
   }
 
   async function loadXmlText(xmlText) {

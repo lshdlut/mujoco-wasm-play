@@ -44,7 +44,6 @@ export const DEFAULT_VIEWER_STATE = Object.freeze({
     pauseUpdate: false,
   },
   runtime: {
-    cameraIndex: 0,
     trackingGeom: -1,
     lastAction: 'idle',
     gesture: {
