@@ -36,7 +36,8 @@ Tagging rule:
 The zip contains:
 
 - ``index.html`` (single) and ``pthreads/index.html`` (pthreads)
-- ``site_config.js`` (sets the default ``globalThis.PLAY_VER``)
+- ``site_config.js`` (sets defaults such as ``globalThis.PLAY_VER`` and
+  optional ``globalThis.PLAY_ENV_ASSET_BASE``)
 - runtime directories: ``app/``, ``assets/``, ``backend/``, ``bridge/``,
   ``core/``, ``environment/``, ``model/``, ``plugins/``, ``renderer/``,
   ``spec/``, ``ui/``, ``worker/``

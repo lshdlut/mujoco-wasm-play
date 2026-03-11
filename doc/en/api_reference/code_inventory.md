@@ -360,14 +360,17 @@ This page lists declarations and ESM exports in a searchable form.
 
 ### `environment/environment.mjs`
 
-- Lines: 1326
+- Lines: 1362
 - Exports:
-  - L1320: export `FALLBACK_PRESETS`
-  - L1320: export `FALLBACK_PRESET_ALIASES`
-  - L1320: export `createEnvironmentManager`
-  - L1320: export `pushSkyDebug`
+  - L1355: export `FALLBACK_PRESET_ALIASES`
+  - L1355: export `DEFAULT_ENV_ASSET_BASE_URL`
+  - L1355: export `createEnvironmentManager`
+  - L1355: export `getFallbackPreset`
+  - L1355: export `pushSkyDebug`
+  - L1355: export `resolveEnvironmentAssetBase`
+  - L1355: export `resolveEnvironmentAssetUrl`
 - File-scope declarations:
-  - L12: function `clamp01`
+  - L11: const `DEFAULT_ENV_ASSET_BASE_URL`
   - L19: function `getWorldScene`
   - L133: function `ensureSkyCache`
   - L147: function `hasModelEnvironment`

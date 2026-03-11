@@ -42,6 +42,8 @@ tag before importing the app:
 - ``globalThis.PLAY_COMPAT``: force compat mode on/off. Overrides ``compat=``.
 - ``globalThis.PLAY_VERBOSE_DEBUG``: force verbose debug on/off. Overrides
   ``log=`` / ``verbose=``.
+- ``globalThis.PLAY_ENV_ASSET_BASE``: override the base URL used for built-in
+  HDRI/EXR environment presets. Equivalent to ``envAssetBase=``.
 
 Rendering debug toggles at startup
 ----------------------------------------

@@ -75,6 +75,7 @@ lighting / skybox 相关设置。
 
 - `model`（默认）：使用当前模型中由 MuJoCo 驱动的 skybox/lights。
 - `preset-sun` / `preset-moon`：内置 HDRI 预设，以本仓库静态资源形式提供（forge 的 `dist/<ver>/` 不包含 HDRI）。
+- 可通过 `envAssetBase=` 或 `globalThis.PLAY_ENV_ASSET_BASE` 改写这些 HDRI/EXR 的托管位置，例如共享 CDN 或 R2 bucket。若远端环境资源加载失败，Play 会保留 preset 的灯光设置，并退化到现有 cached/gradient environment 路径。
 
 ## 开发
 

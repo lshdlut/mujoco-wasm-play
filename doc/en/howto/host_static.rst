@@ -25,6 +25,10 @@ for:
 - ``mujoco.wasm``
 - ``version.json`` (optional but recommended)
 
+If you move built-in environment preset assets to another origin via
+``envAssetBase=`` or ``PLAY_ENV_ASSET_BASE``, that host must also allow CORS
+for the HDRI/EXR files.
+
 Caching
 -------
 
@@ -52,6 +56,13 @@ by commit SHA) and serve with long-lived caching headers (ideally
 ``version.json`` is optional. Play may fetch it with ``no-store`` for
 diagnostics when verbose/perf logging is enabled, but it is not required for
 correct caching.
+
+Environment preset assets follow the same model: by default they come from the
+repo-local ``assets/env/`` directory, but you can point them at a shared CDN or
+object store with ``envAssetBase=`` (or ``PLAY_ENV_ASSET_BASE`` in
+``site_config.js``). If those remote files fail to load, Play keeps the preset
+lighting and falls back to the existing cached/gradient environment path rather
+than failing the viewer.
 
 The included dev server is a good reference implementation:
 ``tools/dev_server.py``.

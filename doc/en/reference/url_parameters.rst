@@ -80,6 +80,15 @@ Parameters
     - Initial UI font scale preset. Supported values: ``50``, ``75``, ``100``,
       ``150``, ``200`` (percent presets matching the built-in font selector).
 
+  * - ``envAssetBase``
+    - string (URL)
+    - repo-local ``assets/env/``
+    - main
+    - Base URL for built-in environment preset assets such as
+      ``preset-sun`` / ``preset-moon`` HDRI or EXR files. Relative values
+      resolve from the repo/web root. This only changes where preset env assets
+      are loaded from; it does not affect forge ``dist/``.
+
 Developer/debug parameters
 --------------------------
 

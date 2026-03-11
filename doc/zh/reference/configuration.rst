@@ -31,6 +31,8 @@
 - ``globalThis.PLAY_STRICT``: 强制开启/关闭 strict 模式，覆盖 ``strict=``。
 - ``globalThis.PLAY_COMPAT``: 强制开启/关闭 compat 模式，覆盖 ``compat=``。
 - ``globalThis.PLAY_VERBOSE_DEBUG``: 强制开启/关闭 verbose debug，覆盖 ``log=`` / ``verbose=``。
+- ``globalThis.PLAY_ENV_ASSET_BASE``: 改写内置 HDRI/EXR 环境预设所使用的
+  base URL。等价于 ``envAssetBase=``。
 
 启动时渲染调试开关
 ---------------------------------

@@ -75,6 +75,7 @@ Lighting and skybox sources.
 
 - `model` (default): MuJoCo-driven skybox/lights from the loaded model.
 - `preset-sun` / `preset-moon`: built-in HDRI presets shipped as static assets in this repo (forge does not include HDRIs as part of `dist/<ver>/`).
+- Override preset HDRI/EXR hosting via `envAssetBase=` or `globalThis.PLAY_ENV_ASSET_BASE` (for example a shared CDN or R2 bucket). If remote env assets fail to load, Play keeps the preset lighting and falls back to the cached/gradient environment path.
 
 ## Development
 

@@ -360,14 +360,17 @@
 
 ### `environment/environment.mjs`
 
-- 行数：1326
+- 行数：1362
 - 导出：
-  - L1320: export `FALLBACK_PRESETS`
-  - L1320: export `FALLBACK_PRESET_ALIASES`
-  - L1320: export `createEnvironmentManager`
-  - L1320: export `pushSkyDebug`
+  - L1355: export `FALLBACK_PRESET_ALIASES`
+  - L1355: export `DEFAULT_ENV_ASSET_BASE_URL`
+  - L1355: export `createEnvironmentManager`
+  - L1355: export `getFallbackPreset`
+  - L1355: export `pushSkyDebug`
+  - L1355: export `resolveEnvironmentAssetBase`
+  - L1355: export `resolveEnvironmentAssetUrl`
 - 文件级声明：
-  - L12: function `clamp01`
+  - L11: const `DEFAULT_ENV_ASSET_BASE_URL`
   - L19: function `getWorldScene`
   - L133: function `ensureSkyCache`
   - L147: function `hasModelEnvironment`

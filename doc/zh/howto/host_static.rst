@@ -22,6 +22,9 @@ CORS
 - ``mujoco.wasm``
 - ``version.json``（可选；用于诊断时推荐）
 
+如果你通过 ``envAssetBase=`` 或 ``PLAY_ENV_ASSET_BASE`` 把内置环境预设资源移到
+另一个 origin，该托管端也需要为对应 HDRI/EXR 文件允许 CORS。
+
 缓存
 -------
 
@@ -41,5 +44,10 @@ Play 默认是缓存友好的：
 生产/演示托管时应当反过来：推荐使用不可变 URL（用 commit SHA 固定 forge），并配合长生命周期的缓存头（最好带 ``immutable``）。
 
 ``version.json`` 是可选项。Play 可能会在开启 verbose/perf 日志时用 ``no-store`` 拉取它用于诊断，但它不是正确缓存所必需的。
+
+环境预设资源遵循同样的思路：默认来自仓库内置的 ``assets/env/``，也可以通过
+``envAssetBase=``（或 ``site_config.js`` 中的 ``PLAY_ENV_ASSET_BASE``）指向共享
+CDN 或对象存储。若这些远端文件加载失败，Play 会保留 preset 的灯光设置，并退化到
+现有的 cached/gradient environment 路径，而不会让 viewer 整体失败。
 
 内置开发服务器是一个不错的参考实现：``tools/dev_server.py``。

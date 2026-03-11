@@ -34,7 +34,8 @@ tag 规则：
 ``site.zip`` 的内容包括：
 
 - ``index.html``（single）与 ``pthreads/index.html``（pthreads）
-- ``site_config.js``（设置默认 ``globalThis.PLAY_VER``）
+- ``site_config.js``（设置默认 ``globalThis.PLAY_VER``，也可选配置
+  ``globalThis.PLAY_ENV_ASSET_BASE``）
 - 运行时目录：``app/``、``assets/``、``backend/``、``bridge/``、``core/``、
   ``environment/``、``model/``、``plugins/``、``renderer/``、``spec/``、
   ``ui/``、``worker/``
