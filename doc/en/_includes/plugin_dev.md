@@ -189,9 +189,11 @@ Entry points:
 
 Each scope has per-layer roots. These strings are used in the APIs below:
 - `worldOpaque`: normal world objects, depth-tested, intended for opaque materials
-- `worldTransparent`: normal world objects intended for alpha blending, depth-tested; depth-write defaults to off when opacity < 1
-- `worldOverlay`: world-occluded overlays that should draw after the base world, for example selection highlights and gizmos
-- `hud`: always-on-top overlays, depth-test defaults to off
+- `worldTransparent`: normal world objects intended for alpha blending, depth-tested, depth-write off
+- `worldOverlay`: world-occluded overlays that should draw after the base world, for example selection highlights and gizmos; depth-tested, depth-write off
+- `hud`: always-on-top overlays, depth-test off, depth-write off
+
+When you add an `Object3D` tree to a layer, Play applies that layer contract to the whole subtree.
 
 #### Instanced primitives
 
@@ -222,8 +224,8 @@ Transparent instancing is a system-level problem: instances are not automaticall
 The overlay system provides an explicit policy surface to avoid per-plugin hacks.
 
 `transparency` fields. Supported on `createInstancedMeshBatch` and `batch.setTransparency`:
-- `mode`: `'opaque' | 'blend'`. Defaults to `'blend'` for `worldTransparent`, else `'opaque'`.
-- `opacity`: `0..1`. When `< 1`, enables blend mode.
+- `mode`: `'opaque' | 'blend'`. Defaults to `'blend'` for `worldTransparent`; overlay/HUD layers keep their class semantics regardless.
+- `opacity`: `0..1`. Affects `worldTransparent` blending; it does not turn `worldOpaque` into another layer.
 - `sortMode`: `'nosort' | 'bins' | 'strict' | 'inherit'`
   - `nosort`: no per-instance ordering; fastest
   - `bins`: coarse depth bins; good default for large counts

@@ -189,9 +189,11 @@ viewer 提供了一个正式的、对插件友好的 3D overlay 系统，它直�
 
 每个 scope 提供各 layer 的 root。以下为 API 使用的字符串：
 - `worldOpaque`: 普通 world 对象，depth-tested，面向不透明材质
-- `worldTransparent`: 面向 alpha blending 的 world 对象，depth-tested；当 opacity < 1 时默认关闭 depth-write
-- `worldOverlay`: 被世界遮挡的 overlay，应在基础 world 之后绘制，例如选中高亮、gizmo
-- `hud`: 永远置顶的 overlay，默认关闭 depth-test
+- `worldTransparent`: 面向 alpha blending 的 world 对象，depth-tested，depth-write 关闭
+- `worldOverlay`: 被世界遮挡的 overlay，应在基础 world 之后绘制，例如选中高亮、gizmo；depth-tested，depth-write 关闭
+- `hud`: 永远置顶的 overlay，默认关闭 depth-test 和 depth-write
+
+当你把一个 `Object3D` 树加入某个 layer 时，Play 会把该 layer 的契约应用到整棵子树。
 
 #### Instanced primitive
 
@@ -218,8 +220,8 @@ Commit 是 **延迟** 的：它不会立即上传到 GPU。Play 会在每个渲�
 透明 instancing 是系统级问题：Three.js 不会自动为 instances 做 depth sort。overlay 系统提供了显式的策略 surface，避免每个插件都各自搞 hack。
 
 `transparency` 字段。`createInstancedMeshBatch` 与 `batch.setTransparency` 均支持：
-- `mode`: `'opaque' | 'blend'`。在 `worldTransparent` 下默认为 `'blend'`，其它图层默认为 `'opaque'`。
-- `opacity`: `0..1`。当 `< 1` 时启用 blend 模式。
+- `mode`: `'opaque' | 'blend'`。在 `worldTransparent` 下默认为 `'blend'`；overlay/HUD 图层会保持各自的图层语义。
+- `opacity`: `0..1`。只影响 `worldTransparent` 的 blending；不会把 `worldOpaque` 改造成其它图层。
 - `sortMode`: `'nosort' | 'bins' | 'strict' | 'inherit'`
   - `nosort`: 不做 per-instance 排序；最快
   - `bins`: 粗粒度深度分箱；适合大数量的默认方案

@@ -238,6 +238,8 @@ Responsibilities:
 - Owns Three.js scene application and frame orchestration
 - Owns camera interaction and picking
 - Owns environment/sky and renderer-visible debug hooks
+- Owns the world-space occlusion contract for packed scene geoms, infinite
+  ground, and overlay3d world layers
 
 Ownership:
 
@@ -248,6 +250,8 @@ Current caveat:
 
 - `renderer/pipeline.mjs` still contains more than orchestration. A substantial
   amount of scene/resource policy remains inside the top-level pipeline.
+- Labels are still a separate sprite path (`labelGroup`) and are intentionally
+  outside the current world-space occlusion contract.
 
 ### 7. Plugins and public surface
 

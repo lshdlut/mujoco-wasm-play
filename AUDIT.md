@@ -233,6 +233,9 @@ Current deviation from the ideal:
 
 - `renderer/pipeline.mjs` is still too broad for long-term maintainability
 - Environment and renderer debug outputs are still ad hoc globals
+- World-space occlusion used to be split across infinite ground, packed scene
+  geoms, overlay3d, and labels; the renderer now needs to preserve one shared
+  contract for world objects and keep labels explicitly separate
 
 Evidence:
 
