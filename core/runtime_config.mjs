@@ -38,6 +38,7 @@ const EMPTY_RUNTIME_CONFIG = Object.freeze({
     snapshotHzMax: 120,
   }),
   rendering: Object.freeze({
+    environmentAssetBase: '',
     hideAllGeometryDefault: false,
     forceBasic: false,
     instancingEnabled: true,

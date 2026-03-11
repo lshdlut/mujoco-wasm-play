@@ -27,7 +27,7 @@ import { SCENE_FLAG_DEFAULTS } from '../core/viewer_defaults.mjs';
   getSnapshotVoptFlags,
   getSnapshotWatch,
 } from '../core/snapshot_selectors.mjs';
-import { FALLBACK_PRESETS } from '../environment/environment.mjs';
+import { getFallbackPreset } from '../environment/environment.mjs';
 import {
   DEFAULT_VIEWER_STATE,
   VISUAL_SOURCE_CACHE_TEMPLATE,
@@ -472,7 +472,7 @@ function applyPresetOverridesToStruct(base, presetLabel) {
 function applyAppearancePresetOverrides(base, presetKey) {
   const source = cloneStruct(base) || {};
   const key = presetKey === 'moon' ? 'moon' : 'sun';
-  const preset = FALLBACK_PRESETS[key] || FALLBACK_PRESETS.sun;
+  const preset = getFallbackPreset(key);
   for (const [field, value] of Object.entries(preset)) {
     const before = Object.prototype.hasOwnProperty.call(source, field) ? cloneStruct(source[field]) : null;
     source[field] = cloneStruct(value);

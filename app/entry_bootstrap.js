@@ -104,6 +104,22 @@
     return new URL(value, repoRootUrl).href;
   }
 
+  function normaliseUrlBase(raw, fallbackUrl, label) {
+    const value = String(raw || '').trim();
+    const baseUrl = String(fallbackUrl || '').trim();
+    const target = value || baseUrl;
+    if (!target) {
+      throw new Error(`Missing ${label} base URL`);
+    }
+    let resolved;
+    try {
+      resolved = new URL(target, repoRootUrl).href;
+    } catch (error) {
+      throw new Error(`Invalid ${label} base URL: ${target}`, { cause: error });
+    }
+    return resolved.endsWith('/') ? resolved : `${resolved}/`;
+  }
+
   function normalisePanelDefaults(source) {
     const input = source && typeof source === 'object' ? source : null;
     return {
@@ -238,6 +254,11 @@
   const skyOverride = readBoolean(['nosky', 'sky_off']);
   const skyDebugModeParam = getToken('skydebug') || null;
   const cacheBustMode = ['1', 'true', 'yes', 'on', 'always'].includes(getToken('cacheBust')) ? 'always' : 'none';
+  const environmentAssetBase = normaliseUrlBase(
+    getRaw('envAssetBase') || globalThis.PLAY_ENV_ASSET_BASE,
+    new URL('./assets/env/', repoRootUrl).href,
+    'environment asset',
+  );
   const uiUpdateIntervalMs = readNumeric('ui_ms', 33, { parser: (value) => Number.parseInt(value, 10), min: 16, max: 2000 });
   const uiSlowUpdateIntervalMs = readNumeric('ui_slow_ms', 1000, { parser: (value) => Number.parseInt(value, 10), min: 200, max: 10000 });
   const snapshotHzMax = readNumeric('snapshot_hz_max', 120, { parser: (value) => Number.parseInt(value, 10), min: 30, max: 120 });
@@ -281,6 +302,7 @@
       snapshotHzMax,
     },
     rendering: {
+      environmentAssetBase,
       hideAllGeometryDefault,
       forceBasic,
       instancingEnabled,

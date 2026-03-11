@@ -6,8 +6,23 @@ import {
   strictCatch,
   strictEnsure,
 } from '../core/viewer_runtime.mjs';
+import { getRuntimeConfig } from '../core/runtime_config.mjs';
 
-const ASSET_ENV_BASE_URL = new URL('../assets/env/', import.meta.url);
+const DEFAULT_ENV_ASSET_BASE_URL = new URL('../assets/env/', import.meta.url).href;
+
+function normaliseEnvironmentAssetBase(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return DEFAULT_ENV_ASSET_BASE_URL;
+  return value.endsWith('/') ? value : `${value}/`;
+}
+
+function resolveEnvironmentAssetBase(config = getRuntimeConfig()) {
+  return normaliseEnvironmentAssetBase(config?.rendering?.environmentAssetBase);
+}
+
+function resolveEnvironmentAssetUrl(fileName, config = getRuntimeConfig()) {
+  return new URL(fileName, resolveEnvironmentAssetBase(config)).href;
+}
 
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
@@ -23,7 +38,7 @@ function getWorldScene(ctx, override = null) {
   return null;
 }
 
-const FALLBACK_PRESETS = {
+const FALLBACK_PRESET_TEMPLATES = {
   sun: {
     // Bright daytime preset: strong directional light with moderate IBL so
     // shadows remain clearly visible.
@@ -45,7 +60,7 @@ const FALLBACK_PRESETS = {
     // Kept deliberately low so HDRI does not wash out shadows.
     envIntensity: 0.35,
     // Preset-specific environment settings
-    hdri: new URL('rustig_koppie_puresky_4k.hdr', ASSET_ENV_BASE_URL).href,
+    hdriFile: 'rustig_koppie_puresky_4k.hdr',
     backgroundBottom: 0x6a8bb3,
     ground: {
       style: 'shadow',
@@ -91,7 +106,7 @@ const FALLBACK_PRESETS = {
     fill: { color: 0x182030, intensity: 0.14, position: [-1.5, 1.5, 1] },
     shadowBias: -0.0002,
     envIntensity: 0.08,
-    hdri: new URL('starmap_random_2020_4k_rot.exr', ASSET_ENV_BASE_URL).href,
+    hdriFile: 'starmap_random_2020_4k_rot.exr',
     backgroundBottom: 0x02030a,
     ground: {
       style: 'shadow',
@@ -129,6 +144,25 @@ const SKY_MODE_NONE = 'none';
 const SKY_MODE_PRESET = 'preset-hdri';
 const SKY_MODE_MODEL = 'mj-sky';
 const SKY_PRESET_CACHE_LIMIT = 2;
+
+function normaliseFallbackPresetKey(key) {
+  const token = String(key || '').trim().toLowerCase();
+  return token === 'moon' ? 'moon' : 'sun';
+}
+
+function buildFallbackPreset(key, config = getRuntimeConfig()) {
+  const presetKey = normaliseFallbackPresetKey(key);
+  const template = FALLBACK_PRESET_TEMPLATES[presetKey];
+  const { hdriFile, ...rest } = template;
+  return {
+    ...rest,
+    hdri: resolveEnvironmentAssetUrl(hdriFile, config),
+  };
+}
+
+function getFallbackPreset(key, config = getRuntimeConfig()) {
+  return buildFallbackPreset(key, config);
+}
 
 function ensureSkyCache(ctx) {
   if (!ctx) return null;
@@ -919,7 +953,7 @@ function createEnvironmentManager({
     // Decide which preset HDRI to use from the unified rendering buffer.
     const url = (preset && typeof preset.hdri === 'string' && preset.hdri.length)
       ? preset.hdri
-      : new URL('rustig_koppie_puresky_4k.hdr', ASSET_ENV_BASE_URL).href;
+      : getFallbackPreset('sun').hdri;
     const hdrReady =
       ctx.envFromHDRI &&
       ctx.envRT &&
@@ -1319,8 +1353,11 @@ function createEnvironmentManager({
 
 
 export {
-  FALLBACK_PRESETS,
   FALLBACK_PRESET_ALIASES,
+  DEFAULT_ENV_ASSET_BASE_URL,
   createEnvironmentManager,
+  getFallbackPreset,
   pushSkyDebug,
+  resolveEnvironmentAssetBase,
+  resolveEnvironmentAssetUrl,
 };
