@@ -34,6 +34,7 @@ spec/*audit*.md
 # Local tools and artifacts
 /local_tools/
 /release_assets/
+/output/
 
 # Legacy/experimental (not part of canonical play)
 /scripts/

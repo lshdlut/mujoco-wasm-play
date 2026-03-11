@@ -59,6 +59,9 @@ Current deviation from the ideal:
 - A small pre-paint duplication remains for font presets across bootstrap and
   runtime config
 - Some debug-oriented globals are still accepted as bootstrap inputs
+- The shared HTML shell used to be duplicated between `index.html` and
+  `pthreads/index.html`; this should stay centralized in one shared shell mount
+  instead of drifting back into inline page copies
 
 Evidence:
 
@@ -386,6 +389,9 @@ Impact:
 
 - The project now has a minimally credible runtime pattern guard again, but it
   remains a coarse backstop rather than a full architecture proof
+- The bridge still needs explicit pointer-ownership policy review whenever new
+  forge pointer exports are added, because volatility is a semantic property,
+  not something pattern checks can infer automatically
 
 ### `tools/run_checks.mjs`
 
@@ -429,6 +435,8 @@ Priority order for future implementation:
 - Add explicit ownership-oriented checks around shell side effects and new
   snapshot-consumer patterns
 - Keep the live runtime-tree coverage in `tools/forbid_patterns.mjs`
+- Keep tests on the formal snapshot contract (`__PLAY_HOST__.getSnapshot()`)
+  instead of reviving `window.__lastSnapshot` as a fallback path
 
 ### Queue B — Ownership consolidation
 

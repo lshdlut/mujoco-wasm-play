@@ -58,6 +58,8 @@ Entry HTML:
 Bootstrap:
 
 - `app/entry_bootstrap.js`
+- `app/viewer_shell.js`
+- `app/viewer_shell.css`
 
 Responsibilities:
 
@@ -65,6 +67,7 @@ Responsibilities:
 - Derives the entry variant (`single` vs `pthreads`)
 - Resolves the effective runtime config buffer
 - Applies pre-paint shell state for `embed`, `theme`, and `font`
+- Mounts the shared viewer shell and injects the main module after shell setup
 - Writes `globalThis.__PLAY_RUNTIME_CONFIG__`
 
 Ownership:
@@ -76,6 +79,8 @@ Rule:
 
 - No runtime module other than bootstrap may treat URL params or `PLAY_*` /
   `__*` globals as a primary input source.
+- Entry HTML pages should stay thin. Shared shell DOM/CSS assets must live in one
+  place, not in duplicated inline HTML blocks.
 
 ### 2. Main-thread assembly
 
@@ -274,6 +279,24 @@ Rule:
 | DOM shell state (`theme`, `font`, `embed`, layout classes) | bootstrap + `core/runtime_config.mjs` + `app/main.mjs` + `ui/control_manager.mjs` | Reapplied from runtime config / store |
 | MuJoCo sim state | `worker/physics.worker.mjs` | Recreated on worker restart / reload |
 
+## Bridge pointer ownership
+
+Bridge-side forge pointers are split into two classes:
+
+- `stable ptr`: safe to cache per handle via `_cachedPtr()`
+- `volatile ptr`: must be re-read on every access via `_directPtr()`
+
+Current volatile family:
+
+- packed scene exports (`_mjwf_scene_geomorder_ptr`, `_mjwf_scene_geoms_*_ptr`)
+
+Rule:
+
+- If an accessor reads from packed scene SoA data or any forge export whose
+  address may change without a handle restart, it must be treated as volatile.
+- `_cachedPtr()` must reject volatile exports loudly instead of silently
+  caching them.
+
 ## Runtime inputs vs outputs
 
 ### Inputs
@@ -296,6 +319,10 @@ These are output/debug surfaces, not configuration inputs:
 - `window.__viewerControls`
 - `window.__viewerRenderer`
 - `window.__lastSnapshot`
+
+Formal runtime/test physical snapshot entry:
+
+- `window.__PLAY_HOST__.getSnapshot()`
 
 ## Snapshot-centric owner contract
 
@@ -322,6 +349,9 @@ Explicit non-goals:
 
 - The store is not a backend snapshot cache
 - `window.__lastSnapshot` is not a formal owner
+- tests and diagnostics should use `__PLAY_HOST__.getSnapshot()` as the formal
+  main-thread physical snapshot entry and treat `window.__lastSnapshot` as
+  debug-only
 - `app/main.mjs` must not maintain a second snapshot alias
 - `ui/control_manager.mjs` must not re-own widget renderer bodies
 - `ui/control_widgets.mjs` must stay self-contained enough to avoid
@@ -333,6 +363,7 @@ Explicit non-goals:
 Direct DOM writes are currently allowed in:
 
 - `app/entry_bootstrap.js` for pre-paint shell state
+- `app/viewer_shell.js` for shared shell mount / pthreads COI failure shell
 - `core/runtime_config.mjs` for runtime UI replay
 - `app/main.mjs` for layout shell / overlays / debug hookups
 - `ui/control_manager.mjs` for control-driven shell updates
