@@ -10,7 +10,6 @@ async function readThemeState(page: any) {
       color: store.get()?.theme?.color ?? null,
       font: store.get()?.theme?.font ?? null,
       fontScale: style.getPropertyValue('--viewer-font-scale').trim(),
-      panelScale: style.getPropertyValue('--viewer_panel_scale').trim(),
       prepaintAttr: document.documentElement.getAttribute('data-play-theme'),
       runtimeConfig: (window as any).__PLAY_RUNTIME_CONFIG__ ?? null,
     };
@@ -86,7 +85,6 @@ test('font=150 sets initial UI font preset', async ({ page }) => {
 
   expect(result.font).toBe(3);
   expect(result.fontScale).toBe('1.5');
-  expect(result.panelScale).toBe('1.3');
 });
 
 test('theme and font URL settings persist across builtin model switches', async ({ page }) => {

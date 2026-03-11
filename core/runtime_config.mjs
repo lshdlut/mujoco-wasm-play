@@ -47,11 +47,11 @@ const EMPTY_RUNTIME_CONFIG = Object.freeze({
 });
 
 const FONT_PRESET_LOOKUP = Object.freeze([
-  Object.freeze({ index: 0, pct: 50, scale: 0.5, panelScale: 0.7 }),
-  Object.freeze({ index: 1, pct: 75, scale: 0.75, panelScale: 0.85 }),
-  Object.freeze({ index: 2, pct: 100, scale: 1, panelScale: 1 }),
-  Object.freeze({ index: 3, pct: 150, scale: 1.5, panelScale: 1.3 }),
-  Object.freeze({ index: 4, pct: 200, scale: 2, panelScale: 1.6 }),
+  Object.freeze({ index: 0, pct: 50, scale: 0.5 }),
+  Object.freeze({ index: 1, pct: 75, scale: 0.75 }),
+  Object.freeze({ index: 2, pct: 100, scale: 1 }),
+  Object.freeze({ index: 3, pct: 150, scale: 1.5 }),
+  Object.freeze({ index: 4, pct: 200, scale: 2 }),
 ]);
 
 function readRuntimeConfigObject() {
@@ -112,7 +112,6 @@ export function applyRuntimeUiToDocument(doc = document, options = {}) {
 
   if (root?.style?.setProperty) {
     root.style.setProperty('--viewer-font-scale', String(font.scale));
-    root.style.setProperty('--viewer_panel_scale', String(font.panelScale));
   }
   if (body?.classList) {
     body.classList.toggle('theme-light', themeColor === 1);

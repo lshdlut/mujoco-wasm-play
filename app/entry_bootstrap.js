@@ -10,11 +10,11 @@
   const BOOL_TRUE = new Set(['1', 'true', 'yes', 'on']);
   const BOOL_FALSE = new Set(['0', 'false', 'no', 'off']);
   const FONT_PRESETS = Object.freeze([
-    Object.freeze({ index: 0, pct: 50, scale: 0.5, panelScale: 0.7 }),
-    Object.freeze({ index: 1, pct: 75, scale: 0.75, panelScale: 0.85 }),
-    Object.freeze({ index: 2, pct: 100, scale: 1, panelScale: 1 }),
-    Object.freeze({ index: 3, pct: 150, scale: 1.5, panelScale: 1.3 }),
-    Object.freeze({ index: 4, pct: 200, scale: 2, panelScale: 1.6 }),
+    Object.freeze({ index: 0, pct: 50, scale: 0.5 }),
+    Object.freeze({ index: 1, pct: 75, scale: 0.75 }),
+    Object.freeze({ index: 2, pct: 100, scale: 1 }),
+    Object.freeze({ index: 3, pct: 150, scale: 1.5 }),
+    Object.freeze({ index: 4, pct: 200, scale: 2 }),
   ]);
 
   function getRaw(name) {
@@ -295,7 +295,6 @@
     root.removeAttribute('data-play-theme');
   }
   root.style.setProperty('--viewer-font-scale', String(font.scale));
-  root.style.setProperty('--viewer_panel_scale', String(font.panelScale));
   if (embedMode) {
     root.setAttribute('data-play-embed', '1');
   } else {
