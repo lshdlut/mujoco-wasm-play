@@ -5,8 +5,7 @@ import path from 'node:path';
 export async function readCurrentSnapshot(page: Page) {
   return page.evaluate(() => {
     const hostSnapshot = (window as any).__PLAY_HOST__?.getSnapshot?.();
-    if (hostSnapshot) return hostSnapshot;
-    return (window as any).__lastSnapshot ?? null;
+    return hostSnapshot ?? null;
   });
 }
 
@@ -60,7 +59,7 @@ export async function waitForViewerReady(
       const store = (window as any).__viewerStore;
       const ctx = (window as any).__renderCtx;
       const controls = (window as any).__viewerControls;
-      const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? (window as any).__lastSnapshot;
+      const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
       const scnNgeom = Number(snapshot?.scn_ngeom) | 0;
       return {
         ready: !!ctx?.initialized && !!store?.get && !!controls && scnNgeom > 0,
@@ -83,7 +82,7 @@ export async function waitForViewerReady(
     await page.waitForTimeout(100);
   }
   const diag = await page.evaluate(() => {
-    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? (window as any).__lastSnapshot;
+    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
     return {
       hasStore: !!(window as any).__viewerStore?.get,
       hasCtx: !!(window as any).__renderCtx,

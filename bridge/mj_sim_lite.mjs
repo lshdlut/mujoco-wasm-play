@@ -18,6 +18,12 @@ function tagForgeModule(mod) {
 }
 
 const MJ_STATE_INTEGRATION = 0x1fff;
+const VOLATILE_PTR_EXPORTS = Object.freeze(new Set([
+  '_mjwf_scene_geomorder_ptr',
+]));
+const VOLATILE_PTR_PREFIXES = Object.freeze([
+  '_mjwf_scene_geoms_',
+]);
 
 export class MjSimLite {
   constructor(mod) {
@@ -290,7 +296,16 @@ export class MjSimLite {
     return this._ptrCache;
   }
 
+  _isVolatilePtrExport(fnName){
+    if (typeof fnName !== 'string' || !fnName.length) return false;
+    if (VOLATILE_PTR_EXPORTS.has(fnName)) return true;
+    return VOLATILE_PTR_PREFIXES.some((prefix) => fnName.startsWith(prefix));
+  }
+
   _cachedPtr(fnName){
+    if (this._isVolatilePtrExport(fnName)) {
+      throw new Error(`Volatile pointer export must not be cached: ${fnName}`);
+    }
     const cache = this._ensurePtrCache();
     if (!cache) return 0;
     if (cache.has(fnName)) return cache.get(fnName) | 0;
@@ -299,6 +314,14 @@ export class MjSimLite {
     const ptr = typeof fn === 'function' ? (fn.call(m, this.h | 0) | 0) : 0;
     cache.set(fnName, ptr);
     return ptr | 0;
+  }
+
+  _directPtr(fnName){
+    const h = this.h | 0;
+    if (!(h > 0)) return 0;
+    const m = this.mod;
+    const fn = m?.[fnName];
+    return typeof fn === 'function' ? (fn.call(m, h) | 0) : 0;
   }
 
   _ensureCountCache(){
@@ -975,21 +998,21 @@ export class MjSimLite {
   // mjvScene SoA (forge scene API; SoA packed in wasm, copied by worker)
   sceneUpdateAndPack(catmask = 7){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_scene_update_and_pack; if (typeof fn!=='function' || !(h>0)) return 0; const out=fn.call(m, h, catmask|0) | 0; this._sceneNgeomCache=null; this._sceneNgeomCacheHandle=0; return out; }
   sceneNgeom(){ const h=this.h|0; if(!(h>0)) return 0; if (this._sceneNgeomCache != null && this._sceneNgeomCacheHandle === h) return this._sceneNgeomCache | 0; const m=this.mod; const fn=m?._mjwf_scene_ngeom; if (typeof fn!=='function') return 0; const out=fn.call(m, h) | 0; this._sceneNgeomCache=out|0; this._sceneNgeomCacheHandle=h; return out | 0; }
-  sceneGeomOrderView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geomorder_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomCamDistView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_camdist_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n); }
-  sceneGeomTypeView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_type_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomPosView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_pos_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*3); }
-  sceneGeomMatView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_mat_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*9); }
-  sceneGeomSizeView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_size_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*3); }
-  sceneGeomRgbaView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_rgba_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*4); }
-  sceneGeomMatIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_matid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomDataIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_dataid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomObjTypeView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_objtype_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomObjIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_objid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomCategoryView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_category_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomSegIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_segid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
-  sceneGeomTransparentView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_transparent_ptr')|0; if(!(ptr>0)) return null; return heapViewU8(m, ptr, n); }
-  sceneGeomLabelView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._cachedPtr('_mjwf_scene_geoms_label_ptr')|0; if(!(ptr>0)) return null; const stride=100; return heapViewU8(m, ptr, n*stride); }
+  sceneGeomOrderView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geomorder_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomCamDistView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_camdist_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n); }
+  sceneGeomTypeView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_type_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomPosView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_pos_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*3); }
+  sceneGeomMatView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_mat_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*9); }
+  sceneGeomSizeView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_size_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*3); }
+  sceneGeomRgbaView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_rgba_ptr')|0; if(!(ptr>0)) return null; return heapViewF32(m, ptr, n*4); }
+  sceneGeomMatIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_matid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomDataIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_dataid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomObjTypeView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_objtype_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomObjIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_objid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomCategoryView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_category_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomSegIdView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_segid_ptr')|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, n); }
+  sceneGeomTransparentView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_transparent_ptr')|0; if(!(ptr>0)) return null; return heapViewU8(m, ptr, n); }
+  sceneGeomLabelView(){ const m=this.mod; const n=this.sceneNgeom()|0; if(!(n>0)) return null; const ptr=this._directPtr('_mjwf_scene_geoms_label_ptr')|0; if(!(ptr>0)) return null; const stride=100; return heapViewU8(m, ptr, n*stride); }
   // mjvOption views (writeable)
   voptFlagsPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_vopt_flags_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewU8(m, ptr, 31); }
   voptLabelPtrView(){ const m=this.mod; const h=this.h|0; const fn=m?._mjwf_vopt_label_ptr; if (typeof fn!=='function' || !(h>0)) return null; const ptr=fn.call(m,h)|0; if(!(ptr>0)) return null; return heapViewI32(m, ptr, 1); }
