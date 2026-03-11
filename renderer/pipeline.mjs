@@ -35,10 +35,16 @@ import { installMuJoCoShadowViewportInset } from './mujoco_shadows.mjs';
 import { MJ_GEOM, MJ_LIGHT_TYPE, MJ_MAXLIGHT, MJ_MAXPLANEGRID, MJ_MINVAL, MJ_OBJ, MJ_TEXTURE, MJ_VIS } from './mujoco_constants.mjs';
 import { applyMuJoCoTextureToMesh, quantize1e6, quantize1e3, resolveMaterialTextureDescriptor } from './mujoco_textures.mjs';
 import { ensureFlexGroup, hideFlexGroup, ensureFlexEntry, applyFlexAppearance, updateFlexFaces, ensureSkinGroup, hideSkinGroup, ensureSkinEntry, applySkinAppearance, updateSkinMesh } from './deformables.mjs';
+import {
+  WORLD_LAYER,
+  WORLD_SPECIAL_RENDER_ORDER,
+  applyWorldMaterialState,
+  resolveSceneWorldLayer,
+  worldItemRenderOrder,
+} from './world_occlusion.mjs';
 import { geomNameFromLookup, getOrCreateGeomNameLookup } from './geom_names.mjs';
 import {
   GROUND_DISTANCE,
-  RENDER_ORDER,
   TRANSPARENT_BIN_CAM_POS,
   TRANSPARENT_BIN_CAM_DIR,
   SEGMENT_FLAG_INDEX,
@@ -2088,9 +2094,13 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
             proxyRgba[2] = b;
             proxyRgba[3] = a;
             proxy.userData.infinitePlane = false;
+            proxy.userData.occlusionLayer = resolveSceneWorldLayer({ infinitePlane: false, opacity: a });
             if (proxy.material && typeof proxy.material === 'object') {
-              proxy.material.opacity = a;
-              proxy.material.transparent = a < 0.999;
+              if ('opacity' in proxy.material) proxy.material.opacity = a;
+              applyWorldMaterialState(proxy.material, proxy.userData.occlusionLayer, {
+                opacity: a,
+                toneMapped: ('toneMapped' in proxy.material) ? !!proxy.material.toneMapped : undefined,
+              });
               if (proxy.material.color && typeof proxy.material.color.setRGB === 'function') {
                 proxy.material.color.setRGB(r, g, b);
               }
@@ -2322,7 +2332,8 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       }
     }
     if (!mesh.userData?.infinitePlane) {
-      mesh.renderOrder = geomOrderRank ? (geomOrderRank[si] | 0) : (mesh.renderOrder || 0);
+      const baseOpaqueOrder = geomOrderRank ? (geomOrderRank[si] | 0) : (mesh.renderOrder || 0);
+      mesh.renderOrder = worldItemRenderOrder(WORLD_LAYER.WORLD_OPAQUE, baseOpaqueOrder);
     }
 
     const tFlagsStart0 = perfEnabled ? perfNow() : 0;
@@ -2418,31 +2429,25 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
           if (perfEnabled) colorUpdates += 1;
         }
       }
-      // Infinite ground uses shader-driven alpha (haze, underside fade, edge cutoffs).
-      // Keep it in the transparent render pass regardless of the MuJoCo RGBA alpha.
-      const nextTransparent = isInfinitePlane ? true : (a < 0.999);
-      if (mat && ('opacity' in mat)) {
-        const changedOpacity = mat.opacity !== a;
-        const changedTransparent = mat.transparent !== nextTransparent;
-        if (changedOpacity) mat.opacity = a;
-        if (changedTransparent) mat.transparent = nextTransparent;
-        if (perfEnabled && (changedOpacity || changedTransparent)) opacityUpdates += 1;
+      const worldLayer = resolveSceneWorldLayer({ infinitePlane: isInfinitePlane, opacity: a });
+      const prevOpacity = (mat && 'opacity' in mat) ? mat.opacity : null;
+      const prevTransparent = (mat && 'transparent' in mat) ? mat.transparent : null;
+      if (mat) {
+        applyWorldMaterialState(mat, worldLayer, { opacity: a });
       }
-      if (mat && typeof mat.depthWrite === 'boolean' && !isInfinitePlane) {
-        const nextDepthWrite = !nextTransparent;
-        if (mat.depthWrite !== nextDepthWrite) mat.depthWrite = nextDepthWrite;
+      const nextTransparent = worldLayer === WORLD_LAYER.WORLD_TRANSPARENT;
+      if (perfEnabled && prevOpacity != null && prevTransparent != null) {
+        if (prevOpacity !== mat?.opacity || prevTransparent !== mat?.transparent) {
+          opacityUpdates += 1;
+        }
       }
       const userData = mesh.userData || (mesh.userData = {});
+      userData.occlusionLayer = worldLayer;
       let transparentBinKey = -1;
-      const ignoreTransparentOrdering = !!userData.infinitePlane || !!userData.infiniteGrid;
+      const ignoreTransparentOrdering = !!userData.infinitePlane;
       if (ignoreTransparentOrdering) {
         userData.transparentBin = -1;
-        if (userData.infinitePlane) {
-          // Infinite ground ordering is handled by tuneInfiniteGroundForCamera().
-        } else if (userData.infiniteGrid && typeof userData.infiniteGrid === 'object') {
-          const ro = userData.infiniteGrid.renderOrder;
-          if (Number.isFinite(ro)) mesh.renderOrder = ro;
-        }
+        mesh.renderOrder = WORLD_SPECIAL_RENDER_ORDER.groundVisual;
       } else if (transparentOrderingEnabled && nextTransparent) {
         let bin = 0;
         let order = 0;
@@ -2454,13 +2459,16 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
         }
         transparentBinKey = bin | 0;
         order = (transparentBins | 0) - 1 - transparentBinKey;
-        mesh.renderOrder = order | 0;
+        mesh.renderOrder = worldItemRenderOrder(WORLD_LAYER.WORLD_TRANSPARENT, order);
         userData.transparentBin = transparentBinKey;
         if (transparentBinsUsed && transparentBinKey >= 0 && transparentBinKey < transparentBinsUsed.length) {
           transparentBinsUsed[transparentBinKey] = 1;
         }
       } else {
         userData.transparentBin = -1;
+        mesh.renderOrder = nextTransparent
+          ? worldItemRenderOrder(WORLD_LAYER.WORLD_TRANSPARENT, 0)
+          : worldItemRenderOrder(WORLD_LAYER.WORLD_OPAQUE, geomOrderRank ? (geomOrderRank[si] | 0) : 0);
       }
       if (transparentBinPrev && meshIndex >= 0 && meshIndex < transparentBinPrev.length) {
         const prevBin = transparentBinPrev[meshIndex] | 0;
@@ -2655,11 +2663,12 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
       batch.mesh.visible = used > 0;
       if (batch.mesh.instanceMatrix) batch.mesh.instanceMatrix.needsUpdate = used > 0;
       if (batch.mesh.instanceColor) batch.mesh.instanceColor.needsUpdate = used > 0;
-      if (typeof batch.renderOrder === 'number' && Number.isFinite(batch.renderOrder)) {
-        batch.mesh.renderOrder = Number(batch.renderOrder) | 0;
-      } else if (Number.isFinite(batch.orderMin)) {
-        batch.mesh.renderOrder = Number(batch.orderMin) | 0;
-      }
+      const localBatchOrder = (typeof batch.renderOrder === 'number' && Number.isFinite(batch.renderOrder))
+        ? (Number(batch.renderOrder) | 0)
+        : (Number.isFinite(batch.orderMin) ? (Number(batch.orderMin) | 0) : 0);
+      batch.mesh.renderOrder = batch.material?.transparent
+        ? worldItemRenderOrder(WORLD_LAYER.WORLD_TRANSPARENT, localBatchOrder)
+        : worldItemRenderOrder(WORLD_LAYER.WORLD_OPAQUE, localBatchOrder);
       if (used > 1 && batch.material?.transparent && inst && sortTransparentInstances) {
         const tSort0 = perfEnabled ? perfNow() : 0;
         sortInstancedBatchByOrderRank(inst, batch);
@@ -2762,39 +2771,6 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   }
 
   return drawn;
-}
-
-function tuneInfiniteGroundForCamera(ctx) {
-  const ground = ctx?.ground || null;
-  if (!ground?.userData?.infinitePlane) return;
-  const mat = ground.material || null;
-  if (!mat) return;
-
-  const camera = ctx?.camera || null;
-  const camPos = camera?.position || null;
-  const uniforms =
-    ground.userData?.infiniteGround?.uniforms ||
-    mat?.userData?.infiniteUniforms ||
-    null;
-  const origin = uniforms?.uPlaneOrigin?.value || null;
-  const normal = uniforms?.uPlaneNormal?.value || null;
-  if (!camPos || !origin || !normal) return;
-
-  const vx = (camPos.x - origin.x);
-  const vy = (camPos.y - origin.y);
-  const vz = (camPos.z - origin.z);
-  const side = vx * normal.x + vy * normal.y + vz * normal.z;
-  const camBelow = side < -0.01;
-
-  if (typeof mat.depthWrite === 'boolean') {
-    const desiredDepthWrite = !camBelow;
-    if (mat.depthWrite !== desiredDepthWrite) mat.depthWrite = desiredDepthWrite;
-  }
-  const baseGroundOrder = RENDER_ORDER.GROUND | 0;
-  const desiredOrder = camBelow ? (-baseGroundOrder) : baseGroundOrder;
-  if (typeof ground.renderOrder === 'number' && ground.renderOrder !== desiredOrder) {
-    ground.renderOrder = desiredOrder;
-  }
 }
 
 function createRendererManager({
@@ -2923,7 +2899,6 @@ function createRendererManager({
         overlay3d.onFrame({ camera: ctx.camera, frame });
       }
       // Background/environment is managed by environment manager (ensureEnvIfNeeded)
-      tuneInfiniteGroundForCamera(ctx);
       renderWorldScene(ctx, ctx.renderer, { camera: ctx.camera });
       if (perfEnabled) {
         const info = ctx.renderer?.info?.render || null;

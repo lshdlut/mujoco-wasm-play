@@ -60,6 +60,10 @@ function disposeMeshObject(mesh) {
   }
 
   if (!mesh) return;
+  if (Array.isArray(mesh.children) && mesh.children.length > 0) {
+    disposeObject3DTree(mesh);
+    return;
+  }
   const userData = mesh.userData || null;
   const parent = mesh.parent;
   if (parent && typeof parent.remove === 'function') {

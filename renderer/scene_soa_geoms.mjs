@@ -7,11 +7,17 @@ import { logDebug, strictCatch, strictEnsure } from '../core/viewer_runtime.mjs'
 import { computeGeometryBounds, disposeMeshObject, disposeObject3DTree } from './three_helpers.mjs';
 import { onBeforeShadowMuJoCo } from './mujoco_shadows.mjs';
 import { MJ_GEOM, MJ_OBJ } from './mujoco_constants.mjs';
+import {
+  WORLD_LAYER,
+  WORLD_SPECIAL_RENDER_ORDER,
+  applyWorldMaterialState,
+  resolveSceneWorldLayer,
+} from './world_occlusion.mjs';
 
 function createInfiniteGroundHelper({
   color = 0xffffff,
   distance = 2000.0,
-  renderOrder = -10,
+  renderOrder = WORLD_SPECIAL_RENDER_ORDER.groundVisual,
 } = {}) {
   const colorObj = color instanceof THREE.Color ? color.clone() : new THREE.Color(color);
   const geometry = new THREE.PlaneGeometry(2, 2, 1, 1);
@@ -19,9 +25,18 @@ function createInfiniteGroundHelper({
     color: colorObj,
     roughness: 0.9,
     metalness: 0,
-    transparent: true,
-    opacity: 1,
     side: THREE.DoubleSide,
+  });
+  applyWorldMaterialState(material, WORLD_LAYER.WORLD_TRANSPARENT, { opacity: 1 });
+  const depthMaterial = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  });
+  applyWorldMaterialState(depthMaterial, WORLD_LAYER.WORLD_OPAQUE, {
+    opacity: 1,
+    toneMapped: false,
+    colorWrite: false,
   });
   const uniforms = {
     uMuJoCoTexEnabled: { value: 0 },
@@ -42,10 +57,12 @@ function createInfiniteGroundHelper({
     // opt-in to extra ground grid overlays by overriding these uniforms.
     uGridIntensity: { value: 0.0 },
   };
-  material.extensions = material.extensions || {};
-  material.extensions.derivatives = true;
-  material.userData.infiniteUniforms = uniforms;
-  material.onBeforeCompile = (shader) => {
+  const installInfiniteGroundShader = (targetMaterial, { depthOnly = false } = {}) => {
+    targetMaterial.extensions = targetMaterial.extensions || {};
+    targetMaterial.extensions.derivatives = true;
+    targetMaterial.userData = targetMaterial.userData || {};
+    targetMaterial.userData.infiniteUniforms = uniforms;
+    targetMaterial.onBeforeCompile = (shader) => {
     shader.uniforms.uMuJoCoTexEnabled = uniforms.uMuJoCoTexEnabled;
     shader.uniforms.uMuJoCoMap = uniforms.uMuJoCoMap;
     shader.uniforms.uMuJoCoTexScl = uniforms.uMuJoCoTexScl;
@@ -108,7 +125,22 @@ uniform vec3 uPlaneNormal;
 uniform float uGridStep;
 uniform vec3 uGridColor;
 uniform float uGridIntensity;
-${shader.fragmentShader.replace(
+${depthOnly ? shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      '#include <map_fragment>'
+    ).replace(
+      '#include <dithering_fragment>',
+      `
+      vec3 camVec = cameraPosition - uPlaneOrigin;
+      vec2 camCoord = vec2(dot(camVec, uPlaneAxisU), dot(camVec, uPlaneAxisV));
+      float planarDist = length(camCoord - vPlaneCoord);
+
+      float baseRadius = max(1e-4, uQuadDistance);
+      if (planarDist >= baseRadius) discard;
+
+      gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+      #include <dithering_fragment>`
+    ) : shader.fragmentShader.replace(
       '#include <map_fragment>',
       `#include <map_fragment>
 
@@ -164,8 +196,11 @@ ${shader.fragmentShader.replace(
       gl_FragColor.a = alpha;
       #include <dithering_fragment>`
     )}`;
-    material.userData.shader = shader;
+      targetMaterial.userData.shader = shader;
+    };
   };
+  installInfiniteGroundShader(material, { depthOnly: false });
+  installInfiniteGroundShader(depthMaterial, { depthOnly: true });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.renderOrder = renderOrder;
@@ -173,14 +208,29 @@ ${shader.fragmentShader.replace(
   mesh.matrixAutoUpdate = false;
   mesh.matrix.identity();
   mesh.updateMatrix();
-  mesh.userData.infiniteGround = { uniforms };
+  const occluder = new THREE.Mesh(geometry, depthMaterial);
+  occluder.frustumCulled = false;
+  occluder.renderOrder = WORLD_SPECIAL_RENDER_ORDER.groundOccluder;
+  occluder.matrixAutoUpdate = false;
+  occluder.matrix.identity();
+  occluder.updateMatrix();
+  occluder.castShadow = false;
+  occluder.receiveShadow = false;
+  occluder.userData = {
+    ownGeometry: false,
+    infiniteGroundOccluder: true,
+    occlusionLayer: WORLD_LAYER.WORLD_OPAQUE,
+  };
+  mesh.add(occluder);
+  mesh.userData.infiniteGround = { uniforms, occluder };
+  mesh.userData.occlusionLayer = WORLD_LAYER.WORLD_TRANSPARENT;
   return mesh;
 }
 
 const GROUND_DISTANCE = 2000;
 const PLANE_SIZE_EPS = 1e-9;
 const RENDER_ORDER = Object.freeze({
-  GROUND: -50,
+  GROUND: WORLD_SPECIAL_RENDER_ORDER.groundVisual,
 });
 const TRANSPARENT_BIN_CAM_POS = new THREE.Vector3();
 const TRANSPARENT_BIN_CAM_DIR = new THREE.Vector3();
@@ -381,16 +431,20 @@ function createPrimitiveGeometry(gtype, sizeVec) {
           if (baseMat && typeof baseMat.clone === 'function') {
             const backMat = baseMat.clone();
             backMat.side = THREE.BackSide;
-            backMat.transparent = true;
-            backMat.opacity = 0.25;
-            backMat.depthWrite = false;
+            applyWorldMaterialState(backMat, WORLD_LAYER.WORLD_TRANSPARENT, {
+              opacity: 0.25,
+              toneMapped: ('toneMapped' in baseMat) ? !!baseMat.toneMapped : undefined,
+            });
             backMat.polygonOffset = true;
             backMat.polygonOffsetFactor = -1;
             const backMesh = new THREE.Mesh(mesh.geometry, backMat);
             backMesh.receiveShadow = false;
             backMesh.castShadow = false;
             backMesh.renderOrder = (mesh.renderOrder || 0) + 0.01;
-            backMesh.userData = { ownGeometry: false };
+            backMesh.userData = {
+              ownGeometry: false,
+              occlusionLayer: WORLD_LAYER.WORLD_TRANSPARENT,
+            };
             mesh.add(backMesh);
             mesh.userData = mesh.userData || {};
             mesh.userData.fallbackBackface = backMesh;
@@ -1300,13 +1354,13 @@ function ensureInstancedMaterial(
     return mat;
   }
   const opacity = oq / 1000;
-  const transparent = opacity < 0.999;
+  const worldLayer = resolveSceneWorldLayer({ opacity });
   const material = forceBasicFlag
     ? new THREE.MeshBasicMaterial({
         color: 0xffffff,
-        transparent,
-        opacity,
-        depthWrite: !transparent,
+        transparent: false,
+        opacity: 1,
+        depthWrite: true,
         depthTest: true,
         toneMapped: false,
       })
@@ -1314,11 +1368,12 @@ function ensureInstancedMaterial(
         color: 0xffffff,
         roughness: rq / 1000,
         metalness: mq / 1000,
-        transparent,
-        opacity,
-        depthWrite: !transparent,
+        transparent: false,
+        opacity: 1,
+        depthWrite: true,
         depthTest: true,
       });
+  applyWorldMaterialState(material, worldLayer, { opacity, toneMapped: !forceBasicFlag });
   material.vertexColors = true;
   material.wireframe = !!wireframe;
   if (!forceBasicFlag && 'envMapIntensity' in material) {

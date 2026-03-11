@@ -5,10 +5,14 @@ import * as THREE from 'three';
 import { strictCatch, strictEnsure } from '../core/viewer_runtime.mjs';
 import { computeGeometryBounds, disposeObject3DTree, getWorldScene } from './three_helpers.mjs';
 import { transparentBinFromDepthNorm, transparentDepthNorm01 } from './depth_sort.mjs';
+import {
+  WORLD_LAYER,
+  applyWorldMaterialState,
+  normalizeWorldLayer,
+  worldLayerRenderOrder,
+} from './world_occlusion.mjs';
 
 const OVERLAY3D_API_VERSION = 1;
-const OVERLAY3D_WORLD_OVERLAY_GROUP_ORDER = 10;
-const OVERLAY3D_HUD_GROUP_ORDER = 998;
 
 class RefCountedAssetRegistry {
   constructor({ label = 'assets', disposeContext = 'main:assets_dispose' } = {}) {
@@ -124,28 +128,28 @@ function ensureOverlay3D(ctx) {
   if (!layers.worldOpaque) {
     layers.worldOpaque = new THREE.Group();
     layers.worldOpaque.name = 'overlay3d:worldOpaque';
-    layers.worldOpaque.renderOrder = 0;
+    layers.worldOpaque.renderOrder = worldLayerRenderOrder(WORLD_LAYER.WORLD_OPAQUE);
     manager.root.add(layers.worldOpaque);
     strictEnsure('ensureOverlay3D', { reason: 'create_layer', layer: 'worldOpaque' });
   }
   if (!layers.worldTransparent) {
     layers.worldTransparent = new THREE.Group();
     layers.worldTransparent.name = 'overlay3d:worldTransparent';
-    layers.worldTransparent.renderOrder = 0;
+    layers.worldTransparent.renderOrder = worldLayerRenderOrder(WORLD_LAYER.WORLD_TRANSPARENT);
     manager.root.add(layers.worldTransparent);
     strictEnsure('ensureOverlay3D', { reason: 'create_layer', layer: 'worldTransparent' });
   }
   if (!layers.worldOverlay) {
     layers.worldOverlay = new THREE.Group();
     layers.worldOverlay.name = 'overlay3d:worldOverlay';
-    layers.worldOverlay.renderOrder = OVERLAY3D_WORLD_OVERLAY_GROUP_ORDER;
+    layers.worldOverlay.renderOrder = worldLayerRenderOrder(WORLD_LAYER.WORLD_OVERLAY);
     manager.root.add(layers.worldOverlay);
     strictEnsure('ensureOverlay3D', { reason: 'create_layer', layer: 'worldOverlay' });
   }
   if (!layers.hud) {
     layers.hud = new THREE.Group();
     layers.hud.name = 'overlay3d:hud';
-    layers.hud.renderOrder = OVERLAY3D_HUD_GROUP_ORDER;
+    layers.hud.renderOrder = worldLayerRenderOrder(WORLD_LAYER.HUD);
     manager.root.add(layers.hud);
     strictEnsure('ensureOverlay3D', { reason: 'create_layer', layer: 'hud' });
   }
@@ -243,19 +247,37 @@ function ensureOverlay3D(ctx) {
         },
       };
 
-      const addObject3D = (object3d, { layer = 'worldOpaque', owned = false, name = null } = {}) => {
+      const applyLayerToObjectTree = (object3d, layerKey, { applyLayerMaterial = true } = {}) => {
+        if (!object3d || typeof object3d.traverse !== 'function') return;
+        const renderOrder = worldLayerRenderOrder(layerKey);
+        object3d.traverse((node) => {
+          if (!node || typeof node !== 'object') return;
+          node.userData = node.userData || {};
+          node.userData.overlay3dScope = id;
+          node.userData.overlay3dLayer = layerKey;
+          if (typeof node.renderOrder === 'number') {
+            node.renderOrder = renderOrder;
+          }
+          if (applyLayerMaterial && node.material) {
+            applyWorldMaterialState(node.material, layerKey, {
+              opacity: Number.isFinite(node.material.opacity) ? node.material.opacity : 1,
+              toneMapped: ('toneMapped' in node.material) ? !!node.material.toneMapped : undefined,
+            });
+          }
+        });
+      };
+
+      const addObject3D = (object3d, { layer = 'worldOpaque', owned = false, name = null, applyLayerMaterial = true } = {}) => {
         if (!object3d) return null;
-        const key = String(layer || '').trim();
+        const key = normalizeWorldLayer(layer);
         const parent =
-          key === 'worldTransparent' ? groups.worldTransparent :
-          key === 'worldOverlay' ? groups.worldOverlay :
-          key === 'hud' ? groups.hud :
+          key === WORLD_LAYER.WORLD_TRANSPARENT ? groups.worldTransparent :
+          key === WORLD_LAYER.WORLD_OVERLAY ? groups.worldOverlay :
+          key === WORLD_LAYER.HUD ? groups.hud :
           groups.worldOpaque;
         parent.add(object3d);
         if (name && typeof object3d.name === 'string') object3d.name = String(name);
-        object3d.userData = object3d.userData || {};
-        object3d.userData.overlay3dScope = id;
-        object3d.userData.overlay3dLayer = key;
+        applyLayerToObjectTree(object3d, key, { applyLayerMaterial });
         if (owned) {
           disposers.push(() => disposeObject3DTree(object3d));
         }
@@ -331,27 +353,13 @@ function ensureOverlay3D(ctx) {
           const src = (spec && typeof spec === 'object')
             ? spec
             : ((transparency && typeof transparency === 'object') ? transparency : {});
-          const layerKey = String(layer || '').trim();
-          const defaultMode = (layerKey === 'worldTransparent') ? 'blend' : 'opaque';
+          const layerKey = normalizeWorldLayer(layer);
+          const defaultMode = layerKey === WORLD_LAYER.WORLD_TRANSPARENT ? 'blend' : 'opaque';
           const mode = (src.mode === 'opaque' || src.mode === 'blend') ? src.mode : defaultMode;
           const opacityRaw = Number.isFinite(src.opacity) ? Number(src.opacity) : Number(mat?.opacity);
           const opacity = Number.isFinite(opacityRaw) ? Math.max(0, Math.min(1, opacityRaw)) : 1;
-
-          const isBlend = mode === 'blend' && opacity < 0.999;
-          const depthTest = (src.depthTest != null) ? !!src.depthTest : (layerKey === 'hud' ? false : true);
-          const depthWrite = (src.depthWrite != null) ? !!src.depthWrite : (!isBlend && layerKey !== 'hud');
-          const toneMapped = (src.toneMapped != null) ? !!src.toneMapped : (layerKey === 'hud' ? false : true);
-
-          const mats = Array.isArray(mat) ? mat : [mat];
-          for (const m of mats) {
-            if (!m || typeof m !== 'object') continue;
-            if ('transparent' in m) m.transparent = isBlend;
-            if ('opacity' in m) m.opacity = isBlend ? opacity : 1;
-            if ('depthTest' in m) m.depthTest = depthTest;
-            if ('depthWrite' in m) m.depthWrite = depthWrite;
-            if ('toneMapped' in m) m.toneMapped = toneMapped;
-            if ('needsUpdate' in m) m.needsUpdate = true;
-          }
+          const toneMapped = (src.toneMapped != null) ? !!src.toneMapped : (layerKey !== WORLD_LAYER.HUD);
+          const materialState = applyWorldMaterialState(mat, layerKey, { opacity, toneMapped });
 
           const sortModeRaw = String(src.sortMode || 'inherit');
           let sortMode = (sortModeRaw === 'inherit') ? String(defaults.sortMode || 'bins') : sortModeRaw;
@@ -364,11 +372,12 @@ function ensureOverlay3D(ctx) {
           const everyRaw = Number.isFinite(src.every) ? Number(src.every) : Number(defaults.every);
           const every = Math.max(1, Number.isFinite(everyRaw) ? (everyRaw | 0) : 1);
 
-          if (!isBlend) sortMode = 'nosort';
+          if (layerKey !== WORLD_LAYER.WORLD_TRANSPARENT || !materialState.transparent) sortMode = 'nosort';
 
           return {
-            mode: isBlend ? 'blend' : 'opaque',
-            opacity: isBlend ? opacity : 1,
+            layer: layerKey,
+            mode: materialState.transparent ? 'blend' : 'opaque',
+            opacity: materialState.opacity,
             sortMode,
             bins,
             update,
@@ -380,6 +389,7 @@ function ensureOverlay3D(ctx) {
         let batch = null;
         let frameRegistered = false;
         const wantsFrameSort = (policy) => (
+          policy?.layer === WORLD_LAYER.WORLD_TRANSPARENT &&
           policy?.mode === 'blend' &&
           policy?.sortMode !== 'nosort' &&
           policy?.update === 'frame'
@@ -679,7 +689,7 @@ function ensureOverlay3D(ctx) {
           syncToGpu(camera || ctx?.camera || null, { force: false, frame: f });
         };
 
-        addObject3D(mesh, { layer, owned: false });
+        addObject3D(mesh, { layer, owned: false, applyLayerMaterial: false });
 
         const setTransparency = (spec = null, { sync = true } = {}) => {
           const nextSpec = (spec && typeof spec === 'object') ? spec : {};
@@ -774,17 +784,17 @@ function ensureOverlay3D(ctx) {
         geometry.setAttribute('color', colAttr);
 
         const alpha = Number(opacity);
-        const transparent = Number.isFinite(alpha) ? alpha < 0.999 : false;
         const mat = material || new THREE.PointsMaterial({
           color: 0xffffff,
           vertexColors: true,
           size: Number(size) || 1,
           sizeAttenuation: !!sizeAttenuation,
-          transparent,
-          opacity: Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1,
+          transparent: false,
+          opacity: 1,
           depthTest: true,
-          depthWrite: !transparent,
+          depthWrite: true,
         });
+        if ('opacity' in mat) mat.opacity = Number.isFinite(alpha) ? alpha : 1;
         const points = new THREE.Points(geometry, mat);
         points.name = name ? String(name) : 'overlay3d:points';
         points.frustumCulled = false;
@@ -857,15 +867,15 @@ function ensureOverlay3D(ctx) {
         geometry.setAttribute('color', colAttr);
 
         const alpha = Number(opacity);
-        const transparent = Number.isFinite(alpha) ? alpha < 0.999 : false;
         const mat = material || new THREE.LineBasicMaterial({
           color: 0xffffff,
           vertexColors: true,
-          transparent,
-          opacity: Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1,
+          transparent: false,
+          opacity: 1,
           depthTest: true,
-          depthWrite: !transparent,
+          depthWrite: true,
         });
+        if ('opacity' in mat) mat.opacity = Number.isFinite(alpha) ? alpha : 1;
         const lines = new THREE.LineSegments(geometry, mat);
         lines.name = name ? String(name) : 'overlay3d:lines';
         lines.frustumCulled = false;
