@@ -15,8 +15,8 @@ export function createRightPanelRuntime({ controlManager, store }) {
   let visibleLastFrame = false;
   let lastCtrlRef = null;
   let lastActsRef = null;
-  let lastQposRef = null;
-  let lastEqActiveRef = null;
+  let lastJointSource = null;
+  let lastEqualitySource = null;
   const dynamicSectionState = {
     control: { expanded: false, dirty: true },
     joint: { expanded: false, dirty: true },
@@ -32,8 +32,8 @@ export function createRightPanelRuntime({ controlManager, store }) {
     visibleLastFrame = false;
     lastCtrlRef = null;
     lastActsRef = null;
-    lastQposRef = null;
-    lastEqActiveRef = null;
+    lastJointSource = null;
+    lastEqualitySource = null;
     for (const section of Object.values(dynamicSectionState)) {
       section.expanded = false;
       section.dirty = true;
@@ -50,6 +50,41 @@ export function createRightPanelRuntime({ controlManager, store }) {
     }
     state.expanded = expanded;
     return expanded;
+  }
+
+  function sameSource(prev, next) {
+    if (!prev || !next) return false;
+    const keys = Object.keys(next);
+    for (const key of keys) {
+      if (prev[key] !== next[key]) return false;
+    }
+    return true;
+  }
+
+  function buildJointSource(snapshot) {
+    const groupState = getSnapshotGroups(snapshot)?.joint;
+    const groupKey = Array.isArray(groupState) ? groupState.map((enabled) => (enabled ? '1' : '0')).join('') : '';
+    return {
+      qpos: snapshot?.qpos || null,
+      groupKey,
+      jtype: snapshot?.jtype || null,
+      jqpos: snapshot?.jnt_qposadr || null,
+      jrange: snapshot?.jnt_range || null,
+      names: Array.isArray(snapshot?.jnt_names) ? snapshot.jnt_names : null,
+      nq: snapshot?.nq | 0,
+    };
+  }
+
+  function buildEqualitySource(snapshot) {
+    return {
+      eqActive: snapshot?.eq_active || null,
+      eqType: snapshot?.eq_type || null,
+      eqObj1: snapshot?.eq_obj1id || null,
+      eqObj2: snapshot?.eq_obj2id || null,
+      eqObjType: snapshot?.eq_objtype || null,
+      eqNames: Array.isArray(snapshot?.eq_names) ? snapshot.eq_names : null,
+      jointNames: Array.isArray(snapshot?.jnt_names) ? snapshot.jnt_names : null,
+    };
   }
 
   function deriveJointDofs(snapshot) {
@@ -223,9 +258,9 @@ export function createRightPanelRuntime({ controlManager, store }) {
       dynamicSectionState.control.dirty = false;
     }
 
-    const qposRef = snapshot.qpos || null;
-    if (panelJustOpened || lastQposRef !== qposRef) {
-      lastQposRef = qposRef;
+    const jointSource = buildJointSource(snapshot);
+    if (panelJustOpened || !sameSource(lastJointSource, jointSource)) {
+      lastJointSource = jointSource;
       dynamicSectionState.joint.dirty = true;
     }
     if (jointExpanded && dynamicSectionState.joint.dirty && typeof controlManager.ensureJointSliders === 'function') {
@@ -247,9 +282,9 @@ export function createRightPanelRuntime({ controlManager, store }) {
       dynamicSectionState.joint.dirty = false;
     }
 
-    const eqActiveRef = snapshot.eq_active || null;
-    if (panelJustOpened || lastEqActiveRef !== eqActiveRef) {
-      lastEqActiveRef = eqActiveRef;
+    const equalitySource = buildEqualitySource(snapshot);
+    if (panelJustOpened || !sameSource(lastEqualitySource, equalitySource)) {
+      lastEqualitySource = equalitySource;
       dynamicSectionState.equality.dirty = true;
     }
     if (equalityExpanded && dynamicSectionState.equality.dirty && typeof controlManager.ensureEqualityToggles === 'function') {

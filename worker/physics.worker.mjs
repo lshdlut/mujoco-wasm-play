@@ -32,6 +32,7 @@ import {
   writeVisualField,
 } from '../core/viewer_structs.mjs';
 import { dispatchCommand } from './dispatch.gen.mjs';
+import { HISTORY_DEFAULT_CAPTURE_HZ, resolveHistorySamplingPlan } from './history_sampling.mjs';
 import { collectSnapshotTransfersInto } from './protocol.gen.mjs';
 import {
   DIRTY_REASON,
@@ -173,8 +174,6 @@ function safePost(message, transfers, context) {
 
 // Log minimal status lines to the main thread, keep the rest in the worker console.
 
-const HISTORY_DEFAULT_CAPTURE_HZ = 30;
-const HISTORY_MAX_CAPTURE_HZ = 60;
 const HISTORY_DEFAULT_CAPACITY = 900;
 const KEYFRAME_EXTRA_SLOTS = 5;
 const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata', 'xpos', 'xmat', 'body_xpos', 'body_xmat'];
@@ -266,8 +265,10 @@ function maybeSyncTimestepFromOptions(optionsState) {
   if (!Number.isFinite(rawDt) || !(rawDt > 0)) return;
   if (Math.abs(rawDt - dt) <= 1e-12) return;
   dt = rawDt;
-  const targetHz = clamp(Math.round(1 / dt), 5, HISTORY_MAX_CAPTURE_HZ);
+  const targetHz = resolveHistoryStepHz(dt);
   historyConfig = { ...historyConfig, captureHz: targetHz };
+  syncHistorySamplingPlan();
+  emitHistoryMeta();
   resetTimingForCurrentSim(rate);
 }
 
@@ -698,20 +699,38 @@ function clamp(value, lo, hi) {
   return Math.max(lo, Math.min(hi, value));
 }
 
+function resolveHistoryStepHz(stepDt = dt) {
+  const value = Number(stepDt);
+  if (!Number.isFinite(value) || !(value > 0)) return 0;
+  return Math.max(1, Math.round(1 / value));
+}
+
+function syncHistorySamplingPlan() {
+  if (!historyState) return;
+  const plan = resolveHistorySamplingPlan(resolveHistoryStepHz(), historyConfig.captureHz, HISTORY_DEFAULT_CAPTURE_HZ);
+  historyState.stepHz = plan.stepHz;
+  historyState.captureHz = plan.captureHz;
+  historyState.captureStepStride = plan.captureStepStride;
+  const remaining = Number.isFinite(historyState.stepsUntilCapture) ? (historyState.stepsUntilCapture | 0) : 0;
+  historyState.stepsUntilCapture = Math.max(0, Math.min(remaining, Math.max(0, plan.captureStepStride - 1)));
+}
+
 function initHistoryBuffers() {
   const capacity = Math.max(0, historyConfig.capacity | 0);
-  const captureHz = Math.max(1, Number(historyConfig.captureHz) || HISTORY_DEFAULT_CAPTURE_HZ);
+  const plan = resolveHistorySamplingPlan(resolveHistoryStepHz(), historyConfig.captureHz, HISTORY_DEFAULT_CAPTURE_HZ);
   const stateSize = typeof sim?.stateSize === 'function' ? (sim.stateSize(historyConfig.stateSig) | 0) : 0;
   if (!(capacity > 0) || !(stateSize > 0)) {
     historyState = {
       enabled: false,
-      captureHz,
+      stepHz: plan.stepHz,
+      captureHz: plan.captureHz,
       capacity,
       stateSize: 0,
       samples: [],
       head: 0,
       count: 0,
-      lastCaptureTs: 0,
+      captureStepStride: plan.captureStepStride,
+      stepsUntilCapture: 0,
       scrubIndex: 0,
       scrubActive: false,
       resumeRun: true,
@@ -720,15 +739,16 @@ function initHistoryBuffers() {
   }
   historyState = {
     enabled: true,
-    captureHz,
+    stepHz: plan.stepHz,
+    captureHz: plan.captureHz,
     capacity,
-    captureIntervalMs: 1000 / captureHz,
+    captureStepStride: plan.captureStepStride,
     stateSize,
     stateSig: historyConfig.stateSig,
     samples: Array.from({ length: capacity }, () => new Float64Array(stateSize)),
     head: 0,
     count: 0,
-    lastCaptureTs: 0,
+    stepsUntilCapture: 0,
     scrubIndex: 0,
     scrubActive: false,
     resumeRun: true,
@@ -946,25 +966,31 @@ function buildInfoStats(sim, tSim, nconLocal) {
   return out;
 }
 
-function captureHistorySample(force = false, nowMs = null) {
+function captureHistorySample(force = false) {
   if (!historyState || !historyState.enabled || !sim) return;
   if (!(historyState.samples?.length > 0)) return;
   if (!force && (!running || historyState.scrubActive)) return;
-  const now = (nowMs != null && Number.isFinite(nowMs)) ? nowMs : perfNowMs();
-  if (!force && historyState.captureIntervalMs > 0) {
-    if ((now - historyState.lastCaptureTs) < historyState.captureIntervalMs) return;
+  if (!force) {
+    const stepsUntilCapture = Number.isFinite(historyState.stepsUntilCapture)
+      ? (historyState.stepsUntilCapture | 0)
+      : 0;
+    if (stepsUntilCapture > 0) {
+      historyState.stepsUntilCapture = stepsUntilCapture - 1;
+      return;
+    }
   }
-  historyState.lastCaptureTs = now;
   const slot = historyState.samples[historyState.head];
   if (!slot) return;
   sim.captureState?.(slot, historyState.stateSig || MJ_STATE_SIG);
   historyState.head = (historyState.head + 1) % historyState.capacity;
   historyState.count = Math.min(historyState.count + 1, historyState.capacity);
+  historyState.stepsUntilCapture = Math.max(0, (historyState.captureStepStride | 0) - 1);
 }
 
 function releaseHistoryScrub() {
   if (!historyState) return;
   historyState.scrubIndex = 0;
+  historyState.stepsUntilCapture = 0;
   if (historyState.scrubActive) {
     historyState.scrubActive = false;
     historyState.resumeRun = false;
@@ -1005,7 +1031,7 @@ function applyHistoryConfig(partial = {}) {
   if (partial.captureHz !== undefined) {
     const hz = Number(partial.captureHz);
     if (Number.isFinite(hz) && hz > 0) {
-      next.captureHz = clamp(Math.round(hz), 5, 240);
+      next.captureHz = Math.max(1, Math.round(hz));
     }
   }
   if (partial.capacity !== undefined) {
@@ -2526,10 +2552,10 @@ setInterval(() => {
     try {
       if (perfEnabled) {
         const tHist = perfNowMs();
-        captureHistorySample(false, tHist);
+        captureHistorySample(false);
         stepTickHistoryMs += perfNowMs() - tHist;
       } else {
-        captureHistorySample(false, tickStartMs);
+        captureHistorySample(false);
       }
       if (mjvPerturbActive) {
         if (perfEnabled) {
@@ -2579,18 +2605,14 @@ setInterval(() => {
           measuredSlowdown = slowdownSample;
           measured = true;
         }
-        // Avoid calling captureHistorySample() every step when throttled; only invoke when due.
         const history = historyState;
         if (history?.enabled && !history.scrubActive && (history.samples?.length > 0)) {
-          const intervalMs = history.captureIntervalMs;
-          if (!(intervalMs > 0) || ((nowMs - history.lastCaptureTs) >= intervalMs)) {
-            if (perfEnabled) {
-              const tHist = perfNowMs();
-              captureHistorySample(false, tHist);
-              stepTickHistoryMs += perfNowMs() - tHist;
-            } else {
-              captureHistorySample(false, nowMs);
-            }
+          if (perfEnabled) {
+            const tHist = perfNowMs();
+            captureHistorySample(false);
+            stepTickHistoryMs += perfNowMs() - tHist;
+          } else {
+            captureHistorySample(false);
           }
         }
         if (mjvPerturbActive) {
@@ -2723,7 +2745,7 @@ const commandHandlers = {
     optionSupport = detectOptionSupport(mod);
     dt = sim?.timestep?.() || 0.002;
     if (Number.isFinite(dt) && dt > 0) {
-      const targetHz = clamp(Math.round(1 / dt), 5, HISTORY_MAX_CAPTURE_HZ);
+      const targetHz = resolveHistoryStepHz(dt);
       historyConfig = { ...historyConfig, captureHz: targetHz };
     }
     ngeom = sim?.ngeom?.() | 0;
@@ -3109,8 +3131,10 @@ const commandHandlers = {
               const rawDt = sim?.timestep?.() || dt;
               if (Number.isFinite(rawDt) && rawDt > 0) {
                 dt = rawDt;
-                const targetHz = clamp(Math.round(1 / dt), 5, 240);
+                const targetHz = resolveHistoryStepHz(dt);
                 historyConfig = { ...historyConfig, captureHz: targetHz };
+                syncHistorySamplingPlan();
+                emitHistoryMeta();
                 resetTimingForCurrentSim(rate);
               }
             } catch (err) {

@@ -425,6 +425,13 @@ html[data-play-embed="1"] body.fullscreen {
   max-width: 100%;
   min-width: 0;
 }
+.control-field.slider-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(4px * var(--viewer-font-scale));
+  flex-wrap: nowrap;
+}
 .control-field .static-value {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
@@ -607,6 +614,7 @@ html[data-play-embed="1"] body.fullscreen {
   flex: 1;
   width: 100%;
   max-width: 100%;
+  min-width: 0;
 }
 .control-field textarea {
   width: 100%;
@@ -645,8 +653,14 @@ html[data-play-embed="1"] body.fullscreen {
 .slider-value {
   font-size: calc(11px * var(--viewer-font-scale));
   color: var(--color-text-muted);
-  min-width: 44px;
+  width: calc(28px * var(--viewer-font-scale));
+  min-width: calc(28px * var(--viewer-font-scale));
+  max-width: calc(28px * var(--viewer-font-scale));
   text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 .bool-row {
   display: flex;

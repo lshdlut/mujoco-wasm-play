@@ -184,9 +184,9 @@
       ? 1
       : (getToken('theme') === 'dark' ? 0 : 0);
   const spacing =
-    getToken('spacing') === 'wide'
-      ? 1
-      : 0;
+    getToken('spacing') === 'tight'
+      ? 0
+      : 1;
   const font = resolveFontPreset(getRaw('font'));
   const embedMode = readTruthy('embed');
   const profileId = normaliseProfileId(globalThis.PLAY_UI_PROFILE);

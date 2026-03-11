@@ -20,12 +20,17 @@ type UiMeasure = {
   boolStyles: { whiteSpace: string; overflowX: string; textOverflow: string };
   segmentedStyles: { whiteSpace: string; overflowX: string; textOverflow: string };
   selectStyles: { whiteSpace: string; overflowX: string; textOverflow: string; textAlign: string; textAlignLast: string };
+  treeDepthSliderWidth: number;
+  treeDepthValueWidth: number;
+  flexLayerSliderWidth: number;
+  flexLayerValueWidth: number;
 };
 
 async function ensureUiSections(page: any) {
   await ensureSectionExpanded(page, 'file');
   await ensureSectionExpanded(page, 'option');
   await ensureSectionExpanded(page, 'simulation');
+  await ensureSectionExpanded(page, 'rendering');
 }
 
 async function readUiMeasure(page: any): Promise<UiMeasure> {
@@ -56,6 +61,16 @@ async function readUiMeasure(page: any): Promise<UiMeasure> {
     }
     const segmented = requireElement('[data-testid="option.visual_source"] .segmented-option span');
     const select = requireElement('[data-testid="option.font"]');
+    const treeDepthSlider = requireElement('[data-testid="rendering.tree_depth"]');
+    const treeDepthValue = treeDepthSlider.parentElement?.querySelector('.slider-value');
+    if (!(treeDepthValue instanceof HTMLElement)) {
+      throw new Error('missing tree depth slider value');
+    }
+    const flexLayerSlider = requireElement('[data-testid="rendering.flex_layer"]');
+    const flexLayerValue = flexLayerSlider.parentElement?.querySelector('.slider-value');
+    if (!(flexLayerValue instanceof HTMLElement)) {
+      throw new Error('missing flex layer slider value');
+    }
     const selectStyle = getComputedStyle(select);
     const runStyle = getComputedStyle(runButton);
     const boolStyle = getComputedStyle(boolButton);
@@ -79,6 +94,10 @@ async function readUiMeasure(page: any): Promise<UiMeasure> {
         textAlign: selectStyle.textAlign,
         textAlignLast: (selectStyle as any).textAlignLast || '',
       },
+      treeDepthSliderWidth: treeDepthSlider.getBoundingClientRect().width,
+      treeDepthValueWidth: treeDepthValue.getBoundingClientRect().width,
+      flexLayerSliderWidth: flexLayerSlider.getBoundingClientRect().width,
+      flexLayerValueWidth: flexLayerValue.getBoundingClientRect().width,
     };
   });
 }
@@ -175,4 +194,15 @@ test('single-line controls clip without stretching', async ({ page }) => {
   }
 
   expect(after.selectStyles.whiteSpace).toBe('nowrap');
+});
+
+test('single-column sliders keep a wider track and tighter value slot', async ({ page }) => {
+  await waitForViewerReady(page, '/index.html?model=raj&font=100');
+  await ensureUiSections(page);
+  const measure = await readUiMeasure(page);
+
+  expect(measure.treeDepthSliderWidth).toBeGreaterThan(measure.treeDepthValueWidth * 2.4);
+  expect(measure.flexLayerSliderWidth).toBeGreaterThan(measure.flexLayerValueWidth * 2.4);
+  expect(measure.treeDepthValueWidth).toBeLessThan(40);
+  expect(measure.flexLayerValueWidth).toBeLessThan(40);
 });

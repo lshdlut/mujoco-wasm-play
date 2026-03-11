@@ -24,7 +24,7 @@ const EMPTY_RUNTIME_CONFIG = Object.freeze({
   ui: Object.freeze({
     embedMode: false,
     themeColor: 0,
-    spacing: 0,
+    spacing: 1,
     fontIndex: 2,
     profileId: 'play',
     builtInDefaultOpen: true,

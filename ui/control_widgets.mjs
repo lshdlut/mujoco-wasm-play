@@ -267,6 +267,11 @@ export function createControlWidgetsRuntime({
     },
   };
 
+  function resetDynamicContainerState(container) {
+    if (!container || typeof container !== 'object') return;
+    delete container.__playSliderCache;
+  }
+
   function createControlRow(control, options = {}) {
     const row = document.createElement('div');
     row.className = 'control-row';
@@ -440,6 +445,7 @@ export function createControlWidgetsRuntime({
       });
     }
     if (items.length === 0) {
+      resetDynamicContainerState(container);
       container.innerHTML = '';
       container.setAttribute('data-count', '0');
       return;
@@ -451,6 +457,7 @@ export function createControlWidgetsRuntime({
       }
       return;
     }
+    resetDynamicContainerState(container);
     container.innerHTML = '';
     items.forEach((item, index) => {
       buildItem(container, item, index);
@@ -491,7 +498,9 @@ export function createControlWidgetsRuntime({
           containerEl.__playSliderCache = cached;
         }
         const sliderByIndex = cached.map;
-        if (sliderByIndex.size !== containerEl.childElementCount) {
+        const needsRescan = sliderByIndex.size !== containerEl.childElementCount
+          || Array.from(sliderByIndex.values()).some((node) => !(node instanceof HTMLElement) || !containerEl.contains(node));
+        if (needsRescan) {
           sliderByIndex.clear();
           const nodes = containerEl.querySelectorAll(`input[type="range"][${wantAttr}]`);
           for (const node of nodes) {
@@ -1145,6 +1154,7 @@ function createBoolToggleElements(control, { disabled = false } = {}) {
   function renderSlider(container, control) {
     const baseRange = parseRange(control);
     const { row, label, field } = createLabeledRow(control);
+    field.classList.add('slider-field');
     const inputId = `${sanitiseName(control.item_id)}__slider`;
     label.setAttribute('for', inputId);
     const input = document.createElement('input');

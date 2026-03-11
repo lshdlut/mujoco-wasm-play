@@ -87,6 +87,14 @@ test('font=150 sets initial UI font preset', async ({ page }) => {
   expect(result.fontScale).toBe('1.5');
 });
 
+test('default spacing is wide', async ({ page }) => {
+  await waitForViewerReady(page, '/index.html?model=raj');
+  const result = await readThemeState(page);
+
+  expect(result.bodyClass).toContain('spacing-wide');
+  expect(result.runtimeConfig?.ui?.spacing).toBe(1);
+});
+
 test('theme and font URL settings persist across builtin model switches', async ({ page }) => {
   await waitForViewerReady(page, '/index.html?model=raj&theme=light&font=50');
   await switchBuiltinModel(page, 'humanoid/humanoid');

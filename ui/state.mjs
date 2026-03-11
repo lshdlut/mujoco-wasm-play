@@ -61,7 +61,7 @@ export const DEFAULT_VIEWER_STATE = Object.freeze({
   },
   theme: {
     color: 0,
-    spacing: 0,
+    spacing: 1,
     font: 2,
   },
   visualSourceMode: 'model',
