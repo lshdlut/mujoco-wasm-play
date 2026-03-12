@@ -17,7 +17,7 @@ import {
   strictOverride,
 } from '../core/viewer_runtime.mjs';
 import { getRuntimeConfig } from '../core/runtime_config.mjs';
-import { getSnapshotAlign, getSnapshotBvhDepth, getSnapshotCameraMode, getSnapshotCameras, getSnapshotCopyState, getSnapshotFlexLayer, getSnapshotGeomBodyIds, getSnapshotGeoms, getSnapshotGroups, getSnapshotLabelMode, getSnapshotOptions, getSnapshotRenderAssets, getSnapshotSceneFlags, getSnapshotSelection, getSnapshotStatistic, getSnapshotStructValue, getSnapshotVisual, getSnapshotVoptFlags } from '../core/snapshot_selectors.mjs';
+import { getSnapshotAlign, getSnapshotBvhDepth, getSnapshotCameraMode, getSnapshotCameras, getSnapshotCopyState, getSnapshotFlexLayer, getSnapshotGeomBodyIds, getSnapshotGeoms, getSnapshotGroups, getSnapshotOptions, getSnapshotRenderAssets, getSnapshotSceneFlags, getSnapshotSelection, getSnapshotStatistic, getSnapshotStructValue, getSnapshotVisual, getSnapshotVoptFlags } from '../core/snapshot_selectors.mjs';
 import { pushSkyDebug } from '../environment/environment.mjs';
 import {
   depthFromSoAPos,
@@ -31,6 +31,12 @@ import {
   renderWorldScene,
 } from './three_helpers.mjs';
 import { disposeOverlay3D, ensureOverlay3D } from './overlay3d.mjs';
+import {
+  clearLabelOverlay,
+  disposeLabelOverlay,
+  renderLabelOverlay,
+  syncLabelOverlayViewport,
+} from './label_overlay.mjs';
 import { installMuJoCoShadowViewportInset } from './mujoco_shadows.mjs';
 import { MJ_GEOM, MJ_LIGHT_TYPE, MJ_MAXLIGHT, MJ_MAXPLANEGRID, MJ_MINVAL, MJ_OBJ, MJ_TEXTURE, MJ_VIS } from './mujoco_constants.mjs';
 import { applyMuJoCoTextureToMesh, quantize1e6, quantize1e3, resolveMaterialTextureDescriptor } from './mujoco_textures.mjs';
@@ -80,32 +86,6 @@ import {
 
 
 const FIXED_CAMERA_OFFSET = 2;
-const LABEL_TEXTURE_CACHE = new Map();
-const LABEL_TEXTURE_VERSION = 3;
-const LABEL_TEXTURE_CACHE_LIMIT = 256;
-const LABEL_DEFAULT_HEIGHT = 0.08;
-const LABEL_DEFAULT_OFFSET = 0.04;
-const MJ_LABEL_STRIDE = 100;
-const MJ_LABEL_DECODER = (typeof TextDecoder !== 'undefined') ? new TextDecoder('utf-8') : null;
-const LABEL_LOD_NEAR = 2.0;
-const LABEL_LOD_MID = 4.5;
-const LABEL_LOD_FACTORS = { near: 2, mid: 1.4, far: 1 };
-const __TMP_VEC3 = new THREE.Vector3();
-const __TMP_VEC3_A = new THREE.Vector3();
-const __TMP_VEC3_B = new THREE.Vector3();
-const __TMP_VEC3_C = new THREE.Vector3();
-const __TMP_QUAT_A = new THREE.Quaternion();
-
-// MuJoCo uses `mju_round` (half away from zero), which differs from
-// `Math.round` for negative half-values.
-function mjuRound(value) {
-  const v = Number(value);
-  if (!Number.isFinite(v)) return 0;
-  return v >= 0 ? Math.floor(v + 0.5) : Math.ceil(v - 0.5);
-}
-
-const LABEL_DPR_CAP = 2;
-const LABEL_GEOM_LIMIT = 120;
 const DEFAULT_CLEAR_HEX = 0xd6dce4;
 const DEFAULT_CLEAR_COLOR = new THREE.Color(DEFAULT_CLEAR_HEX);
 
@@ -994,6 +974,7 @@ function applyFixedCameraPreset(ctx, snapshot, state, { tempVecA, tempVecB, temp
   if (Number.isFinite(fovy) && ctx.camera.fov !== fovy) {
     ctx.camera.fov = fovy;
     ctx.camera.updateProjectionMatrix();
+    syncLabelOverlayViewport(ctx);
   }
   ctx.fixedCameraActive = true;
   return true;
@@ -1162,192 +1143,6 @@ function computeScenePolicy(snapshot, state, context) {
       hideAllGeometry,
     };
   }
-
-function disposeLabelTextureCache() {
-  for (const tex of LABEL_TEXTURE_CACHE.values()) {
-    if (tex && typeof tex.dispose === 'function') {
-      try {
-        tex.dispose();
-      } catch (err) {
-        strictCatch(err, 'main:labelTex_dispose');
-      }
-    }
-  }
-  LABEL_TEXTURE_CACHE.clear();
-}
-
-function getLabelTexture(text, quality = 1) {
-  if (typeof document === 'undefined') return null;
-  const label = (text || '').toString();
-  const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, LABEL_DPR_CAP) : 1;
-  const q = Math.max(1, quality);
-  const cacheKey = `${LABEL_TEXTURE_VERSION}::${label}::q${q.toFixed(2)}::${dpr.toFixed(2)}`;
-  if (LABEL_TEXTURE_CACHE.has(cacheKey)) {
-    const cached = LABEL_TEXTURE_CACHE.get(cacheKey);
-    if (cached) {
-      LABEL_TEXTURE_CACHE.delete(cacheKey);
-      LABEL_TEXTURE_CACHE.set(cacheKey, cached);
-    }
-    return cached;
-  }
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  const baseFontPx = 18;
-  const fontPx = baseFontPx * dpr * q;
-  ctx.font = `400 ${fontPx}px "Inter", "Segoe UI", sans-serif`;
-  const metrics = ctx.measureText(label);
-  const paddingX = 10 * dpr * q;
-  const paddingY = 6 * dpr * q;
-  const textWidth = Math.max(metrics.width, 12 * dpr * q);
-  canvas.width = Math.ceil(textWidth + paddingX * 2);
-  canvas.height = Math.ceil(fontPx + paddingY * 2);
-  ctx.font = `400 ${fontPx}px "Inter", "Segoe UI", sans-serif`;
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'center';
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.lineWidth = Math.max(1.5 * dpr * q, 1);
-  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-  ctx.fillStyle = '#050608';
-  const centerY = canvas.height / 2 + 0.1 * fontPx;
-  ctx.strokeText(label, canvas.width / 2, centerY);
-  ctx.fillText(label, canvas.width / 2, centerY);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.anisotropy = 1;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.needsUpdate = true;
-  texture.generateMipmaps = false;
-  texture.userData = texture.userData || {};
-  texture.userData.aspect = canvas.width / Math.max(1, canvas.height);
-  LABEL_TEXTURE_CACHE.set(cacheKey, texture);
-  while (LABEL_TEXTURE_CACHE.size > LABEL_TEXTURE_CACHE_LIMIT) {
-    const oldest = LABEL_TEXTURE_CACHE.entries().next().value;
-    if (!oldest) break;
-    const [oldKey, oldTex] = oldest;
-    LABEL_TEXTURE_CACHE.delete(oldKey);
-    if (oldTex && typeof oldTex.dispose === 'function') {
-      try {
-        oldTex.dispose();
-      } catch (err) {
-        strictCatch(err, 'main:labelTex_dispose');
-      }
-    }
-  }
-  return texture;
-}
-
-function createLabelSprite() {
-  const material = new THREE.SpriteMaterial({
-    map: null,
-    color: 0xffffff,
-    transparent: true,
-    depthTest: false,
-    depthWrite: false,
-    toneMapped: false,
-  });
-  const sprite = new THREE.Sprite(material);
-  sprite.visible = false;
-  sprite.renderOrder = 999;
-  sprite.center.set(0.5, 0);
-  sprite.frustumCulled = false;
-  return sprite;
-}
-
-function ensureLabelGroup(context) {
-  if (!context.labelGroup) {
-    context.labelGroup = new THREE.Group();
-    context.labelGroup.name = 'overlay:labels';
-    const worldScene = getWorldScene(context);
-    if (worldScene) worldScene.add(context.labelGroup);
-    context.labelPool = [];
-    strictEnsure('ensureLabelGroup', { reason: 'create' });
-  }
-  return context.labelGroup;
-}
-
-function hideLabelGroup(context) {
-  if (Array.isArray(context?.labelPool)) {
-    for (const sprite of context.labelPool) {
-      if (sprite) sprite.visible = false;
-    }
-  }
-  if (context?.labelGroup) {
-    context.labelGroup.visible = false;
-  }
-}
-
-function updateSceneLabelOverlays(context, snapshot, state, options = {}) {
-  const scnNgeom = snapshot?.scn_ngeom | 0;
-  const labelBytes = snapshot?.scn_label || null;
-  const posView = snapshot?.scn_pos || null;
-  if (!(scnNgeom > 0) || !labelBytes || !posView || !MJ_LABEL_DECODER) {
-    hideLabelGroup(context);
-    return;
-  }
-  if (labelBytes.length < scnNgeom * MJ_LABEL_STRIDE || posView.length < scnNgeom * 3) {
-    hideLabelGroup(context);
-    return;
-  }
-  const hideAllGeometry = !!options.hideAllGeometry;
-  if (hideAllGeometry) {
-    hideLabelGroup(context);
-    return;
-  }
-
-  const labelGroup = ensureLabelGroup(context);
-  const pool = context.labelPool;
-  const camera = context.camera;
-  const labelHeight = LABEL_DEFAULT_HEIGHT;
-  const verticalOffset = LABEL_DEFAULT_OFFSET;
-  const maxLabels = LABEL_GEOM_LIMIT;
-  let used = 0;
-
-  for (let si = 0; si < scnNgeom; si += 1) {
-    const base = si * MJ_LABEL_STRIDE;
-    if ((labelBytes[base] | 0) === 0) continue;
-    if (used >= maxLabels) break;
-    const bytes = labelBytes.subarray(base, base + MJ_LABEL_STRIDE);
-    let end = bytes.indexOf(0);
-    if (end < 0) end = MJ_LABEL_STRIDE;
-    const text = MJ_LABEL_DECODER.decode(bytes.subarray(0, end)).trim();
-    if (!text) continue;
-    const pbase = si * 3;
-    const px = Number(posView[pbase + 0]);
-    const py = Number(posView[pbase + 1]);
-    const pz = Number(posView[pbase + 2]);
-    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
-
-    let quality = LABEL_LOD_FACTORS.far;
-    if (camera) {
-      const dist = camera.position.distanceTo(__TMP_VEC3.set(px, py, pz));
-      if (dist < LABEL_LOD_NEAR) quality = LABEL_LOD_FACTORS.near;
-      else if (dist < LABEL_LOD_MID) quality = LABEL_LOD_FACTORS.mid;
-    }
-    const texture = getLabelTexture(text, quality);
-    if (!texture) continue;
-    let sprite = pool[used];
-    if (!sprite) {
-      sprite = createLabelSprite();
-      pool[used] = sprite;
-      labelGroup.add(sprite);
-    }
-    sprite.material.map = texture;
-    sprite.material.needsUpdate = true;
-    const aspect = Number(texture.userData?.aspect) || 3;
-    const width = labelHeight * aspect;
-    sprite.scale.set(width, labelHeight, 1);
-    sprite.position.set(px, py, pz + verticalOffset);
-    sprite.visible = true;
-    used += 1;
-  }
-
-  for (let i = used; i < pool.length; i += 1) {
-    if (pool[i]) pool[i].visible = false;
-  }
-  labelGroup.visible = used > 0;
-}
-
 
 function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, sceneFlags = null) {
   const groundData = mesh.userData?.infiniteGround;
@@ -2775,6 +2570,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
 
 function createRendererManager({
   canvas,
+  overlayRoot = null,
   backend,
   renderCtx,
   applyFallbackAppearance,
@@ -2799,6 +2595,7 @@ function createRendererManager({
     ? Math.max(0, Math.trunc(ctx.viewerCameraSyncSeqAck))
     : 0;
   ctx.viewerCameraTrackId = Number.isFinite(ctx.viewerCameraTrackId) ? (ctx.viewerCameraTrackId | 0) : null;
+  ctx.overlayRoot = overlayRoot || ctx.overlayRoot || null;
 
   const cleanup = [];
   const tempVecA = new THREE.Vector3();
@@ -2851,6 +2648,7 @@ function createRendererManager({
     ctx.renderer.setSize(width, height, false);
     ctx.camera.aspect = width / height;
     ctx.camera.updateProjectionMatrix();
+    syncLabelOverlayViewport(ctx);
   }
 
   function ensureRenderLoop() {
@@ -2900,6 +2698,13 @@ function createRendererManager({
       }
       // Background/environment is managed by environment manager (ensureEnvIfNeeded)
       renderWorldScene(ctx, ctx.renderer, { camera: ctx.camera });
+      if (lastFrameSnapshot && lastFrameState) {
+        renderLabelOverlay(ctx, lastFrameSnapshot, lastFrameState, {
+          hideAllGeometry: !!lastFrameState?.rendering?.hideAllGeometry,
+        });
+      } else {
+        clearLabelOverlay(ctx);
+      }
       if (perfEnabled) {
         const info = ctx.renderer?.info?.render || null;
         if (info) {
@@ -3339,9 +3144,6 @@ function createRendererManager({
       !!snapshot?.scn_objid &&
       !!snapshot?.scn_category;
 
-    // Scene-first: decor/debug visuals come from mjvScene; JS overlay builders removed.
-    updateSceneLabelOverlays(context, snapshot, state, { hideAllGeometry });
-
     // Scene-first: base-layer rendering is driven solely by mjvScene SoA.
     // Legacy JS-side scene construction (geom/site/tendon/flex/skin) is disabled.
     if (hasSceneSoA) {
@@ -3605,11 +3407,7 @@ function createRendererManager({
       ctx.skinGroup = null;
       ctx.skinPool = [];
     }
-    if (ctx.labelGroup) {
-      disposeObject3DTree(ctx.labelGroup);
-      ctx.labelGroup = null;
-      ctx.labelPool = [];
-    }
+    disposeLabelOverlay(ctx);
 
     disposeOverlay3D(ctx);
 
@@ -3617,7 +3415,6 @@ function createRendererManager({
       try { ctx.materialPool.disposeAll(); } catch (err) { strictCatch(err, 'main:materialPool_dispose'); }
       ctx.materialPool = null;
     }
-    disposeLabelTextureCache();
 
     if (ctx.assetCache && ctx.assetCache.meshGeometries instanceof Map) {
       for (const geometry of ctx.assetCache.meshGeometries.values()) {

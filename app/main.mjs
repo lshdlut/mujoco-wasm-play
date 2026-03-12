@@ -141,6 +141,7 @@ if (store && typeof store.update === 'function') {
 
 const rendererManager = createRendererManager({
   canvas,
+  overlayRoot: overlayRootMount,
   backend,
   renderCtx,
   applyFallbackAppearance,
