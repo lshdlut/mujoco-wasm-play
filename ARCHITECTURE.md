@@ -250,8 +250,9 @@ Current caveat:
 
 - `renderer/pipeline.mjs` still contains more than orchestration. A substantial
   amount of scene/resource policy remains inside the top-level pipeline.
-- Labels are still a separate sprite path (`labelGroup`) and are intentionally
-  outside the current world-space occlusion contract.
+- Labels are a separate screen-space text pass. MuJoCo still owns label
+  semantics and 3D anchors; Play only projects anchors and renders Web text
+  after the world pass, outside the world-space occlusion contract.
 
 ### 7. Plugins and public surface
 

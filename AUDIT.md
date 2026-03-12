@@ -233,9 +233,10 @@ Current deviation from the ideal:
 
 - `renderer/pipeline.mjs` is still too broad for long-term maintainability
 - Environment and renderer debug outputs are still ad hoc globals
-- World-space occlusion used to be split across infinite ground, packed scene
-  geoms, overlay3d, and labels; the renderer now needs to preserve one shared
-  contract for world objects and keep labels explicitly separate
+- World-space occlusion is now unified for world objects. Labels remain
+  intentionally separate, but they no longer ride the world scene as sprites;
+  they are rendered in a dedicated screen-space text pass from MuJoCo-provided
+  anchors and text.
 
 Evidence:
 
