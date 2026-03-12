@@ -130,6 +130,14 @@ The `render(body, ctx)` callback receives:
 - `ctx`: `{ panel, sectionId, sectionEl, body, host }`
 If `render(...)` returns a function or `{ dispose() }`, Play calls it on `unregister(...)`.
 
+Lifecycle contract:
+- Play owns the **section shell** only: header, collapse state, mount order, unregister, and shell disposal.
+- `render(body, ctx)` is called once when the section is registered. Play does **not** diff, rerender, or reconcile the plugin body for you.
+- The plugin owns the **body DOM lifecycle**. If your source disappears, clear the body DOM yourself. If the source comes back, recreate nodes and listeners yourself.
+- Do not retain detached nodes, stale closures, timers, or observers across body teardown/rebuild.
+- If you subscribe, start timers, or attach listeners inside the body, release them from the disposer returned by `render(...)`.
+- See `plugins/test_ui_sections_plugin.mjs` for the minimal dynamic-body pattern: enable/disable, `replaceChildren()`, rebuild, and explicit cleanup.
+
 Unregister:
 - `host.ui.sections.unregister(sectionId)`
 

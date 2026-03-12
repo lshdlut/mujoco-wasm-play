@@ -13,8 +13,7 @@ export function createRightPanelRuntime({ controlManager, store }) {
     throw new Error('createRightPanelRuntime: missing store');
   }
   let visibleLastFrame = false;
-  let lastCtrlRef = null;
-  let lastActsRef = null;
+  let lastActuatorSource = null;
   let lastJointSource = null;
   let lastEqualitySource = null;
   const dynamicSectionState = {
@@ -24,16 +23,19 @@ export function createRightPanelRuntime({ controlManager, store }) {
   };
   let cachedJointDofs = [];
   let cachedJointDofsMeta = null;
+  let cachedActuatorMetaRef = null;
+  let cachedActuatorMetaKey = '';
   let cachedEqualityEntries = [];
   let cachedEqualityMeta = null;
   let cachedEqualityActiveRef = null;
 
   function reset() {
     visibleLastFrame = false;
-    lastCtrlRef = null;
-    lastActsRef = null;
+    lastActuatorSource = null;
     lastJointSource = null;
     lastEqualitySource = null;
+    cachedActuatorMetaRef = null;
+    cachedActuatorMetaKey = '';
     for (const section of Object.values(dynamicSectionState)) {
       section.expanded = false;
       section.dirty = true;
@@ -72,6 +74,37 @@ export function createRightPanelRuntime({ controlManager, store }) {
       jrange: snapshot?.jnt_range || null,
       names: Array.isArray(snapshot?.jnt_names) ? snapshot.jnt_names : null,
       nq: snapshot?.nq | 0,
+    };
+  }
+
+  function buildActuatorSource(snapshot) {
+    const actuators = Array.isArray(snapshot?.actuators) ? snapshot.actuators : null;
+    const count = Array.isArray(actuators) ? (actuators.length | 0) : 0;
+    let metadataKey = '';
+    if (count > 0) {
+      if (cachedActuatorMetaRef === actuators) {
+        metadataKey = cachedActuatorMetaKey;
+      } else {
+        metadataKey = actuators.map((item, fallback) => {
+          const index = Number.isFinite(Number(item?.index)) ? (Number(item.index) | 0) : fallback;
+          const name = String(item?.name ?? '');
+          const min = Number.isFinite(Number(item?.min)) ? Number(item.min) : '';
+          const max = Number.isFinite(Number(item?.max)) ? Number(item.max) : '';
+          const step = Number.isFinite(Number(item?.step)) ? Number(item.step) : '';
+          return `${index}:${name}:${min}:${max}:${step}`;
+        }).join('|');
+        cachedActuatorMetaRef = actuators;
+        cachedActuatorMetaKey = metadataKey;
+      }
+    } else {
+      cachedActuatorMetaRef = null;
+      cachedActuatorMetaKey = '';
+    }
+    return {
+      actuators,
+      ctrl: snapshot?.ctrl || null,
+      count,
+      metadataKey,
     };
   }
 
@@ -239,12 +272,11 @@ export function createRightPanelRuntime({ controlManager, store }) {
     const jointExpanded = syncDynamicSection('joint', panelVisible);
     const equalityExpanded = syncDynamicSection('equality', panelVisible);
 
-    const actsRef = Array.isArray(snapshot.actuators) ? snapshot.actuators : null;
-    const acts = actsRef || [];
-    const ctrlValues = snapshot.ctrl ?? [];
-    if (panelJustOpened || lastActsRef !== actsRef || lastCtrlRef !== ctrlValues) {
-      lastActsRef = actsRef;
-      lastCtrlRef = ctrlValues;
+    const actuatorSource = buildActuatorSource(snapshot);
+    const acts = actuatorSource.actuators || [];
+    const ctrlValues = actuatorSource.ctrl ?? [];
+    if (panelJustOpened || !sameSource(lastActuatorSource, actuatorSource)) {
+      lastActuatorSource = actuatorSource;
       dynamicSectionState.control.dirty = true;
     }
     if (controlExpanded && dynamicSectionState.control.dirty && typeof controlManager.ensureActuatorSliders === 'function') {

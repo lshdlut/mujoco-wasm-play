@@ -130,6 +130,14 @@
 - `ctx`: `{ panel, sectionId, sectionEl, body, host }`
 若 `render(...)` 返回函数，或返回 `{ dispose() }`，Play 会在 `unregister(...)` 时调用它。
 
+生命周期契约：
+- Play 只拥有 **section shell**：header、折叠状态、挂载顺序、注销和 shell disposal。
+- `render(body, ctx)` 只会在 section 注册时调用一次。Play **不会**替 plugin diff、rerender 或 reconcile body 内容。
+- plugin 拥有 **body DOM 生命周期**。如果 source 消失，plugin 必须自己清空 body DOM；如果 source 回来，plugin 必须自己重建节点和事件绑定。
+- 不要跨 body teardown / rebuild 保留 detached node、stale closure、timer 或 observer。
+- 如果 body 内部有订阅、timer 或事件监听，请在 `render(...)` 返回的 disposer 中释放它们。
+- 最小动态 body 模式请参考 `plugins/test_ui_sections_plugin.mjs`：enable/disable、`replaceChildren()`、rebuild，以及显式 cleanup。
+
 注销：
 - `host.ui.sections.unregister(sectionId)`
 

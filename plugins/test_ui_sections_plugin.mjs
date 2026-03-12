@@ -10,7 +10,45 @@ export function registerPlayPlugin(host) {
     defaultOpen: true,
     after: 'file',
     render: (body) => {
-      body.innerHTML = '';
+      body.replaceChildren();
+
+      let dynamicEnabled = true;
+      let clickCount = 0;
+      let disposeDynamicBody = () => {};
+      let disposeDynamicToggle = () => {};
+
+      const updateDynamicBody = (container, statusEl) => {
+        disposeDynamicBody();
+        container.replaceChildren();
+        if (!dynamicEnabled) {
+          statusEl.textContent = 'dynamic body disabled';
+          disposeDynamicBody = () => {};
+          return;
+        }
+        const cleanups = [];
+        ['Alpha', 'Beta'].forEach((labelText, index) => {
+          const { row, field } = host.ui.kit.namedRow(`dynamic ${index}`);
+          const button = host.ui.kit.button({
+            label: labelText,
+            variant: 'pill',
+            testId: `plugin.test_ui_dynamic.item.${index}`,
+          });
+          const onClick = () => {
+            clickCount += 1;
+            statusEl.textContent = `dynamic click ${index}:${clickCount}`;
+          };
+          button.addEventListener('click', onClick);
+          cleanups.push(() => button.removeEventListener('click', onClick));
+          field.appendChild(button);
+          container.appendChild(row);
+        });
+        statusEl.textContent = `dynamic body enabled (${cleanups.length})`;
+        disposeDynamicBody = () => {
+          for (const cleanup of cleanups) cleanup();
+          container.replaceChildren();
+          disposeDynamicBody = () => {};
+        };
+      };
 
       {
         const { row, field } = host.ui.kit.fullRow();
@@ -28,6 +66,34 @@ export function registerPlayPlugin(host) {
         field.appendChild(btn);
         body.appendChild(row);
       }
+
+      {
+        const { row, field } = host.ui.kit.namedRow('dynamic');
+        const toggle = host.ui.kit.button({
+          label: 'Disable dynamic body',
+          variant: 'pill',
+          testId: 'plugin.test_ui_dynamic.toggle',
+        });
+        const onToggle = () => {
+          dynamicEnabled = !dynamicEnabled;
+          toggle.textContent = dynamicEnabled ? 'Disable dynamic body' : 'Enable dynamic body';
+          updateDynamicBody(dynamicBody, dynamicStatus);
+        };
+        toggle.addEventListener('click', onToggle);
+        disposeDynamicToggle = () => toggle.removeEventListener('click', onToggle);
+        field.appendChild(toggle);
+        body.appendChild(row);
+      }
+
+      const dynamicStatus = document.createElement('div');
+      dynamicStatus.className = 'plugin-card';
+      dynamicStatus.setAttribute('data-testid', 'plugin.test_ui_dynamic.status');
+      body.appendChild(dynamicStatus);
+
+      const dynamicBody = document.createElement('div');
+      dynamicBody.setAttribute('data-testid', 'plugin.test_ui_dynamic.body');
+      body.appendChild(dynamicBody);
+      updateDynamicBody(dynamicBody, dynamicStatus);
 
       {
         const { row, field } = host.ui.kit.namedRow('select');
@@ -75,6 +141,12 @@ export function registerPlayPlugin(host) {
         field.appendChild(pre);
         body.appendChild(row);
       }
+
+      return () => {
+        disposeDynamicToggle();
+        disposeDynamicBody();
+        body.replaceChildren();
+      };
     },
   });
 
