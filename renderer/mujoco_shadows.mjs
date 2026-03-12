@@ -29,16 +29,27 @@ export function installMuJoCoShadowViewportInset(renderer) {
   shadowMap[MUJOCO_SHADOW_VIEWPORT_INSET_SENTINEL] = true;
 
   const state = renderer.state;
-  if (typeof state.viewport !== 'function' || typeof shadowMap.render !== 'function') return false;
+  const gl = typeof renderer.getContext === 'function' ? renderer.getContext() : null;
+  if (!gl || typeof state.viewport !== 'function' || typeof shadowMap.render !== 'function') return false;
 
   let inShadowPass = false;
   const originalShadowRender = shadowMap.render.bind(shadowMap);
   shadowMap.render = (lights, scene, camera) => {
+    const restoreViewportRaw = gl.getParameter(gl.VIEWPORT);
+    const restoreViewport = Array.isArray(restoreViewportRaw) || ArrayBuffer.isView(restoreViewportRaw)
+      ? new THREE.Vector4(
+        restoreViewportRaw[0] ?? 0,
+        restoreViewportRaw[1] ?? 0,
+        restoreViewportRaw[2] ?? 0,
+        restoreViewportRaw[3] ?? 0,
+      )
+      : null;
     inShadowPass = true;
     try {
       return originalShadowRender(lights, scene, camera);
     } finally {
       inShadowPass = false;
+      if (restoreViewport) originalViewport(restoreViewport);
     }
   };
 
@@ -71,4 +82,3 @@ export function onBeforeShadowMuJoCo(renderer, object, camera, shadowCamera, geo
     depthMaterial.polygonOffsetUnits = MUJOCO_SHADOW_POLYGON_OFFSET_UNITS;
   }
 }
-
