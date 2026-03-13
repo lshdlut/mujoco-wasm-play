@@ -71,9 +71,11 @@ import {
   resolveGeomWorldMatrix,
   resolveGeomWorldPose,
   segmentColorForIndex,
+  segmentGroundColor,
   restoreSegmentMaterial,
   ensureSegmentMaterial,
   applyMaterialFlags,
+  setInfiniteGroundDebugState,
   resolveMaterialReflectance,
   resolveMaterialMetallic,
   resolveMaterialRoughness,
@@ -1100,17 +1102,6 @@ function computeBoundsFromSceneSoA(snapshot, { ignoreStatic = false } = {}) {
   return { center: [cx, cy, cz], radius: Number.isFinite(radius) && radius > 0 ? radius : fallback };
 }
 
-  function overlayScale(radius, factor, min = 0.05, max = 2) {
-    const r = Number.isFinite(radius) && radius > 0 ? radius : 1;
-    return Math.min(max, Math.max(min, r * factor));
-  }
-
-function scaleAllFactor(snapshot) {
-  const value = Number(getSnapshotVisual(snapshot)?.scale?.all);
-  if (Number.isFinite(value) && value > 1e-6) return value;
-  return 1;
-}
-
 function voptEnabled(flags, idx) {
   return Array.isArray(flags) && idx >= 0 && !!flags[idx];
 }
@@ -1121,20 +1112,6 @@ export function normalizeDeltaByViewportHeight(canvas, dx, dy, invertY = false) 
   const dyEff = invertY ? -dy : dy;
   return { reldx: dx / heightDen, reldy: dyEff / heightDen };
 }
-
-function meanSizeFromState(snapshot, context = null) {
-  const statSize = Number(getSnapshotStatistic(snapshot)?.meansize);
-  if (Number.isFinite(statSize) && statSize > 0) return statSize;
-  const radius = Number(context?.bounds?.radius);
-  if (Number.isFinite(radius) && radius > 0) return radius;
-  return 1;
-}
-
-  function computeMeanScale(snapshot, context = null) {
-    const meanSize = meanSizeFromState(snapshot, context);
-    const scaleAll = scaleAllFactor(snapshot);
-    return { meanSize, scaleAll };
-  }
 
 function computeScenePolicy(snapshot, state, context) {
   const sceneFlags = getSnapshotSceneFlags(snapshot);
@@ -2321,9 +2298,10 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     mesh.userData.scnCategory = categoryView[si] | 0;
     mesh.userData.scnDataId = rawDataId;
     mesh.userData.geomModelDataId = meshLike ? meshModelDataId : null;
+    const isInfinitePlane = !!mesh.userData?.infinitePlane;
     applyReflectanceToMaterial(mesh, ctx, reflectanceValue, reflectionEnabled);
 
-    if (segmentEnabled) {
+    if (segmentEnabled && !isInfinitePlane) {
       const segMat = ensureSegmentMaterial(mesh, flags);
       if (segMat) {
         const segColor = segmentColorForIndex(mesh.userData?.geomIndex ?? meshIndex);
@@ -2336,7 +2314,6 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     if (perfEnabled) flagsMs += perfNow() - tFlagsStart0;
 
     const tXformStart = perfEnabled ? perfNow() : 0;
-    const isInfinitePlane = !!mesh.userData?.infinitePlane;
     if (isInfinitePlane) {
       updateInfinitePlaneFromSceneSoA(ctx, mesh, si, snapshot, assets, flags, state);
       if (perfEnabled) infiniteXformUpdates += 1;
@@ -2505,7 +2482,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
         }
       }
       if (view) view.__dirty = false;
-      applyMaterialFlags(mesh, meshIndex, flags);
+      if (!isInfinitePlane) {
+        applyMaterialFlags(mesh, meshIndex, flags);
+      }
       const texcoordMode =
         (gtypeRaw === MJ_GEOM.MESH || gtypeRaw === MJ_GEOM.SDF) && mesh.geometry && typeof mesh.geometry.getAttribute === 'function' && mesh.geometry.getAttribute('uv')
           ? 'explicit'
@@ -2810,7 +2789,6 @@ function createRendererManager({
   // Expose a small helper so other modules (e.g. environment manager)
   // can tweak JS-side geom view state without needing to know where
   // those fields live.
-  ctx.setGeomViewProps = (geomIndex, props) => setGeomViewProps(ctx, geomIndex, props || {});
   ctx.resolveGeomWorldMatrix = (geomIndex, outMat4) => resolveGeomWorldMatrix(ctx, geomIndex, outMat4);
   ctx.resolveGeomWorldPose = (geomIndex, outPos, outQuat, outScale) => resolveGeomWorldPose(ctx, geomIndex, outPos, outQuat, outScale);
 
@@ -3086,6 +3064,7 @@ function createRendererManager({
       fogEnabled,
       hazeEnabled,
     } = policy;
+    const wireframeEnabled = !!sceneFlags?.[SCENE_FLAG_INDICES.WIREFRAME];
     context.reflectionActive = reflectionEnabled;
     const ngeom = snapshot?.ngeom | 0;
 
@@ -3189,18 +3168,18 @@ function createRendererManager({
     if (groundUniforms?.uFadePow) {
       const baseFade = Number(groundData?.baseFadePow);
       const defaultFade = Number.isFinite(baseFade) ? baseFade : 2.5;
-      const powValue = !hasPresetGroundSurface && hazeConfig.enabled && Number.isFinite(hazeConfig.pow)
+      const powValue = hazeConfig.enabled && Number.isFinite(hazeConfig.pow)
         ? hazeConfig.pow
-        : (!hasPresetGroundSurface && hazeEnabled ? defaultFade : 0.0);
+        : (hazeEnabled ? defaultFade : 0.0);
       groundUniforms.uFadePow.value = powValue;
     }
     if (groundUniforms) {
-      if (!hasPresetGroundSurface && hazeConfig.enabled && baseRadius != null && baseRadius > 0) {
-        // Default ground haze: fade region is the outer 30% of the
+      if (hazeConfig.enabled && baseRadius != null && baseRadius > 0) {
+        // Default ground haze: fade region is the outer 40% of the
         // visible disc. The cutoff radius is still controlled by
         // uQuadDistance; haze only shapes transparency inside it.
         const fadeEnd = baseRadius;
-        const fadeStart = baseRadius * 0.7;
+        const fadeStart = baseRadius * 0.6;
         if (groundUniforms.uFadeStart) groundUniforms.uFadeStart.value = fadeStart;
         if (groundUniforms.uFadeEnd) groundUniforms.uFadeEnd.value = fadeEnd;
       } else {
@@ -3227,9 +3206,9 @@ function createRendererManager({
     applySceneFog(worldSceneForFog, fogConfig);
     const hazeSummary = {
       mode: 'ground-fade',
-      enabled: !hasPresetGroundSurface && hazeEnabled && skyboxEnabled,
+      enabled: hazeEnabled && skyboxEnabled,
       reason: hazeEnabled
-        ? (hasPresetGroundSurface ? 'preset-ground-surface' : (skyboxEnabled ? 'enabled' : 'skybox-disabled'))
+        ? (skyboxEnabled ? 'enabled' : 'skybox-disabled')
         : 'flag-off',
       fadePow: groundUniforms?.uFadePow?.value ?? null,
       distance: groundDistance,
@@ -3415,20 +3394,15 @@ function createRendererManager({
             if (Number.isFinite(dist) && dist > 0) {
               if (uniforms.uDistance) uniforms.uDistance.value = dist;
               if (uniforms.uQuadDistance) uniforms.uQuadDistance.value = dist;
-              if (!wantsPresetSurface && uniforms.uFadeStart && typeof infiniteCfg.fadeStartFactor === 'number') {
+              if (uniforms.uFadeStart && typeof infiniteCfg.fadeStartFactor === 'number') {
                 uniforms.uFadeStart.value = dist * infiniteCfg.fadeStartFactor;
               }
-              if (!wantsPresetSurface && uniforms.uFadeEnd) {
+              if (uniforms.uFadeEnd) {
                 uniforms.uFadeEnd.value = dist;
               }
             }
-            if (!wantsPresetSurface && uniforms.uFadePow && Number.isFinite(infiniteCfg.fadePow)) {
+            if (uniforms.uFadePow && Number.isFinite(infiniteCfg.fadePow)) {
               uniforms.uFadePow.value = infiniteCfg.fadePow;
-            }
-            if (wantsPresetSurface) {
-              if (uniforms.uFadeStart) uniforms.uFadeStart.value = 0;
-              if (uniforms.uFadeEnd) uniforms.uFadeEnd.value = 0;
-              if (uniforms.uFadePow) uniforms.uFadePow.value = 0;
             }
             if (uniforms.uGridStep && Number.isFinite(infiniteCfg.gridStep)) {
               uniforms.uGridStep.value = infiniteCfg.gridStep;
@@ -3453,6 +3427,11 @@ function createRendererManager({
           const uniforms = context.ground?.userData?.infiniteGround?.uniforms || null;
           clearPresetGroundSurfaceUniforms(uniforms);
         }
+        setInfiniteGroundDebugState(context.ground, {
+          segmentEnabled,
+          wireframe: wireframeEnabled,
+          segmentColor: segmentGroundColor(),
+        });
       }
     }
 

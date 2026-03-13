@@ -103,7 +103,7 @@ const FALLBACK_PRESET_TEMPLATES = {
       infinite: {
         distance: 2000,
         fadePow: 2.5,
-        fadeStartFactor: 0.7,
+        fadeStartFactor: 0.6,
         gridStep: 2.0,
         gridIntensity: 0.0,
         gridColor: 0x3a4250,
@@ -158,7 +158,7 @@ const FALLBACK_PRESET_TEMPLATES = {
       infinite: {
         distance: 2000,
         fadePow: 2.5,
-        fadeStartFactor: 0.7,
+        fadeStartFactor: 0.6,
         gridStep: 2.0,
         gridIntensity: 0.0,
         gridColor: 0x2a2f3c,

@@ -29,10 +29,22 @@ function createInfiniteGroundHelper({
     side: THREE.DoubleSide,
   });
   applyWorldMaterialState(material, WORLD_LAYER.WORLD_TRANSPARENT, { opacity: 1 });
-  const depthMaterial = new THREE.MeshBasicMaterial({
-    color: 0x000000,
+  const segmentMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
     side: THREE.DoubleSide,
     toneMapped: false,
+  });
+  applyWorldMaterialState(segmentMaterial, WORLD_LAYER.WORLD_TRANSPARENT, {
+    opacity: 1,
+    toneMapped: false,
+  });
+  const depthMaterial = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    side: THREE.FrontSide,
+    toneMapped: false,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
   });
   applyWorldMaterialState(depthMaterial, WORLD_LAYER.WORLD_OPAQUE, {
     opacity: 1,
@@ -55,7 +67,7 @@ function createInfiniteGroundHelper({
     uPresetRoughnessMap: { value: null },
     uPresetRoughnessTexScl: { value: new THREE.Vector2(1, 1) },
     uDistance: { value: distance },
-    uFadeStart: { value: distance * 0.9 },
+    uFadeStart: { value: distance * 0.6 },
     uFadeEnd: { value: distance },
     uQuadDistance: { value: distance },
     uFadePow: { value: 2.5 },
@@ -69,7 +81,7 @@ function createInfiniteGroundHelper({
     // opt-in to extra ground grid overlays by overriding these uniforms.
     uGridIntensity: { value: 0.0 },
   };
-  const installInfiniteGroundShader = (targetMaterial, { depthOnly = false } = {}) => {
+  const installInfiniteGroundShader = (targetMaterial, { depthOnly = false, segmentSolid = false } = {}) => {
     targetMaterial.extensions = targetMaterial.extensions || {};
     targetMaterial.extensions.derivatives = true;
     targetMaterial.userData = targetMaterial.userData || {};
@@ -220,7 +232,9 @@ ${depthOnly ? shader.fragmentShader.replace(
       #include <dithering_fragment>`
     ) : shader.fragmentShader.replace(
       '#include <map_fragment>',
-      `#include <map_fragment>
+      segmentSolid
+        ? '#include <map_fragment>'
+        : `#include <map_fragment>
 
       // Match MuJoCo's generated 2D texture coords (see engine_vis_visualize.c):
       // u = 0.5 * repeatX * x - 0.5, v = -0.5 * repeatY * y - 0.5.
@@ -262,7 +276,6 @@ ${depthOnly ? shader.fragmentShader.replace(
       if (planarDist >= baseRadius) discard;
 
       float alpha = 1.0;
-
       float fadeStart = max(0.0, uFadeStart);
       float fadeEnd = max(fadeStart, uFadeEnd);
       if (fadeEnd > fadeStart + 1e-4 && uFadePow > 1e-5) {
@@ -292,7 +305,7 @@ ${depthOnly ? shader.fragmentShader.replace(
       gl_FragColor.a = alpha;
       #include <dithering_fragment>`
     )}`;
-      if (!depthOnly) {
+      if (!depthOnly && !segmentSolid) {
         shader.fragmentShader = shader.fragmentShader.replace(
           '#include <normal_fragment_maps>',
           `#include <normal_fragment_maps>
@@ -345,6 +358,7 @@ ${depthOnly ? shader.fragmentShader.replace(
     };
   };
   installInfiniteGroundShader(material, { depthOnly: false });
+  installInfiniteGroundShader(segmentMaterial, { depthOnly: false, segmentSolid: true });
   installInfiniteGroundShader(depthMaterial, { depthOnly: true });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
@@ -367,7 +381,13 @@ ${depthOnly ? shader.fragmentShader.replace(
     occlusionLayer: WORLD_LAYER.WORLD_OPAQUE,
   };
   mesh.add(occluder);
-  mesh.userData.infiniteGround = { uniforms, occluder };
+  mesh.userData.infiniteGround = {
+    uniforms,
+    occluder,
+    baseMaterial: material,
+    segmentMaterial,
+    debugMode: 'normal',
+  };
   mesh.userData.occlusionLayer = WORLD_LAYER.WORLD_TRANSPARENT;
   return mesh;
 }
@@ -1856,11 +1876,16 @@ const SEGMENT_PALETTE = [
   0xaec7e8, 0xffbb78, 0x98df8a, 0xff9896, 0xc5b0d5,
   0xc49c94, 0xf7b6d2, 0xc7c7c7, 0xdbdb8d, 0x9edae5,
 ];
+const SEGMENT_GROUND_COLOR = 0x2a2a2a;
 
 function segmentColorForIndex(index) {
   const palette = SEGMENT_PALETTE;
   if (!(index >= 0)) return palette[0];
   return palette[index % palette.length];
+}
+
+function segmentGroundColor() {
+  return SEGMENT_GROUND_COLOR;
 }
 
 function restoreSegmentMaterial(mesh) {
@@ -1898,6 +1923,41 @@ function applyMaterialFlags(mesh, index, sceneFlagsOverride = null) {
   if (!mesh || !mesh.material) return;
   const sceneFlags = Array.isArray(sceneFlagsOverride) ? sceneFlagsOverride : [];
   mesh.material.wireframe = !!sceneFlags[SCENE_FLAG_INDICES.WIREFRAME];
+}
+
+function setInfiniteGroundDebugState(mesh, {
+  segmentEnabled = false,
+  wireframe = false,
+  segmentColor = null,
+} = {}) {
+  const infiniteGround = mesh?.userData?.infiniteGround || null;
+  if (!mesh || !infiniteGround) return;
+  const baseMaterial = infiniteGround.baseMaterial || mesh.material || null;
+  const segmentMaterial = infiniteGround.segmentMaterial || null;
+  const nextMode = segmentEnabled ? 'segment-solid' : (wireframe ? 'wire-hidden' : 'normal');
+
+  if (nextMode === 'segment-solid') {
+    if (segmentMaterial?.color && Number.isFinite(segmentColor)) {
+      segmentMaterial.color.setHex(segmentColor);
+    }
+    if (segmentMaterial) {
+      segmentMaterial.wireframe = false;
+      if (mesh.material !== segmentMaterial) {
+        mesh.material = segmentMaterial;
+      }
+    }
+    mesh.visible = true;
+  } else {
+    if (baseMaterial) {
+      baseMaterial.wireframe = false;
+      if (mesh.material !== baseMaterial) {
+        mesh.material = baseMaterial;
+      }
+    }
+    mesh.visible = nextMode !== 'wire-hidden';
+  }
+
+  infiniteGround.debugMode = nextMode;
 }
 
 function clampUnit(value) {
@@ -2360,9 +2420,11 @@ export {
   resolveGeomWorldMatrix,
   resolveGeomWorldPose,
   segmentColorForIndex,
+  segmentGroundColor,
   restoreSegmentMaterial,
   ensureSegmentMaterial,
   applyMaterialFlags,
+  setInfiniteGroundDebugState,
   resolveMaterialReflectance,
   resolveMaterialMetallic,
   resolveMaterialRoughness,

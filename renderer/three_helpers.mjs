@@ -35,6 +35,32 @@ function computeGeometryBounds(geometry) {
   geometry?.computeBoundingSphere?.();
 }
 
+function disposeMaterialOnce(material, disposed, scope) {
+  if (!material || material.userData?.pooled || typeof material.dispose !== 'function') return;
+  if (disposed?.has(material)) return;
+  try {
+    material.dispose();
+  } catch (err) {
+    strictCatch(err, scope);
+  }
+  disposed?.add(material);
+}
+
+function disposeInfiniteGroundMaterials(userData, activeMaterial, disposed, scope) {
+  const infiniteGround = userData?.infiniteGround || null;
+  if (!infiniteGround) return;
+  const extras = [
+    infiniteGround.baseMaterial,
+    infiniteGround.segmentMaterial,
+  ];
+  for (const material of extras) {
+    if (!material || material === activeMaterial) continue;
+    disposeMaterialOnce(material, disposed, scope);
+  }
+  infiniteGround.baseMaterial = null;
+  infiniteGround.segmentMaterial = null;
+}
+
 function disposeMeshObject(mesh) {
   try {
     if (mesh.userData && mesh.userData.fallbackBackface) {
@@ -70,6 +96,7 @@ function disposeMeshObject(mesh) {
     parent.remove(mesh);
   }
   const ownGeometry = userData?.ownGeometry !== false;
+  const disposedMaterials = new Set();
   if (ownGeometry && mesh.geometry && typeof mesh.geometry.dispose === 'function') {
     try {
       mesh.geometry.dispose();
@@ -80,33 +107,18 @@ function disposeMeshObject(mesh) {
   const material = mesh.material;
   if (Array.isArray(material)) {
     for (const mat of material) {
-      if (mat && !mat.userData?.pooled && typeof mat.dispose === 'function') {
-        try {
-          mat.dispose();
-        } catch (err) {
-          strictCatch(err, 'main:dispose_mesh');
-        }
-      }
+      disposeMaterialOnce(mat, disposedMaterials, 'main:dispose_mesh');
     }
-  } else if (material && !material.userData?.pooled && typeof material.dispose === 'function') {
-    try {
-      material.dispose();
-    } catch (err) {
-      strictCatch(err, 'main:dispose_mesh');
-    }
+  } else {
+    disposeMaterialOnce(material, disposedMaterials, 'main:dispose_mesh');
   }
+  disposeInfiniteGroundMaterials(userData, material, disposedMaterials, 'main:dispose_mesh');
   const segMat = userData?.segmentMaterial || null;
   if (segMat) {
     let disposed = false;
     if (Array.isArray(material)) disposed = material.includes(segMat);
-    else disposed = material === segMat;
-    if (!disposed && typeof segMat.dispose === 'function') {
-      try {
-        segMat.dispose();
-      } catch (err) {
-        strictCatch(err, 'main:dispose_mesh');
-      }
-    }
+    else disposed = material === segMat || disposedMaterials.has(segMat);
+    if (!disposed) disposeMaterialOnce(segMat, disposedMaterials, 'main:dispose_mesh');
     userData.segmentMaterial = null;
     userData.segmentOriginalMaterial = null;
   }
@@ -127,6 +139,7 @@ function disposeObject3DTree(root) {
     if (!obj) return;
     const userData = obj.userData || null;
     const ownGeometry = userData?.ownGeometry !== false;
+    const disposedMaterials = new Set();
     if (ownGeometry && !obj.isSprite && obj.geometry && typeof obj.geometry.dispose === 'function') {
       try {
         obj.geometry.dispose();
@@ -137,21 +150,12 @@ function disposeObject3DTree(root) {
     const material = obj.material;
     if (Array.isArray(material)) {
       for (const mat of material) {
-        if (mat && !mat.userData?.pooled && typeof mat.dispose === 'function') {
-          try {
-            mat.dispose();
-          } catch (err) {
-            strictCatch(err, 'main:dispose_tree');
-          }
-        }
+        disposeMaterialOnce(mat, disposedMaterials, 'main:dispose_tree');
       }
-    } else if (material && !material.userData?.pooled && typeof material.dispose === 'function') {
-      try {
-        material.dispose();
-      } catch (err) {
-        strictCatch(err, 'main:dispose_tree');
-      }
+    } else {
+      disposeMaterialOnce(material, disposedMaterials, 'main:dispose_tree');
     }
+    disposeInfiniteGroundMaterials(userData, material, disposedMaterials, 'main:dispose_tree');
   });
 }
 

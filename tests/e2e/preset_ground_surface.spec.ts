@@ -94,9 +94,9 @@ test('preset sun/moon infinite ground binds the sandy gravel PBR textures', asyn
   expect(moon.roughnessRepeatY).toBeCloseTo(0.95, 5);
   expect(moon.normalScaleX).toBeCloseTo(0.4, 5);
   expect(moon.normalScaleY).toBeCloseTo(0.4, 5);
-  expect(moon.fadePow).toBeCloseTo(0, 5);
-  expect(moon.fadeStart).toBeCloseTo(0, 5);
-  expect(moon.fadeEnd).toBeCloseTo(0, 5);
+  expect(moon.fadePow).toBeCloseTo(2.5, 5);
+  expect(moon.fadeEnd).toBeCloseTo(2000, 5);
+  expect(moon.fadeStart).toBeCloseTo(1200, 5);
   expect(moon.opacity).toBeCloseTo(1, 5);
 
   await switchVisualSource(page, 'PresetSun');
@@ -127,9 +127,31 @@ test('preset sun/moon infinite ground binds the sandy gravel PBR textures', asyn
   expect(sun.normalScaleX).toBeCloseTo(0.3, 5);
   expect(sun.normalScaleY).toBeCloseTo(0.3, 5);
   expect(sun.colorHex).not.toBe(moon.colorHex);
-  expect(sun.fadePow).toBeCloseTo(0, 5);
-  expect(sun.fadeStart).toBeCloseTo(0, 5);
-  expect(sun.fadeEnd).toBeCloseTo(0, 5);
+  expect(sun.fadePow).toBeCloseTo(2.5, 5);
+  expect(sun.fadeEnd).toBeCloseTo(2000, 5);
+  expect(sun.fadeStart).toBeCloseTo(1200, 5);
   expect(sun.opacity).toBeCloseTo(1, 5);
   expect(warnings.filter((line) => line.includes('Texture marked for update but no image data found'))).toEqual([]);
+});
+
+test('model-mode infinite ground starts haze fade closer to the camera', async ({ page }) => {
+  await waitForViewerReady(page, '/index.html?model=raj&ver=3.5.0&snapshot=1&log=0');
+
+  await expect
+    .poll(async () => page.evaluate(readPresetGroundInfo), {
+      message: 'waiting for model-mode infinite ground uniforms',
+    })
+    .toMatchObject({
+      found: true,
+      projection: 'infinite',
+      infiniteVisible: true,
+    });
+
+  const info = await page.evaluate(readPresetGroundInfo);
+  expect(info.enabled).toBe(0);
+  expect(info.fadePow).toBeGreaterThan(0);
+  expect(info.fadeEnd).toBeGreaterThan(0);
+  expect(info.fadeStart).toBeGreaterThan(0);
+  expect(info.fadeStart).toBeLessThan(info.fadeEnd);
+  expect(info.fadeStart / info.fadeEnd).toBeCloseTo(0.6, 3);
 });
