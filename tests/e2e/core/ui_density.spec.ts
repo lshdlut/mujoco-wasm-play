@@ -1,6 +1,6 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-import { ensureSectionExpanded, waitForViewerReady } from './test-utils';
+import { ensureSectionExpanded, waitForViewerReady } from '../test-utils';
 
 test.use({ viewport: { width: 1600, height: 960 } });
 
