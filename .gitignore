@@ -12,7 +12,7 @@ node_modules/
 /playwright-report/
 /test-results/
 # Local-only Playwright specs
-/tests/e2e/*.local.spec.*
+/tests/**/*.local.spec.*
 
 # Python
 __pycache__/

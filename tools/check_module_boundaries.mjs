@@ -1,17 +1,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-
-function runGit(args) {
-  const result = spawnSync('git', args, { encoding: 'utf8' });
-  if (result.status !== 0) {
-    throw new Error(`[boundaries] git ${args.join(' ')} failed: ${result.stderr || result.stdout || ''}`);
-  }
-  return String(result.stdout || '');
-}
 
 function toPosix(relPath) {
   return relPath.replaceAll('\\', '/');
+}
+
+function walkRepo(dirAbs, out = []) {
+  const entries = fs.readdirSync(dirAbs, { withFileTypes: true });
+  for (const entry of entries) {
+    const abs = path.join(dirAbs, entry.name);
+    const rel = toPosix(path.relative(process.cwd(), abs));
+    if (entry.isDirectory()) {
+      if (shouldSkipFile(rel)) continue;
+      walkRepo(abs, out);
+      continue;
+    }
+    out.push(rel);
+  }
+  return out;
 }
 
 function layerOf(relPath) {
@@ -114,9 +120,7 @@ function shouldSkipFile(relPath) {
   return false;
 }
 
-const tracked = runGit(['ls-files']).split(/\r?\n/).filter(Boolean).map(toPosix);
-const untracked = runGit(['ls-files', '--others', '--exclude-standard']).split(/\r?\n/).filter(Boolean).map(toPosix);
-const allFiles = Array.from(new Set([...tracked, ...untracked]));
+const allFiles = walkRepo(process.cwd());
 const codeFiles = allFiles.filter((p) => {
   if (!(p.endsWith('.mjs') || p.endsWith('.ts'))) return false;
   if (!layerOf(p)) return false;

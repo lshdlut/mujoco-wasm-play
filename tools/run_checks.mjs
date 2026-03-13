@@ -58,13 +58,17 @@ assertFactoryParamLimit('backend/backend_runtime.mjs', 'createBackendRuntime', 1
 
 run('forbid_patterns', ['tools/forbid_patterns.mjs']);
 
+if (fileExists('tests/tooling/validate_test_layout.mjs')) {
+  run('test_layout', ['tests/tooling/validate_test_layout.mjs']);
+}
+
 if (fileExists('tools/check_module_boundaries.mjs')) {
   run('module_boundaries', ['tools/check_module_boundaries.mjs']);
 }
 
 const tests = listNodeTests();
 if (tests.length) {
-  run('node_tests', ['--test', ...tests]);
+  run('node_tests', ['--experimental-test-isolation=none', '--test', ...tests]);
 }
 
 // Syntax-only checks for browser-only entrypoints.
