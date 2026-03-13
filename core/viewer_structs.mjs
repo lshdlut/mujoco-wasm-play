@@ -1002,3 +1002,4 @@ export function writeStatisticField(mod, handle, pathSegments, kind, value, size
 export function readStatisticStruct(mod, handle) {
   return readStructSnapshot(mod, handle, 'stat', STAT_FIELD_DESCRIPTORS);
 }
+

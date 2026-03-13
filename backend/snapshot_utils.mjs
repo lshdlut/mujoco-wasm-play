@@ -264,6 +264,7 @@ export function resolveSnapshot(state) {
     scn_ngeom: Number.isFinite(state.scn_ngeom) ? (state.scn_ngeom | 0) : 0,
     nisland: typeof state.nisland === 'number' ? (state.nisland | 0) : 0,
     jnt_names: Array.isArray(state.jnt_names) ? state.jnt_names.slice() : null,
+    jnt_group: viewOrNull(state.jnt_group, Int32Array),
     eq_names: Array.isArray(state.eq_names) ? state.eq_names.slice() : null,
     contacts:
       state.contacts && typeof state.contacts === 'object'

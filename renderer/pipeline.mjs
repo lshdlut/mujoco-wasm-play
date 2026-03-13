@@ -16,6 +16,7 @@ import {
   strictEnsure,
   strictOverride,
 } from '../core/viewer_runtime.mjs';
+import { SCENE_FLAG_INDICES } from '../core/viewer_defaults.mjs';
 import { getRuntimeConfig } from '../core/runtime_config.mjs';
 import { getSnapshotAlign, getSnapshotBvhDepth, getSnapshotCameraMode, getSnapshotCameras, getSnapshotCopyState, getSnapshotFlexLayer, getSnapshotGeomBodyIds, getSnapshotGeoms, getSnapshotGroups, getSnapshotOptions, getSnapshotRenderAssets, getSnapshotSceneFlags, getSnapshotSelection, getSnapshotStatistic, getSnapshotStructValue, getSnapshotVisual, getSnapshotVoptFlags } from '../core/snapshot_selectors.mjs';
 import { pushSkyDebug } from '../environment/environment.mjs';
@@ -1124,12 +1125,12 @@ function computeScenePolicy(snapshot, state, context) {
   const sceneFlags = getSnapshotSceneFlags(snapshot);
   const voptFlags = getSnapshotVoptFlags(snapshot) || getDefaultVopt(context, snapshot) || [];
     const segmentEnabled = !!sceneFlags[SEGMENT_FLAG_INDEX];
-    const skyboxFlag = sceneFlags[4] !== false;
-    const shadowEnabled = segmentEnabled ? false : sceneFlags[0] !== false;
-    const reflectionEnabled = segmentEnabled ? false : sceneFlags[2] !== false;
+    const skyboxFlag = sceneFlags[SCENE_FLAG_INDICES.SKYBOX] !== false;
+    const shadowEnabled = segmentEnabled ? false : sceneFlags[SCENE_FLAG_INDICES.SHADOW] !== false;
+    const reflectionEnabled = segmentEnabled ? false : sceneFlags[SCENE_FLAG_INDICES.REFLECTION] !== false;
     const skyboxEnabled = !segmentEnabled && skyboxFlag;
-    const fogEnabled = segmentEnabled ? false : !!sceneFlags[5];
-    const hazeEnabled = segmentEnabled ? false : !!sceneFlags[6];
+    const fogEnabled = segmentEnabled ? false : !!sceneFlags[SCENE_FLAG_INDICES.FOG];
+    const hazeEnabled = segmentEnabled ? false : !!sceneFlags[SCENE_FLAG_INDICES.HAZE];
     const hideAllGeometry = !!state.rendering?.hideAllGeometry;
     return {
       sceneFlags,

@@ -696,7 +696,7 @@
         "group_type": null,
         "item_id": "visualization.map_alpha",
         "control_type": "edit_float",
-        "label": "alpha",
+        "label": "Alpha",
         "shortcut": null
       }
     ]
@@ -714,7 +714,7 @@
         "group_type": null,
         "item_id": "visualization.map_fogend",
         "control_type": "edit_float",
-        "label": "fogend",
+        "label": "Fog end",
         "shortcut": null
       }
     ]
@@ -732,7 +732,7 @@
         "group_type": null,
         "item_id": "visualization.map_fogstart",
         "control_type": "edit_float",
-        "label": "fogstart",
+        "label": "Fog start",
         "shortcut": null
       }
     ]
@@ -750,7 +750,7 @@
         "group_type": null,
         "item_id": "visualization.map_force",
         "control_type": "edit_float",
-        "label": "force",
+        "label": "Force",
         "shortcut": null
       }
     ]
@@ -768,7 +768,7 @@
         "group_type": null,
         "item_id": "visualization.map_haze",
         "control_type": "edit_float",
-        "label": "haze",
+        "label": "Haze",
         "shortcut": null
       }
     ]
@@ -786,7 +786,7 @@
         "group_type": null,
         "item_id": "visualization.map_shadowclip",
         "control_type": "edit_float",
-        "label": "shadowclip",
+        "label": "Shadow clip",
         "shortcut": null
       }
     ]
@@ -804,7 +804,7 @@
         "group_type": null,
         "item_id": "visualization.map_shadowscale",
         "control_type": "edit_float",
-        "label": "shadowscale",
+        "label": "Shadow scale",
         "shortcut": null
       }
     ]
@@ -822,7 +822,7 @@
         "group_type": null,
         "item_id": "visualization.map_stiffness",
         "control_type": "edit_float",
-        "label": "stiffness",
+        "label": "Stiffness",
         "shortcut": null
       }
     ]
@@ -840,7 +840,7 @@
         "group_type": null,
         "item_id": "visualization.map_stiffnessrot",
         "control_type": "edit_float",
-        "label": "stiffnessrot",
+        "label": "Rot stiffness",
         "shortcut": null
       }
     ]
@@ -858,7 +858,7 @@
         "group_type": null,
         "item_id": "visualization.map_torque",
         "control_type": "edit_float",
-        "label": "torque",
+        "label": "Torque",
         "shortcut": null
       }
     ]
@@ -876,7 +876,7 @@
         "group_type": null,
         "item_id": "visualization.map_zfar",
         "control_type": "edit_float",
-        "label": "zfar",
+        "label": "Z far",
         "shortcut": null
       }
     ]
@@ -930,7 +930,7 @@
         "group_type": null,
         "item_id": "visualization.rgba_actuatornegative",
         "control_type": "edit_rgba",
-        "label": "actuatornegative",
+        "label": "actnegative",
         "shortcut": null
       }
     ]
@@ -948,7 +948,7 @@
         "group_type": null,
         "item_id": "visualization.rgba_actuatorpositive",
         "control_type": "edit_rgba",
-        "label": "actuatorpositive",
+        "label": "actpositive",
         "shortcut": null
       }
     ]
@@ -3053,6 +3053,24 @@
       }
     ]
   },
+  "mjvScene::flags[10]": {
+    "value": {
+      "kind": "bool",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "rendering",
+        "section_title": "Rendering",
+        "group_id": "rendering.opengl_flags",
+        "group_type": "checkbox_list",
+        "item_id": "rendering.opengl_flags.Cull_Face",
+        "control_type": "checkbox",
+        "label": "Cull Face",
+        "shortcut": null
+      }
+    ]
+  },
   "mjvScene::flags[2]": {
     "value": {
       "kind": "bool",
@@ -3154,10 +3172,10 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": "rendering.opengl_flags.Segment",
+        "item_id": "rendering.opengl_flags.Depth",
         "control_type": "checkbox",
-        "label": "Segment",
-        "shortcut": ","
+        "label": "Depth",
+        "shortcut": null
       }
     ]
   },
@@ -3172,10 +3190,10 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": "rendering.opengl_flags.Id_Color",
+        "item_id": "rendering.opengl_flags.Segment",
         "control_type": "checkbox",
-        "label": "Id Color",
-        "shortcut": null
+        "label": "Segment",
+        "shortcut": ","
       }
     ]
   },
@@ -3190,9 +3208,9 @@
         "section_title": "Rendering",
         "group_id": "rendering.opengl_flags",
         "group_type": "checkbox_list",
-        "item_id": "rendering.opengl_flags.Cull_Face",
+        "item_id": "rendering.opengl_flags.Id_Color",
         "control_type": "checkbox",
-        "label": "Cull Face",
+        "label": "Id Color",
         "shortcut": null
       }
     ]

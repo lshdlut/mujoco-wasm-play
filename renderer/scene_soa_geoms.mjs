@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { compatFallback } from '../core/fallbacks.mjs';
+import { SCENE_FLAG_INDICES } from '../core/viewer_defaults.mjs';
 import { logDebug, strictCatch, strictEnsure } from '../core/viewer_runtime.mjs';
 import { computeGeometryBounds, disposeMeshObject, disposeObject3DTree } from './three_helpers.mjs';
 import { onBeforeShadowMuJoCo } from './mujoco_shadows.mjs';
@@ -1632,7 +1633,7 @@ function getSharedHfieldGeometry(ctx, assets, dataId) {
   return geometry || null;
 }
 
-const SEGMENT_FLAG_INDEX = 7;
+const SEGMENT_FLAG_INDEX = SCENE_FLAG_INDICES.SEGMENT;
 const SEGMENT_PALETTE = [
   0x1f77b4, 0xff7f0e, 0x2ca02c, 0xd62728, 0x9467bd,
   0x8c564b, 0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf,
@@ -1680,7 +1681,7 @@ function ensureSegmentMaterial(mesh, sceneFlags) {
 function applyMaterialFlags(mesh, index, sceneFlagsOverride = null) {
   if (!mesh || !mesh.material) return;
   const sceneFlags = Array.isArray(sceneFlagsOverride) ? sceneFlagsOverride : [];
-  mesh.material.wireframe = !!sceneFlags[1];
+  mesh.material.wireframe = !!sceneFlags[SCENE_FLAG_INDICES.WIREFRAME];
 }
 
 function clampUnit(value) {
@@ -1871,7 +1872,7 @@ function ensureGeomMesh(ctx, index, gtype, assets, dataId, sizeVec, options = {}
           const baseOpts = geometryInfo.materialOpts || {};
           const useStandard = gtype === MJ_GEOM.PLANE || gtype === MJ_GEOM.HFIELD;
           const sceneFlags = Array.isArray(sceneFlagsOverride) ? sceneFlagsOverride : [];
-          const wire = !!sceneFlags[1];
+          const wire = !!sceneFlags[SCENE_FLAG_INDICES.WIREFRAME];
           const kind = baseOpts.kind || null;
         if (objectKind === 'line' || kind === 'line') {
           material = new THREE.LineBasicMaterial({

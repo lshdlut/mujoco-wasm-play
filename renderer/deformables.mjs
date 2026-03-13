@@ -2,6 +2,7 @@
 // Keep behaviour identical; do not swallow errors.
 
 import * as THREE from 'three';
+import { SCENE_FLAG_INDICES } from '../core/viewer_defaults.mjs';
 import { strictEnsure } from '../core/viewer_runtime.mjs';
 import { disposeMeshObject, disposeObject3DTree } from './three_helpers.mjs';
 import { applyMuJoCoTextureToMesh } from './mujoco_textures.mjs';
@@ -204,7 +205,7 @@ function ensureFlexEntry(ctx, index, assets, sceneFlags = null) {
     });
   }
 
-  const wire = !!(Array.isArray(sceneFlags) && sceneFlags[1]);
+  const wire = !!(Array.isArray(sceneFlags) && sceneFlags[SCENE_FLAG_INDICES.WIREFRAME]);
   if (entry?.faces?.material && 'wireframe' in entry.faces.material) {
     entry.faces.material.wireframe = wire;
   }
@@ -749,7 +750,7 @@ function ensureSkinEntry(ctx, index, assets, sceneFlags = null) {
       }
     }
 
-    const wire = !!(Array.isArray(sceneFlags) && sceneFlags[1]);
+    const wire = !!(Array.isArray(sceneFlags) && sceneFlags[SCENE_FLAG_INDICES.WIREFRAME]);
     const material = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       roughness: 0.8,
@@ -790,7 +791,7 @@ function ensureSkinEntry(ctx, index, assets, sceneFlags = null) {
     });
   }
 
-  const wire = !!(Array.isArray(sceneFlags) && sceneFlags[1]);
+  const wire = !!(Array.isArray(sceneFlags) && sceneFlags[SCENE_FLAG_INDICES.WIREFRAME]);
   if (entry?.mesh?.material && 'wireframe' in entry.mesh.material) {
     entry.mesh.material.wireframe = wire;
   }

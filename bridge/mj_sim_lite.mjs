@@ -416,6 +416,7 @@ export class MjSimLite {
   actuatorCtrlRangeView(){ const m=this.mod; const n=this.nu(); if(!(n>0)) return; const p=this._cachedPtr('_mjwf_model_actuator_ctrlrange_ptr')|0; if(!p) return; return heapViewF64(m,p,n*2); }
   jntQposAdrView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_qposadr_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,nj); }
   jntRangeView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_range_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,nj*2); }
+  jntGroupView(){ const m=this.mod; const nj=this.njnt()|0; if(!(nj>0)) return null; const p=this._cachedPtr('_mjwf_model_jnt_group_ptr')|0; if(!p)return null; return heapViewI32(m,p,nj); }
   jntTypeView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_type_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,nj); }
   jntNameOf(i){
     return this._nameFromAdr(i, '_mjwf_model_name_jntadr_ptr', '_mjwf_model_njnt') || '';
@@ -425,6 +426,7 @@ export class MjSimLite {
   jntBodyIdView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_bodyid_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,nj); }
   actuatorTrnidView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_actuator_trnid_ptr; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n*2); }
   actuatorTrntypeView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_actuator_trntype_ptr; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
+  actuatorGroupView(){ const m=this.mod; const n=this.nu()|0; if(!(n>0)) return null; const p=this._cachedPtr('_mjwf_model_actuator_group_ptr')|0; if(!p)return null; return heapViewI32(m,p,n); }
   actuatorCranklengthView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_actuator_cranklength_ptr; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n); }
   siteXposView(){ const m=this.mod; const h=this.h|0; const n=this.nsite()|0; if(!n)return; const d=m._mjwf_data_site_xpos_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*3); }
   siteXmatView(){ const m=this.mod; const h=this.h|0; const n=this.nsite()|0; if(!n)return; const d=m._mjwf_data_site_xmat_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*9); }

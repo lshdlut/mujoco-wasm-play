@@ -15,7 +15,10 @@ function makeFlagArray(length, enabledIndices) {
 export const MJ_GROUP_TYPES = Object.freeze(["geom","site","joint","tendon","actuator","flex","skin"]);
 export const MJ_GROUP_COUNT = 6;
 
-export const SCENE_FLAG_DEFAULTS = Object.freeze([true,false,true,false,true,false,true,false,false,true]);
+export const VIEWER_GROUP_DEFAULTS = Object.freeze({"geom":[true,true,true,false,false,false],"site":[true,true,true,false,false,false],"joint":[true,true,true,false,false,false],"tendon":[true,true,true,false,false,false],"actuator":[true,true,true,false,false,false],"flex":[true,true,true,false,false,false],"skin":[true,true,true,false,false,false]});
+
+export const SCENE_FLAG_DEFAULTS = Object.freeze([true,false,true,false,true,false,true,false,false,false,true]);
+export const SCENE_FLAG_INDICES = Object.freeze({"SHADOW":0,"WIREFRAME":1,"REFLECTION":2,"ADDITIVE":3,"SKYBOX":4,"FOG":5,"HAZE":6,"DEPTH":7,"SEGMENT":8,"ID_COLOR":9,"CULL_FACE":10});
 
 export const DEFAULT_VOPT_FLAGS = Object.freeze(makeFlagArray(32, VOPT_FLAG_DEFAULT_INDICES));
 

@@ -3,7 +3,7 @@
   "runtime": {
     "group_types": ["geom", "site", "joint", "tendon", "actuator", "flex", "skin"],
     "group_count": 6,
-    "scene_flag_defaults": [true, false, true, false, true, false, true, false, false, true],
+    "scene_flag_defaults": [true, false, true, false, true, false, true, false, false, false, true],
     "vopt_flag_default_indices": [1, 7, 8, 13, 21, 22, 23, 25, 27],
     "realtime_levels": [800, 400, 200, 150, 120, 100, 80, 66, 50, 40, 33, 25, 20, 16, 13, 10, 8, 6.6, 5, 4, 3.3, 2.5, 2, 1.6, 1.3, 1, 0.8, 0.66, 0.5, 0.4, 0.33, 0.25, 0.2, 0.16, 0.13, 0.1],
     "statistic_extra_fields": [
@@ -792,6 +792,7 @@
           "label": "Tracking geom",
           "binding": "Simulate::tracking_geom",
           "default": -1,
+          "notes": "Play extension. Not part of the upstream MuJoCo Rendering block.",
           "options": "Scene center"
         },
         {
@@ -1116,20 +1117,26 @@
               "shortcut": "/"
             },
             {
-              "name": "Segment",
+              "name": "Depth",
               "binding": "mjvScene::flags[7]",
+              "default": 0,
+              "shortcut": null
+            },
+            {
+              "name": "Segment",
+              "binding": "mjvScene::flags[8]",
               "default": 0,
               "shortcut": ","
             },
             {
               "name": "Id Color",
-              "binding": "mjvScene::flags[8]",
+              "binding": "mjvScene::flags[9]",
               "default": 0,
               "shortcut": null
             },
             {
               "name": "Cull Face",
-              "binding": "mjvScene::flags[9]",
+              "binding": "mjvScene::flags[10]",
               "default": 1,
               "shortcut": null
             }
@@ -1281,49 +1288,49 @@
         {
           "item_id": "visualization.map_stiffness",
           "type": "edit_float",
-          "label": "stiffness",
+          "label": "Stiffness",
           "binding": "mjVisual::map.stiffness",
           "default": "model.vis.map.stiffness"
         },
         {
           "item_id": "visualization.map_stiffnessrot",
           "type": "edit_float",
-          "label": "stiffnessrot",
+          "label": "Rot stiffness",
           "binding": "mjVisual::map.stiffnessrot",
           "default": "model.vis.map.stiffnessrot"
         },
         {
           "item_id": "visualization.map_force",
           "type": "edit_float",
-          "label": "force",
+          "label": "Force",
           "binding": "mjVisual::map.force",
           "default": "model.vis.map.force"
         },
         {
           "item_id": "visualization.map_torque",
           "type": "edit_float",
-          "label": "torque",
+          "label": "Torque",
           "binding": "mjVisual::map.torque",
           "default": "model.vis.map.torque"
         },
         {
           "item_id": "visualization.map_alpha",
           "type": "edit_float",
-          "label": "alpha",
+          "label": "Alpha",
           "binding": "mjVisual::map.alpha",
           "default": "model.vis.map.alpha"
         },
         {
           "item_id": "visualization.map_fogstart",
           "type": "edit_float",
-          "label": "fogstart",
+          "label": "Fog start",
           "binding": "mjVisual::map.fogstart",
           "default": "model.vis.map.fogstart"
         },
         {
           "item_id": "visualization.map_fogend",
           "type": "edit_float",
-          "label": "fogend",
+          "label": "Fog end",
           "binding": "mjVisual::map.fogend",
           "default": "model.vis.map.fogend"
         },
@@ -1337,28 +1344,28 @@
         {
           "item_id": "visualization.map_zfar",
           "type": "edit_float",
-          "label": "zfar",
+          "label": "Z far",
           "binding": "mjVisual::map.zfar",
           "default": "model.vis.map.zfar"
         },
         {
           "item_id": "visualization.map_haze",
           "type": "edit_float",
-          "label": "haze",
+          "label": "Haze",
           "binding": "mjVisual::map.haze",
           "default": "model.vis.map.haze"
         },
         {
           "item_id": "visualization.map_shadowclip",
           "type": "edit_float",
-          "label": "shadowclip",
+          "label": "Shadow clip",
           "binding": "mjVisual::map.shadowclip",
           "default": "model.vis.map.shadowclip"
         },
         {
           "item_id": "visualization.map_shadowscale",
           "type": "edit_float",
-          "label": "shadowscale",
+          "label": "Shadow scale",
           "binding": "mjVisual::map.shadowscale",
           "default": "model.vis.map.shadowscale"
         },
@@ -1536,14 +1543,14 @@
         {
           "item_id": "visualization.rgba_actuatornegative",
           "type": "edit_rgba",
-          "label": "actuatornegative",
+          "label": "actnegative",
           "binding": "mjVisual::rgba.actuatornegative",
           "default": "model.vis.rgba.actuatornegative"
         },
         {
           "item_id": "visualization.rgba_actuatorpositive",
           "type": "edit_rgba",
-          "label": "actuatorpositive",
+          "label": "actpositive",
           "binding": "mjVisual::rgba.actuatorpositive",
           "default": "model.vis.rgba.actuatorpositive"
         },
@@ -1687,7 +1694,7 @@
           "type": "checkbox",
           "label": "Geom 0",
           "binding": "mjvOption::geomgroup[0]",
-          "default": "model.opt.geomgroup[0]",
+          "default": 1,
           "shortcut": [
             "0"
           ]
@@ -1697,7 +1704,7 @@
           "type": "checkbox",
           "label": "Geom 1",
           "binding": "mjvOption::geomgroup[1]",
-          "default": "model.opt.geomgroup[1]",
+          "default": 1,
           "shortcut": [
             "1"
           ]
@@ -1707,7 +1714,7 @@
           "type": "checkbox",
           "label": "Geom 2",
           "binding": "mjvOption::geomgroup[2]",
-          "default": "model.opt.geomgroup[2]",
+          "default": 1,
           "shortcut": [
             "2"
           ]
@@ -1717,7 +1724,7 @@
           "type": "checkbox",
           "label": "Geom 3",
           "binding": "mjvOption::geomgroup[3]",
-          "default": "model.opt.geomgroup[3]",
+          "default": 0,
           "shortcut": [
             "3"
           ]
@@ -1727,7 +1734,7 @@
           "type": "checkbox",
           "label": "Geom 4",
           "binding": "mjvOption::geomgroup[4]",
-          "default": "model.opt.geomgroup[4]",
+          "default": 0,
           "shortcut": [
             "4"
           ]
@@ -1737,7 +1744,7 @@
           "type": "checkbox",
           "label": "Geom 5",
           "binding": "mjvOption::geomgroup[5]",
-          "default": "model.opt.geomgroup[5]",
+          "default": 0,
           "shortcut": [
             "5"
           ]
@@ -1752,7 +1759,7 @@
           "type": "checkbox",
           "label": "Site 0",
           "binding": "mjvOption::sitegroup[0]",
-          "default": "model.opt.sitegroup[0]",
+          "default": 1,
           "shortcut": [
             "Shift",
             "0"
@@ -1763,7 +1770,7 @@
           "type": "checkbox",
           "label": "Site 1",
           "binding": "mjvOption::sitegroup[1]",
-          "default": "model.opt.sitegroup[1]",
+          "default": 1,
           "shortcut": [
             "Shift",
             "1"
@@ -1774,7 +1781,7 @@
           "type": "checkbox",
           "label": "Site 2",
           "binding": "mjvOption::sitegroup[2]",
-          "default": "model.opt.sitegroup[2]",
+          "default": 1,
           "shortcut": [
             "Shift",
             "2"
@@ -1785,7 +1792,7 @@
           "type": "checkbox",
           "label": "Site 3",
           "binding": "mjvOption::sitegroup[3]",
-          "default": "model.opt.sitegroup[3]",
+          "default": 0,
           "shortcut": [
             "Shift",
             "3"
@@ -1796,7 +1803,7 @@
           "type": "checkbox",
           "label": "Site 4",
           "binding": "mjvOption::sitegroup[4]",
-          "default": "model.opt.sitegroup[4]",
+          "default": 0,
           "shortcut": [
             "Shift",
             "4"
@@ -1807,7 +1814,7 @@
           "type": "checkbox",
           "label": "Site 5",
           "binding": "mjvOption::sitegroup[5]",
-          "default": "model.opt.sitegroup[5]",
+          "default": 0,
           "shortcut": [
             "Shift",
             "5"
@@ -1823,7 +1830,7 @@
           "type": "checkbox",
           "label": "Joint 0",
           "binding": "mjvOption::jointgroup[0]",
-          "default": "model.opt.jointgroup[0]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1831,7 +1838,7 @@
           "type": "checkbox",
           "label": "Joint 1",
           "binding": "mjvOption::jointgroup[1]",
-          "default": "model.opt.jointgroup[1]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1839,7 +1846,7 @@
           "type": "checkbox",
           "label": "Joint 2",
           "binding": "mjvOption::jointgroup[2]",
-          "default": "model.opt.jointgroup[2]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1847,7 +1854,7 @@
           "type": "checkbox",
           "label": "Joint 3",
           "binding": "mjvOption::jointgroup[3]",
-          "default": "model.opt.jointgroup[3]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -1855,7 +1862,7 @@
           "type": "checkbox",
           "label": "Joint 4",
           "binding": "mjvOption::jointgroup[4]",
-          "default": "model.opt.jointgroup[4]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -1863,7 +1870,7 @@
           "type": "checkbox",
           "label": "Joint 5",
           "binding": "mjvOption::jointgroup[5]",
-          "default": "model.opt.jointgroup[5]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -1876,7 +1883,7 @@
           "type": "checkbox",
           "label": "Tendon 0",
           "binding": "mjvOption::tendongroup[0]",
-          "default": "model.opt.tendongroup[0]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1884,7 +1891,7 @@
           "type": "checkbox",
           "label": "Tendon 1",
           "binding": "mjvOption::tendongroup[1]",
-          "default": "model.opt.tendongroup[1]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1892,7 +1899,7 @@
           "type": "checkbox",
           "label": "Tendon 2",
           "binding": "mjvOption::tendongroup[2]",
-          "default": "model.opt.tendongroup[2]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1900,7 +1907,7 @@
           "type": "checkbox",
           "label": "Tendon 3",
           "binding": "mjvOption::tendongroup[3]",
-          "default": "model.opt.tendongroup[3]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -1908,7 +1915,7 @@
           "type": "checkbox",
           "label": "Tendon 4",
           "binding": "mjvOption::tendongroup[4]",
-          "default": "model.opt.tendongroup[4]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -1916,7 +1923,7 @@
           "type": "checkbox",
           "label": "Tendon 5",
           "binding": "mjvOption::tendongroup[5]",
-          "default": "model.opt.tendongroup[5]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -1929,7 +1936,7 @@
           "type": "checkbox",
           "label": "Actuator 0",
           "binding": "mjvOption::actuatorgroup[0]",
-          "default": "model.opt.actuatorgroup[0]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1937,7 +1944,7 @@
           "type": "checkbox",
           "label": "Actuator 1",
           "binding": "mjvOption::actuatorgroup[1]",
-          "default": "model.opt.actuatorgroup[1]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1945,7 +1952,7 @@
           "type": "checkbox",
           "label": "Actuator 2",
           "binding": "mjvOption::actuatorgroup[2]",
-          "default": "model.opt.actuatorgroup[2]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1953,7 +1960,7 @@
           "type": "checkbox",
           "label": "Actuator 3",
           "binding": "mjvOption::actuatorgroup[3]",
-          "default": "model.opt.actuatorgroup[3]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -1961,7 +1968,7 @@
           "type": "checkbox",
           "label": "Actuator 4",
           "binding": "mjvOption::actuatorgroup[4]",
-          "default": "model.opt.actuatorgroup[4]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -1969,7 +1976,7 @@
           "type": "checkbox",
           "label": "Actuator 5",
           "binding": "mjvOption::actuatorgroup[5]",
-          "default": "model.opt.actuatorgroup[5]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -1982,7 +1989,7 @@
           "type": "checkbox",
           "label": "Flex 0",
           "binding": "mjvOption::flexgroup[0]",
-          "default": "model.opt.flexgroup[0]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1990,7 +1997,7 @@
           "type": "checkbox",
           "label": "Flex 1",
           "binding": "mjvOption::flexgroup[1]",
-          "default": "model.opt.flexgroup[1]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -1998,7 +2005,7 @@
           "type": "checkbox",
           "label": "Flex 2",
           "binding": "mjvOption::flexgroup[2]",
-          "default": "model.opt.flexgroup[2]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -2006,7 +2013,7 @@
           "type": "checkbox",
           "label": "Flex 3",
           "binding": "mjvOption::flexgroup[3]",
-          "default": "model.opt.flexgroup[3]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -2014,7 +2021,7 @@
           "type": "checkbox",
           "label": "Flex 4",
           "binding": "mjvOption::flexgroup[4]",
-          "default": "model.opt.flexgroup[4]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -2022,7 +2029,7 @@
           "type": "checkbox",
           "label": "Flex 5",
           "binding": "mjvOption::flexgroup[5]",
-          "default": "model.opt.flexgroup[5]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -2035,7 +2042,7 @@
           "type": "checkbox",
           "label": "Skin 0",
           "binding": "mjvOption::skingroup[0]",
-          "default": "model.opt.skingroup[0]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -2043,7 +2050,7 @@
           "type": "checkbox",
           "label": "Skin 1",
           "binding": "mjvOption::skingroup[1]",
-          "default": "model.opt.skingroup[1]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -2051,7 +2058,7 @@
           "type": "checkbox",
           "label": "Skin 2",
           "binding": "mjvOption::skingroup[2]",
-          "default": "model.opt.skingroup[2]",
+          "default": 1,
           "shortcut": null
         },
         {
@@ -2059,7 +2066,7 @@
           "type": "checkbox",
           "label": "Skin 3",
           "binding": "mjvOption::skingroup[3]",
-          "default": "model.opt.skingroup[3]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -2067,7 +2074,7 @@
           "type": "checkbox",
           "label": "Skin 4",
           "binding": "mjvOption::skingroup[4]",
-          "default": "model.opt.skingroup[4]",
+          "default": 0,
           "shortcut": null
         },
         {
@@ -2075,7 +2082,7 @@
           "type": "checkbox",
           "label": "Skin 5",
           "binding": "mjvOption::skingroup[5]",
-          "default": "model.opt.skingroup[5]",
+          "default": 0,
           "shortcut": null
         }
       ]

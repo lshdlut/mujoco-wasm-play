@@ -763,6 +763,8 @@ export async function createBackend(options = {}) {
       if (typeof payload.njnt === 'number') lastSnapshot.njnt = payload.njnt | 0;
       const jqposadr = toI32(payload.jnt_qposadr);
       if (jqposadr) lastSnapshot.jnt_qposadr = jqposadr;
+      const jntGroup = toI32(payload.jnt_group);
+      if (jntGroup) lastSnapshot.jnt_group = jntGroup;
       const jrange = (() => {
         const source = payload.jnt_range;
         if (!source) return null;
@@ -788,6 +790,7 @@ export async function createBackend(options = {}) {
           lastSnapshot.actuators = payload.actuators.map((a) => ({
             index: Number(a.index) | 0,
             name: String(a.name ?? `act ${a.index|0}`),
+            group: Number.isFinite(Number(a.group)) ? (Number(a.group) | 0) : 0,
             min: Number(a.min),
             max: Number(a.max),
             step: Number.isFinite(+a.step) && +a.step > 0 ? +a.step : 0.001,

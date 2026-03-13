@@ -2251,6 +2251,25 @@ function snapshot() {
   }
 }
 
+function writeCtrlValue(index, value) {
+  if (!sim) return false;
+  const ctrlView = sim.ctrlView?.();
+  if (!ctrlView || !ctrlView.length) return false;
+  const idx = index | 0;
+  if (idx < 0 || idx >= ctrlView.length) return false;
+  let nextValue = +value || 0;
+  const rangeView = sim.actuatorCtrlRangeView?.();
+  if (rangeView && (2 * idx + 1) < rangeView.length) {
+    const lo = +rangeView[2 * idx];
+    const hi = +rangeView[2 * idx + 1];
+    if (Number.isFinite(lo) && Number.isFinite(hi) && (hi - lo) > 1e-12) {
+      nextValue = Math.max(Math.min(hi, nextValue), lo);
+    }
+  }
+  ctrlView[idx] = nextValue;
+  return true;
+}
+
 function emitRenderAssets() {
   if (!mod || !(h > 0)) return;
   try {
@@ -2482,24 +2501,10 @@ setInterval(() => {
   // Flush pending control writes (coalesce burst updates)
   try {
     if (pendingCtrl.size && sim) {
-      const ctrlView = sim.ctrlView?.();
-      if (ctrlView && ctrlView.length) {
-        const rangeView = sim.actuatorCtrlRangeView?.();
-        for (const [i, v] of pendingCtrl.entries()) {
-          const idx = i | 0;
-          if (idx < 0 || idx >= ctrlView.length) continue;
-          let vv = +v || 0;
-          if (rangeView && (2 * idx + 1) < rangeView.length) {
-            const lo = +rangeView[2 * idx];
-            const hi = +rangeView[2 * idx + 1];
-            if (Number.isFinite(lo) && Number.isFinite(hi) && (hi - lo) > 1e-12) {
-              vv = Math.max(Math.min(hi, vv), lo);
-            }
-          }
-          ctrlView[idx] = vv;
-        }
-        pendingCtrl.clear();
+      for (const [i, v] of pendingCtrl.entries()) {
+        writeCtrlValue(i, v);
       }
+      pendingCtrl.clear();
     }
   } catch (err) {
     strictCatch(err, 'worker:pending_ctrl_flush');
@@ -2819,6 +2824,8 @@ const commandHandlers = {
         const jtype = jtypeView ? new Int32Array(jtypeView) : null;
         const jnt_qposadr = jqposAdr ? new Int32Array(jqposAdr) : null;
         const jnt_range = jrangeView ? new Float64Array(jrangeView) : null;
+        const jnt_group_view = sim?.jntGroupView?.();
+        const jnt_group = jnt_group_view ? new Int32Array(jnt_group_view) : null;
         const jnt_names = (() => {
           if (!(nj > 0) || typeof sim?.jntNameOf !== 'function') return null;
           const names = [];
@@ -2835,6 +2842,7 @@ const commandHandlers = {
           jtype?.buffer,
           jnt_qposadr?.buffer,
           jnt_range?.buffer,
+          jnt_group?.buffer,
         ].filter(Boolean);
         postMessage({
           kind:'meta_joints',
@@ -2848,6 +2856,7 @@ const commandHandlers = {
           jtype,
           jnt_qposadr,
           jnt_range,
+          jnt_group,
           jnt_names,
         }, transfers);
     } catch (err) {
@@ -2857,6 +2866,7 @@ const commandHandlers = {
     try {
       const acts = [];
       const rangeView = sim?.actuatorCtrlRangeView?.();
+      const actuatorGroupView = sim?.actuatorGroupView?.();
       if (nu > 0) {
         for (let i = 0; i < nu; i += 1) {
           const name = sim?.actuatorNameOf?.(i) || `act ${i}`;
@@ -2865,7 +2875,8 @@ const commandHandlers = {
           const valid = Number.isFinite(rawLo) && Number.isFinite(rawHi) && (rawHi - rawLo) > 1e-12;
           const lo = valid ? rawLo : -1;
           const hi = valid ? rawHi : 1;
-          acts.push({ index:i, name, min: lo, max: hi, step: 0.001, value: 0 });
+          const group = actuatorGroupView && i < actuatorGroupView.length ? (actuatorGroupView[i] | 0) : 0;
+          acts.push({ index:i, name, group, min: lo, max: hi, step: 0.001, value: 0 });
         }
       }
       postMessage({ kind:'meta', actuators: acts });
@@ -3055,7 +3066,7 @@ const commandHandlers = {
     const enabled = !!payload.enabled;
     if (MJ_GROUP_TYPES.includes(type) && idx >= 0 && idx < MJ_GROUP_COUNT) {
       if (!groupState[type]) {
-        groupState[type] = Array.from({ length: MJ_GROUP_COUNT }, () => 1);
+        groupState[type] = Array.from({ length: MJ_GROUP_COUNT }, (_, groupIndex) => (groupIndex < 3 ? 1 : 0));
       }
       groupState[type][idx] = enabled ? 1 : 0;
       markDirty(DIRTY_REASON.VOPT_CHANGED);
@@ -3491,8 +3502,15 @@ const commandHandlers = {
   },
   setCtrlNoise: () => {},
   setCtrl: (payload) => {
-    // Write a single actuator control value if pointers available
-    try { const i = payload.index|0; pendingCtrl.set(i, +payload.value||0); } catch (err) { strictCatch(err, 'worker:set_ctrl'); }
+    try {
+      const idx = payload.index | 0;
+      const value = +payload.value || 0;
+      pendingCtrl.set(idx, value);
+      const wrote = writeCtrlValue(idx, value);
+      if (wrote && !running && sim && h) snapshot();
+    } catch (err) {
+      strictCatch(err, 'worker:set_ctrl');
+    }
   },
   setQpos: (payload) => {
     try {

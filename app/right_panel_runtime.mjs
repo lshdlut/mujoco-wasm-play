@@ -2,6 +2,7 @@ import {
   getSnapshotGeoms,
   getSnapshotGroups,
 } from '../core/snapshot_selectors.mjs';
+import { MJ_GROUP_COUNT } from '../core/viewer_defaults.mjs';
 import {
   isPerfEnabled,
   perfNow,
@@ -63,12 +64,21 @@ export function createRightPanelRuntime({ controlManager, store }) {
     return true;
   }
 
+  function clampGroupIndex(value) {
+    const idx = Number(value);
+    if (!Number.isFinite(idx)) return 0;
+    if (idx <= 0) return 0;
+    if (idx >= MJ_GROUP_COUNT) return MJ_GROUP_COUNT - 1;
+    return idx | 0;
+  }
+
   function buildJointSource(snapshot) {
     const groupState = getSnapshotGroups(snapshot)?.joint;
     const groupKey = Array.isArray(groupState) ? groupState.map((enabled) => (enabled ? '1' : '0')).join('') : '';
     return {
       qpos: snapshot?.qpos || null,
       groupKey,
+      jgroup: snapshot?.jnt_group || null,
       jtype: snapshot?.jtype || null,
       jqpos: snapshot?.jnt_qposadr || null,
       jrange: snapshot?.jnt_range || null,
@@ -79,6 +89,8 @@ export function createRightPanelRuntime({ controlManager, store }) {
 
   function buildActuatorSource(snapshot) {
     const actuators = Array.isArray(snapshot?.actuators) ? snapshot.actuators : null;
+    const actuatorGroups = getSnapshotGroups(snapshot)?.actuator;
+    const groupKey = Array.isArray(actuatorGroups) ? actuatorGroups.map((enabled) => (enabled ? '1' : '0')).join('') : '';
     const count = Array.isArray(actuators) ? (actuators.length | 0) : 0;
     let metadataKey = '';
     if (count > 0) {
@@ -88,10 +100,11 @@ export function createRightPanelRuntime({ controlManager, store }) {
         metadataKey = actuators.map((item, fallback) => {
           const index = Number.isFinite(Number(item?.index)) ? (Number(item.index) | 0) : fallback;
           const name = String(item?.name ?? '');
+          const group = clampGroupIndex(item?.group);
           const min = Number.isFinite(Number(item?.min)) ? Number(item.min) : '';
           const max = Number.isFinite(Number(item?.max)) ? Number(item.max) : '';
           const step = Number.isFinite(Number(item?.step)) ? Number(item.step) : '';
-          return `${index}:${name}:${min}:${max}:${step}`;
+          return `${index}:${group}:${name}:${min}:${max}:${step}`;
         }).join('|');
         cachedActuatorMetaRef = actuators;
         cachedActuatorMetaKey = metadataKey;
@@ -104,6 +117,7 @@ export function createRightPanelRuntime({ controlManager, store }) {
       actuators,
       ctrl: snapshot?.ctrl || null,
       count,
+      groupKey,
       metadataKey,
     };
   }
@@ -132,25 +146,33 @@ export function createRightPanelRuntime({ controlManager, store }) {
       ? snapshot.jnt_range
       : (Array.isArray(snapshot.jnt_range) ? Float64Array.from(snapshot.jnt_range) : null);
     const names = Array.isArray(snapshot.jnt_names) ? snapshot.jnt_names : [];
+    const jgroup = snapshot.jnt_group instanceof Int32Array
+      ? snapshot.jnt_group
+      : (Array.isArray(snapshot.jnt_group) ? Int32Array.from(snapshot.jnt_group) : null);
     const qpos = snapshot.qpos instanceof Float64Array
       ? snapshot.qpos
       : (Array.isArray(snapshot.qpos) ? Float64Array.from(snapshot.qpos) : null);
     const nq = snapshot.nq | 0;
     const groupState = getSnapshotGroups(snapshot)?.joint;
-    const jointGroupEnabled = Array.isArray(groupState) ? groupState.some(Boolean) : true;
-    if (!jointGroupEnabled) return [];
+    const groupKey = Array.isArray(groupState) ? groupState.map((enabled) => (enabled ? '1' : '0')).join('') : '';
+    const jointGroupsEnabled = Array.isArray(groupState) ? groupState : null;
+    if (jointGroupsEnabled && !jointGroupsEnabled.some(Boolean)) return [];
     if (!jtype || !jqpos || !jrange) return [];
 
     const metaSame = !!(cachedJointDofsMeta
       && cachedJointDofsMeta.jtype === jtype
       && cachedJointDofsMeta.jqpos === jqpos
       && cachedJointDofsMeta.jrange === jrange
+      && cachedJointDofsMeta.jgroup === jgroup
+      && cachedJointDofsMeta.groupKey === groupKey
       && cachedJointDofsMeta.names === names
       && cachedJointDofsMeta.nq === nq);
 
     if (!metaSame) {
       const out = [];
       for (let i = 0; i < jtype.length; i += 1) {
+        const groupIndex = clampGroupIndex(jgroup && i < jgroup.length ? jgroup[i] : 0);
+        if (jointGroupsEnabled && !jointGroupsEnabled[groupIndex]) continue;
         const type = jtype[i] | 0;
         if (type !== 2 && type !== 3) continue;
         const qposIndex = jqpos && i < jqpos.length ? jqpos[i] : -1;
@@ -164,7 +186,7 @@ export function createRightPanelRuntime({ controlManager, store }) {
         out.push({ index: qposIndex, jointIndex: i, min, max, value, label });
       }
       cachedJointDofs = out;
-      cachedJointDofsMeta = { jtype, jqpos, jrange, names, nq };
+      cachedJointDofsMeta = { jtype, jqpos, jrange, jgroup, groupKey, names, nq };
       return out;
     }
 
@@ -177,6 +199,15 @@ export function createRightPanelRuntime({ controlManager, store }) {
       }
     }
     return cachedJointDofs;
+  }
+
+  function deriveVisibleActuators(snapshot) {
+    const actuators = Array.isArray(snapshot?.actuators) ? snapshot.actuators : [];
+    if (!actuators.length) return actuators;
+    const groupState = getSnapshotGroups(snapshot)?.actuator;
+    if (!Array.isArray(groupState)) return actuators;
+    if (!groupState.some(Boolean)) return [];
+    return actuators.filter((entry) => groupState[clampGroupIndex(entry?.group)]);
   }
 
   function deriveEqualityList(snapshot) {
@@ -273,7 +304,7 @@ export function createRightPanelRuntime({ controlManager, store }) {
     const equalityExpanded = syncDynamicSection('equality', panelVisible);
 
     const actuatorSource = buildActuatorSource(snapshot);
-    const acts = actuatorSource.actuators || [];
+    const acts = deriveVisibleActuators(snapshot);
     const ctrlValues = actuatorSource.ctrl ?? [];
     if (panelJustOpened || !sameSource(lastActuatorSource, actuatorSource)) {
       lastActuatorSource = actuatorSource;
