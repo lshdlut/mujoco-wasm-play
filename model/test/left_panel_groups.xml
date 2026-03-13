@@ -1,0 +1,22 @@
+<mujoco model="left_panel_groups">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.01" gravity="0 0 -9.81"/>
+
+  <worldbody>
+    <light pos="0 0 2" dir="0 0 -1"/>
+    <geom name="floor" type="plane" size="2 2 0.1" rgba="0.9 0.9 0.9 1"/>
+    <body name="root" pos="0 0 0.2">
+      <joint name="root_hinge" type="hinge" axis="0 1 0" range="-1 1" damping="0.2" group="0"/>
+      <geom name="root_geom" type="capsule" fromto="0 0 0 0 0 0.25" size="0.04" rgba="0.8 0.4 0.4 1"/>
+      <body name="child" pos="0 0 0.25">
+        <joint name="child_hinge" type="hinge" axis="1 0 0" range="-1 1" damping="0.2" group="1"/>
+        <geom name="child_geom" type="capsule" fromto="0 0 0 0 0 0.25" size="0.035" rgba="0.4 0.4 0.8 1"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="root_motor" joint="root_hinge" gear="20" ctrlrange="-1 1" group="0"/>
+    <motor name="child_motor" joint="child_hinge" gear="20" ctrlrange="-1 1" group="1"/>
+  </actuator>
+</mujoco>

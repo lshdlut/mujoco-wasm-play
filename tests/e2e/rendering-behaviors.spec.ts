@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { SCENE_FLAG_INDICES } from '../../core/viewer_defaults.mjs';
 import { firstVisibleGeomSummary, waitForViewerReady } from './test-utils';
 
 test('segment mode switches to unlit materials', async ({ page }) => {
@@ -7,16 +8,16 @@ test('segment mode switches to unlit materials', async ({ page }) => {
   const initial = await page.evaluate(firstVisibleGeomSummary);
   expect(initial?.materialType).not.toBe('MeshBasicMaterial');
 
-  await page.evaluate(async () => {
+  await page.evaluate(async (segmentFlagIndex) => {
     const controls = (window as any).__viewerControls;
     if (!controls?.listIds || !controls.toggleControl || !controls.getControl) {
       throw new Error('__viewerControls helpers are not available');
     }
     const ids: string[] = controls.listIds('rendering.opengl_flags.');
-    const target = ids.find((id) => controls.getControl(id)?.binding === 'mjvScene::flags[7]');
+    const target = ids.find((id) => controls.getControl(id)?.binding === `mjvScene::flags[${segmentFlagIndex}]`);
     if (!target) throw new Error('segment control not found');
     await controls.toggleControl(target, true);
-  });
+  }, SCENE_FLAG_INDICES.SEGMENT);
 
   await page.waitForFunction(() => {
     const ctx = (window as any).__renderCtx;

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { SCENE_FLAG_INDICES } from '../../core/viewer_defaults.mjs';
 import { waitForViewerReady } from './test-utils';
 
 async function setSceneFlag(page: any, binding: string, value: boolean) {
@@ -17,8 +18,8 @@ async function setSceneFlag(page: any, binding: string, value: boolean) {
 test('shadow pass restores full canvas viewport', async ({ page }) => {
   await waitForViewerReady(page, '/index.html?model=humanoid.xml&ver=3.5.0');
 
-  await setSceneFlag(page, 'mjvScene::flags[7]', false);
-  await setSceneFlag(page, 'mjvScene::flags[0]', true);
+  await setSceneFlag(page, `mjvScene::flags[${SCENE_FLAG_INDICES.SEGMENT}]`, false);
+  await setSceneFlag(page, `mjvScene::flags[${SCENE_FLAG_INDICES.SHADOW}]`, true);
 
   await expect.poll(async () => {
     return page.evaluate(() => {
