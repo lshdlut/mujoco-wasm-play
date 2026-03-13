@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { waitForViewerReady } from './test-utils';
+import { waitForViewerReady } from '../e2e/test-utils';
 
 test('perf: init + render phase timings', async ({ page }) => {
   page.on('console', (msg) => {
