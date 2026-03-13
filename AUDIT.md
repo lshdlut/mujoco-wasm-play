@@ -465,3 +465,486 @@ Priority order for future implementation:
   cleaner
 - Plugin contract tightening after the runtime/public boundary is fully
   explicit
+
+## Left Panel Wiring Audit vs MuJoCo Simulate 3.5.0
+
+Baseline:
+
+- Upstream truth: MuJoCo `3.5.0` `simulate/simulate.cc`
+  (`MakeRenderingSection`, `MakeVisualizationSection`, `MakeGroupSection`) and
+  `src/engine/engine_vis_init.c` (`mjVISSTRING`, `mjRNDSTRING`,
+  `mjv_defaultOption`)
+- Play truth: `spec/ui_spec.json`, `ui/viewer_actions.mjs`,
+  `ui/control_widgets.mjs`, `backend/backend_runtime.mjs`,
+  `app/right_panel_runtime.mjs`
+- Audited control count:
+  - `Rendering`: `50`
+  - `Visualization`: `73`
+  - `Group enable`: `49`
+
+Presentation note:
+
+- Play expands MuJoCo shortcut tokens such as `AR`, `AV`, `AG`, `S0`, and
+  `" 0"` into web-style shortcut displays such as `Alt R`, `Alt V`, `Alt G`,
+  `Shift 0`, and `0`.
+- Play also packages repeated upstream `mjITEM_CHECKBYTE` rows into shared web
+  list controls in a few places (`checkbox_list`), while keeping per-entry
+  binding/default/order semantics.
+- This audit treats those shell-level packaging/display changes as
+  `Intentional extension` unless they also change binding/default/order
+  semantics.
+
+Verdict summary:
+
+- `Rendering`: `Partial`
+- `Visualization`: `Partial`
+- `Group enable`: `Partial`
+
+Critical findings:
+
+1. `rendering.tracking_geom` remains a Play-only extension inserted into the
+   `Rendering` section. It must stay explicitly quarantined from the upstream
+   MuJoCo core block.
+2. `Visualization` now matches upstream label text and binding order, while
+   compound vector/color editors remain intentional web widget substitutions
+   rather than exact Simulate widget-type parity.
+3. `Group enable` defaults now follow `mjv_defaultOption` (`[1,1,1,0,0,0]`)
+   instead of fake `model.opt.*group[*]` sources.
+4. `jointgroup` and `actuatorgroup` now carry per-item group metadata through
+   the snapshot path and drive right-panel filtering/topology rebuild in the
+   same coarse way MuJoCo Simulate does.
+
+### Detailed matrix
+
+#### Rendering
+
+- Section / Item: `Rendering` section metadata
+  - Upstream: title `Rendering`, shortcut `AR`, order `Camera -> Label -> Frame -> Copy camera -> Model Elements -> flags -> Tree depth -> Flex layer -> OpenGL Effects -> render flags`
+  - Play: title `Rendering`, shortcut `Alt R`, same overall section position
+  - Status: `Partial`
+  - Evidence: `simulate/simulate.cc::MakeRenderingSection`, `spec/ui_spec.json`
+  - Required action: Align the internal item order exactly by isolating the
+    Play-only `tracking_geom` row from the upstream core block. The shortcut
+    display expansion itself is an acceptable shell-level extension.
+
+- Section / Item: `rendering.camera_mode`
+  - Upstream: `mjITEM_SELECT`, binding `Simulate::camera`, default `0`, dynamic
+    options `Free / Tracking / fixed cameras`
+  - Play: `select`, binding `Simulate::camera`, default `0`, dynamic options
+    refreshed from snapshot cameras
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeRenderingSection`,
+    `ui/control_widgets.mjs::syncCameraSelectOptions`,
+    `backend/backend_runtime.mjs`
+  - Required action: None.
+
+- Section / Item: `rendering.tracking_geom`
+  - Upstream: no such control in `Rendering`
+  - Play: `select`, binding `Simulate::tracking_geom`, disabled unless camera
+    mode is `Tracking`
+  - Status: `Intentional extension`
+  - Evidence: `spec/ui_spec.json`, `ui/control_widgets.mjs`,
+    `ui/viewer_actions.mjs`
+  - Required action: Quarantine as a Play extension. Keep it out of the strict
+    upstream core order, either by moving it to a clearly marked Play-only block
+    under `Rendering` or by documenting it as a non-upstream row.
+
+- Section / Item: `rendering.label_mode`
+  - Upstream: `mjITEM_SELECT`, binding `mjvOption::label`, options
+    `None/Body/Joint/Geom/Site/Camera/Light/Tendon/Actuator/Constraint/Flex/Skin/Selection/Sel Pnt/Contact/Force/Island`
+  - Play: same binding, same options, same default `0`
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeRenderingSection`, `spec/ui_spec.json`,
+    `ui/viewer_actions.mjs`, `backend/backend_runtime.mjs`
+  - Required action: None.
+
+- Section / Item: `rendering.frame_mode`
+  - Upstream: `mjITEM_SELECT`, binding `mjvOption::frame`, options
+    `None/Body/Geom/Site/Camera/Light/Contact/World`
+  - Play: same binding, same options, same default `0`
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeRenderingSection`, `spec/ui_spec.json`,
+    `ui/viewer_actions.mjs`, `backend/backend_runtime.mjs`
+  - Required action: None.
+
+- Section / Item: `rendering.copy_camera`
+  - Upstream: `mjITEM_BUTTON`, label `Copy camera`
+  - Play: `button`, same label
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeRenderingSection`, `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `rendering.model_elements` separator
+  - Upstream: separator `Model Elements`
+  - Play: same separator
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeRenderingSection`, `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `rendering.model_flags` / `mjvOption::flags[0..30]`
+  - Upstream: `31` checkboxes from `mjVISSTRING`, with exact labels/defaults
+    and shortcuts
+  - Play: `31` checkboxes with exact index, label, default, and shortcut
+    mapping for every `mjvOption::flags[i]`
+  - Status: `Exact match`
+  - Evidence: `engine_vis_init.c::mjVISSTRING`, `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `rendering.tree_depth`
+  - Upstream: `Tree depth`, `mjITEM_SLIDERINT`, binding `Simulate::opt.bvh_depth`,
+    default `1`, range `0..20`
+  - Play: `slider_int`, same label, binding, default, and range
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeRenderingSection`, `spec/ui_spec.json`,
+    `backend/backend_runtime.mjs`
+  - Required action: None.
+
+- Section / Item: `rendering.flex_layer`
+  - Upstream: `Flex layer`, `mjITEM_SLIDERINT`, binding
+    `Simulate::opt.flex_layer`, default `0`, range `0..10`
+  - Play: `slider_int`, same label, binding, default, and range
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeRenderingSection`, `spec/ui_spec.json`,
+    `backend/backend_runtime.mjs`
+  - Required action: None.
+
+- Section / Item: `rendering.opengl_sep`
+  - Upstream: separator `OpenGL Effects`
+  - Play: same separator
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeRenderingSection`, `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `mjvScene::flags[0..6]`
+  - Upstream: `Shadow / Wireframe / Reflection / Additive / Skybox / Fog / Haze`
+  - Play: exact same seven entries with correct defaults and shortcuts
+  - Status: `Exact match`
+  - Evidence: `engine_vis_init.c::mjRNDSTRING`, `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `mjvScene::flags[7]` (`Depth`)
+  - Upstream: `Depth`, default `0`, no shortcut
+  - Play: present at the official index and wired through generated scene-flag
+    defaults and runtime consumers
+  - Status: `Exact match`
+  - Evidence: `engine_vis_init.c::mjRNDSTRING`, `spec/ui_spec.json`,
+    `core/viewer_defaults.mjs`
+  - Required action: None.
+
+- Section / Item: `mjvScene::flags[8]` (`Segment`)
+  - Upstream: `Segment`, default `0`, shortcut `,`
+  - Play: `Segment` is wired to `mjvScene::flags[8]`
+  - Status: `Exact match`
+  - Evidence: `engine_vis_init.c::mjRNDSTRING`, `spec/ui_spec.json`,
+    `core/viewer_defaults.mjs`, `renderer/pipeline.mjs`
+  - Required action: None.
+
+- Section / Item: `mjvScene::flags[9]` (`Id Color`)
+  - Upstream: `Id Color`, default `0`
+  - Play: `Id Color` is wired to `mjvScene::flags[9]`
+  - Status: `Exact match`
+  - Evidence: `engine_vis_init.c::mjRNDSTRING`, `spec/ui_spec.json`,
+    `core/viewer_defaults.mjs`
+  - Required action: None.
+
+- Section / Item: `mjvScene::flags[10]` (`Cull Face`)
+  - Upstream: `Cull Face`, default `1`
+  - Play: `Cull Face` is wired to `mjvScene::flags[10]`
+  - Status: `Exact match`
+  - Evidence: `engine_vis_init.c::mjRNDSTRING`, `spec/ui_spec.json`,
+    `core/viewer_defaults.mjs`
+  - Required action: None.
+
+#### Visualization
+
+- Section / Item: `Visualization` section metadata
+  - Upstream: title `Visualization`, shortcut `AV`, section order identical to
+    `Headlight -> Free Camera -> Global -> Map -> Scale -> RGBA`
+  - Play: same title, shortcut displayed as `Alt V`, same group ordering
+  - Status: `Intentional extension`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: None beyond documenting the shortcut presentation layer as
+    a web-shell extension.
+
+- Section / Item: `visualization.headlight_sep`, `visualization.freecam_sep`,
+  `visualization.global_sep`, `visualization.map_sep`,
+  `visualization.scale_sep`, `visualization.rgba_sep`
+  - Upstream: same separator titles and order
+  - Play: same separator titles and order
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `visualization.headlight_active`
+  - Upstream: `radio`, binding `mjVisual::headlight.active`, options `Off/On`
+  - Play: same
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`, `backend/backend_runtime.mjs`
+  - Required action: None.
+
+- Section / Item: `visualization.headlight_ambient`,
+  `visualization.headlight_diffuse`, `visualization.headlight_specular`
+  - Upstream: `mjITEM_EDITFLOAT` with vector length `3`
+  - Play: `edit_vec3_string`
+  - Status: `Intentional extension`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`, `ui/bindings.mjs`
+  - Required action: Quarantine as a control-type extension. Keep the binding,
+    order, and labels exact, but explicitly document that Play uses compound
+    vector editors instead of repeated float fields.
+
+- Section / Item: `visualization.orthographic`, `visualization.fovy`,
+  `visualization.azimuth`, `visualization.elevation`, `visualization.align`,
+  `visualization.extent`, `visualization.inertia`, `visualization.bvh`
+  - Upstream: same labels, same order, same bindings, same options
+  - Play: same
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`, `backend/backend_runtime.mjs`
+  - Required action: None.
+
+- Section / Item: `visualization.center`
+  - Upstream: `mjITEM_EDITNUM` with vector length `3`
+  - Play: `edit_vec3`
+  - Status: `Intentional extension`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: Quarantine as a control-type extension. Do not treat it as
+    an exact upstream widget match.
+
+- Section / Item: `visualization.map_stiffness`
+  - Upstream: label `Stiffness`
+  - Play: label `Stiffness`
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `visualization.map_stiffnessrot`
+  - Upstream: label `Rot stiffness`
+  - Play: label `Rot stiffness`
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `visualization.map_force`,
+  `visualization.map_torque`, `visualization.map_alpha`,
+  `visualization.map_fogstart`, `visualization.map_fogend`,
+  `visualization.map_zfar`, `visualization.map_haze`,
+  `visualization.map_shadowclip`, `visualization.map_shadowscale`
+  - Upstream: labels `Force`, `Torque`, `Alpha`, `Fog start`, `Fog end`,
+    `Z far`, `Haze`, `Shadow clip`, `Shadow scale`
+  - Play: bindings, order, and label text now match upstream exactly
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `visualization.map_znear`
+  - Upstream: label `Z near`
+  - Play: label `Z near`
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `visualization.scale_*`
+  - Upstream: all `Scale` labels and order match
+  - Play: bindings, labels, and order are exact for
+    `All (meansize) / Force width / Contact width / Contact height / Connect / Com / Camera / Light / Select point / Joint length / Joint width / Actuator length / Actuator width / Frame length / Frame width / Constraint / Slider-crank`
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `visualization.rgba_fog` through `visualization.rgba_bvactive`
+  - Upstream: `mjITEM_EDITFLOAT` with vector length `4`
+  - Play: `edit_rgba`
+  - Status: `Intentional extension`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: Quarantine as a control-type extension. Keep binding/order
+    parity, but do not treat the widget type as an exact upstream match.
+
+- Section / Item: `visualization.rgba_actuatornegative`,
+  `visualization.rgba_actuatorpositive`
+  - Upstream: labels `actnegative`, `actpositive`
+  - Play: labels `actnegative`, `actpositive`
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: all remaining `visualization.rgba_*`
+  - Upstream: label/order/binding match
+  - Play: exact same order and bindings; only widget type differs as noted
+    above
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeVisualizationSection`,
+    `spec/ui_spec.json`
+  - Required action: None beyond the accepted `edit_rgba` type divergence.
+
+#### Group enable
+
+- Section / Item: `Group enable` section metadata
+  - Upstream: title `Group enable`, shortcut `AG`
+  - Play: same title, shortcut displayed as `Alt G`
+  - Status: `Intentional extension`
+  - Evidence: `simulate/simulate.cc::MakeGroupSection`, `spec/ui_spec.json`
+  - Required action: None beyond documenting the shortcut presentation layer as
+    a web-shell extension.
+
+- Section / Item: `group.geom_separator`, `group.site_separator`,
+  `group.joint_separator`, `group.tendon_separator`,
+  `group.actuator_separator`, `group.flex_separator`,
+  `group.skin_separator`
+  - Upstream: same separator titles and order
+  - Play: same
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeGroupSection`, `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `group.geom[0..5]`
+  - Upstream: labels `Geom 0..5`, shortcuts `" 0".." 5"`, defaults from
+    `mjv_defaultOption` (`1,1,1,0,0,0`)
+  - Play: labels and shortcuts match; spec and generated defaults now also
+    match `mjv_defaultOption`
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeGroupSection`,
+    `engine_vis_init.c::mjv_defaultOption`, `spec/ui_spec.json`
+  - Required action: None.
+
+- Section / Item: `group.site[0..5]`
+  - Upstream: labels `Site 0..5`, shortcuts `S0..S5`, defaults from
+    `mjv_defaultOption` (`1,1,1,0,0,0`)
+  - Play: defaults now match `mjv_defaultOption`; shortcut badges remain
+    web-style `Shift+0..5` presentation
+  - Status: `Intentional extension`
+  - Evidence: `simulate/simulate.cc::MakeGroupSection`,
+    `engine_vis_init.c::mjv_defaultOption`, `spec/ui_spec.json`
+  - Required action: None beyond keeping the shortcut presentation difference
+    documented.
+
+- Section / Item: `group.joint[0..5]`, `group.tendon[0..5]`,
+  `group.actuator[0..5]`, `group.flex[0..5]`, `group.skin[0..5]`
+  - Upstream: labels match, no shortcuts, defaults from `mjv_defaultOption`
+    (`1,1,1,0,0,0`)
+  - Play: labels, lack of shortcuts, and defaults now match
+    `mjv_defaultOption`
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeGroupSection`,
+    `engine_vis_init.c::mjv_defaultOption`, `spec/ui_spec.json`
+  - Required action: None.
+
+### Wiring-specific findings
+
+- Section / Item: `Rendering` and `Visualization` refresh model
+  - Upstream: selective `pending_.ui_update_rendering` /
+    `pending_.ui_update_visualization`
+  - Play: generic snapshot/state-driven `updateControls(...)` tick plus
+    per-control option refresh hooks
+  - Status: `Intentional extension`
+  - Evidence: `simulate/simulate.cc`, `app/ui_runtime.mjs`,
+    `ui/control_manager.mjs`, `ui/control_widgets.mjs`
+  - Required action: Keep the generic refresh model. It is implementation
+    different but semantically acceptable as long as values/options remain
+    correct.
+
+- Section / Item: `mjVisual::*` / `mjStatistic::*` edit wiring
+  - Upstream: edits mutate live passive/current visual/stat structs and then
+    trigger `ui_update_visualization`
+  - Play: readers use snapshot selectors; writers use `setField` via
+    `prepareBindingUpdate`, then explicitly request a fresh snapshot
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc`, `ui/viewer_actions.mjs`,
+    `backend/backend_runtime.mjs`
+  - Required action: None.
+
+- Section / Item: `group.geom[*]` and `group.site[*]` -> rendering behavior
+  - Upstream: group toggles update `SECT_GROUP`; world rendering responds via
+    `mjvOption`
+  - Play: snapshot-backed `groups` are read directly; left panel values refresh
+    correctly and renderer consumes group state from snapshot
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc`, `backend/backend_runtime.mjs`,
+    `ui/viewer_actions.mjs`
+  - Required action: None.
+
+- Section / Item: `group.joint[*]` -> `Joint` right-panel filtering
+  - Upstream: `MakeJointSection` skips each joint whose own model group is
+    disabled
+  - Play: snapshot meta now carries `jnt_group`, and `deriveJointDofs(...)`
+    filters each joint by its actual group
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeJointSection`,
+    `app/right_panel_runtime.mjs`
+  - Required action: None.
+
+- Section / Item: `group.actuator[*]` -> `Control` right-panel filtering/remake
+  - Upstream: `MakeControlSection` skips actuators whose model group is
+    disabled; actuator-group changes trigger `ui_remake_ctrl`
+  - Play: actuator meta now carries per-actuator `group`, and
+    `buildActuatorSource(...)` / `deriveVisibleActuators(...)` include actuator
+    group topology in both filtering and remake
+  - Status: `Exact match`
+  - Evidence: `simulate/simulate.cc::MakeControlSection`,
+    `simulate.cc` pending logic, `worker/physics.worker.mjs`,
+    `app/right_panel_runtime.mjs`
+  - Required action: None.
+
+- Section / Item: `rendering.tracking_geom`
+  - Upstream: none
+  - Play: local store-backed extension with option list derived from snapshot
+    geoms
+  - Status: `Intentional extension`
+  - Evidence: `ui/control_widgets.mjs`, `ui/viewer_actions.mjs`,
+    `backend/backend_runtime.mjs`
+  - Required action: Quarantine as Play extension and ensure future audits do
+    not treat it as an upstream row.
+
+### Implementation status
+
+The planned parity remediation has now been implemented.
+
+Resolved upstream drift:
+
+1. `Rendering` OpenGL flag parity is now exact for MuJoCo `3.5.0`
+   - `Depth` is restored at `mjvScene::flags[7]`
+   - `Segment`, `Id Color`, and `Cull Face` now live at official indices
+   - generated defaults, snapshot serialization, renderer consumers, and tests
+     now use the same 11-flag model
+2. `Visualization` label text drift is resolved
+   - `Stiffness`, `Rot stiffness`, `Force`, `Torque`, `Alpha`, `Fog start`,
+     `Fog end`, `Z far`, `Haze`, `Shadow clip`, `Shadow scale`,
+     `actnegative`, and `actpositive` now match upstream spelling/casing
+3. `Group enable` default metadata is resolved
+   - spec defaults now follow `mjv_defaultOption` `[1,1,1,0,0,0]`
+   - generated viewer group defaults and runtime normalization match that same
+     source of truth
+4. `jointgroup` and `actuatorgroup` right-panel behavior is resolved
+   - worker meta now carries per-joint and per-actuator group ids
+   - `Joint` and `Control` right-panel sections now filter by each item's actual
+     group and rebuild on topology changes
+
+Intentional extensions retained:
+
+- `rendering.tracking_geom` remains a Play-only row and is explicitly marked as
+  such in spec/docs
+- `edit_vec3_string`, `edit_vec3`, and `edit_rgba` remain web widget
+  substitutions rather than exact MuJoCo widget-type parity
+- shortcut badges such as `Alt R`, `Alt V`, `Alt G`, and `Shift 0..5` remain
+  shell-level presentation expansions of MuJoCo shortcut tokens
+
+Current completion criteria:
+
+- `Rendering / Visualization / Group enable` now have exact upstream
+  order/text/default/index semantics for the upstream-owned rows
+- `mjvScene::flags[*]` indices are identical to MuJoCo `3.5.0`
+- `jointgroup` and `actuatorgroup` now drive right-panel filtering/remake in
+  the same coarse way MuJoCo Simulate does
+- Remaining non-upstream rows and widget substitutions are explicitly marked as
+  Play extensions

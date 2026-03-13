@@ -204,6 +204,18 @@ Responsibilities:
 - Syncs sticky runtime-facing UI choices back into the runtime config buffer
 - Renders DOM panels and control widgets
 
+Left-panel parity note:
+
+- `rendering.tracking_geom` is a Play-only extension. It is intentionally kept
+  outside strict MuJoCo left-panel parity, even though it lives under the
+  `Rendering` section in the web UI.
+- `edit_vec3_string`, `edit_vec3`, and `edit_rgba` are web widget substitutions
+  for upstream repeated float editors. They preserve binding/order semantics but
+  are not widget-type parity with MuJoCo Simulate.
+- Shortcut badges such as `Alt R`, `Alt V`, `Alt G`, and `Shift 0..5` are
+  shell-level presentation expansions of MuJoCo shortcut tokens, not runtime
+  contract changes.
+
 Ownership:
 
 - Viewer state owner: `ui/state.mjs`
