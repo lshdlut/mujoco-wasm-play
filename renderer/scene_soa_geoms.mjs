@@ -43,6 +43,17 @@ function createInfiniteGroundHelper({
     uMuJoCoTexEnabled: { value: 0 },
     uMuJoCoMap: { value: null },
     uMuJoCoTexScl: { value: new THREE.Vector2(1, 1) },
+    uPresetAlbedoEnabled: { value: 0 },
+    uPresetAlbedoMap: { value: null },
+    uPresetAlbedoTexScl: { value: new THREE.Vector2(1, 1) },
+    uPresetAlbedoGain: { value: 1.0 },
+    uPresetNormalEnabled: { value: 0 },
+    uPresetNormalMap: { value: null },
+    uPresetNormalTexScl: { value: new THREE.Vector2(1, 1) },
+    uPresetNormalScale: { value: new THREE.Vector2(1, 1) },
+    uPresetRoughnessEnabled: { value: 0 },
+    uPresetRoughnessMap: { value: null },
+    uPresetRoughnessTexScl: { value: new THREE.Vector2(1, 1) },
     uDistance: { value: distance },
     uFadeStart: { value: distance * 0.9 },
     uFadeEnd: { value: distance },
@@ -67,6 +78,17 @@ function createInfiniteGroundHelper({
     shader.uniforms.uMuJoCoTexEnabled = uniforms.uMuJoCoTexEnabled;
     shader.uniforms.uMuJoCoMap = uniforms.uMuJoCoMap;
     shader.uniforms.uMuJoCoTexScl = uniforms.uMuJoCoTexScl;
+    shader.uniforms.uPresetAlbedoEnabled = uniforms.uPresetAlbedoEnabled;
+    shader.uniforms.uPresetAlbedoMap = uniforms.uPresetAlbedoMap;
+    shader.uniforms.uPresetAlbedoTexScl = uniforms.uPresetAlbedoTexScl;
+    shader.uniforms.uPresetAlbedoGain = uniforms.uPresetAlbedoGain;
+    shader.uniforms.uPresetNormalEnabled = uniforms.uPresetNormalEnabled;
+    shader.uniforms.uPresetNormalMap = uniforms.uPresetNormalMap;
+    shader.uniforms.uPresetNormalTexScl = uniforms.uPresetNormalTexScl;
+    shader.uniforms.uPresetNormalScale = uniforms.uPresetNormalScale;
+    shader.uniforms.uPresetRoughnessEnabled = uniforms.uPresetRoughnessEnabled;
+    shader.uniforms.uPresetRoughnessMap = uniforms.uPresetRoughnessMap;
+    shader.uniforms.uPresetRoughnessTexScl = uniforms.uPresetRoughnessTexScl;
     shader.uniforms.uDistance = uniforms.uDistance;
     shader.uniforms.uFadeStart = uniforms.uFadeStart;
     shader.uniforms.uFadeEnd = uniforms.uFadeEnd;
@@ -114,6 +136,17 @@ varying float vCameraSide;
 uniform float uMuJoCoTexEnabled;
 uniform sampler2D uMuJoCoMap;
 uniform vec2 uMuJoCoTexScl;
+uniform float uPresetAlbedoEnabled;
+uniform sampler2D uPresetAlbedoMap;
+uniform vec2 uPresetAlbedoTexScl;
+uniform float uPresetAlbedoGain;
+uniform float uPresetNormalEnabled;
+uniform sampler2D uPresetNormalMap;
+uniform vec2 uPresetNormalTexScl;
+uniform vec2 uPresetNormalScale;
+uniform float uPresetRoughnessEnabled;
+uniform sampler2D uPresetRoughnessMap;
+uniform vec2 uPresetRoughnessTexScl;
 uniform float uDistance;
 uniform float uFadeStart;
 uniform float uFadeEnd;
@@ -126,6 +159,50 @@ uniform vec3 uPlaneNormal;
 uniform float uGridStep;
 uniform vec3 uGridColor;
 uniform float uGridIntensity;
+vec2 presetGroundUv(vec2 scl) {
+  return vec2(
+    0.5 * vPlaneCoord.x * scl.x - 0.5,
+    -0.5 * vPlaneCoord.y * scl.y - 0.5
+  );
+}
+float presetGroundFootprint(vec2 uv) {
+  vec2 d = fwidth(uv);
+  return max(abs(d.x), abs(d.y));
+}
+float presetGroundFade(float footprint, float startValue, float endValue) {
+  return 1.0 - smoothstep(startValue, endValue, footprint);
+}
+float presetGroundDistanceFade(float planarDist, float startValue, float endValue) {
+  return 1.0 - smoothstep(startValue, endValue, planarDist);
+}
+float presetGroundLuma(vec3 color) {
+  return dot(color, vec3(0.299, 0.587, 0.114));
+}
+vec2 presetGroundVariantUv(vec2 uv) {
+  return uv + vec2(0.371, 0.617);
+}
+float presetGroundHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+float presetGroundNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(presetGroundHash(i + vec2(0.0, 0.0)), presetGroundHash(i + vec2(1.0, 0.0)), u.x),
+    mix(presetGroundHash(i + vec2(0.0, 1.0)), presetGroundHash(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+float presetGroundAntiTileMix(vec2 uv) {
+  float mask = presetGroundNoise(uv * 0.12 + vec2(3.7, 5.1));
+  return smoothstep(0.28, 0.72, mask);
+}
+float presetGroundPlanarDistance() {
+  vec3 camVec = cameraPosition - uPlaneOrigin;
+  vec2 camCoord = vec2(dot(camVec, uPlaneAxisU), dot(camVec, uPlaneAxisV));
+  return length(camCoord - vPlaneCoord);
+}
 ${depthOnly ? shader.fragmentShader.replace(
       '#include <map_fragment>',
       '#include <map_fragment>'
@@ -148,13 +225,31 @@ ${depthOnly ? shader.fragmentShader.replace(
       // Match MuJoCo's generated 2D texture coords (see engine_vis_visualize.c):
       // u = 0.5 * repeatX * x - 0.5, v = -0.5 * repeatY * y - 0.5.
       if (uMuJoCoTexEnabled > 0.5) {
-        vec2 scl = uMuJoCoTexScl;
-        vec2 uv = vec2(
-          0.5 * vPlaneCoord.x * scl.x - 0.5,
-          -0.5 * vPlaneCoord.y * scl.y - 0.5
-        );
+        vec2 uv = presetGroundUv(uMuJoCoTexScl);
         vec4 texColor = texture2D(uMuJoCoMap, uv);
         diffuseColor.rgb *= texColor.rgb;
+      }
+      if (uPresetAlbedoEnabled > 0.5) {
+        vec2 uv = presetGroundUv(uPresetAlbedoTexScl);
+        float antiTileMix = presetGroundAntiTileMix(uv);
+        vec3 texColorA = texture2D(uPresetAlbedoMap, uv).rgb;
+        vec3 texColorB = texture2D(uPresetAlbedoMap, presetGroundVariantUv(uv)).rgb;
+        vec3 texColor = mix(texColorA, texColorB, antiTileMix);
+        float planarDist = presetGroundPlanarDistance();
+        float footprint = presetGroundFootprint(uv);
+        float distanceMix = 1.0 - presetGroundDistanceFade(planarDist, 180.0, 1800.0);
+        float minifyMix = 1.0 - presetGroundFade(footprint, 1.5, 4.0);
+        float macroMix = max(distanceMix, minifyMix);
+        vec2 macroUv = presetGroundUv(max(uPresetAlbedoTexScl * 0.08, vec2(0.08)));
+        vec2 macroUv2 = vec2(-macroUv.y * 0.61 + 0.13, macroUv.x * 0.73 + 0.07);
+        vec3 macroColorA = texture2D(uPresetAlbedoMap, macroUv).rgb;
+        vec3 macroColorB = texture2D(uPresetAlbedoMap, macroUv2).rgb;
+        vec3 farColor = mix(macroColorA, macroColorB, 0.18);
+        farColor = mix(vec3(presetGroundLuma(farColor)), farColor, 0.75);
+        texColor = mix(texColor, farColor, macroMix * 0.008);
+        float albedoGain = max(uPresetAlbedoGain, 1.0);
+        texColor = 1.0 - (1.0 - texColor) / albedoGain;
+        diffuseColor.rgb *= texColor;
       }`
     ).replace(
       '#include <dithering_fragment>',
@@ -197,6 +292,55 @@ ${depthOnly ? shader.fragmentShader.replace(
       gl_FragColor.a = alpha;
       #include <dithering_fragment>`
     )}`;
+      if (!depthOnly) {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <normal_fragment_maps>',
+          `#include <normal_fragment_maps>
+
+      if (uPresetNormalEnabled > 0.5) {
+        vec2 uv = presetGroundUv(uPresetNormalTexScl);
+        float antiTileMix = presetGroundAntiTileMix(uv);
+        float planarDist = presetGroundPlanarDistance();
+        float footprint = presetGroundFootprint(uv);
+        float distanceFade = presetGroundDistanceFade(planarDist, 180.0, 1500.0);
+        float minifyFade = presetGroundFade(footprint, 1.0, 4.5);
+        float normalFade = mix(0.12, 0.78, min(distanceFade, minifyFade));
+        vec3 mapNA = texture2D(uPresetNormalMap, uv).xyz * 2.0 - 1.0;
+        vec3 mapNB = texture2D(uPresetNormalMap, presetGroundVariantUv(uv)).xyz * 2.0 - 1.0;
+        vec3 mapN = normalize(mix(mapNA, mapNB, antiTileMix));
+        mapN = normalize(vec3(mapN.xy * uPresetNormalScale * normalFade, max(mapN.z, 1e-5)));
+        vec3 tangentView = normalize(mat3(viewMatrix) * normalize(uPlaneAxisU));
+        vec3 bitangentView = normalize(mat3(viewMatrix) * normalize(uPlaneAxisV));
+        vec3 normalView = normalize(mat3(viewMatrix) * normalize(uPlaneNormal));
+        mat3 presetTbn = mat3(tangentView, bitangentView, normalView);
+        vec3 mappedNormal = normalize(presetTbn * mapN);
+        normal = normalize(mix(normal, mappedNormal, normalFade));
+      }`
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <roughnessmap_fragment>',
+          `#include <roughnessmap_fragment>
+
+      if (uPresetRoughnessEnabled > 0.5) {
+        vec2 uv = presetGroundUv(uPresetRoughnessTexScl);
+        float antiTileMix = presetGroundAntiTileMix(uv);
+        float planarDist = presetGroundPlanarDistance();
+        float footprint = presetGroundFootprint(uv);
+        float distanceFade = presetGroundDistanceFade(planarDist, 220.0, 1600.0);
+        float minifyFade = presetGroundFade(footprint, 1.2, 5.0);
+        float roughnessFade = mix(0.4, 1.0, min(distanceFade, minifyFade));
+        float presetRoughnessA = clamp(texture2D(uPresetRoughnessMap, uv).r, 0.0, 1.0);
+        float presetRoughnessB = clamp(texture2D(uPresetRoughnessMap, presetGroundVariantUv(uv)).r, 0.0, 1.0);
+        float presetRoughness = mix(presetRoughnessA, presetRoughnessB, antiTileMix);
+        // Keep the projected infinite-ground response conservative so the
+        // horizon does not collapse into a dead-flat white band.
+        presetRoughness = clamp(0.78 + (presetRoughness - 0.969) * 24.0, 0.68, 0.93);
+        presetRoughness = mix(0.92, presetRoughness, roughnessFade);
+        roughnessFactor *= presetRoughness;
+        roughnessFactor = max(roughnessFactor, mix(0.92, 0.76, roughnessFade));
+      }`
+        );
+      }
       targetMaterial.userData.shader = shader;
     };
   };
@@ -1241,10 +1385,23 @@ function syncRendererAssets(ctx, assets) {
     }
     ctx.assetCache.mjTextures.clear();
   }
+  if (ctx.assetCache && ctx.assetCache.presetGroundTextures instanceof Map) {
+    for (const texture of ctx.assetCache.presetGroundTextures.values()) {
+      if (texture && typeof texture.dispose === 'function') {
+        try {
+          texture.dispose();
+        } catch (err) {
+          strictCatch(err, 'main:assetCache_dispose');
+        }
+      }
+    }
+    ctx.assetCache.presetGroundTextures.clear();
+  }
   ctx.assetCache = {
     meshGeometries: new Map(),
     hfieldGeometries: new Map(),
     mjTextures: new Map(),
+    presetGroundTextures: new Map(),
   };
 }
 
@@ -1610,7 +1767,66 @@ function ensureAssetCache(ctx) {
   if (!(cache.meshGeometries instanceof Map)) cache.meshGeometries = new Map();
   if (!(cache.hfieldGeometries instanceof Map)) cache.hfieldGeometries = new Map();
   if (!(cache.mjTextures instanceof Map)) cache.mjTextures = new Map();
+  if (!(cache.presetGroundTextures instanceof Map)) cache.presetGroundTextures = new Map();
   return cache;
+}
+
+function configurePresetGroundTexture(ctx, texture, url, colorSpaceMode) {
+  if (!texture) return null;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  if (typeof texture.flipY === 'boolean') {
+    texture.flipY = true;
+  }
+  if (colorSpaceMode === 'srgb' && 'colorSpace' in texture && typeof THREE.SRGBColorSpace === 'string') {
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
+  texture.userData = texture.userData || {};
+  texture.userData.sourceUrl = String(url || '').trim();
+  const maxAnisotropy = ctx?.renderer?.capabilities?.getMaxAnisotropy?.() || 0;
+  if ('anisotropy' in texture && maxAnisotropy > 0) {
+    texture.anisotropy = maxAnisotropy;
+  }
+  if (isTextureImageReady(texture)) {
+    texture.needsUpdate = true;
+  }
+  return texture;
+}
+
+function getOrCreatePresetGroundTexture(ctx, url, options = {}) {
+  const key = String(url || '').trim();
+  if (!key) return null;
+  const colorSpaceMode = options.colorSpace === 'srgb' ? 'srgb' : 'none';
+  const cacheKey = `${colorSpaceMode}:${key}`;
+  const cache = ensureAssetCache(ctx).presetGroundTextures;
+  if (cache.has(cacheKey)) return cache.get(cacheKey) || null;
+  const loader = ctx._textureLoader || (ctx._textureLoader = new THREE.TextureLoader());
+  const texture = loader.load(
+    key,
+    (loadedTexture) => {
+      configurePresetGroundTexture(ctx, loadedTexture, key, colorSpaceMode);
+      cache.set(cacheKey, loadedTexture);
+    },
+    undefined,
+    (err) => {
+      cache.delete(cacheKey);
+      strictCatch(err, 'main:preset_ground_texture_load');
+    },
+  );
+  configurePresetGroundTexture(ctx, texture, key, colorSpaceMode);
+  cache.set(cacheKey, texture);
+  return texture;
+}
+
+function isTextureImageReady(texture) {
+  const image = texture?.image || texture?.source?.data || null;
+  if (!image) return false;
+  if (typeof image.width === 'number' && image.width > 0) return true;
+  if (typeof image.height === 'number' && image.height > 0) return true;
+  if (typeof image.naturalWidth === 'number' && image.naturalWidth > 0) return true;
+  if (typeof image.naturalHeight === 'number' && image.naturalHeight > 0) return true;
+  if (ArrayBuffer.isView(image) && image.byteLength > 0) return true;
+  return false;
 }
 
 function getSharedMeshGeometry(ctx, assets, dataId) {
@@ -2152,6 +2368,8 @@ export {
   resolveMaterialRoughness,
   resolveMaterialEmission,
   applyReflectanceToMaterial,
+  getOrCreatePresetGroundTexture,
+  isTextureImageReady,
   ensureGeomMesh,
   ensureGeomState,
   setGeomViewProps,

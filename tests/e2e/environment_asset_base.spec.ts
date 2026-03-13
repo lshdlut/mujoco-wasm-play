@@ -20,4 +20,19 @@ test('envAssetBase routes preset HDRI URLs through runtime config', async ({ pag
     const state = (window as any).__viewerStore?.get?.();
     return state?.rendering?.appearance?.hdri ?? null;
   })).toBe(`${expectedBase}rustig_koppie_puresky_4k.hdr`);
+
+  await expect.poll(async () => page.evaluate(() => {
+    const state = (window as any).__viewerStore?.get?.();
+    return state?.rendering?.appearance?.ground?.surface?.albedo ?? null;
+  })).toBe(`${expectedBase}preset-ground/sandy_gravel_diff_2k.jpg`);
+
+  await expect.poll(async () => page.evaluate(() => {
+    const state = (window as any).__viewerStore?.get?.();
+    return state?.rendering?.appearance?.ground?.surface?.normal ?? null;
+  })).toBe(`${expectedBase}preset-ground/sandy_gravel_nor_gl_2k.png`);
+
+  await expect.poll(async () => page.evaluate(() => {
+    const state = (window as any).__viewerStore?.get?.();
+    return state?.rendering?.appearance?.ground?.surface?.roughness ?? null;
+  })).toBe(`${expectedBase}preset-ground/sandy_gravel_rough_2k.png`);
 });

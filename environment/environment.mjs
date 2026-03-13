@@ -24,6 +24,27 @@ function resolveEnvironmentAssetUrl(fileName, config = getRuntimeConfig()) {
   return new URL(fileName, resolveEnvironmentAssetBase(config)).href;
 }
 
+function resolveGroundSurface(surface, config = getRuntimeConfig()) {
+  if (!surface || typeof surface !== 'object') return null;
+  const {
+    albedoFile,
+    normalFile,
+    roughnessFile,
+    ...rest
+  } = surface;
+  const resolved = { ...rest };
+  if (typeof albedoFile === 'string' && albedoFile.length) {
+    resolved.albedo = resolveEnvironmentAssetUrl(albedoFile, config);
+  }
+  if (typeof normalFile === 'string' && normalFile.length) {
+    resolved.normal = resolveEnvironmentAssetUrl(normalFile, config);
+  }
+  if (typeof roughnessFile === 'string' && roughnessFile.length) {
+    resolved.roughness = resolveEnvironmentAssetUrl(roughnessFile, config);
+  }
+  return resolved;
+}
+
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
   if (value <= 0) return 0;
@@ -45,34 +66,46 @@ const FALLBACK_PRESET_TEMPLATES = {
     background: 0xdde6f4,
     // Base clear colour used when no skybox/environment is active.
     clearColor: 0xd6dce4,
-    exposure: 0.5,
-    ambient: { color: 0xf0f4ff, intensity: 0.1 },
-    hemi: { sky: 0xf0f4ff, ground: 0x10121a, intensity: 0.18 },
+    exposure: 0.88,
+    ambient: { color: 0xf0f4ff, intensity: 0.14 },
+    hemi: { sky: 0xf0f4ff, ground: 0x10121a, intensity: 0.22 },
     dir: {
       color: 0xffffff,
-      intensity: 3,
+      intensity: 3.5,
       position: [9, -5.3, 3],
       target: [0, 1, 1],
       shadowBias: -0.0001,
     },
-    fill: { color: 0xb6d5ff, intensity: 0.18, position: [-4, 3, 2] },
+    fill: { color: 0xb6d5ff, intensity: 0.28, position: [-4, 3, 2] },
     shadowBias: -0.00015,
     // Kept deliberately low so HDRI does not wash out shadows.
-    envIntensity: 0.35,
+    envIntensity: 0.62,
     // Preset-specific environment settings
     hdriFile: 'rustig_koppie_puresky_4k.hdr',
     backgroundBottom: 0x6a8bb3,
     ground: {
       style: 'shadow',
-      opacity: 0.95,
-      color: 0xffffff,
+      opacity: 1.0,
+      color: 0xfffdf8,
       metallic: 0,
+      roughness: 0.78,
+      surface: {
+        albedoFile: 'preset-ground/sandy_gravel_diff_2k.jpg',
+        normalFile: 'preset-ground/sandy_gravel_nor_gl_2k.png',
+        roughnessFile: 'preset-ground/sandy_gravel_rough_2k.png',
+        projection: 'infinite',
+        // Sandy Gravel captures a much smaller ground footprint, so keeping
+        // repeat near 0.95 preserves its denser near-field texel density.
+        repeat: 0.95,
+        albedoGain: 2.4,
+        normalScale: 0.3,
+      },
       infinite: {
         distance: 2000,
         fadePow: 2.5,
         fadeStartFactor: 0.7,
         gridStep: 2.0,
-        gridIntensity: 0.2,
+        gridIntensity: 0.0,
         gridColor: 0x3a4250,
       },
     },
@@ -93,31 +126,41 @@ const FALLBACK_PRESET_TEMPLATES = {
     background: 0x02030a,
     // Base clear colour for night preset when no skybox/environment is active.
     clearColor: 0x02030a,
-    exposure: 0.5,
-    ambient: { color: 0xf0f4ff, intensity: 0.2 },
-    hemi: { sky: 0x22273a, ground: 0x02030a, intensity: 0.05 },
+    exposure: 0.9,
+    ambient: { color: 0xf0f4ff, intensity: 0.3 },
+    hemi: { sky: 0x22273a, ground: 0x02030a, intensity: 0.09 },
     dir: {
       color: 0xffffff,
-      intensity: 1,
-      position: [1, -3, 2],
-      target: [0, 0, -3],
+      intensity: 2.1,
+      position: [5.2, -4.2, 1.15],
+      target: [0, 0, 0],
       shadowBias: -0.0001,
     },
-    fill: { color: 0x182030, intensity: 0.14, position: [-1.5, 1.5, 1] },
+    fill: { color: 0x1b2334, intensity: 0.14, position: [-1.5, 1.5, 1] },
     shadowBias: -0.0002,
-    envIntensity: 0.08,
+    envIntensity: 0.24,
     hdriFile: 'starmap_random_2020_4k_rot.exr',
     backgroundBottom: 0x02030a,
     ground: {
       style: 'shadow',
-      opacity: 0.25,
-      color: 0xffffff,
+      opacity: 1.0,
+      color: 0xf2f4f5,
+      roughness: 0.82,
+      surface: {
+        albedoFile: 'preset-ground/sandy_gravel_diff_2k.jpg',
+        normalFile: 'preset-ground/sandy_gravel_nor_gl_2k.png',
+        roughnessFile: 'preset-ground/sandy_gravel_rough_2k.png',
+        projection: 'infinite',
+        repeat: 0.95,
+        albedoGain: 1.2,
+        normalScale: 0.4,
+      },
       infinite: {
         distance: 2000,
         fadePow: 2.5,
         fadeStartFactor: 0.7,
         gridStep: 2.0,
-        gridIntensity: 0.18,
+        gridIntensity: 0.0,
         gridColor: 0x2a2f3c,
       },
     },
@@ -154,8 +197,15 @@ function buildFallbackPreset(key, config = getRuntimeConfig()) {
   const presetKey = normaliseFallbackPresetKey(key);
   const template = FALLBACK_PRESET_TEMPLATES[presetKey];
   const { hdriFile, ...rest } = template;
+  const ground = rest.ground && typeof rest.ground === 'object'
+    ? {
+        ...rest.ground,
+        surface: resolveGroundSurface(rest.ground.surface, config),
+      }
+    : rest.ground;
   return {
     ...rest,
+    ground,
     hdri: resolveEnvironmentAssetUrl(hdriFile, config),
   };
 }

@@ -31,13 +31,13 @@ import {
   getWorldScene,
   renderWorldScene,
 } from './three_helpers.mjs';
-import { disposeOverlay3D, ensureOverlay3D } from './overlay3d.mjs';
 import {
   clearLabelOverlay,
   disposeLabelOverlay,
   renderLabelOverlay,
   syncLabelOverlayViewport,
 } from './label_overlay.mjs';
+import { disposeOverlay3D, ensureOverlay3D } from './overlay3d.mjs';
 import { installMuJoCoShadowViewportInset } from './mujoco_shadows.mjs';
 import { MJ_GEOM, MJ_LIGHT_TYPE, MJ_MAXLIGHT, MJ_MAXPLANEGRID, MJ_MINVAL, MJ_OBJ, MJ_TEXTURE, MJ_VIS } from './mujoco_constants.mjs';
 import { applyMuJoCoTextureToMesh, quantize1e6, quantize1e3, resolveMaterialTextureDescriptor } from './mujoco_textures.mjs';
@@ -79,6 +79,8 @@ import {
   resolveMaterialRoughness,
   resolveMaterialEmission,
   applyReflectanceToMaterial,
+  getOrCreatePresetGroundTexture,
+  isTextureImageReady,
   ensureGeomMesh,
   ensureGeomState,
   setGeomViewProps,
@@ -87,6 +89,20 @@ import {
 
 
 const FIXED_CAMERA_OFFSET = 2;
+const __TMP_VEC3 = new THREE.Vector3();
+const __TMP_VEC3_A = new THREE.Vector3();
+const __TMP_VEC3_B = new THREE.Vector3();
+const __TMP_VEC3_C = new THREE.Vector3();
+const __TMP_QUAT_A = new THREE.Quaternion();
+
+// MuJoCo uses `mju_round` (half away from zero), which differs from
+// `Math.round` for negative half-values.
+function mjuRound(value) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return 0;
+  return v >= 0 ? Math.floor(v + 0.5) : Math.ceil(v - 0.5);
+}
+
 const DEFAULT_CLEAR_HEX = 0xd6dce4;
 const DEFAULT_CLEAR_COLOR = new THREE.Color(DEFAULT_CLEAR_HEX);
 
@@ -975,7 +991,6 @@ function applyFixedCameraPreset(ctx, snapshot, state, { tempVecA, tempVecB, temp
   if (Number.isFinite(fovy) && ctx.camera.fov !== fovy) {
     ctx.camera.fov = fovy;
     ctx.camera.updateProjectionMatrix();
-    syncLabelOverlayViewport(ctx);
   }
   ctx.fixedCameraActive = true;
   return true;
@@ -1145,7 +1160,7 @@ function computeScenePolicy(snapshot, state, context) {
     };
   }
 
-function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, sceneFlags = null) {
+function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, sceneFlags = null, state = null) {
   const groundData = mesh.userData?.infiniteGround;
   if (!groundData) return;
   const xpos = snapshot?.scn_pos;
@@ -1156,20 +1171,41 @@ function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, 
   const userData = mesh.userData || (mesh.userData = {});
 
   const i = scnIndex | 0;
-  const baseIndex = 3 * i;
-  const px = xpos?.[baseIndex + 0] ?? 0;
-  const py = xpos?.[baseIndex + 1] ?? 0;
-  const pz = xpos?.[baseIndex + 2] ?? 0;
-  const matBase = 9 * i;
-  const m00 = xmat?.[matBase + 0] ?? 1;
-  const m01 = xmat?.[matBase + 1] ?? 0;
-  const m02 = xmat?.[matBase + 2] ?? 0;
-  const m10 = xmat?.[matBase + 3] ?? 0;
-  const m11 = xmat?.[matBase + 4] ?? 1;
-  const m12 = xmat?.[matBase + 5] ?? 0;
-  const m20 = xmat?.[matBase + 6] ?? 0;
-  const m21 = xmat?.[matBase + 7] ?? 0;
-  const m22 = xmat?.[matBase + 8] ?? 1;
+  const surfaceCfg = state?.rendering?.appearance?.ground?.surface || null;
+  const wantsPresetSurface =
+    !!surfaceCfg && (
+      typeof surfaceCfg.albedo === 'string' ||
+      typeof surfaceCfg.normal === 'string' ||
+      typeof surfaceCfg.roughness === 'string' ||
+      typeof surfaceCfg.detail === 'string'
+    );
+  const modelGeomIndex = Number.isFinite(userData.geomIndex) ? (userData.geomIndex | 0) : -1;
+  const modelXpos = snapshot?.xpos || null;
+  const modelXmat = snapshot?.xmat || null;
+  const canUseModelPose =
+    wantsPresetSurface &&
+    modelGeomIndex >= 0 &&
+    !!modelXpos &&
+    !!modelXmat &&
+    modelXpos.length >= (modelGeomIndex * 3 + 3) &&
+    modelXmat.length >= (modelGeomIndex * 9 + 9);
+  const poseIndex = canUseModelPose ? modelGeomIndex : i;
+  const posePos = canUseModelPose ? modelXpos : xpos;
+  const poseMat = canUseModelPose ? modelXmat : xmat;
+  const baseIndex = 3 * poseIndex;
+  const px = posePos?.[baseIndex + 0] ?? 0;
+  const py = posePos?.[baseIndex + 1] ?? 0;
+  const pz = posePos?.[baseIndex + 2] ?? 0;
+  const matBase = 9 * poseIndex;
+  const m00 = poseMat?.[matBase + 0] ?? 1;
+  const m01 = poseMat?.[matBase + 1] ?? 0;
+  const m02 = poseMat?.[matBase + 2] ?? 0;
+  const m10 = poseMat?.[matBase + 3] ?? 0;
+  const m11 = poseMat?.[matBase + 4] ?? 1;
+  const m12 = poseMat?.[matBase + 5] ?? 0;
+  const m20 = poseMat?.[matBase + 6] ?? 0;
+  const m21 = poseMat?.[matBase + 7] ?? 0;
+  const m22 = poseMat?.[matBase + 8] ?? 1;
   setQuatFromMat3(__TMP_QUAT_A, m00, m01, m02, m10, m11, m12, m20, m21, m22);
   const axisU = __TMP_VEC3_A.set(1, 0, 0).applyQuaternion(__TMP_QUAT_A).normalize();
   const axisV = __TMP_VEC3_B.set(0, 1, 0).applyQuaternion(__TMP_QUAT_A).normalize();
@@ -1191,53 +1227,56 @@ function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, 
     const vx = cameraPos.x - originX;
     const vy = cameraPos.y - originY;
     const vz = cameraPos.z - originZ;
+    if (!wantsPresetSurface) {
+      let repeatX = 0;
+      let repeatY = 0;
+      const matId = Number.isFinite(userData.matId) ? (userData.matId | 0) : -1;
+      const texrepeat = assets?.materials?.texrepeat || null;
+      repeatX = (texrepeat && matId >= 0 && texrepeat.length >= (matId * 2 + 2))
+        ? Number(texrepeat[matId * 2 + 0])
+        : 0;
+      repeatY = (texrepeat && matId >= 0 && texrepeat.length >= (matId * 2 + 2))
+        ? Number(texrepeat[matId * 2 + 1])
+        : 0;
+      // Mirror the `texrepeat="x"` MuJoCo XML behavior: the missing axis is 0 in
+      // the model buffer, but the renderer treats it as "copy the other axis".
+      if (!Number.isFinite(repeatX)) repeatX = 0;
+      if (!Number.isFinite(repeatY)) repeatY = 0;
+      if (repeatX === 0 && repeatY === 0) {
+        repeatX = 1;
+        repeatY = 1;
+      } else if (repeatX === 0) {
+        repeatX = repeatY;
+      } else if (repeatY === 0) {
+        repeatY = repeatX;
+      }
+      const mapZfar = Number(getSnapshotVisual(snapshot)?.map?.zfar);
+      const extent = Number(getSnapshotStatistic(snapshot)?.extent);
+      let zfar = (Number.isFinite(mapZfar) ? mapZfar : 0) * (Number.isFinite(extent) ? extent : 1);
+      if (!(Number.isFinite(zfar) && zfar > 0)) {
+        const fallbackFar = Number(ctx?.camera?.far);
+        zfar = Number.isFinite(fallbackFar) && fallbackFar > 0 ? fallbackFar : 1;
+      }
+      const fallbackStep = (2.1 * zfar) / (MJ_MAXPLANEGRID - 2);
 
-    const matId = Number.isFinite(userData.matId) ? (userData.matId | 0) : -1;
-    const texrepeat = assets?.materials?.texrepeat || null;
-    let repeatX = (texrepeat && matId >= 0 && texrepeat.length >= (matId * 2 + 2))
-      ? Number(texrepeat[matId * 2 + 0])
-      : 0;
-    let repeatY = (texrepeat && matId >= 0 && texrepeat.length >= (matId * 2 + 2))
-      ? Number(texrepeat[matId * 2 + 1])
-      : 0;
-    // Mirror the `texrepeat="x"` MuJoCo XML behavior: the missing axis is 0 in
-    // the model buffer, but the renderer treats it as "copy the other axis".
-    if (!Number.isFinite(repeatX)) repeatX = 0;
-    if (!Number.isFinite(repeatY)) repeatY = 0;
-    if (repeatX === 0 && repeatY === 0) {
-      repeatX = 1;
-      repeatY = 1;
-    } else if (repeatX === 0) {
-      repeatX = repeatY;
-    } else if (repeatY === 0) {
-      repeatY = repeatX;
-    }
-    const mapZfar = Number(getSnapshotVisual(snapshot)?.map?.zfar);
-    const extent = Number(getSnapshotStatistic(snapshot)?.extent);
-    let zfar = (Number.isFinite(mapZfar) ? mapZfar : 0) * (Number.isFinite(extent) ? extent : 1);
-    if (!(Number.isFinite(zfar) && zfar > 0)) {
-      const fallbackFar = Number(ctx?.camera?.far);
-      zfar = Number.isFinite(fallbackFar) && fallbackFar > 0 ? fallbackFar : 1;
-    }
-    const fallbackStep = (2.1 * zfar) / (MJ_MAXPLANEGRID - 2);
-
-    if (recenterU) {
-      let sX = fallbackStep;
-      if (repeatX > 0) sX = 2 / repeatX;
-      const dX = vx * axisU.x + vy * axisU.y + vz * axisU.z;
-      const stepX = 2 * sX * mjuRound(0.5 * dX / sX);
-      originX += axisU.x * stepX;
-      originY += axisU.y * stepX;
-      originZ += axisU.z * stepX;
-    }
-    if (recenterV) {
-      let sY = fallbackStep;
-      if (repeatY > 0) sY = 2 / repeatY;
-      const dY = vx * axisV.x + vy * axisV.y + vz * axisV.z;
-      const stepY = 2 * sY * mjuRound(0.5 * dY / sY);
-      originX += axisV.x * stepY;
-      originY += axisV.y * stepY;
-      originZ += axisV.z * stepY;
+      if (recenterU) {
+        let sX = fallbackStep;
+        if (repeatX > 0) sX = 2 / repeatX;
+        const dX = vx * axisU.x + vy * axisU.y + vz * axisU.z;
+        const stepX = 2 * sX * mjuRound(0.5 * dX / sX);
+        originX += axisU.x * stepX;
+        originY += axisU.y * stepX;
+        originZ += axisU.z * stepX;
+      }
+      if (recenterV) {
+        let sY = fallbackStep;
+        if (repeatY > 0) sY = 2 / repeatY;
+        const dY = vx * axisV.x + vy * axisV.y + vz * axisV.z;
+        const stepY = 2 * sY * mjuRound(0.5 * dY / sY);
+        originX += axisV.x * stepY;
+        originY += axisV.y * stepY;
+        originZ += axisV.z * stepY;
+      }
     }
   }
   if (uniforms.uPlaneOrigin?.value) {
@@ -1278,6 +1317,144 @@ function updateInfinitePlaneFromSceneSoA(ctx, mesh, scnIndex, snapshot, assets, 
     }
     userData.segmentGroundGrid = null;
   }
+}
+
+function hasPresetGroundSurfaceTextures(surfaceCfg) {
+  return !!surfaceCfg && (
+    typeof surfaceCfg.albedo === 'string' ||
+    typeof surfaceCfg.normal === 'string' ||
+    typeof surfaceCfg.roughness === 'string'
+  );
+}
+
+function readPresetGroundSurfaceParams(surfaceCfg) {
+  const params = {
+    albedoUrl: '',
+    normalUrl: '',
+    roughnessUrl: '',
+    projection: String(surfaceCfg?.projection || '').trim(),
+    wantsPresetSurface: false,
+    albedoRepeatX: 1,
+    albedoRepeatY: 1,
+    normalRepeatX: 1,
+    normalRepeatY: 1,
+    roughnessRepeatX: 1,
+    roughnessRepeatY: 1,
+    albedoGain: 1,
+    normalScaleX: 1,
+    normalScaleY: 1,
+  };
+  if (!surfaceCfg || typeof surfaceCfg !== 'object') return params;
+  params.albedoUrl = typeof surfaceCfg.albedo === 'string' ? surfaceCfg.albedo : '';
+  params.normalUrl = typeof surfaceCfg.normal === 'string' ? surfaceCfg.normal : '';
+  params.roughnessUrl = typeof surfaceCfg.roughness === 'string' ? surfaceCfg.roughness : '';
+  params.wantsPresetSurface = !!(params.albedoUrl || params.normalUrl || params.roughnessUrl);
+  const readRepeat = (value, fallbackX, fallbackY) => {
+    if (Array.isArray(value) && value.length >= 2) {
+      return [
+        Number.isFinite(value[0]) ? value[0] : fallbackX,
+        Number.isFinite(value[1]) ? value[1] : fallbackY,
+      ];
+    }
+    if (Number.isFinite(value)) {
+      return [value, value];
+    }
+    return [fallbackX, fallbackY];
+  };
+  const [baseRepeatX, baseRepeatY] = readRepeat(surfaceCfg.repeat, 1, 1);
+  [params.albedoRepeatX, params.albedoRepeatY] = readRepeat(
+    surfaceCfg.albedoRepeat,
+    baseRepeatX,
+    baseRepeatY,
+  );
+  [params.normalRepeatX, params.normalRepeatY] = readRepeat(
+    surfaceCfg.normalRepeat,
+    baseRepeatX,
+    baseRepeatY,
+  );
+  [params.roughnessRepeatX, params.roughnessRepeatY] = readRepeat(
+    surfaceCfg.roughnessRepeat,
+    baseRepeatX,
+    baseRepeatY,
+  );
+  params.albedoGain = Number.isFinite(surfaceCfg.albedoGain) && surfaceCfg.albedoGain >= 1
+    ? surfaceCfg.albedoGain
+    : 1;
+  const rawNormalScale = surfaceCfg.normalScale;
+  if (Array.isArray(rawNormalScale) && rawNormalScale.length >= 2) {
+    params.normalScaleX = Number.isFinite(rawNormalScale[0]) ? rawNormalScale[0] : 1;
+    params.normalScaleY = Number.isFinite(rawNormalScale[1]) ? rawNormalScale[1] : 1;
+  } else if (Number.isFinite(rawNormalScale)) {
+    params.normalScaleX = rawNormalScale;
+    params.normalScaleY = rawNormalScale;
+  }
+  return params;
+}
+
+function loadPresetGroundSurfaceTextures(context, params) {
+  const albedoTexture = params.albedoUrl
+    ? getOrCreatePresetGroundTexture(context, params.albedoUrl, { colorSpace: 'srgb' })
+    : null;
+  const normalTexture = params.normalUrl
+    ? getOrCreatePresetGroundTexture(context, params.normalUrl, { colorSpace: 'none' })
+    : null;
+  const roughnessTexture = params.roughnessUrl
+    ? getOrCreatePresetGroundTexture(context, params.roughnessUrl, { colorSpace: 'none' })
+    : null;
+  return {
+    albedoTexture,
+    normalTexture,
+    roughnessTexture,
+    albedoReady: isTextureImageReady(albedoTexture),
+    normalReady: isTextureImageReady(normalTexture),
+    roughnessReady: isTextureImageReady(roughnessTexture),
+  };
+}
+
+function applyPresetGroundSurfaceUniforms(uniforms, params, textures, { disableMuJoCo = false } = {}) {
+  if (!uniforms) return;
+  if (disableMuJoCo) {
+    if (uniforms.uMuJoCoTexEnabled) uniforms.uMuJoCoTexEnabled.value = params.wantsPresetSurface ? 0 : uniforms.uMuJoCoTexEnabled.value;
+    if (params.wantsPresetSurface && uniforms.uMuJoCoMap) uniforms.uMuJoCoMap.value = null;
+  }
+  if (uniforms.uPresetAlbedoEnabled) uniforms.uPresetAlbedoEnabled.value = textures.albedoReady ? 1 : 0;
+  if (uniforms.uPresetAlbedoMap) uniforms.uPresetAlbedoMap.value = textures.albedoReady ? textures.albedoTexture : null;
+  if (uniforms.uPresetAlbedoTexScl?.value?.set) {
+    uniforms.uPresetAlbedoTexScl.value.set(params.albedoRepeatX, params.albedoRepeatY);
+  }
+  if (uniforms.uPresetAlbedoGain) uniforms.uPresetAlbedoGain.value = params.albedoGain;
+  if (uniforms.uPresetNormalEnabled) uniforms.uPresetNormalEnabled.value = textures.normalReady ? 1 : 0;
+  if (uniforms.uPresetNormalMap) uniforms.uPresetNormalMap.value = textures.normalReady ? textures.normalTexture : null;
+  if (uniforms.uPresetNormalTexScl?.value?.set) {
+    uniforms.uPresetNormalTexScl.value.set(params.normalRepeatX, params.normalRepeatY);
+  }
+  if (uniforms.uPresetNormalScale?.value?.set) {
+    uniforms.uPresetNormalScale.value.set(params.normalScaleX, params.normalScaleY);
+  }
+  if (uniforms.uPresetRoughnessEnabled) uniforms.uPresetRoughnessEnabled.value = textures.roughnessReady ? 1 : 0;
+  if (uniforms.uPresetRoughnessMap) uniforms.uPresetRoughnessMap.value = textures.roughnessReady ? textures.roughnessTexture : null;
+  if (uniforms.uPresetRoughnessTexScl?.value?.set) {
+    uniforms.uPresetRoughnessTexScl.value.set(params.roughnessRepeatX, params.roughnessRepeatY);
+  }
+}
+
+function clearPresetGroundSurfaceUniforms(uniforms, { clearMuJoCo = false } = {}) {
+  if (!uniforms) return;
+  if (clearMuJoCo) {
+    if (uniforms.uMuJoCoTexEnabled) uniforms.uMuJoCoTexEnabled.value = 0;
+    if (uniforms.uMuJoCoMap) uniforms.uMuJoCoMap.value = null;
+  }
+  if (uniforms.uPresetAlbedoEnabled) uniforms.uPresetAlbedoEnabled.value = 0;
+  if (uniforms.uPresetAlbedoMap) uniforms.uPresetAlbedoMap.value = null;
+  if (uniforms.uPresetAlbedoTexScl?.value?.set) uniforms.uPresetAlbedoTexScl.value.set(1, 1);
+  if (uniforms.uPresetAlbedoGain) uniforms.uPresetAlbedoGain.value = 1;
+  if (uniforms.uPresetNormalEnabled) uniforms.uPresetNormalEnabled.value = 0;
+  if (uniforms.uPresetNormalMap) uniforms.uPresetNormalMap.value = null;
+  if (uniforms.uPresetNormalTexScl?.value?.set) uniforms.uPresetNormalTexScl.value.set(1, 1);
+  if (uniforms.uPresetNormalScale?.value?.set) uniforms.uPresetNormalScale.value.set(1, 1);
+  if (uniforms.uPresetRoughnessEnabled) uniforms.uPresetRoughnessEnabled.value = 0;
+  if (uniforms.uPresetRoughnessMap) uniforms.uPresetRoughnessMap.value = null;
+  if (uniforms.uPresetRoughnessTexScl?.value?.set) uniforms.uPresetRoughnessTexScl.value.set(1, 1);
 }
 
 function getDefaultVopt(ctx, snapshot) {
@@ -1649,7 +1826,9 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
   ctx.geomState = ctx.geomState || [];
   const safeHide = (meshIndex) => {
     const mesh = Array.isArray(ctx.meshes) ? ctx.meshes[meshIndex] : null;
-    if (mesh) mesh.visible = false;
+    if (mesh) {
+      mesh.visible = false;
+    }
     if (meshIndex >= 0 && inst && Array.isArray(inst.geomRefs)) {
       inst.geomRefs[meshIndex] = null;
     }
@@ -2159,7 +2338,7 @@ function applyMjvSceneSoAGeoms(ctx, snapshot, state, assets, {
     const tXformStart = perfEnabled ? perfNow() : 0;
     const isInfinitePlane = !!mesh.userData?.infinitePlane;
     if (isInfinitePlane) {
-      updateInfinitePlaneFromSceneSoA(ctx, mesh, si, snapshot, assets, flags);
+      updateInfinitePlaneFromSceneSoA(ctx, mesh, si, snapshot, assets, flags, state);
       if (perfEnabled) infiniteXformUpdates += 1;
     } else {
       const posBase = si * 3;
@@ -2583,7 +2762,12 @@ function createRendererManager({
   if (!ctx) throw new Error('renderCtx is required');
   ctx.cameraTarget = ctx.cameraTarget || new THREE.Vector3(0, 0, 0);
   ctx.meshes = ctx.meshes || [];
-  ctx.assetCache = ctx.assetCache || { meshGeometries: new Map(), hfieldGeometries: new Map(), mjTextures: new Map() };
+  ctx.assetCache = ctx.assetCache || {
+    meshGeometries: new Map(),
+    hfieldGeometries: new Map(),
+    mjTextures: new Map(),
+    presetGroundTextures: new Map(),
+  };
   ctx._frameCounter = ctx._frameCounter || 0;
   ctx.boundsEvery = typeof ctx.boundsEvery === 'number' && ctx.boundsEvery > 0 ? ctx.boundsEvery : 2;
   ctx.currentCameraMode = typeof ctx.currentCameraMode === 'number' ? ctx.currentCameraMode : 0;
@@ -2995,6 +3179,8 @@ function createRendererManager({
     const visStruct = getSnapshotVisual(snapshot);
     const statStruct = getSnapshotStatistic(snapshot);
     const hazeConfig = resolveHazeConfig(visStruct, statStruct, context.bounds, hazeEnabled);
+    const presetGroundSurface = state?.rendering?.appearance?.ground?.surface || null;
+    const hasPresetGroundSurface = hasPresetGroundSurfaceTextures(presetGroundSurface);
     const baseRadius =
       (groundUniforms?.uQuadDistance && Number(groundUniforms.uQuadDistance.value))
         || Number(groundData?.baseQuadDistance)
@@ -3003,13 +3189,13 @@ function createRendererManager({
     if (groundUniforms?.uFadePow) {
       const baseFade = Number(groundData?.baseFadePow);
       const defaultFade = Number.isFinite(baseFade) ? baseFade : 2.5;
-      const powValue = hazeConfig.enabled && Number.isFinite(hazeConfig.pow)
+      const powValue = !hasPresetGroundSurface && hazeConfig.enabled && Number.isFinite(hazeConfig.pow)
         ? hazeConfig.pow
-        : (hazeEnabled ? defaultFade : 0.0);
+        : (!hasPresetGroundSurface && hazeEnabled ? defaultFade : 0.0);
       groundUniforms.uFadePow.value = powValue;
     }
     if (groundUniforms) {
-      if (hazeConfig.enabled && baseRadius != null && baseRadius > 0) {
+      if (!hasPresetGroundSurface && hazeConfig.enabled && baseRadius != null && baseRadius > 0) {
         // Default ground haze: fade region is the outer 30% of the
         // visible disc. The cutoff radius is still controlled by
         // uQuadDistance; haze only shapes transparency inside it.
@@ -3023,7 +3209,9 @@ function createRendererManager({
         if (groundUniforms.uFadeEnd) groundUniforms.uFadeEnd.value = 0;
       }
     }
-    const fogConfig = resolveFogConfig(visStruct, statStruct, context.bounds, fogEnabled, context);
+    const fogConfig = hasPresetGroundSurface
+      ? { enabled: false }
+      : resolveFogConfig(visStruct, statStruct, context.bounds, fogEnabled, context);
     if (fogConfig.enabled && !fogConfig.color) {
       const presetFogRaw = state?.rendering?.appearance?.fogColor;
       const presetFog = (typeof presetFogRaw === 'number' && Number.isFinite(presetFogRaw))
@@ -3039,9 +3227,9 @@ function createRendererManager({
     applySceneFog(worldSceneForFog, fogConfig);
     const hazeSummary = {
       mode: 'ground-fade',
-      enabled: hazeEnabled && skyboxEnabled,
+      enabled: !hasPresetGroundSurface && hazeEnabled && skyboxEnabled,
       reason: hazeEnabled
-        ? (skyboxEnabled ? 'enabled' : 'skybox-disabled')
+        ? (hasPresetGroundSurface ? 'preset-ground-surface' : (skyboxEnabled ? 'enabled' : 'skybox-disabled'))
         : 'flag-off',
       fadePow: groundUniforms?.uFadePow?.value ?? null,
       distance: groundDistance,
@@ -3175,7 +3363,9 @@ function createRendererManager({
       drawn = 0;
       if (Array.isArray(context.meshes)) {
         for (const mesh of context.meshes) {
-          if (mesh) mesh.visible = false;
+          if (mesh) {
+            mesh.visible = false;
+          }
         }
       }
       hideFlexGroup(context);
@@ -3184,7 +3374,7 @@ function createRendererManager({
     context.ground = null;
     for (let i = 0; i < ngeom; i += 1) {
       const candidate = context.meshes?.[i] || null;
-      if (candidate?.userData?.infinitePlane && candidate.visible) {
+      if (candidate?.userData?.infinitePlane) {
         context.ground = candidate;
         break;
       }
@@ -3203,24 +3393,42 @@ function createRendererManager({
             emission: groundPreset.emission,
           });
           // Apply infinite-ground specific tuning when available.
+          const surfaceCfg = groundPreset.surface || null;
           const infiniteCfg = groundPreset.infinite || null;
           const groundMesh = context.ground;
           const infiniteData = groundMesh?.userData?.infiniteGround || null;
           const uniforms = infiniteData?.uniforms || null;
+          const surfaceParams = readPresetGroundSurfaceParams(surfaceCfg);
+          const wantsPresetSurface = surfaceParams.wantsPresetSurface;
+          const surfaceTextures = wantsPresetSurface
+            ? loadPresetGroundSurfaceTextures(context, surfaceParams)
+            : null;
+          if (uniforms) {
+            if (wantsPresetSurface && surfaceTextures) {
+              applyPresetGroundSurfaceUniforms(uniforms, surfaceParams, surfaceTextures, { disableMuJoCo: true });
+            } else {
+              clearPresetGroundSurfaceUniforms(uniforms, { clearMuJoCo: wantsPresetSurface });
+            }
+          }
           if (infiniteCfg && uniforms) {
             const dist = Number(infiniteCfg.distance);
             if (Number.isFinite(dist) && dist > 0) {
               if (uniforms.uDistance) uniforms.uDistance.value = dist;
               if (uniforms.uQuadDistance) uniforms.uQuadDistance.value = dist;
-              if (uniforms.uFadeStart && typeof infiniteCfg.fadeStartFactor === 'number') {
+              if (!wantsPresetSurface && uniforms.uFadeStart && typeof infiniteCfg.fadeStartFactor === 'number') {
                 uniforms.uFadeStart.value = dist * infiniteCfg.fadeStartFactor;
               }
-              if (uniforms.uFadeEnd) {
+              if (!wantsPresetSurface && uniforms.uFadeEnd) {
                 uniforms.uFadeEnd.value = dist;
               }
             }
-            if (uniforms.uFadePow && Number.isFinite(infiniteCfg.fadePow)) {
+            if (!wantsPresetSurface && uniforms.uFadePow && Number.isFinite(infiniteCfg.fadePow)) {
               uniforms.uFadePow.value = infiniteCfg.fadePow;
+            }
+            if (wantsPresetSurface) {
+              if (uniforms.uFadeStart) uniforms.uFadeStart.value = 0;
+              if (uniforms.uFadeEnd) uniforms.uFadeEnd.value = 0;
+              if (uniforms.uFadePow) uniforms.uFadePow.value = 0;
             }
             if (uniforms.uGridStep && Number.isFinite(infiniteCfg.gridStep)) {
               uniforms.uGridStep.value = infiniteCfg.gridStep;
@@ -3242,6 +3450,8 @@ function createRendererManager({
             gs.view.emissiveIntensityOverride = null;
             gs.view.__dirty = true;
           }
+          const uniforms = context.ground?.userData?.infiniteGround?.uniforms || null;
+          clearPresetGroundSurfaceUniforms(uniforms);
         }
       }
     }
@@ -3408,15 +3618,13 @@ function createRendererManager({
       ctx.skinGroup = null;
       ctx.skinPool = [];
     }
-    disposeLabelOverlay(ctx);
-
     disposeOverlay3D(ctx);
+    disposeLabelOverlay(ctx);
 
     if (ctx.materialPool && typeof ctx.materialPool.disposeAll === 'function') {
       try { ctx.materialPool.disposeAll(); } catch (err) { strictCatch(err, 'main:materialPool_dispose'); }
       ctx.materialPool = null;
     }
-
     if (ctx.assetCache && ctx.assetCache.meshGeometries instanceof Map) {
       for (const geometry of ctx.assetCache.meshGeometries.values()) {
         if (geometry && typeof geometry.dispose === 'function') {
@@ -3440,6 +3648,14 @@ function createRendererManager({
         }
       }
       ctx.assetCache.mjTextures.clear();
+    }
+    if (ctx.assetCache && ctx.assetCache.presetGroundTextures instanceof Map) {
+      for (const texture of ctx.assetCache.presetGroundTextures.values()) {
+        if (texture && typeof texture.dispose === 'function') {
+          try { texture.dispose(); } catch (err) { strictCatch(err, 'main:assetCache_dispose'); }
+        }
+      }
+      ctx.assetCache.presetGroundTextures.clear();
     }
 
     const disposeResource = (resource) => {
@@ -3481,7 +3697,12 @@ function createRendererManager({
     ctx.hdriBackground = null;
     ctx.skyBackground = null;
     ctx.skyCube = null;
-    ctx.assetCache = { meshGeometries: new Map(), hfieldGeometries: new Map(), mjTextures: new Map() };
+    ctx.assetCache = {
+      meshGeometries: new Map(),
+      hfieldGeometries: new Map(),
+      mjTextures: new Map(),
+      presetGroundTextures: new Map(),
+    };
 
     if (ctx.renderer && typeof ctx.renderer.dispose === 'function') {
       try { ctx.renderer.dispose(); } catch (err) { strictCatch(err, 'main:renderer_dispose'); }
