@@ -86,6 +86,7 @@ export const DEFAULT_VIEWER_STATE = Object.freeze({
       exposure: 1.1,
       envIntensity: 0.0,
       hdri: null,
+      backgroundMode: null,
       backgroundBottom: null,
       ambient: { color: 0xffffff, intensity: 0 },
       hemi: { sky: 0xffffff, ground: 0x10131c, intensity: 0 },

@@ -400,7 +400,7 @@ export function applyGesture(store, backend, payload, onSnapshot = null) {
   }
 }
 
-const VISUAL_OVERRIDE_PRESET = [
+const VISUAL_OVERRIDE_PRESET_SHARED = [
   { path: ['global', 'fovy'], kind: 'float', size: 1, value: 70 },
   { path: ['headlight', 'active'], kind: 'enum', size: 1, value: 0 },
   { path: ['headlight', 'ambient'], kind: 'float_vec', size: 3, value: [0.1, 0.1, 0.1] },
@@ -409,11 +409,8 @@ const VISUAL_OVERRIDE_PRESET = [
   { path: ['map', 'force'], kind: 'float', size: 1, value: 0.005 },
   { path: ['map', 'torque'], kind: 'float', size: 1, value: 0.1 },
   { path: ['map', 'alpha'], kind: 'float', size: 1, value: 0.3 },
-  { path: ['map', 'fogstart'], kind: 'float', size: 1, value: 6 },
-  { path: ['map', 'fogend'], kind: 'float', size: 1, value: 24 },
   { path: ['map', 'znear'], kind: 'float', size: 1, value: 0.01 },
   { path: ['map', 'zfar'], kind: 'float', size: 1, value: 50 },
-  { path: ['map', 'haze'], kind: 'float', size: 1, value: 0.4 },
   { path: ['map', 'shadowclip'], kind: 'float', size: 1, value: 1 },
   { path: ['map', 'shadowscale'], kind: 'float', size: 1, value: 0.6 },
   { path: ['scale', 'forcewidth'], kind: 'float', size: 1, value: 0.1 },
@@ -432,8 +429,6 @@ const VISUAL_OVERRIDE_PRESET = [
   { path: ['scale', 'framewidth'], kind: 'float', size: 1, value: 0.1 },
   { path: ['scale', 'constraint'], kind: 'float', size: 1, value: 0.1 },
   { path: ['scale', 'slidercrank'], kind: 'float', size: 1, value: 0.2 },
-  { path: ['rgba', 'fog'], kind: 'float_vec', size: 4, value: [0.7, 0.75, 0.85, 1] },
-  { path: ['rgba', 'haze'], kind: 'float_vec', size: 4, value: [0.9411765, 0.9568627, 1, 1] },
   { path: ['rgba', 'force'], kind: 'float_vec', size: 4, value: [1, 0.5, 0.5, 1] },
   { path: ['rgba', 'inertia'], kind: 'float_vec', size: 4, value: [0.8, 0.2, 0.2, 0.6] },
   { path: ['rgba', 'joint'], kind: 'float_vec', size: 4, value: [0.2, 0.6, 0.8, 1] },
@@ -448,10 +443,31 @@ const VISUAL_OVERRIDE_PRESET = [
   { path: ['rgba', 'selectpoint'], kind: 'float_vec', size: 4, value: [0.9, 0.9, 0.1, 1] },
 ];
 
+const VISUAL_OVERRIDE_PRESET_BY_KEY = {
+  sun: [
+    { path: ['map', 'fogstart'], kind: 'float', size: 1, value: 6 },
+    { path: ['map', 'fogend'], kind: 'float', size: 1, value: 24 },
+    { path: ['map', 'haze'], kind: 'float', size: 1, value: 0.28 },
+    { path: ['rgba', 'fog'], kind: 'float_vec', size: 4, value: [0.8392157, 0.8901961, 0.9647059, 1] },
+    { path: ['rgba', 'haze'], kind: 'float_vec', size: 4, value: [0.9490196, 0.9686275, 1, 1] },
+  ],
+  moon: [
+    { path: ['map', 'fogstart'], kind: 'float', size: 1, value: 6 },
+    { path: ['map', 'fogend'], kind: 'float', size: 1, value: 20 },
+    { path: ['map', 'haze'], kind: 'float', size: 1, value: 0.22 },
+    { path: ['rgba', 'fog'], kind: 'float_vec', size: 4, value: [0.0666667, 0.0823529, 0.1137255, 1] },
+    { path: ['rgba', 'haze'], kind: 'float_vec', size: 4, value: [0.1058824, 0.1215686, 0.1647059, 1] },
+  ],
+};
+
 function applyPresetOverridesToStruct(base, presetLabel) {
   const source = cloneStruct(base) || {};
-  const preset = typeof presetLabel === 'string' && presetLabel ? presetLabel : 'preset';
-  for (const entry of VISUAL_OVERRIDE_PRESET) {
+  const preset = presetLabel === 'moon' ? 'moon' : 'sun';
+  const overrides = [
+    ...VISUAL_OVERRIDE_PRESET_SHARED,
+    ...(VISUAL_OVERRIDE_PRESET_BY_KEY[preset] || []),
+  ];
+  for (const entry of overrides) {
     const beforeRaw = resolveStructPath(source, entry.path);
     const before = Array.isArray(beforeRaw) ? beforeRaw.slice() : beforeRaw;
     const overrideValue = Array.isArray(entry.value) ? entry.value.slice() : entry.value;
@@ -564,7 +580,7 @@ export async function switchVisualSourceMode(store, backend, requestedMode) {
     }
     const wantsPreset = targetMode === 'preset-sun' || targetMode === 'preset-moon';
     if (wantsPreset && !baselines.presetSun && baselines.model) {
-      const presetBase = applyPresetOverridesToStruct(baselines.model, 'preset-sun');
+      const presetBase = applyPresetOverridesToStruct(baselines.model, 'sun');
       baselines.presetSun = cloneStruct(presetBase);
       baselines.sceneFlagsPresetSun = baselines.sceneFlagsModel ? [...baselines.sceneFlagsModel] : null;
       if (!baselines.lightActivePresetSun && nlight > 0) {
@@ -575,8 +591,8 @@ export async function switchVisualSourceMode(store, backend, requestedMode) {
       baselines.appearancePresetSun = applyAppearancePresetOverrides(baselines.appearanceModel, 'sun');
     }
     if (targetMode === 'preset-moon' && !baselines.presetMoon) {
-      const moonBase = baselines.presetSun || baselines.model;
-      baselines.presetMoon = cloneStruct(moonBase);
+      const moonBase = baselines.model;
+      baselines.presetMoon = moonBase ? applyPresetOverridesToStruct(moonBase, 'moon') : null;
       baselines.sceneFlagsPresetMoon = baselines.sceneFlagsPresetSun
         ? [...baselines.sceneFlagsPresetSun]
         : baselines.sceneFlagsModel
@@ -587,7 +603,7 @@ export async function switchVisualSourceMode(store, backend, requestedMode) {
       }
     }
     if (targetMode === 'preset-moon' && !baselines.appearancePresetMoon) {
-      const moonBase = baselines.appearancePresetSun || baselines.appearanceModel;
+      const moonBase = baselines.appearanceModel;
       baselines.appearancePresetMoon = applyAppearancePresetOverrides(moonBase, 'moon');
     }
     if (currentMode === 'preset-sun') {

@@ -63,32 +63,33 @@ const FALLBACK_PRESET_TEMPLATES = {
   sun: {
     // Bright daytime preset: strong directional light with moderate IBL so
     // shadows remain clearly visible.
-    background: 0xdde6f4,
+    background: 0x8fb8ec,
     // Base clear colour used when no skybox/environment is active.
-    clearColor: 0xd6dce4,
-    exposure: 0.88,
-    ambient: { color: 0xf0f4ff, intensity: 0.14 },
-    hemi: { sky: 0xf0f4ff, ground: 0x10121a, intensity: 0.22 },
+    clearColor: 0xe6ebf2,
+    exposure: 0.82,
+    ambient: { color: 0xf0f4ff, intensity: 0.15 },
+    hemi: { sky: 0xf0f4ff, ground: 0x10121a, intensity: 0.24 },
     dir: {
       color: 0xffffff,
-      intensity: 3.5,
-      position: [9, -5.3, 3],
-      target: [0, 1, 1],
+      intensity: 3.1,
+      position: [9, -5.3, 6],
+      target: [0, 0, 1],
       shadowBias: -0.0001,
     },
-    fill: { color: 0xb6d5ff, intensity: 0.28, position: [-4, 3, 2] },
+    fill: { color: 0xb6d5ff, intensity: 0.16, position: [-4, 3, 2] },
     shadowBias: -0.00015,
     // Kept deliberately low so HDRI does not wash out shadows.
-    envIntensity: 0.62,
+    envIntensity: 0.48,
     // Preset-specific environment settings
     hdriFile: 'rustig_koppie_puresky_4k.hdr',
-    backgroundBottom: 0x6a8bb3,
+    backgroundMode: 'hdri',
+    backgroundBottom: 0xf3f6fb,
     ground: {
       style: 'shadow',
       opacity: 1.0,
-      color: 0xfffdf8,
+      color: 0xe8e6e0,
       metallic: 0,
-      roughness: 0.78,
+      roughness: 0.86,
       surface: {
         albedoFile: 'preset-ground/sandy_gravel_diff_2k.jpg',
         normalFile: 'preset-ground/sandy_gravel_nor_gl_2k.png',
@@ -97,8 +98,8 @@ const FALLBACK_PRESET_TEMPLATES = {
         // Sandy Gravel captures a much smaller ground footprint, so keeping
         // repeat near 0.95 preserves its denser near-field texel density.
         repeat: 0.95,
-        albedoGain: 2.4,
-        normalScale: 0.3,
+        albedoGain: 1.8,
+        normalScale: 0.36,
       },
       infinite: {
         distance: 2000,
@@ -118,7 +119,7 @@ const FALLBACK_PRESET_TEMPLATES = {
       perturbRing: 0xff8a2b,
       perturbArrow: 0xffb366,
     },
-    fogColor: 0xb3bfd9,
+    fogColor: 0xd4dce8,
   },
   moon: {
     // Night preset: darker exposure and very weak IBL so forms are defined
@@ -126,34 +127,42 @@ const FALLBACK_PRESET_TEMPLATES = {
     background: 0x02030a,
     // Base clear colour for night preset when no skybox/environment is active.
     clearColor: 0x02030a,
-    exposure: 0.9,
-    ambient: { color: 0xf0f4ff, intensity: 0.3 },
-    hemi: { sky: 0x22273a, ground: 0x02030a, intensity: 0.09 },
+    exposure: 0.68,
+    ambient: { color: 0xf6eee2, intensity: 0.52 },
+    hemi: { sky: 0xaab3c2, ground: 0x675547, intensity: 0.42 },
     dir: {
-      color: 0xffffff,
-      intensity: 2.1,
-      position: [5.2, -4.2, 1.15],
+      color: 0xdbe5f6,
+      intensity: 1.10,
+      position: [5.2, -4.2, 1.35],
       target: [0, 0, 0],
       shadowBias: -0.0001,
     },
-    fill: { color: 0x1b2334, intensity: 0.14, position: [-1.5, 1.5, 1] },
+    fill: {
+      color: 0x7a6550,
+      intensity: 0.36,
+      position: [-1.2, 2.0, 5.0],
+      target: [0, 0, -1.0],
+    },
     shadowBias: -0.0002,
-    envIntensity: 0.24,
+    envIntensity: 0.16,
     hdriFile: 'starmap_random_2020_4k_rot.exr',
+    backgroundMode: 'hdri',
     backgroundBottom: 0x02030a,
     ground: {
       style: 'shadow',
       opacity: 1.0,
-      color: 0xf2f4f5,
-      roughness: 0.82,
+      color: 0xb0b6bd,
+      roughness: 1.0,
+      envIntensity: 0.0,
       surface: {
         albedoFile: 'preset-ground/sandy_gravel_diff_2k.jpg',
         normalFile: 'preset-ground/sandy_gravel_nor_gl_2k.png',
         roughnessFile: 'preset-ground/sandy_gravel_rough_2k.png',
         projection: 'infinite',
         repeat: 0.95,
-        albedoGain: 1.2,
-        normalScale: 0.4,
+        albedoGain: 1.0,
+        normalScale: 0.5,
+        directSpecularScale: 0.05,
       },
       infinite: {
         distance: 2000,
@@ -173,7 +182,7 @@ const FALLBACK_PRESET_TEMPLATES = {
       perturbRing: 0xff8a2b,
       perturbArrow: 0xffb366,
     },
-    fogColor: 0x243040,
+    fogColor: 0x101522,
   },
 };
 
@@ -688,7 +697,23 @@ function createVerticalGradientTexture(THREE_NS, topHex, bottomHex, height = 256
   tex.minFilter = THREE_NS.LinearMipmapLinearFilter;
   tex.generateMipmaps = true;
   tex.colorSpace = THREE_NS.SRGBColorSpace;
+  tex.userData = { ...(tex.userData || {}), backgroundKind: 'gradient' };
   return tex;
+}
+
+function normalisePresetBackgroundMode(value) {
+  return value === 'gradient' ? 'gradient' : 'hdri';
+}
+
+function createPresetBackgroundTexture(THREE_NS, preset, hdriTexture = null) {
+  const mode = normalisePresetBackgroundMode(preset?.backgroundMode);
+  if (mode === 'hdri' && hdriTexture) {
+    hdriTexture.userData = { ...(hdriTexture.userData || {}), backgroundKind: 'hdri' };
+    return hdriTexture;
+  }
+  const bgTop = preset?.background ?? 0xdde6f4;
+  const bgBottom = preset?.backgroundBottom ?? 0x6a8bb3;
+  return createVerticalGradientTexture(THREE_NS, bgTop, bgBottom, 256);
 }
 
 
@@ -1000,33 +1025,35 @@ function createEnvironmentManager({
       strictEnsure('ensureOutdoorSkyEnv', { reason: 'init_pmrem' });
     }
     const allowHDRI = options.allowHDRI !== false;
+    const backgroundMode = normalisePresetBackgroundMode(preset?.backgroundMode);
     // Decide which preset HDRI to use from the unified rendering buffer.
     const url = (preset && typeof preset.hdri === 'string' && preset.hdri.length)
       ? preset.hdri
       : getFallbackPreset('sun').hdri;
+    const cacheKey = `${url}|${backgroundMode}|${preset?.background ?? ''}|${preset?.backgroundBottom ?? ''}`;
     const hdrReady =
       ctx.envFromHDRI &&
       ctx.envRT &&
       ctx.hdriReady &&
-      ctx.hdriActiveKey === url;
+      ctx.hdriActiveKey === cacheKey;
     if (hdrReady) {
       return;
     }
     const presetMap = cache?.presetMap instanceof Map ? cache.presetMap : null;
-    const cachedPreset = allowHDRI && presetMap ? presetMap.get(url) : null;
+    const cachedPreset = allowHDRI && presetMap ? presetMap.get(cacheKey) : null;
     if (cachedPreset?.envRT && cachedPreset.background) {
       if (ctx.hdriLoading && ctx.hdriLoadPromise) {
         ctx.hdriLoadGen = (ctx.hdriLoadGen || 0) + 1;
         ctx.hdriLoading = false;
       }
-      presetMap.delete(url);
-      presetMap.set(url, cachedPreset);
+      presetMap.delete(cacheKey);
+      presetMap.set(cacheKey, cachedPreset);
       ctx.envRT = cachedPreset.envRT;
       ctx.hdriBackground = cachedPreset.background;
       ctx.envIntensity = preset?.envIntensity ?? 1.6;
       ctx.envFromHDRI = true;
       ctx.hdriReady = true;
-      ctx.hdriActiveKey = url;
+      ctx.hdriActiveKey = cacheKey;
       ctx.envDirty = false;
       worldScene.environment = cachedPreset.envRT.texture;
       worldScene.background = cachedPreset.background;
@@ -1041,11 +1068,11 @@ function createEnvironmentManager({
         mode: 'preset-cache',
         presetMode: true,
         allowHDRI: true,
-        key: url || 'cache',
+        key: cacheKey || 'cache',
       });
       strictEnsure('ensureOutdoorSkyEnv', {
         reason: 'apply_cached_preset',
-        key: url || null,
+        key: cacheKey || null,
       });
       return;
     }
@@ -1102,13 +1129,21 @@ function createEnvironmentManager({
             ctx.hdriLoading = false;
             return false;
           }
+          const background = createPresetBackgroundTexture(
+            THREE_NS,
+            preset,
+            backgroundMode === 'hdri' ? hdr : null,
+          );
+          if (background !== hdr) {
+            try { hdr?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_dispose'); }
+          }
           ctx.envRT = envRT;
-          ctx.hdriBackground = hdr;
+          ctx.hdriBackground = background;
           ctx.envFromHDRI = true;
           ctx.hdriReady = true;
           ctx.envDirty = false;
           worldScene.environment = envTexture;
-          worldScene.background = hdr;
+          worldScene.background = background;
           if ('backgroundIntensity' in worldScene) {
             worldScene.backgroundIntensity = 1.0;
           }
@@ -1117,14 +1152,14 @@ function createEnvironmentManager({
           }
           if (cache?.presetMap instanceof Map) {
             const map = cache.presetMap;
-            const entry = { key: hdriUrl, envRT, background: hdr };
-            const existing = map.get(hdriUrl);
+            const entry = { key: cacheKey, envRT, background };
+            const existing = map.get(cacheKey);
             if (existing && existing !== entry) {
               try { existing.envRT?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_cache_dispose'); }
               try { existing.background?.dispose?.(); } catch (err) { strictCatch(err, 'main:hdri_cache_dispose'); }
             }
-            map.delete(hdriUrl);
-            map.set(hdriUrl, entry);
+            map.delete(cacheKey);
+            map.set(cacheKey, entry);
             while (map.size > SKY_PRESET_CACHE_LIMIT) {
               const evictKey = map.keys().next().value;
               const evicted = map.get(evictKey);
@@ -1139,12 +1174,13 @@ function createEnvironmentManager({
             key: typeof preset?.hdri === 'string' ? preset.hdri : null,
             url: hdriUrl,
             envIntensity: intensity,
+            backgroundMode,
           };
-          ctx.hdriActiveKey = hdriUrl;
+          ctx.hdriActiveKey = cacheKey;
           ctx.hdriLoading = false;
           strictEnsure('ensureOutdoorSkyEnv', {
             reason: 'apply_hdr',
-            key: hdriUrl || null,
+            key: cacheKey || null,
           });
           return true;
         } catch (error) {
@@ -1194,11 +1230,9 @@ function createEnvironmentManager({
       const modelCached = cache?.model || null;
       if (modelCached?.envRT && modelCached.background) {
         envRT = modelCached.envRT;
-        background = modelCached.background;
+        background = createPresetBackgroundTexture(THREE_NS, preset, null);
       } else {
-        const bgTop = preset?.background ?? 0xdde6f4;
-        const bgBottom = preset?.backgroundBottom ?? 0x6a8bb3;
-        const grad = createVerticalGradientTexture(THREE_NS, bgTop, bgBottom, 256);
+        const grad = createPresetBackgroundTexture(THREE_NS, preset, null);
         envRT = ctx.pmrem.fromEquirectangular(grad);
         background = grad;
       }
@@ -1276,6 +1310,14 @@ function createEnvironmentManager({
       ctx.fill.visible = ctx.fill.intensity > 0;
       if (Array.isArray(fillCfg.position) && fillCfg.position.length === 3) {
         ctx.fill.position.set(fillCfg.position[0], fillCfg.position[1], fillCfg.position[2]);
+      }
+      if (ctx.fillTarget) {
+        if (Array.isArray(fillCfg.target) && fillCfg.target.length === 3) {
+          ctx.fillTarget.position.set(fillCfg.target[0], fillCfg.target[1], fillCfg.target[2]);
+        } else {
+          ctx.fillTarget.position.set(0, 0, 0);
+        }
+        ctx.fill.target?.updateMatrixWorld?.();
       }
     }
 
