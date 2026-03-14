@@ -1426,11 +1426,15 @@ function syncRendererAssets(ctx, assets) {
     }
     ctx.assetCache.presetGroundTextures.clear();
   }
+  if (ctx.assetCache && ctx.assetCache.presetGroundTextureFailures instanceof Set) {
+    ctx.assetCache.presetGroundTextureFailures.clear();
+  }
   ctx.assetCache = {
     meshGeometries: new Map(),
     hfieldGeometries: new Map(),
     mjTextures: new Map(),
     presetGroundTextures: new Map(),
+    presetGroundTextureFailures: new Set(),
   };
 }
 
@@ -1797,6 +1801,7 @@ function ensureAssetCache(ctx) {
   if (!(cache.hfieldGeometries instanceof Map)) cache.hfieldGeometries = new Map();
   if (!(cache.mjTextures instanceof Map)) cache.mjTextures = new Map();
   if (!(cache.presetGroundTextures instanceof Map)) cache.presetGroundTextures = new Map();
+  if (!(cache.presetGroundTextureFailures instanceof Set)) cache.presetGroundTextureFailures = new Set();
   return cache;
 }
 
@@ -1822,29 +1827,49 @@ function configurePresetGroundTexture(ctx, texture, url, colorSpaceMode) {
   return texture;
 }
 
+function formatTextureLoadError(err, url) {
+  const detail = err && typeof err === 'object' && 'type' in err
+    ? ` (${String(err.type || 'event')})`
+    : '';
+  return new Error(`[preset-ground] failed to load texture ${String(url || '')}${detail}`);
+}
+
 function getOrCreatePresetGroundTexture(ctx, url, options = {}) {
   const key = String(url || '').trim();
   if (!key) return null;
+  const fallbackUrl = String(options.fallbackUrl || '').trim();
   const colorSpaceMode = options.colorSpace === 'srgb' ? 'srgb' : 'none';
-  const cacheKey = `${colorSpaceMode}:${key}`;
-  const cache = ensureAssetCache(ctx).presetGroundTextures;
+  const cacheKey = `${colorSpaceMode}:${key}|${fallbackUrl}`;
+  const assetCache = ensureAssetCache(ctx);
+  const cache = assetCache.presetGroundTextures;
+  const failures = assetCache.presetGroundTextureFailures;
   if (cache.has(cacheKey)) return cache.get(cacheKey) || null;
+  if (failures.has(cacheKey)) return null;
   const loader = ctx._textureLoader || (ctx._textureLoader = new THREE.TextureLoader());
-  const texture = loader.load(
-    key,
-    (loadedTexture) => {
-      configurePresetGroundTexture(ctx, loadedTexture, key, colorSpaceMode);
-      cache.set(cacheKey, loadedTexture);
-    },
-    undefined,
-    (err) => {
-      cache.delete(cacheKey);
-      strictCatch(err, 'main:preset_ground_texture_load');
-    },
-  );
-  configurePresetGroundTexture(ctx, texture, key, colorSpaceMode);
-  cache.set(cacheKey, texture);
-  return texture;
+  const loadIntoCache = (sourceUrl, isFallback = false) => {
+    const texture = loader.load(
+      sourceUrl,
+      (loadedTexture) => {
+        configurePresetGroundTexture(ctx, loadedTexture, sourceUrl, colorSpaceMode);
+        cache.set(cacheKey, loadedTexture);
+        failures.delete(cacheKey);
+      },
+      undefined,
+      (err) => {
+        cache.delete(cacheKey);
+        if (!isFallback && fallbackUrl && fallbackUrl !== key) {
+          loadIntoCache(fallbackUrl, true);
+          return;
+        }
+        failures.add(cacheKey);
+        strictCatch(formatTextureLoadError(err, sourceUrl), 'main:preset_ground_texture_load');
+      },
+    );
+    configurePresetGroundTexture(ctx, texture, sourceUrl, colorSpaceMode);
+    cache.set(cacheKey, texture);
+    return texture;
+  };
+  return loadIntoCache(key, false);
 }
 
 function isTextureImageReady(texture) {

@@ -1324,8 +1324,11 @@ function readPresetGroundSurfaceParams(surfaceCfg) {
   };
   if (!surfaceCfg || typeof surfaceCfg !== 'object') return params;
   params.albedoUrl = typeof surfaceCfg.albedo === 'string' ? surfaceCfg.albedo : '';
+  params.albedoFallbackUrl = typeof surfaceCfg.albedoFallback === 'string' ? surfaceCfg.albedoFallback : '';
   params.normalUrl = typeof surfaceCfg.normal === 'string' ? surfaceCfg.normal : '';
+  params.normalFallbackUrl = typeof surfaceCfg.normalFallback === 'string' ? surfaceCfg.normalFallback : '';
   params.roughnessUrl = typeof surfaceCfg.roughness === 'string' ? surfaceCfg.roughness : '';
+  params.roughnessFallbackUrl = typeof surfaceCfg.roughnessFallback === 'string' ? surfaceCfg.roughnessFallback : '';
   params.wantsPresetSurface = !!(params.albedoUrl || params.normalUrl || params.roughnessUrl);
   const readRepeat = (value, fallbackX, fallbackY) => {
     if (Array.isArray(value) && value.length >= 2) {
@@ -1374,13 +1377,22 @@ function readPresetGroundSurfaceParams(surfaceCfg) {
 
 function loadPresetGroundSurfaceTextures(context, params) {
   const albedoTexture = params.albedoUrl
-    ? getOrCreatePresetGroundTexture(context, params.albedoUrl, { colorSpace: 'srgb' })
+    ? getOrCreatePresetGroundTexture(context, params.albedoUrl, {
+        colorSpace: 'srgb',
+        fallbackUrl: params.albedoFallbackUrl,
+      })
     : null;
   const normalTexture = params.normalUrl
-    ? getOrCreatePresetGroundTexture(context, params.normalUrl, { colorSpace: 'none' })
+    ? getOrCreatePresetGroundTexture(context, params.normalUrl, {
+        colorSpace: 'none',
+        fallbackUrl: params.normalFallbackUrl,
+      })
     : null;
   const roughnessTexture = params.roughnessUrl
-    ? getOrCreatePresetGroundTexture(context, params.roughnessUrl, { colorSpace: 'none' })
+    ? getOrCreatePresetGroundTexture(context, params.roughnessUrl, {
+        colorSpace: 'none',
+        fallbackUrl: params.roughnessFallbackUrl,
+      })
     : null;
   return {
     albedoTexture,
@@ -2753,6 +2765,7 @@ function createRendererManager({
     meshGeometries: new Map(),
     hfieldGeometries: new Map(),
     mjTextures: new Map(),
+    presetGroundTextureFailures: new Set(),
     presetGroundTextures: new Map(),
   };
   ctx._frameCounter = ctx._frameCounter || 0;
@@ -3658,6 +3671,9 @@ function createRendererManager({
       }
       ctx.assetCache.presetGroundTextures.clear();
     }
+    if (ctx.assetCache && ctx.assetCache.presetGroundTextureFailures instanceof Set) {
+      ctx.assetCache.presetGroundTextureFailures.clear();
+    }
 
     const disposeResource = (resource) => {
       if (resource && typeof resource.dispose === 'function') {
@@ -3702,6 +3718,7 @@ function createRendererManager({
       meshGeometries: new Map(),
       hfieldGeometries: new Map(),
       mjTextures: new Map(),
+      presetGroundTextureFailures: new Set(),
       presetGroundTextures: new Map(),
     };
 

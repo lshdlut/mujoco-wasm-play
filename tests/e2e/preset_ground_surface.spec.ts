@@ -148,8 +148,8 @@ test('preset sun/moon infinite ground binds the sandy gravel PBR textures', asyn
   expect(moon.roughnessRepeatY).toBeCloseTo(0.95, 5);
   expect(moon.normalScaleX).toBeCloseTo(0.5, 5);
   expect(moon.normalScaleY).toBeCloseTo(0.5, 5);
-  expect(moon.directSpecularScale).toBeCloseTo(0.05, 5);
-  expect(moon.roughness).toBeCloseTo(1.0, 5);
+  expect(moon.directSpecularScale).toBeCloseTo(0.6, 5);
+  expect(moon.roughness).toBeCloseTo(0.94, 5);
   expect(moon.reflectance).toBeGreaterThan(0);
   expect(moon.envBaseIntensity).toBeCloseTo(0.0, 2);
   expect(moon.fadePow).toBeCloseTo(2.5, 5);
@@ -232,10 +232,10 @@ test('preset sun and moon split atmosphere/background behavior without leaking i
   const moon = await page.evaluate(readPresetSceneInfo);
   expect(moon.exposure).toBeCloseTo(0.68, 5);
   expect(moon.envIntensity).toBeCloseTo(0.16, 5);
-  expect(moon.ambientIntensity).toBeCloseTo(0.52, 5);
-  expect(moon.hemiIntensity).toBeCloseTo(0.42, 5);
+  expect(moon.ambientIntensity).toBeCloseTo(0.40, 5);
+  expect(moon.hemiIntensity).toBeCloseTo(0.30, 5);
   expect(moon.fillIntensity).toBeCloseTo(0.36, 5);
-  expect(moon.dirIntensity).toBeCloseTo(1.10, 5);
+  expect(moon.dirIntensity).toBeCloseTo(1.55, 5);
   expect(moon.fogstart).toBeCloseTo(6, 5);
   expect(moon.fogend).toBeCloseTo(20, 5);
   expect(moon.haze).toBeCloseTo(0.22, 5);

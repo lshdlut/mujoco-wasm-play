@@ -24,6 +24,10 @@ function resolveEnvironmentAssetUrl(fileName, config = getRuntimeConfig()) {
   return new URL(fileName, resolveEnvironmentAssetBase(config)).href;
 }
 
+function resolveBundledEnvironmentAssetUrl(fileName) {
+  return new URL(fileName, DEFAULT_ENV_ASSET_BASE_URL).href;
+}
+
 function resolveGroundSurface(surface, config = getRuntimeConfig()) {
   if (!surface || typeof surface !== 'object') return null;
   const {
@@ -35,12 +39,15 @@ function resolveGroundSurface(surface, config = getRuntimeConfig()) {
   const resolved = { ...rest };
   if (typeof albedoFile === 'string' && albedoFile.length) {
     resolved.albedo = resolveEnvironmentAssetUrl(albedoFile, config);
+    resolved.albedoFallback = resolveBundledEnvironmentAssetUrl(albedoFile);
   }
   if (typeof normalFile === 'string' && normalFile.length) {
     resolved.normal = resolveEnvironmentAssetUrl(normalFile, config);
+    resolved.normalFallback = resolveBundledEnvironmentAssetUrl(normalFile);
   }
   if (typeof roughnessFile === 'string' && roughnessFile.length) {
     resolved.roughness = resolveEnvironmentAssetUrl(roughnessFile, config);
+    resolved.roughnessFallback = resolveBundledEnvironmentAssetUrl(roughnessFile);
   }
   return resolved;
 }
@@ -128,11 +135,11 @@ const FALLBACK_PRESET_TEMPLATES = {
     // Base clear colour for night preset when no skybox/environment is active.
     clearColor: 0x02030a,
     exposure: 0.68,
-    ambient: { color: 0xf6eee2, intensity: 0.52 },
-    hemi: { sky: 0xaab3c2, ground: 0x675547, intensity: 0.42 },
+    ambient: { color: 0xf6eee2, intensity: 0.40 },
+    hemi: { sky: 0xaab3c2, ground: 0x675547, intensity: 0.30 },
     dir: {
       color: 0xdbe5f6,
-      intensity: 1.10,
+      intensity: 1.55,
       position: [5.2, -4.2, 1.35],
       target: [0, 0, 0],
       shadowBias: -0.0001,
@@ -152,7 +159,7 @@ const FALLBACK_PRESET_TEMPLATES = {
       style: 'shadow',
       opacity: 1.0,
       color: 0xb0b6bd,
-      roughness: 1.0,
+      roughness: 0.94,
       envIntensity: 0.0,
       surface: {
         albedoFile: 'preset-ground/sandy_gravel_diff_2k.jpg',
@@ -162,7 +169,7 @@ const FALLBACK_PRESET_TEMPLATES = {
         repeat: 0.95,
         albedoGain: 1.0,
         normalScale: 0.5,
-        directSpecularScale: 0.05,
+        directSpecularScale: 0.6,
       },
       infinite: {
         distance: 2000,
@@ -216,6 +223,7 @@ function buildFallbackPreset(key, config = getRuntimeConfig()) {
     ...rest,
     ground,
     hdri: resolveEnvironmentAssetUrl(hdriFile, config),
+    hdriFallback: resolveBundledEnvironmentAssetUrl(hdriFile),
   };
 }
 
@@ -1030,6 +1038,9 @@ function createEnvironmentManager({
     const url = (preset && typeof preset.hdri === 'string' && preset.hdri.length)
       ? preset.hdri
       : getFallbackPreset('sun').hdri;
+    const fallbackUrl = (preset && typeof preset.hdriFallback === 'string' && preset.hdriFallback.length)
+      ? preset.hdriFallback
+      : '';
     const cacheKey = `${url}|${backgroundMode}|${preset?.background ?? ''}|${preset?.backgroundBottom ?? ''}`;
     const hdrReady =
       ctx.envFromHDRI &&
@@ -1081,7 +1092,7 @@ function createEnvironmentManager({
       !ctx.hdriLoading &&
       !ctx.hdriLoadPromise
     ) {
-      const tryLoadHDRI = async (hdriUrl, token) => {
+      const tryLoadHDRI = async (hdriUrl, token, { finalAttempt = true } = {}) => {
         try {
           const urlStr = String(hdriUrl || '');
           const lowered = urlStr.toLowerCase();
@@ -1187,7 +1198,9 @@ function createEnvironmentManager({
           ctx.hdriLoading = false;
           ctx.hdriReady = false;
           logWarn('[env] HDRI load failed', { url: hdriUrl, error: String(error) });
-          strictCatch(error, 'main:env_hdri_load');
+          if (finalAttempt) {
+            strictCatch(error, 'main:env_hdri_load');
+          }
           return false;
         }
       };
@@ -1195,8 +1208,11 @@ function createEnvironmentManager({
       // Mark HDRI as loading immediately so we don't treat expected async latency as a fallback.
       ctx.hdriLoading = true;
       ctx.hdriLoadPromise = (async () => {
-        // eslint-disable-next-line no-await-in-loop
-        const ok = await tryLoadHDRI(url, token);
+        let ok = await tryLoadHDRI(url, token, { finalAttempt: !(fallbackUrl && fallbackUrl !== url) });
+        if (!ok && fallbackUrl && fallbackUrl !== url) {
+          logWarn('[env] HDRI primary failed, retrying bundled fallback', { url, fallbackUrl });
+          ok = await tryLoadHDRI(fallbackUrl, token, { finalAttempt: true });
+        }
         if (ok) return true;
         ctx.hdriLoading = false;
         if (!ctx.envFromHDRI) {
