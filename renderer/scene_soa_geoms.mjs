@@ -63,6 +63,7 @@ function createInfiniteGroundHelper({
     uPresetNormalMap: { value: null },
     uPresetNormalTexScl: { value: new THREE.Vector2(1, 1) },
     uPresetNormalScale: { value: new THREE.Vector2(1, 1) },
+    uPresetDirectSpecularScale: { value: 1.0 },
     uPresetRoughnessEnabled: { value: 0 },
     uPresetRoughnessMap: { value: null },
     uPresetRoughnessTexScl: { value: new THREE.Vector2(1, 1) },
@@ -98,6 +99,7 @@ function createInfiniteGroundHelper({
     shader.uniforms.uPresetNormalMap = uniforms.uPresetNormalMap;
     shader.uniforms.uPresetNormalTexScl = uniforms.uPresetNormalTexScl;
     shader.uniforms.uPresetNormalScale = uniforms.uPresetNormalScale;
+    shader.uniforms.uPresetDirectSpecularScale = uniforms.uPresetDirectSpecularScale;
     shader.uniforms.uPresetRoughnessEnabled = uniforms.uPresetRoughnessEnabled;
     shader.uniforms.uPresetRoughnessMap = uniforms.uPresetRoughnessMap;
     shader.uniforms.uPresetRoughnessTexScl = uniforms.uPresetRoughnessTexScl;
@@ -156,6 +158,7 @@ uniform float uPresetNormalEnabled;
 uniform sampler2D uPresetNormalMap;
 uniform vec2 uPresetNormalTexScl;
 uniform vec2 uPresetNormalScale;
+uniform float uPresetDirectSpecularScale;
 uniform float uPresetRoughnessEnabled;
 uniform sampler2D uPresetRoughnessMap;
 uniform vec2 uPresetRoughnessTexScl;
@@ -352,6 +355,12 @@ ${depthOnly ? shader.fragmentShader.replace(
         roughnessFactor *= presetRoughness;
         roughnessFactor = max(roughnessFactor, mix(0.92, 0.76, roughnessFade));
       }`
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <lights_fragment_end>',
+          `#include <lights_fragment_end>
+
+      reflectedLight.directSpecular *= clamp(uPresetDirectSpecularScale, 0.0, 1.0);`
         );
       }
       targetMaterial.userData.shader = shader;
@@ -2000,7 +2009,12 @@ function resolveMaterialEmission(matIndex, assets) {
 function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
   if (!mesh) return;
   mesh.userData = mesh.userData || {};
-  const baseIntensity = typeof ctx?.envIntensity === 'number' ? ctx.envIntensity : 0;
+  const overrideBaseIntensity = Number.isFinite(mesh.userData.envMapBaseIntensityOverride)
+    ? Math.max(0, Number(mesh.userData.envMapBaseIntensityOverride))
+    : null;
+  const baseIntensity = overrideBaseIntensity != null
+    ? overrideBaseIntensity
+    : (typeof ctx?.envIntensity === 'number' ? ctx.envIntensity : 0);
   const mat = mesh.material;
   if (!mat || !('envMapIntensity' in mat)) return;
   if (!('reflectanceBaseEnvIntensity' in mesh.userData) || mesh.userData.reflectanceBaseEnvIntensity == null) {
@@ -2020,14 +2034,6 @@ function applyReflectanceToMaterial(mesh, ctx, reflectance, reflectionEnabled) {
     if (Math.abs(current - nextEnvIntensity) > 1e-6) {
       mat.envMapIntensity = nextEnvIntensity;
     }
-  }
-  if (ctx) {
-    ctx._envDebugSample = {
-      baseIntensity,
-      reflectance: clampedReflectance,
-      reflectionEnabled: !!reflectionEnabled,
-      envMapIntensity: nextEnvIntensity,
-    };
   }
 }
 

@@ -1320,6 +1320,7 @@ function readPresetGroundSurfaceParams(surfaceCfg) {
     albedoGain: 1,
     normalScaleX: 1,
     normalScaleY: 1,
+    directSpecularScale: 1,
   };
   if (!surfaceCfg || typeof surfaceCfg !== 'object') return params;
   params.albedoUrl = typeof surfaceCfg.albedo === 'string' ? surfaceCfg.albedo : '';
@@ -1365,6 +1366,9 @@ function readPresetGroundSurfaceParams(surfaceCfg) {
     params.normalScaleX = rawNormalScale;
     params.normalScaleY = rawNormalScale;
   }
+  if (Number.isFinite(surfaceCfg.directSpecularScale)) {
+    params.directSpecularScale = Math.max(0, Math.min(1, Number(surfaceCfg.directSpecularScale)));
+  }
   return params;
 }
 
@@ -1408,6 +1412,9 @@ function applyPresetGroundSurfaceUniforms(uniforms, params, textures, { disableM
   if (uniforms.uPresetNormalScale?.value?.set) {
     uniforms.uPresetNormalScale.value.set(params.normalScaleX, params.normalScaleY);
   }
+  if (uniforms.uPresetDirectSpecularScale) {
+    uniforms.uPresetDirectSpecularScale.value = params.directSpecularScale;
+  }
   if (uniforms.uPresetRoughnessEnabled) uniforms.uPresetRoughnessEnabled.value = textures.roughnessReady ? 1 : 0;
   if (uniforms.uPresetRoughnessMap) uniforms.uPresetRoughnessMap.value = textures.roughnessReady ? textures.roughnessTexture : null;
   if (uniforms.uPresetRoughnessTexScl?.value?.set) {
@@ -1429,6 +1436,7 @@ function clearPresetGroundSurfaceUniforms(uniforms, { clearMuJoCo = false } = {}
   if (uniforms.uPresetNormalMap) uniforms.uPresetNormalMap.value = null;
   if (uniforms.uPresetNormalTexScl?.value?.set) uniforms.uPresetNormalTexScl.value.set(1, 1);
   if (uniforms.uPresetNormalScale?.value?.set) uniforms.uPresetNormalScale.value.set(1, 1);
+  if (uniforms.uPresetDirectSpecularScale) uniforms.uPresetDirectSpecularScale.value = 1;
   if (uniforms.uPresetRoughnessEnabled) uniforms.uPresetRoughnessEnabled.value = 0;
   if (uniforms.uPresetRoughnessMap) uniforms.uPresetRoughnessMap.value = null;
   if (uniforms.uPresetRoughnessTexScl?.value?.set) uniforms.uPresetRoughnessTexScl.value.set(1, 1);
@@ -2977,6 +2985,9 @@ function createRendererManager({
     const fill = new THREE.DirectionalLight(0xffffff, 0);
     fill.position.set(-6, 6, 3);
     fill.visible = false;
+    const fillTarget = new THREE.Object3D();
+    sceneWorld.add(fillTarget);
+    fill.target = fillTarget;
     sceneWorld.add(fill);
 
     const camera = new THREE.PerspectiveCamera(75, 1, 0.01, GROUND_DISTANCE * 20);
@@ -2999,6 +3010,7 @@ function createRendererManager({
         light: keyLight,
         lightTarget,
         fill,
+        fillTarget,
         hemi,
         ambient,
         assetSource: null,
@@ -3049,7 +3061,6 @@ function createRendererManager({
       window.__renderCtx = context;
       window.__envDebug = {
         envIntensity: typeof context.envIntensity === 'number' ? context.envIntensity : null,
-        sample: context._envDebugSample || null,
       };
     }
     const renderer = context.renderer;
@@ -3278,8 +3289,11 @@ function createRendererManager({
       { trackingBounds, trackingOverride },
     );
     applyViewerCameraSnapshot(context, snapshot, state, nextBounds, { tempVecA, tempVecB });
+    const presetVisualMode =
+      state?.visualSourceMode === 'preset-sun'
+      || state?.visualSourceMode === 'preset-moon';
     const mjShadowCasters = updateMjLightRig(context, snapshot, state, assets, {
-      enabled: !segmentEnabled,
+      enabled: !segmentEnabled && !presetVisualMode,
       shadowEnabled,
       bounds: nextBounds || context.bounds || null,
     });
@@ -3375,6 +3389,11 @@ function createRendererManager({
           const surfaceCfg = groundPreset.surface || null;
           const infiniteCfg = groundPreset.infinite || null;
           const groundMesh = context.ground;
+          if (groundMesh?.userData) {
+            groundMesh.userData.envMapBaseIntensityOverride = Number.isFinite(groundPreset.envIntensity)
+              ? Math.max(0, Number(groundPreset.envIntensity))
+              : null;
+          }
           const infiniteData = groundMesh?.userData?.infiniteGround || null;
           const uniforms = infiniteData?.uniforms || null;
           const surfaceParams = readPresetGroundSurfaceParams(surfaceCfg);
@@ -3423,6 +3442,9 @@ function createRendererManager({
             gs.view.envMapIntensityOverride = null;
             gs.view.emissiveIntensityOverride = null;
             gs.view.__dirty = true;
+          }
+          if (context.ground?.userData) {
+            context.ground.userData.envMapBaseIntensityOverride = null;
           }
           const uniforms = context.ground?.userData?.infiniteGround?.uniforms || null;
           clearPresetGroundSurfaceUniforms(uniforms);
@@ -3694,6 +3716,7 @@ function createRendererManager({
     ctx.light = null;
     ctx.lightTarget = null;
     ctx.fill = null;
+    ctx.fillTarget = null;
     ctx.hemi = null;
     ctx.ambient = null;
     ctx.initialized = false;
