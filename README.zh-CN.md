@@ -4,7 +4,7 @@
 
 ![mujoco-wasm-play](assets/mujoco-wasm-play-cards.png)
 
-[**在线演示（Rajagopal2015, MuJoCo 3.5.0）**](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/)
+[推荐演示页](https://lshdlut.com/en/demos/play/) | [GitHub Pages 直达应用](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/)
 
 > **文档（Sphinx / Read the Docs）**：源码位于 [`doc/zh/`](doc/zh/) 和 [`doc/en/`](doc/en/)；在线阅读：[中文](https://mujoco-wasm-play.readthedocs.io/zh-cn/latest/)｜[英文](https://mujoco-wasm-play.readthedocs.io/en/latest/)。
 
@@ -35,7 +35,9 @@
 - 本地开发（在 8000 端口服务仓库根目录）：
   - `python tools/dev_server.py --root . --port 8000`
   - `http://127.0.0.1:8000/index.html?model=raj`
-- 线上演示：
+- 推荐演示页：
+  - `https://lshdlut.com/en/demos/play/`
+- 直达静态应用（GitHub Pages，仍保留）：
   - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/`
 - 插件：实验性。见 `doc/zh/reference/plugin_contract.md`。`smocap` 即将发布。
 

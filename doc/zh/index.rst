@@ -8,7 +8,8 @@ Play 面向终端用户：加载模型、运行/暂停/单步、查看选项与�
 在线演示
 --------
 
-`在线演示（Rajagopal2015, MuJoCo 3.5.0） <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/>`_
+- `推荐演示页 <https://lshdlut.com/en/demos/play/>`_
+- `GitHub Pages 直达应用 <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/>`_
 
 快速开始
 ----------------

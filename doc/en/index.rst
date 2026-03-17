@@ -10,7 +10,8 @@ and stats, and share a reproducible link.
 Live demo
 ---------
 
-`Live demo (Rajagopal2015, MuJoCo 3.5.0) <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/>`_
+- `Recommended demo page <https://lshdlut.com/en/demos/play/>`_
+- `Direct GitHub Pages app <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/>`_
 
 Quickstart
 ------------------
