@@ -84,6 +84,14 @@ lighting / skybox 相关设置。
 - UI 生成物：`node tools/generate_ui_artifacts.mjs`
 - Worker 协议生成物：`node tools/generate_worker_protocol.mjs`（生成 `worker/protocol.gen.mjs`、`worker/dispatch.gen.mjs`）
 
+## 致谢
+
+- 预设环境资产来自 [Poly Haven](https://polyhaven.com/)（CC0）。感谢 Poly Haven。
+
+## 许可证
+
+- 本仓库采用 [MIT](LICENSE) 许可证。
+
 ## 测试
 
 - `tests/unit/`：Node 单元测试（快、无额外依赖）

@@ -84,6 +84,14 @@ Lighting and skybox sources.
 - UI artifacts: `node tools/generate_ui_artifacts.mjs`
 - Worker protocol artifacts: `node tools/generate_worker_protocol.mjs` (generates `worker/protocol.gen.mjs`, `worker/dispatch.gen.mjs`)
 
+## Acknowledgements
+
+- Preset environment assets are sourced from [Poly Haven](https://polyhaven.com/) under CC0. Thanks to Poly Haven.
+
+## License
+
+- This repo is licensed under [MIT](LICENSE).
+
 ## Testing
 
 - `tests/unit/`: Node unit tests (fast, dependency-free)
