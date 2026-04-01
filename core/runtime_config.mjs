@@ -110,6 +110,7 @@ export function applyRuntimeUiToDocument(doc = document, options = {}) {
   const themeColor = Number.isFinite(ui.themeColor) ? (ui.themeColor | 0) : 0;
   const spacing = Number.isFinite(ui.spacing) ? (ui.spacing | 0) : 0;
   const font = getFontPresetByIndex(ui.fontIndex);
+  const profileId = String(ui.profileId || 'play').trim().toLowerCase() || 'play';
 
   if (root?.style?.setProperty) {
     root.style.setProperty('--viewer-font-scale', String(font.scale));
@@ -124,6 +125,7 @@ export function applyRuntimeUiToDocument(doc = document, options = {}) {
     } else {
       root.removeAttribute('data-play-embed');
     }
+    root.setAttribute('data-play-profile', profileId);
     if (options.clearPrepaintThemeAttr) {
       root.removeAttribute('data-play-theme');
     }

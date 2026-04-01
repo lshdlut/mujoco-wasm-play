@@ -24,6 +24,7 @@ local/
 FORGE_NOTES.local.md
 FORGE_REFERENCE.md
 AGENTS.md
+/.agents_arena/
 DEV_PLAN_LOCAL.md
 tmp_*
 backups/

@@ -189,7 +189,7 @@
       : 1;
   const font = resolveFontPreset(getRaw('font'));
   const embedMode = readTruthy('embed');
-  const profileId = normaliseProfileId(globalThis.PLAY_UI_PROFILE);
+  const profileId = normaliseProfileId(getRaw('profile') || globalThis.PLAY_UI_PROFILE);
   const storageNamespace =
     String(globalThis.PLAY_UI_STORAGE_NAMESPACE || profileId || 'play').trim()
     || profileId;
