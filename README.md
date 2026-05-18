@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 ![mujoco-wasm-play](assets/mujoco-wasm-play-cards.png)
 
-[Recommended demo page](https://lshdlut.com/en/demos/play/) | [Direct GitHub Pages app](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/)
+[Recommended demo page](https://lshdlut.com/en/demos/play/) | [Direct GitHub Pages app](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/)
 
 > **Documentation (Sphinx / Read the Docs)**: source lives in [`doc/en/`](doc/en/) and [`doc/zh/`](doc/zh/). Read online: [EN](https://mujoco-wasm-play.readthedocs.io/en/latest/) | [ZH](https://mujoco-wasm-play.readthedocs.io/zh-cn/latest/).
 
@@ -21,7 +21,7 @@ A performance-first MuJoCo viewer that brings most of the **MuJoCo Simulate** wo
 
 ## Performance
 
-Reference numbers (best of 5 runs; each run reports the median; lower is better), measured interactively (rendered, not headless) after 35s warm-up + 8s sampling, with both side panels collapsed. Web Play uses MuJoCo 3.5.0 via forge dist ver=3.5.0. CPU time is reported as ms/step in the Simulate-style HUD (press `F2`, while Running). Numbers vary with hardware, browser, and power/thermal settings.
+Reference numbers (best of 5 runs; each run reports the median; lower is better), measured interactively (rendered, not headless) after 35s warm-up + 8s sampling, with both side panels collapsed. Current default Play uses MuJoCo 3.8.1; the table below is retained as a historical 3.5.0 measurement until the performance pass is rerun. CPU time is reported as ms/step in the Simulate-style HUD (press `F2`, while Running). Numbers vary with hardware, browser, and power/thermal settings.
 
 > Important: browser extensions and site-level features (e.g. enhanced security modes / efficiency or power-saving modes) can heavily impact Worker/WASM timing, and may affect the GitHub Pages demo more than `localhost`. For fair comparisons, try a private window, disable extensions, and keep the tab in the foreground.
 
@@ -38,7 +38,7 @@ Reference numbers (best of 5 runs; each run reports the median; lower is better)
 - Recommended demo page:
   - `https://lshdlut.com/en/demos/play/`
 - Direct static app (GitHub Pages, retained):
-  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/`
+  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/`
 - Plugins: experimental. See `doc/en/reference/plugin_contract.md`. `smocap` is coming soon.
 
 ## Models
@@ -63,6 +63,7 @@ Forge repo: `https://github.com/lshdlut/mujoco-wasm-forge`
 - Default dist base (local and hosted) is `/forge/dist/{ver}/`, where `{ver}` comes from `site_config.js` (`globalThis.PLAY_VER`) or `ver=...`.
 - The dev server (`tools/dev_server.py`) mounts `/forge/` to a sibling `../mujoco-wasm-forge` checkout if present (otherwise it falls back to this repo root).
 - This viewer requires a forge build with viewer extensions (scene + vopt pointers).
+- Current default baseline: MuJoCo 3.8.1. The 3.6.0, 3.7.0, 3.8.0, and 3.8.1 forge bundles are covered by the external OBJ mesh smoke.
 - Typical remote base template (jsDelivr + pinned forge commit): `https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
 - Cache debugging: append `cacheBust=always` to force cache-busting for the Worker URL and forge resource URLs. Default is cache-friendly (no `cb=...`).
 

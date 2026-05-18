@@ -16,7 +16,7 @@ test.describe('pthreads raj joint names', () => {
 
     const url =
       `/pthreads/index.html?model=${encodeURIComponent('mujoco_Rajagopal2015_simple.xml')}` +
-      `&ver=3.5.0&snapshot=1&log=1`;
+      `&ver=3.8.1&snapshot=1&log=1`;
 
     await waitForViewerReady(page, url, { timeoutMs: 120_000 });
 

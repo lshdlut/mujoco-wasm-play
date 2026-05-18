@@ -21,7 +21,7 @@
 本仓库会在 GitHub Release 中发布一个可直接部署的静态产物包。
 
 - 触发：打 tag ``mjwasm-play-<major>.<minor>.<patch>-r<revision>``。
-- 例如：``mjwasm-play-3.5.0-r2``。
+- 例如：``mjwasm-play-3.8.1-r1``。
 - Workflow：``.github/workflows/release-site.yml``。
 - 输出：``site.zip``（**不包含** forge 的 ``dist/``）。
 

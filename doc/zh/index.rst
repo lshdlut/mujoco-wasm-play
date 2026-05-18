@@ -9,7 +9,7 @@ Play 面向终端用户：加载模型、运行/暂停/单步、查看选项与�
 --------
 
 - `推荐演示页 <https://lshdlut.com/en/demos/play/>`_
-- `GitHub Pages 直达应用 <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/>`_
+- `GitHub Pages 直达应用 <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/>`_
 
 快速开始
 ----------------
@@ -19,7 +19,7 @@ Play 面向终端用户：加载模型、运行/暂停/单步、查看选项与�
 ::
 
   python tools/dev_server.py --root . --port 8000
-  http://127.0.0.1:8000/index.html?model=raj
+  http://127.0.0.1:8000/index.html?model=rkob
 
 亮点
 ----

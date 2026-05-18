@@ -11,7 +11,7 @@ Live demo
 ---------
 
 - `Recommended demo page <https://lshdlut.com/en/demos/play/>`_
-- `Direct GitHub Pages app <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/>`_
+- `Direct GitHub Pages app <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/>`_
 
 Quickstart
 ------------------
@@ -21,7 +21,7 @@ Serve the repo root and open a URL:
 ::
 
   python tools/dev_server.py --root . --port 8000
-  http://127.0.0.1:8000/index.html?model=raj
+  http://127.0.0.1:8000/index.html?model=rkob
 
 Highlights
 ----------

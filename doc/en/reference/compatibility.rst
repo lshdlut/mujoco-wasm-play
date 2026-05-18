@@ -30,6 +30,18 @@ Recommended (optional):
 
 - ``version.json`` (optional; used for diagnostics in verbose/perf mode)
 
+Tested forge baselines
+----------------------
+
+The current default Play baseline is MuJoCo 3.8.1.
+
+Core CI keeps an explicit external OBJ mesh smoke for forge 3.6.0, 3.7.0,
+3.8.0, and 3.8.1. This covers the resource-decoder registration path added in
+MuJoCo 3.6+ without adding Play-side decoder workarounds.
+
+ABI metadata is still generated for older local baselines when present under
+``dist/<ver>/`` so existing pinned demos can keep working.
+
 Viewer ABI extensions
 --------------------------------
 

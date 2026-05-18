@@ -4,7 +4,7 @@
 
 ![mujoco-wasm-play](assets/mujoco-wasm-play-cards.png)
 
-[推荐演示页](https://lshdlut.com/en/demos/play/) | [GitHub Pages 直达应用](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/)
+[推荐演示页](https://lshdlut.com/en/demos/play/) | [GitHub Pages 直达应用](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/)
 
 > **文档（Sphinx / Read the Docs）**：源码位于 [`doc/zh/`](doc/zh/) 和 [`doc/en/`](doc/en/)；在线阅读：[中文](https://mujoco-wasm-play.readthedocs.io/zh-cn/latest/)｜[英文](https://mujoco-wasm-play.readthedocs.io/en/latest/)。
 
@@ -21,7 +21,7 @@
 
 ## 性能
 
-下表为参考数值（共测 5 次；每次取中位数；取最好的一次；越小越好）：交互式测得（有渲染、非 headless），且左右面板收起。每次预热 35 秒并采样 8 秒。Web Play 使用 MuJoCo 3.5.0，forge dist ver=3.5.0。CPU 耗时以 ms/step 的形式显示在 Simulate 风格 HUD 中（按 `F2`，Running 状态）。结果会随硬件、浏览器以及电源/温控策略而波动，仅供参考。
+下表为参考数值（共测 5 次；每次取中位数；取最好的一次；越小越好）：交互式测得（有渲染、非 headless），且左右面板收起。每次预热 35 秒并采样 8 秒。当前 Play 默认使用 MuJoCo 3.8.1；下表保留为历史 3.5.0 测量值，等待后续重新跑性能测试后更新。CPU 耗时以 ms/step 的形式显示在 Simulate 风格 HUD 中（按 `F2`，Running 状态）。结果会随硬件、浏览器以及电源/温控策略而波动，仅供参考。
 
 > 重要提示：浏览器扩展以及站点级功能（例如“增强安全性”/ 效率或省电模式）可能会显著影响 Worker/WASM 的计时表现；同一台机器上，GitHub Pages 的在线演示也可能比 `localhost` 更容易受到影响。做公平对比时建议用隐私窗口（private window）或临时禁用扩展，并保持标签页在前台。
 
@@ -38,7 +38,7 @@
 - 推荐演示页：
   - `https://lshdlut.com/en/demos/play/`
 - 直达静态应用（GitHub Pages，仍保留）：
-  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/`
+  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/`
 - 插件：实验性。见 `doc/zh/reference/plugin_contract.md`。`smocap` 即将发布。
 
 ## 模型
@@ -63,6 +63,7 @@ Forge repo：`https://github.com/lshdlut/mujoco-wasm-forge`
 - 默认 dist base（本地与线上一致）为 `/forge/dist/{ver}/`，其中 `{ver}` 来自 `site_config.js`（`globalThis.PLAY_VER`）或 URL 参数 `ver=...`。
 - 开发服务器 `tools/dev_server.py` 会把 `/forge/` 挂载到同级的 `../mujoco-wasm-forge`（如果存在），否则回退到本仓库根目录。
 - 这个查看器需要带 viewer extensions 的 forge 构建（scene + vopt pointers）。
+- 当前默认基线：MuJoCo 3.8.1。3.6.0、3.7.0、3.8.0 与 3.8.1 forge bundle 已由外部 OBJ mesh smoke 覆盖。
 - 常见的远端 base 模板（jsDelivr + 固定 forge commit）：`https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
 - 缓存排查：追加 `cacheBust=always` 会强制对 Worker URL 与 forge 资源 URL 做 cache-bust。默认模式不会自动添加 `cb=...`。
 

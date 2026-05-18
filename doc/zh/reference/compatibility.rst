@@ -30,6 +30,17 @@ Play 期望 forge 的 ``dist/<ver>/`` 目录至少包含：
 
 - ``version.json``（可选；verbose/perf 模式下可用于诊断）
 
+已验证的 forge 基线
+----------------------
+
+当前 Play 默认基线是 MuJoCo 3.8.1。
+
+核心 CI 对 forge 3.6.0、3.7.0、3.8.0 与 3.8.1 保留了明确的外部 OBJ
+mesh smoke。它覆盖 MuJoCo 3.6+ 引入的 resource decoder 注册路径，但不在
+Play 侧添加 decoder workaround。
+
+当旧版本仍存在于 ``dist/<ver>/`` 下时，ABI metadata 仍会被生成，以便已有的固定版本 demo 继续工作。
+
 Viewer ABI 扩展
 --------------------------------
 

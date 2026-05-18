@@ -11,7 +11,7 @@
 
 .. code-block:: text
 
-  http://127.0.0.1:8000/index.html?model=raj
+  http://127.0.0.1:8000/index.html?model=rkob
 
 Forge bundle 解析
 -----------------------
@@ -34,6 +34,6 @@ Play 需要一个 forge ``dist/<ver>/`` bundle（``mujoco.js`` + ``mujoco.wasm``
 
 .. code-block:: text
 
-  http://127.0.0.1:8000/index.html?model=raj&forgeBase=/forge/dist/3.5.0/
+  http://127.0.0.1:8000/index.html?model=rkob&forgeBase=/forge/dist/3.8.1/
 
 完整说明见 :doc:`/reference/url_parameters`。

@@ -22,7 +22,7 @@ Release artifact: ``site.zip``
 This repo publishes a ready-to-deploy static bundle as a GitHub Release asset.
 
 - Trigger: tag ``mjwasm-play-<major>.<minor>.<patch>-r<revision>``.
-- Example: ``mjwasm-play-3.5.0-r2``.
+- Example: ``mjwasm-play-3.8.1-r1``.
 - Workflow: ``.github/workflows/release-site.yml``.
 - Output: ``site.zip`` (does **not** include forge ``dist/``).
 
