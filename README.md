@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 ![mujoco-wasm-play](assets/mujoco-wasm-play-cards.png)
 
-[Recommended demo page](https://lshdlut.com/en/demos/play/) | [Direct GitHub Pages app](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/)
+[Recommended demo page](https://lshdlut.com/en/demos/play/) | [Direct GitHub Pages app](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/)
 
 > **Documentation (Sphinx / Read the Docs)**: source lives in [`doc/en/`](doc/en/) and [`doc/zh/`](doc/zh/). Read online: [EN](https://mujoco-wasm-play.readthedocs.io/en/latest/) | [ZH](https://mujoco-wasm-play.readthedocs.io/zh-cn/latest/).
 
@@ -34,16 +34,17 @@ Reference numbers (best of 5 runs; each run reports the median; lower is better)
 
 - Local dev (serve repo root on port 8000):
   - `python tools/dev_server.py --root . --port 8000`
-  - `http://127.0.0.1:8000/index.html?model=raj`
+  - `http://127.0.0.1:8000/index.html?model=rkob`
 - Recommended demo page:
   - `https://lshdlut.com/en/demos/play/`
 - Direct static app (GitHub Pages, retained):
-  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=raj&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/`
+  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.5.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@c7d49505b40cff7b113c4f1a5554676bdcfdbd84/dist/3.5.0/`
 - Plugins: experimental. See `doc/en/reference/plugin_contract.md`. `smocap` is coming soon.
 
 ## Models
 
-- `model=` accepts either a `.xml` path under `model/` (or `local_model/` for local-only files) or an alias: `raj`, `humanoid`, `humanoid100`, `cards`, `sensor`.
+- `model=` accepts either a `.xml` path under `model/` (or `local_model/` for local-only files) or an alias: `rkob`, `raj`, `humanoid`, `humanoid100`, `cards`, `sensor`.
+- Packaged model shortcuts come from `backend/model_candidates.mjs`; to ship a model with the static app, add the XML under `model/` and include it in `MODEL_POOL`.
 
 ## Plugins
 

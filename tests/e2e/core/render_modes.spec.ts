@@ -339,7 +339,7 @@ test.describe('skybox toggle', () => {
     });
     await waitForViewerReady(
       page,
-      '/index.html?model=RKOB_simplified_upper_with_marker_CAMS.xml&mode=worker&snapshot=1&log=0',
+      '/index.html?model=local_model/RKOB_tracking_cams_reduced.xml&mode=worker&snapshot=1&log=0',
     );
 
     await setVisualSource(page, 'Model');

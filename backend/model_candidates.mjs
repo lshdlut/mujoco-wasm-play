@@ -1,8 +1,9 @@
 // Built-in model aliases and candidate resolution for the backend.
 
 const MODEL_ALIASES = {
-  rkob: 'model/mujoco_Rajagopal2015_simple.xml',
+  rkob: 'model/RKOB_tracking_reduced.xml',
   raj: 'model/mujoco_Rajagopal2015_simple.xml',
+  'rkob_tracking_reduced.xml': 'model/RKOB_tracking_reduced.xml',
   'mujoco_rajagopal2015_simple.xml': 'model/mujoco_Rajagopal2015_simple.xml',
   humanoid: 'model/humanoid/humanoid.xml',
   humanoid100: 'model/humanoid/humanoid100.xml',
@@ -11,6 +12,7 @@ const MODEL_ALIASES = {
 };
 
 export const MODEL_POOL = [
+  'model/RKOB_tracking_reduced.xml',
   'model/mujoco_Rajagopal2015_simple.xml',
   'model/humanoid/humanoid.xml',
   'model/humanoid/humanoid100.xml',

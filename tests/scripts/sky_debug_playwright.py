@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright
 def main() -> None:
   url = (
       "http://127.0.0.1:4173/index.html"
-      "?model=RKOB_simplified_upper_with_marker_CAMS.xml"
+      "?model=local_model/RKOB_tracking_cams_reduced.xml"
       "&mode=worker&debug=1&skydebug=cube"
   )
   repo_root = Path(__file__).resolve().parents[2]
