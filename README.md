@@ -64,7 +64,7 @@ Forge repo: `https://github.com/lshdlut/mujoco-wasm-forge`
 - The dev server (`tools/dev_server.py`) mounts `/forge/` to a sibling `../mujoco-wasm-forge` checkout if present (otherwise it falls back to this repo root).
 - This viewer requires a forge build with viewer extensions (scene + vopt pointers).
 - Current default baseline: MuJoCo 3.15.0. The core suite includes external OBJ mesh smoke coverage for 3.6.0 through 3.15.0; 3.15.0 also has single-thread and pthreads load-lifecycle and textured-bundle regressions.
-- Typical remote base template (jsDelivr + pinned forge commit): `https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
+- Typical remote base template (jsDelivr + pinned forge commit): `https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/deliverables/{ver}/`
 - Cache debugging: append `cacheBust=always` to force cache-busting for the Worker URL and forge resource URLs. Default is cache-friendly (no `cb=...`).
 
 ### Pthreads variant

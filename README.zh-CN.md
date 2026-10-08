@@ -64,7 +64,7 @@ Forge repo：`https://github.com/lshdlut/mujoco-wasm-forge`
 - 开发服务器 `tools/dev_server.py` 会把 `/forge/` 挂载到同级的 `../mujoco-wasm-forge`（如果存在），否则回退到本仓库根目录。
 - 这个查看器需要带 viewer extensions 的 forge 构建（scene + vopt pointers）。
 - 当前默认基线：MuJoCo 3.15.0。core suite 包含 3.6.0 至 3.15.0 外部 OBJ mesh smoke；3.15.0 另有 single-thread / pthreads 的加载生命周期及带纹理 bundle 回归。
-- 常见的远端 base 模板（jsDelivr + 固定 forge commit）：`https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
+- 常见的远端 base 模板（jsDelivr + 固定 forge commit）：`https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/deliverables/{ver}/`
 - 缓存排查：追加 `cacheBust=always` 会强制对 Worker URL 与 forge 资源 URL 做 cache-bust。默认模式不会自动添加 `cb=...`。
 
 ### Pthreads 版本

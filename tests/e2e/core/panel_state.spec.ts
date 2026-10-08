@@ -19,6 +19,7 @@ test.describe('panel state', () => {
       sectionDefaultOpen = null,
     } = options;
     await page.addInitScript(({ clearStorage, playState, customState, legacyState, profileId, storageNamespace, builtInDefaultOpen, sectionDefaultOpen }) => {
+      if (location.protocol === 'about:') return;
       const bootKey = '__play_ui_bootstrap_done__';
       if (clearStorage && !sessionStorage.getItem(bootKey)) {
         localStorage.removeItem('play:ui:v2:panel_state:play');
@@ -105,6 +106,9 @@ test.describe('panel state', () => {
     await expect(playPage.locator('[data-play-section-id="joint"]')).not.toHaveClass(/is-collapsed/);
     await expect(playPage.locator('[data-testid="panel-left"]')).not.toHaveClass(/is-hidden/);
 
+    const playPersistedBeforeCustom = await playPage.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key) || 'null'), PLAY_STATE_KEY,
+    );
     // This is a persisted namespace contract, not simultaneous rendering in two tabs.
     // Release the first native/WebGL viewer before starting the next profile;
     // the same page is reloaded below to prove Play's state was not polluted.
@@ -127,6 +131,11 @@ test.describe('panel state', () => {
       panels: { left: false, right: true },
       sectionsCollapsed: { right: { joint: true, control: false } },
     });
+    // Check before Play's init script can replay its seed on the final navigation.
+    const playPersistedAfterCustom = await customPage.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key) || 'null'), PLAY_STATE_KEY,
+    );
+    expect(playPersistedAfterCustom).toEqual(playPersistedBeforeCustom);
 
     await customPage.close();
     await waitForViewerReady(playPage, MODEL_URL);
