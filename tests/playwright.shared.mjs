@@ -106,7 +106,7 @@ export async function createPlaywrightConfig({
     use: {
       baseURL: runtime.baseURL,
       headless: true,
-      trace: process.env.CI ? "on-first-retry" : "off",
+      trace: process.env.CI ? "retain-on-failure" : "off",
       screenshot: "off",
       video: "off",
       navigationTimeout,

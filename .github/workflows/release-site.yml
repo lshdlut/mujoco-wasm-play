@@ -81,18 +81,19 @@ jobs:
           npm run spec:lint
           npm run check
 
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+
       - name: Browser core + 3.15/single-thread/pthreads compatibility gate
         env:
           PLAY_DEV_SERVER_COI: "1"
-          PLAYWRIGHT_JSON_OUTPUT_NAME: core-results.json
-        run: |
-          npx playwright install --with-deps chromium
-          npm run test:e2e -- --reporter=list,json
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ github.workspace }}/core-results.json
+        run: npm run test:e2e -- --reporter=list,json --max-failures=1
 
       - name: Browser renderer contract gate
         env:
-          PLAYWRIGHT_JSON_OUTPUT_NAME: contract-results.json
-        run: npm run test:e2e:contracts -- --reporter=list,json
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ github.workspace }}/contract-results.json
+        run: npm run test:e2e:contracts -- --reporter=list,json --max-failures=1
 
       - name: Preserve browser gate evidence
         if: always()
