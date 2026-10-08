@@ -160,7 +160,9 @@ test('preset sun/moon infinite ground binds the sandy gravel PBR textures', asyn
   await switchVisualSource(page, 'PresetSun');
   await expect.poll(async () => {
     const info = await page.evaluate(readPresetGroundInfo);
-    return info.loaded && info.normalLoaded && info.roughnessLoaded && info.enabled === 1 ? (info.src || '') : '';
+    // Sun and Moon reuse these textures, so loaded images alone can still be
+    // the preceding Moon frame. Require the new preset's rendered uniform.
+    return info.loaded && info.normalLoaded && info.roughnessLoaded && info.enabled === 1 && info.albedoGain === 1.8 ? (info.src || '') : '';
   }).toContain('sandy_gravel_diff_2k.jpg');
 
   const sun = await page.evaluate(readPresetGroundInfo);

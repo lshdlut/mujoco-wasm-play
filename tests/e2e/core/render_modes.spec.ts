@@ -176,6 +176,7 @@ test.describe('tracking and frame-site', () => {
 });
 
 test.describe('shadow viewport restore', () => {
+  test.use({ deviceScaleFactor: 2 });
   async function setSceneFlag(page: any, binding: string, value: boolean) {
     await page.evaluate(async ({ binding, value }) => {
       const controls = (window as any).__viewerControls;
@@ -214,6 +215,41 @@ test.describe('shadow viewport restore', () => {
         };
       });
     }, { timeout: 20_000 }).toEqual({ ok: true, shadowEnabled: true });
+  });
+
+  test('cached viewport matches GL drawing pixels for canvas and render target after shadows', async ({ page }) => {
+    await waitForViewerReady(page, '/index.html?model=humanoid.xml&ver=3.15.0');
+    await setSceneFlag(page, `mjvScene::flags[${SCENE_FLAG_INDICES.SHADOW}]`, true);
+    const result = await page.evaluate(async () => {
+      const THREE = await import('three');
+      const ctx = (window as any).__renderCtx;
+      const renderer = ctx.renderer;
+      const gl = renderer.getContext();
+      const read = () => {
+        const cached = renderer.getCurrentViewport(new THREE.Vector4()).toArray();
+        const actual = Array.from(gl.getParameter(gl.VIEWPORT) as ArrayLike<number>);
+        return { cached, actual };
+      };
+      const originalTarget = renderer.getRenderTarget();
+      const target = new THREE.WebGLRenderTarget(512, 512);
+      target.viewport.set(5, 7, 250, 240);
+      let offscreen;
+      try {
+        renderer.setRenderTarget(target);
+        renderer.render(ctx.sceneWorld, ctx.camera);
+        offscreen = read();
+      } finally {
+        renderer.setRenderTarget(originalTarget);
+        target.dispose();
+      }
+      renderer.render(ctx.sceneWorld, ctx.camera);
+      return { offscreen, canvas: read(), width: renderer.domElement.width, height: renderer.domElement.height, pixelRatio: renderer.getPixelRatio() };
+    });
+    expect(result.pixelRatio).toBe(2);
+    expect(result.offscreen.cached).toEqual([5, 7, 250, 240]);
+    expect(result.offscreen.actual).toEqual(result.offscreen.cached);
+    expect(result.canvas.cached).toEqual([0, 0, result.width, result.height]);
+    expect(result.canvas.actual).toEqual(result.canvas.cached);
   });
 });
 
