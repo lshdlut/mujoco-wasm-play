@@ -77,7 +77,7 @@
       'color: #cfd0d0',
       'font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif',
     ].join(';');
-    const fallbackHref = options.fallbackHref || '/index.html';
+    const fallbackHref = new URL(options.fallbackHref || './index.html', doc.baseURI).href;
     root.innerHTML = [
       '<div style="max-width: 860px; width: 100%; border: 1px solid rgba(129, 134, 141, 0.55); border-radius: 16px; padding: 24px; background: rgba(26, 28, 30, 0.96)">',
       '<h1 style="margin: 0 0 12px; font-size: 20px; color: #ffffff">Pthreads build requires cross-origin isolation</h1>',
@@ -105,6 +105,6 @@
   boot({
     moduleSrc: currentScript?.dataset?.playShellModule || './app/main.mjs',
     requireCrossOriginIsolated: currentScript?.dataset?.playShellRequireCoi === '1',
-    fallbackHref: currentScript?.dataset?.playShellFallbackHref || '/index.html',
+    fallbackHref: currentScript?.dataset?.playShellFallbackHref || './index.html',
   });
 })(globalThis);
