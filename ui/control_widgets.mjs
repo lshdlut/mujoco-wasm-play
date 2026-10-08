@@ -101,7 +101,8 @@ export function createControlWidgetsRuntime({
   function applyOptionAvailability(control, element) {
     if (!element || !isOptionBinding(control)) return;
     const support = getSnapshotOptionSupport(currentSnapshot());
-    const supported = !!support?.supported;
+    const field = control.binding.slice(OPTION_BINDING_PREFIX.length).split('.')[0];
+    const supported = !!support?.supported && support.pointers.includes(`_mjwf_model_opt_${field}_ptr`);
     if ('disabled' in element) {
       element.disabled = !supported;
     }
@@ -514,12 +515,15 @@ export function createControlWidgetsRuntime({
           const index = getIndex(item, fallback);
           const slider = sliderByIndex.get(String(index));
           if (!slider) continue;
+          const label = slider.closest('.control-row')?.querySelector('.control-label');
+          if (label) label.textContent = getLabel(item, fallback);
           if (!slider.dataset.editing) slider.dataset.editing = '0';
           if (slider.dataset.editing === '1') continue;
           if (updateRange) {
             const range = getRange(item, fallback);
             if (Number(slider.min) !== range.min) slider.min = String(range.min);
             if (Number(slider.max) !== range.max) slider.max = String(range.max);
+            if (Number(slider.step) !== range.step) slider.step = String(range.step);
           }
           const nextValue = getValue(item, fallback);
           if (nextValue == null) continue;
@@ -903,6 +907,18 @@ function createBoolToggleElements(control, { disabled = false } = {}) {
   }
 
   function applySelectValue(select, meta, control, value) {
+    if (control.item_id === 'physics.integrator') {
+      const entries = currentSnapshot()?.optionSupport?.integrators;
+      if (Array.isArray(entries) && entries.length) {
+        const labels = entries.map(entry => normaliseOptions(control.options)[entry.value] || entry.name.replace(/^mjINT_/, '').toLowerCase());
+        if (labels.join('|') !== meta.options.join('|')) {
+          meta.options = labels;
+          control.options = labels;
+          select.replaceChildren();
+          syncSelectOptions(select, meta, control);
+        }
+      }
+    }
     if (meta.special) {
       const label = meta.special.resolveLabel(value, meta.options);
       select.value = label;
@@ -1687,6 +1703,7 @@ function createBoolToggleElements(control, { disabled = false } = {}) {
         items: actuators,
         itemIdPrefix: 'control.act.',
         dataAttr: 'data-act-index',
+        updateRange: true,
         getIndex: (item, fallback) => resolveListIndex(item, fallback),
         getLabel: (item, fallback) => item.name ?? `Act ${resolveListIndex(item, fallback)}`,
         getRange: (item) => ({

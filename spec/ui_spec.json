@@ -481,6 +481,14 @@
           "range": "[0,1]"
         },
         {
+          "item_id": "physics.sleep_tolerance",
+          "type": "edit_float",
+          "label": "Sleep Tol",
+          "binding": "mjOption::sleep_tolerance",
+          "default": "model.opt.sleep_tolerance",
+          "range": "[0,1]"
+        },
+        {
           "item_id": "physics.sdf_iterations",
           "type": "edit_int",
           "label": "SDF Iter",

@@ -75,7 +75,7 @@ async function resolveSharedRuntime() {
 
   return {
     baseURL,
-    outputDir: path.join(os.tmpdir(), "pw-out"),
+    outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? path.join(os.tmpdir(), "pw-out"),
     reporter: process.env.CI
       ? [["html", { outputFolder: "playwright-report", open: "never" }], ["list"]]
       : "list",

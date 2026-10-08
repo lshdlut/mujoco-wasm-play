@@ -57,6 +57,7 @@ assertFactoryParamLimit('ui/control_widgets.mjs', 'createControlWidgetsRuntime',
 assertFactoryParamLimit('backend/backend_runtime.mjs', 'createBackendRuntime', 12);
 
 run('forbid_patterns', ['tools/forbid_patterns.mjs']);
+run('generated_artifacts', ['tools/check_generated_artifacts.mjs']);
 
 if (fileExists('tests/tooling/validate_test_layout.mjs')) {
   run('test_layout', ['tests/tooling/validate_test_layout.mjs']);

@@ -10,7 +10,7 @@ function localModelPath(model: string) {
 test.describe('convex hull parity', () => {
   test('convex hull toggles mesh geometry variant', async ({ page }) => {
     const MODEL = 'model/convex_hull/hull_mesh.xml';
-    const FORGE_BASE = '/dist/3.4.0/';
+    const FORGE_BASE = '/forge/dist/{ver}/';
     const modelPath = localModelPath(MODEL);
     if (!fsSync.existsSync(modelPath)) {
       test.skip(true, `Missing local model: ${modelPath}`);
@@ -164,7 +164,7 @@ test.describe('slidercrank parity', () => {
   const MODEL = 'model/slider_crank/slider_crank.xml';
   // For local testing we always talk to the freshly built forge artifacts
   // served from this repo under dist/<ver>/.
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   function readSlidercrankSummary() {
     const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
@@ -257,7 +257,7 @@ test.describe('slidercrank parity', () => {
 
 test.describe('tendon catenary parity', () => {
   const MODEL = 'model/tendon_catenary/catenary.xml';
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   function sceneTendonCounts() {
     const MJ_OBJ_TENDON = 18;
@@ -355,7 +355,7 @@ test.describe('tendon catenary parity', () => {
 
 test.describe('flex layer parity', () => {
   const MODEL = 'model/mujoco_Rajagopal2015_simple.xml';
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   async function setSliderNormalised(page: any, testId: string, t: number) {
     await page.getByTestId(testId).evaluate((el: any, next: number) => {
@@ -403,7 +403,7 @@ test.describe('flex layer parity', () => {
 
 test.describe('texture flag parity', () => {
   const MODEL = 'model/car/car.xml';
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   function pickMeshWithMap() {
     const win = window as any;

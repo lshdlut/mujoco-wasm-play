@@ -92,3 +92,8 @@ test('bridge: collectRenderAssetsFromModule reads int64 tex_adr (mjtSize)', () =
   assert.ok(assets.textures.adr instanceof Int32Array);
   assert.deepEqual(Array.from(assets.textures.adr), [0, 4_718_592]);
 });
+
+test('bridge: MuJoCo 3.15 texture ABI is generated and uses int64 addresses', () => {
+  const assets = collectRenderAssetsFromModule(makeFakeForgeModule({ texAdrKind: 'i64', ver: '3.15.0' }), 1);
+  assert.deepEqual([...assets.textures.adr], [0, 4_718_592]);
+});

@@ -2,7 +2,7 @@
   "version": 1,
   "commands": [
     { "name": "strictReport", "required": ["id"] },
-    { "name": "load", "required": ["xmlText"] },
+    { "name": "load", "required": ["xmlText", "requestId"] },
     { "name": "snapshot" },
     { "name": "setPaused", "required": ["paused"] },
     { "name": "setRate", "required": ["rate"] },
@@ -16,6 +16,7 @@
     { "name": "setSceneFlag", "required": ["index", "enabled"] },
     { "name": "setGroupState", "required": ["group", "index", "enabled"] },
     { "name": "setCtrl", "required": ["index", "value"] },
+    { "name": "resetCtrl" },
     { "name": "setQpos", "required": ["index", "value"] },
     { "name": "setEqualityActive", "required": ["index", "active"] },
     { "name": "historyScrub", "required": ["offset"] },
@@ -35,9 +36,10 @@
     { "name": "setCtrlNoise", "required": ["std", "rate"] }
   ],
   "events": [
+    { "name": "load_complete", "required": ["requestId"] },
     { "name": "strict_report", "required": ["id", "report"] },
     { "name": "run_state", "required": ["running"] },
-    { "name": "ready", "required": ["abi", "dt", "ngeom", "optionSupport", "visual", "statistic"] },
+    { "name": "ready", "required": ["abi", "dt", "ngeom", "optionSupport", "visual", "statistic"], "optional": ["engineVersion"] },
     { "name": "struct_state", "required": ["scope", "value"] },
     { "name": "meta_cameras", "required": ["cameras"] },
     { "name": "meta_geoms", "required": ["geoms"] },

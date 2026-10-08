@@ -6,12 +6,11 @@ import { bool, cloneStruct, createDefaultHistoryState, normaliseGroupState, reso
 export function createBackendRuntime({
   clientRef,
   lastSnapshotRef,
-  lastXmlTextRef,
+  lastLoadPayloadRef,
   prepareBindingUpdate,
   readPublishedSnapshot,
   publishMutation,
   loadDefaultXml,
-  restartWorkerWithXml,
   restartWorkerWithLoadPayload,
   setRunState,
   setRate,
@@ -238,10 +237,7 @@ export function createBackendRuntime({
     }],
     ['control.clear', () => {
       try {
-        const acts = Array.isArray(lastSnapshot.actuators) ? lastSnapshot.actuators : [];
-        for (let i = 0; i < acts.length; i += 1) {
-          client.postMessage?.({ cmd: 'setCtrl', index: i, value: 0 });
-        }
+        client.postMessage?.({ cmd: 'resetCtrl' });
       } catch (err) {
         logWarn('[backend control.clear] failed', err);
         strictCatch(err, 'backend:control_clear');
@@ -500,11 +496,8 @@ export function createBackendRuntime({
         client.postMessage?.({ cmd: 'reset' });
         break;
       case 'simulation.reload': {
-        if (lastXmlTextRef.current && typeof lastXmlTextRef.current === 'string' && lastXmlTextRef.current.trim().length > 0) {
-          return restartWorkerWithXml(lastXmlTextRef.current);
-        }
+        if (lastLoadPayloadRef.current) return restartWorkerWithLoadPayload(lastLoadPayloadRef.current);
         const loadPayload = await loadDefaultXml();
-        lastXmlTextRef.current = typeof loadPayload?.xmlText === 'string' ? loadPayload.xmlText : String(loadPayload?.xmlText ?? '');
         return restartWorkerWithLoadPayload(loadPayload);
       }
       case 'simulation.align': {

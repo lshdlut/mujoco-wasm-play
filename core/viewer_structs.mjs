@@ -281,6 +281,10 @@ export const OPTION_LAYOUT = {
     "type": "i32",
     "count": 1
   },
+  "sleep_tolerance": {
+    "type": "f64",
+    "count": 1
+  },
   "solver": {
     "type": "i32",
     "count": 1
@@ -327,6 +331,7 @@ const FIELD_POINTERS = {
   "o_solref": "_mjwf_model_opt_o_solref_ptr",
   "sdf_initpoints": "_mjwf_model_opt_sdf_initpoints_ptr",
   "sdf_iterations": "_mjwf_model_opt_sdf_iterations_ptr",
+  "sleep_tolerance": "_mjwf_model_opt_sleep_tolerance_ptr",
   "solver": "_mjwf_model_opt_solver_ptr",
   "timestep": "_mjwf_model_opt_timestep_ptr",
   "tolerance": "_mjwf_model_opt_tolerance_ptr",

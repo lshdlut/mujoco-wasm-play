@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { Page, test } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -34,8 +34,25 @@ export async function waitForViewerReady(
 ) {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
+  const consoleTimeline: { wallMs: number; type: string; text: string }[] = [];
+  const pendingRequests = new Map<any, any>();
+  const failedRequests: any[] = [];
+  const onRequest = (request: any) => pendingRequests.set(request, {
+    url: request.url(), resourceType: request.resourceType(), startedWallMs: Date.now(),
+  });
+  const onResponse = (response: any) => {
+    const pending = pendingRequests.get(response.request());
+    if (pending) pending.httpStatus = response.status();
+  };
+  const onRequestDone = (request: any) => {
+    if (request.failure()) failedRequests.push({ url: request.url(), failure: request.failure(), wallMs: Date.now() });
+    if (failedRequests.length > 30) failedRequests.shift();
+    pendingRequests.delete(request);
+  };
   const onConsole = (msg: any) => {
     const text = msg?.text?.() || '';
+    consoleTimeline.push({ wallMs: Date.now(), type: msg.type(), text });
+    if (consoleTimeline.length > 30) consoleTimeline.shift();
     if (msg?.type?.() === 'error') {
       consoleErrors.push(text);
       if (consoleErrors.length > 10) consoleErrors.shift();
@@ -47,58 +64,111 @@ export async function waitForViewerReady(
   };
   page.on('console', onConsole);
   page.on('pageerror', onPageError);
+  const requestContext = page.context();
+  requestContext.on('request', onRequest);
+  requestContext.on('response', onResponse);
+  requestContext.on('requestfinished', onRequestDone);
+  requestContext.on('requestfailed', onRequestDone);
+  // Persist a bounded checkpoint before the unchanged 60s test deadline can close the page.
+  // This is diagnostic evidence, not an extra wait/retry or a relaxed readiness condition.
+  const persistCheckpoint = async () => {
+    const capture = async () => {
+      const state = await page.evaluate(() => {
+        const host = (window as any).__PLAY_HOST__;
+        const snapshot = host?.getSnapshot?.();
+        return { hasHost: !!host, hasStore: !!(window as any).__viewerStore,
+          hasCtx: !!(window as any).__renderCtx, ctxInitialized: !!(window as any).__renderCtx?.initialized,
+          hasRuntimeConfig: !!(window as any).__PLAY_RUNTIME_CONFIG__, coi: crossOriginIsolated,
+          engineVersion: snapshot?.engineVersion, loadState: snapshot?.loadState,
+          scnNgeom: snapshot?.scn_ngeom, documentReadyState: document.readyState,
+          resources: performance.getEntriesByType('resource').map((entry: any) => ({ name: entry.name, duration: entry.duration })) };
+      });
+      const browser = page.context().browser();
+      let targets: any = { status: 'UNAVAILABLE_NON_CHROMIUM' };
+      if (browser && typeof browser.newBrowserCDPSession === 'function') {
+        const cdp = await browser.newBrowserCDPSession();
+        try {
+          targets = (await cdp.send('Target.getTargets')).targetInfos.filter((target: any) => target.type.includes('worker'));
+        } finally {
+          await cdp.detach();
+        }
+      }
+      return { state, workerTargets: targets, pageWorkers: page.workers().map(worker => worker.url()) };
+    };
+    const captured = await Promise.race([
+      capture().catch(error => ({ diagnosticError: String(error) })),
+      new Promise(resolve => setTimeout(() => resolve({ diagnosticError: 'Checkpoint capture exceeded 2s budget' }), 2000)),
+    ]);
+    const record = { url, wallMs: Date.now(), pendingRequests: [...pendingRequests.values()], failedRequests, consoleTimeline, consoleErrors, pageErrors, captured };
+    const file = test.info().outputPath('viewer-ready-checkpoint.json');
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, JSON.stringify(record, null, 2));
+    await test.info().attach('viewer-ready-checkpoint', { path: file, contentType: 'application/json' });
+    console.log('VIEWER_READY_CHECKPOINT', JSON.stringify(record));
+  };
+  const checkpointTimer = setTimeout(() => {
+    void persistCheckpoint().catch(error => console.error('VIEWER_READY_CHECKPOINT_ERROR', String(error)));
+  }, 40000);
+  const cleanup = () => {
+    clearTimeout(checkpointTimer);
+    page.off('console', onConsole); page.off('pageerror', onPageError);
+    requestContext.off('request', onRequest); requestContext.off('response', onResponse);
+    requestContext.off('requestfinished', onRequestDone); requestContext.off('requestfailed', onRequestDone);
+  };
   const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 60_000;
   const normalizedUrl =
     typeof url === 'string' && url.startsWith('/index.html')
       ? `/${url.slice('/index.html'.length)}`
       : url;
-  await page.goto(normalizedUrl as string, { waitUntil: 'load', timeout });
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
+  try {
+    await page.goto(normalizedUrl as string, { waitUntil: 'load', timeout });
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const diag = await page.evaluate(() => {
+        const store = (window as any).__viewerStore;
+        const ctx = (window as any).__renderCtx;
+        const controls = (window as any).__viewerControls;
+        const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
+        const scnNgeom = Number(snapshot?.scn_ngeom) | 0;
+        return {
+          ready: !!ctx?.initialized && !!store?.get && !!controls && scnNgeom > 0,
+          hasStore: !!store?.get,
+          hasCtx: !!ctx,
+          ctxInitialized: !!ctx?.initialized,
+          hasControls: !!controls,
+          hasHost: !!(window as any).__PLAY_HOST__,
+          hasRuntimeConfig: !!(window as any).__PLAY_RUNTIME_CONFIG__,
+          scnNgeom,
+          ngeom: Number(snapshot?.ngeom) | 0,
+          hasModelSelect: !!document.querySelector('[data-testid="file.model_select"]'),
+        };
+      });
+      if (diag.ready) {
+        cleanup();
+        return;
+      }
+      await page.waitForTimeout(100);
+    }
     const diag = await page.evaluate(() => {
-      const store = (window as any).__viewerStore;
-      const ctx = (window as any).__renderCtx;
-      const controls = (window as any).__viewerControls;
       const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
-      const scnNgeom = Number(snapshot?.scn_ngeom) | 0;
       return {
-        ready: !!ctx?.initialized && !!store?.get && !!controls && scnNgeom > 0,
-        hasStore: !!store?.get,
-        hasCtx: !!ctx,
-        ctxInitialized: !!ctx?.initialized,
-        hasControls: !!controls,
+        hasStore: !!(window as any).__viewerStore?.get,
+        hasCtx: !!(window as any).__renderCtx,
+        ctxInitialized: !!(window as any).__renderCtx?.initialized,
+        hasControls: !!(window as any).__viewerControls,
         hasHost: !!(window as any).__PLAY_HOST__,
         hasRuntimeConfig: !!(window as any).__PLAY_RUNTIME_CONFIG__,
-        scnNgeom,
+        scnNgeom: Number(snapshot?.scn_ngeom) | 0,
         ngeom: Number(snapshot?.ngeom) | 0,
+        bodyClass: document.body?.className || '',
         hasModelSelect: !!document.querySelector('[data-testid="file.model_select"]'),
       };
-    });
-    if (diag.ready) {
-      page.off('console', onConsole);
-      page.off('pageerror', onPageError);
-      return;
-    }
-    await page.waitForTimeout(100);
+    }).catch(() => null);
+    cleanup();
+    throw new Error(`Viewer did not become ready within ${timeout} ms: ${JSON.stringify({ diag, consoleErrors, pageErrors })}`);
+  } finally {
+    cleanup();
   }
-  const diag = await page.evaluate(() => {
-    const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
-    return {
-      hasStore: !!(window as any).__viewerStore?.get,
-      hasCtx: !!(window as any).__renderCtx,
-      ctxInitialized: !!(window as any).__renderCtx?.initialized,
-      hasControls: !!(window as any).__viewerControls,
-      hasHost: !!(window as any).__PLAY_HOST__,
-      hasRuntimeConfig: !!(window as any).__PLAY_RUNTIME_CONFIG__,
-      scnNgeom: Number(snapshot?.scn_ngeom) | 0,
-      ngeom: Number(snapshot?.ngeom) | 0,
-      bodyClass: document.body?.className || '',
-      hasModelSelect: !!document.querySelector('[data-testid="file.model_select"]'),
-    };
-  }).catch(() => null);
-  page.off('console', onConsole);
-  page.off('pageerror', onPageError);
-  throw new Error(`Viewer did not become ready within ${timeout} ms: ${JSON.stringify({ diag, consoleErrors, pageErrors })}`);
 }
 
 export async function loadXmlFromFileInput(page: Page, filePath: string) {

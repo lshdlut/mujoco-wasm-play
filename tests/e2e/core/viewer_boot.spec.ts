@@ -45,7 +45,7 @@ test.describe('viewer boot and basic progression', () => {
     const url =
       `/index.html?model=${encodeURIComponent('mujoco_Rajagopal2015_simple.xml')}` +
       `&mode=worker&snapshot=1&log=0` +
-      `&forgeBase=${encodeURIComponent('/dist/3.4.0/')}`;
+      `&forgeBase=${encodeURIComponent('/forge/dist/{ver}/')}`;
 
     await waitForViewerReady(page, url);
 

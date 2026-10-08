@@ -82,11 +82,11 @@ export function applyWatchPayload(target, payload, options = {}) {
     watch.index = payload.index | 0;
   }
   if ('value' in payload) {
-    const raw = Number(payload.value);
+    const raw = payload.value == null ? NaN : Number(payload.value);
     watch.value = Number.isFinite(raw) ? raw : null;
   }
-  const minVal = Number(payload.min);
-  const maxVal = Number(payload.max);
+  const minVal = payload.min == null ? NaN : Number(payload.min);
+  const maxVal = payload.max == null ? NaN : Number(payload.max);
   watch.min = Number.isFinite(minVal) ? minVal : null;
   watch.max = Number.isFinite(maxVal) ? maxVal : null;
   const samples = Number(payload.samples) || 0;
@@ -168,6 +168,10 @@ export function resolveSnapshot(state) {
   };
 
   const snapshot = {
+    engineVersion: state.engineVersion || null,
+    loadState: state.loadState ? { ...state.loadState } : null,
+    backendError: state.backendError || null,
+    toast: state.toast ? { ...state.toast } : null,
     t: state.t ?? 0,
     rate: state.rate ?? 1,
     measuredSlowdown: state.measuredSlowdown ?? 1,

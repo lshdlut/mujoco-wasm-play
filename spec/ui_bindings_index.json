@@ -359,6 +359,24 @@
       }
     ]
   },
+  "mjOption::sleep_tolerance": {
+    "value": {
+      "kind": "float",
+      "size": 1
+    },
+    "occurrences": [
+      {
+        "section_id": "physics",
+        "section_title": "Physics",
+        "group_id": null,
+        "group_type": null,
+        "item_id": "physics.sleep_tolerance",
+        "control_type": "edit_float",
+        "label": "Sleep Tol",
+        "shortcut": null
+      }
+    ]
+  },
   "mjOption::solver": {
     "value": {
       "kind": "enum",

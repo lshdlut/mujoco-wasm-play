@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { SCENE_FLAG_INDICES } from '../../core/viewer_defaults.mjs';
-import { waitForViewerReady } from './test-utils';
+import { SCENE_FLAG_INDICES } from '../../../core/viewer_defaults.mjs';
+import { waitForViewerReady } from '../test-utils';
 
 async function switchVisualSource(page: Page, target: 'PresetSun' | 'PresetMoon') {
   await page.evaluate(async (mode) => {

@@ -35,6 +35,7 @@ export const WORKER_COMMANDS = [
   "setSceneFlag",
   "setGroupState",
   "setCtrl",
+  "resetCtrl",
   "setQpos",
   "setEqualityActive",
   "historyScrub",
@@ -55,6 +56,7 @@ export const WORKER_COMMANDS = [
 ];
 
 export const WORKER_EVENTS = [
+  "load_complete",
   "strict_report",
   "run_state",
   "ready",
@@ -80,7 +82,7 @@ export const WORKER_EVENTS = [
 
 export const COMMAND_FIELDS = {
   "strictReport": { required: ["id"], optional: [] },
-  "load": { required: ["xmlText"], optional: [] },
+  "load": { required: ["xmlText","requestId"], optional: [] },
   "snapshot": { required: [], optional: [] },
   "setPaused": { required: ["paused"], optional: [] },
   "setRate": { required: ["rate"], optional: [] },
@@ -94,6 +96,7 @@ export const COMMAND_FIELDS = {
   "setSceneFlag": { required: ["index","enabled"], optional: [] },
   "setGroupState": { required: ["group","index","enabled"], optional: [] },
   "setCtrl": { required: ["index","value"], optional: [] },
+  "resetCtrl": { required: [], optional: [] },
   "setQpos": { required: ["index","value"], optional: [] },
   "setEqualityActive": { required: ["index","active"], optional: [] },
   "historyScrub": { required: ["offset"], optional: [] },
@@ -114,9 +117,10 @@ export const COMMAND_FIELDS = {
 };
 
 export const EVENT_FIELDS = {
+  "load_complete": { required: ["requestId"], optional: [] },
   "strict_report": { required: ["id","report"], optional: [] },
   "run_state": { required: ["running"], optional: [] },
-  "ready": { required: ["abi","dt","ngeom","optionSupport","visual","statistic"], optional: [] },
+  "ready": { required: ["abi","dt","ngeom","optionSupport","visual","statistic"], optional: ["engineVersion"] },
   "struct_state": { required: ["scope","value"], optional: [] },
   "meta_cameras": { required: ["cameras"], optional: [] },
   "meta_geoms": { required: ["geoms"], optional: [] },

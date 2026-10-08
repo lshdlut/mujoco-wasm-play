@@ -12,6 +12,7 @@ import { GEOM_VIEW_FIELDS_OPTIONAL, GEOM_VIEW_FIELDS_ALWAYS } from '../worker/pr
 import { parseMuJoCoDirectFileRefs, buildMuJoCoBundle } from '../core/xml_refs.mjs';
 import { buildModelCandidates, resolveModelFileName, MODEL_POOL } from './model_candidates.mjs';
 import { applyHistoryPayload, applyKeyframesPayload, applyWatchPayload, applyViewFields, createInitialSnapshot, resolveSnapshot } from './snapshot_utils.mjs';
+import { cloneLoadPayload } from './load_payload.mjs';
 import { createBackendRuntime } from './backend_runtime.mjs';
 const ASSET_BASE_URL = new URL('../', import.meta.url);
 const WORKER_URL = new URL('worker/physics.worker.mjs', ASSET_BASE_URL);
@@ -46,9 +47,12 @@ export async function createBackend(options = {}) {
   let lastSnapshotTransferMs = null;
   let lastSnapshotTransferFrameId = null;
   let messageHandler = null;
-  let lastXmlText = null;
   let strictRequestSeq = 0;
   const strictRequests = new Map();
+  let workerGeneration = 0;
+  let pendingLoad = null;
+  let lastLoadPayload = null;
+  let disposed = false;
   const SNAPSHOT_ADAPT_MAX_HZ = runtimeConfig.timing?.snapshotHzMax ?? 120;
   const SNAPSHOT_ADAPT_DEFAULT_HZ = SNAPSHOT_ADAPT_MAX_HZ;
   const SNAPSHOT_ADAPT_ALPHA = 0.2;
@@ -192,14 +196,7 @@ export async function createBackend(options = {}) {
       lastSnapshot = value;
     },
   };
-  const lastXmlTextRef = {
-    get current() {
-      return lastXmlText;
-    },
-    set current(value) {
-      lastXmlText = value;
-    },
-  };
+  const lastLoadPayloadRef = { get current() { return lastLoadPayload; } };
   function spawnWorkerBackend() {
     const workerUrl = buildWorkerUrl(WORKER_URL);
     return new Worker(workerUrl, { type: 'module' });
@@ -220,14 +217,20 @@ export async function createBackend(options = {}) {
   }
 
   async function requestWorkerStrictReport() {
+    if (disposed) throw new Error('Backend is disposed');
     if (!client || typeof client.postMessage !== 'function') return null;
     const id = (strictRequestSeq += 1);
     const promise = new Promise((resolve, reject) => {
-      strictRequests.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        strictRequests.delete(id);
+        reject(new Error('Worker strict report timed out'));
+      }, 10000);
+      strictRequests.set(id, { resolve, reject, timer });
     });
     try {
       client.postMessage({ cmd: 'strictReport', id });
     } catch (err) {
+      clearTimeout(strictRequests.get(id)?.timer);
       strictRequests.delete(id);
       strictCatch(err, 'backend:strict_report_request');
       throw err;
@@ -335,18 +338,46 @@ export async function createBackend(options = {}) {
     }
   }
 
-  async function restartWorkerWithLoadPayload(loadPayload) {
-    const xmlText = typeof loadPayload?.xmlText === 'string' ? loadPayload.xmlText : String(loadPayload?.xmlText ?? '');
-    if (!xmlText || xmlText.trim().length === 0) {
-      return readPublishedSnapshot(false);
+  function rejectPending(reason) {
+    for (const pending of strictRequests.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(reason);
     }
+    strictRequests.clear();
+    if (pendingLoad) {
+      clearTimeout(pendingLoad.timer);
+      pendingLoad.reject(reason);
+      pendingLoad = null;
+    }
+  }
+
+  function failWorker(error) {
+    lastSnapshot.loadState = { status: 'failed', generation: workerGeneration, message: error.message };
+    lastSnapshot.backendError = error.message;
+    lastSnapshot.toast = { message: error.message, ts: Date.now() };
+    lastSnapshot.paused = true;
+    rejectPending(error);
+    detachClient();
+    client?.terminate();
+    client = null;
+    notifyListeners();
+  }
+
+  async function restartWorkerWithLoadPayload(loadPayload) {
+    if (disposed) throw new Error('Backend is disposed');
+    const retained = cloneLoadPayload(loadPayload);
+    const replay = cloneLoadPayload(retained);
+    const xmlText = replay.xmlText;
+    lastLoadPayload = retained;
+    const generation = ++workerGeneration;
+    rejectPending(new Error('Worker request cancelled by model replacement'));
     // Tear down old worker (if any).
     try { detachClient(); } catch (err) { strictCatch(err, 'backend:detach_client'); }
     try { client?.terminate?.(); } catch (err) { strictCatch(err, 'backend:terminate'); }
     client = null;
     // Spawn a fresh worker (new wasm instance).
     try {
-      client = await spawnWorkerBackend();
+      client = spawnWorkerBackend();
     } catch (err) {
       logError('[backend] worker init failed', err);
       strictCatch(err, 'backend:worker_init');
@@ -354,12 +385,19 @@ export async function createBackend(options = {}) {
     }
     // Attach message handler to the new worker.
     if (typeof client.addEventListener === 'function') {
-      messageHandler = (evt) => handleMessage(evt);
+      messageHandler = (evt) => { if (generation === workerGeneration) handleMessage(evt); };
       client.addEventListener('message', messageHandler);
     } else if ('onmessage' in client) {
-      messageHandler = (evt) => handleMessage(evt);
+      messageHandler = (evt) => { if (generation === workerGeneration) handleMessage(evt); };
       client.onmessage = messageHandler;
     }
+    const worker = client;
+    worker.addEventListener('error', (event) => {
+      if (generation === workerGeneration) failWorker(new Error(event.message || 'Physics Worker failed'));
+    });
+    worker.addEventListener('messageerror', () => {
+      if (generation === workerGeneration) failWorker(new Error('Physics Worker message could not be decoded'));
+    });
     const loadRate = Number.isFinite(lastSnapshot.rate) ? lastSnapshot.rate : 1;
     // Reset local snapshot state and kick off load on the fresh worker.
     lastSnapshot = createInitialSnapshot();
@@ -367,26 +405,33 @@ export async function createBackend(options = {}) {
     publishedSnapshotDirty = false;
     lastFrameId = -1;
     lastSnapshot.visualDefaults = null;
+    lastSnapshot.loadState = { status: 'loading', generation };
+    const completion = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (generation === workerGeneration) failWorker(new Error('Model load timed out'));
+      }, 120000);
+      pendingLoad = { generation, resolve, reject, timer, compiled: false, snapshot: false, assets: false };
+    });
     resetAdaptiveSnapshotState();
     notifyListeners();
     try {
-      const msg = { cmd: 'load', rate: loadRate, xmlText };
-      if (typeof loadPayload?.xmlPath === 'string' && loadPayload.xmlPath.trim().length) {
-        msg.xmlPath = loadPayload.xmlPath;
+      const msg = { cmd: 'load', requestId: generation, rate: loadRate, xmlText };
+      if (typeof replay.xmlPath === 'string' && replay.xmlPath.trim().length) {
+        msg.xmlPath = replay.xmlPath;
       }
-      if (Array.isArray(loadPayload?.files) && loadPayload.files.length) {
-        msg.files = loadPayload.files;
+      if (Array.isArray(replay.files) && replay.files.length) {
+        msg.files = replay.files;
       }
-      const transfers = collectLoadTransfers(loadPayload?.files);
-      client.postMessage(msg, transfers);
-      client.postMessage({ cmd: 'setSnapshotHz', hz: SNAPSHOT_ADAPT_DEFAULT_HZ });
-      client.postMessage({ cmd: 'snapshot' });
+      const transfers = collectLoadTransfers(replay.files);
+      worker.postMessage(msg, transfers);
+      worker.postMessage({ cmd: 'setSnapshotHz', hz: SNAPSHOT_ADAPT_DEFAULT_HZ });
+      worker.postMessage({ cmd: 'snapshot' });
     } catch (err) {
       logError('[backend load] failed', err);
+      failWorker(err);
       strictCatch(err, 'backend:load');
-      throw err;
     }
-    return publishMutation();
+    return completion;
   }
 
   async function restartWorkerWithXml(xmlText) {
@@ -535,7 +580,6 @@ export async function createBackend(options = {}) {
 
   async function loadXmlText(xmlText) {
     const payload = typeof xmlText === 'string' ? xmlText : String(xmlText ?? '');
-    lastXmlText = payload;
     return restartWorkerWithXml(payload);
   }
 
@@ -543,8 +587,6 @@ export async function createBackend(options = {}) {
     if (!loadPayload || typeof loadPayload !== 'object') {
       return readPublishedSnapshot(false);
     }
-    const xmlText = typeof loadPayload.xmlText === 'string' ? loadPayload.xmlText : String(loadPayload.xmlText ?? '');
-    lastXmlText = xmlText;
     return restartWorkerWithLoadPayload(loadPayload);
   }
 
@@ -577,10 +619,23 @@ export async function createBackend(options = {}) {
   }
 
   const workerEventHandlers = {
+    load_complete: (payload) => {
+      if (!pendingLoad || payload.requestId !== pendingLoad.generation) return;
+      if (!pendingLoad.compiled || !pendingLoad.snapshot || !pendingLoad.assets) {
+        failWorker(new Error('Model completion arrived before required load stages'));
+        return;
+      }
+      const pending = pendingLoad;
+      pendingLoad = null;
+      clearTimeout(pending.timer);
+      lastSnapshot.loadState = { status: 'ready', generation: pending.generation };
+      pending.resolve(publishMutation());
+    },
     strict_report: (payload) => {
       const id = Number(payload.id) || 0;
       const pending = strictRequests.get(id);
       if (pending) {
+        clearTimeout(pending.timer);
         strictRequests.delete(id);
         pending.resolve(payload.report || null);
       }
@@ -593,6 +648,8 @@ export async function createBackend(options = {}) {
       }
     },
     ready: (payload) => {
+      lastSnapshot.engineVersion = payload.engineVersion || null;
+      if (pendingLoad) pendingLoad.compiled = true;
       perfMarkOnce('play:backend:worker_ready', {
         sentWallMs: (typeof payload?.perf?.sentWallMs === 'number') ? payload.perf.sentWallMs : null,
         transferMs: (typeof payload?.perf?.sentWallMs === 'number') ? (Date.now() - payload.perf.sentWallMs) : null,
@@ -789,6 +846,9 @@ export async function createBackend(options = {}) {
         if (Array.isArray(payload.actuators)) {
           lastSnapshot.actuators = payload.actuators.map((a) => ({
             index: Number(a.index) | 0,
+            actuator: Number(a.actuator) | 0,
+            input: Number(a.input) | 0,
+            inputCount: Number(a.inputCount) | 0,
             name: String(a.name ?? `act ${a.index|0}`),
             group: Number.isFinite(Number(a.group)) ? (Number(a.group) | 0) : 0,
             min: Number(a.min),
@@ -803,6 +863,7 @@ export async function createBackend(options = {}) {
       }
     },
     snapshot: (payload) => {
+      if (pendingLoad) pendingLoad.snapshot = true;
       const tDecodeStart = perfEnabled ? perfNow() : 0;
       const recvWallMs = Date.now();
       if (perfEnabled) {
@@ -1055,6 +1116,7 @@ export async function createBackend(options = {}) {
     },
     render_assets: (payload) => {
       if (payload.assets) {
+        if (pendingLoad) pendingLoad.assets = true;
         lastSnapshot.renderAssets = payload.assets;
         notifyListeners();
         if (perfEnabled) {
@@ -1162,6 +1224,7 @@ export async function createBackend(options = {}) {
       lastSnapshot.toast = { message, ts: Date.now() };
       lastSnapshot.backendError = message;
       logError('[backend error]', payload);
+      if (pendingLoad) failWorker(new Error(message));
       notifyListeners();
     },
   };
@@ -1177,18 +1240,16 @@ export async function createBackend(options = {}) {
   }
 
   const initialLoad = await loadDefaultXml();
-  lastXmlText = typeof initialLoad?.xmlText === 'string' ? initialLoad.xmlText : String(initialLoad?.xmlText ?? '');
   await restartWorkerWithLoadPayload(initialLoad);
 
   const backendRuntime = createBackendRuntime({
     clientRef,
     lastSnapshotRef,
-    lastXmlTextRef,
+    lastLoadPayloadRef,
     prepareBindingUpdate: options.prepareBindingUpdate,
     readPublishedSnapshot,
     publishMutation,
     loadDefaultXml,
-    restartWorkerWithXml,
     restartWorkerWithLoadPayload,
     setRunState,
     setRate,
@@ -1204,10 +1265,15 @@ export async function createBackend(options = {}) {
   }
 
   function dispose() {
+    disposed = true;
+    ++workerGeneration;
+    rejectPending(new Error('Worker request cancelled by dispose'));
     if (messageHandler) {
       try { client?.removeEventListener?.('message', messageHandler); } catch (err) { strictCatch(err, 'backend:dispose_listener'); }
     }
     client?.terminate?.();
+    client = null;
+    listeners.clear();
   }
 
   return {

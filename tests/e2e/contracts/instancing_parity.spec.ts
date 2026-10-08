@@ -3,7 +3,7 @@ import { waitForViewerReady } from '../test-utils';
 
 test.describe('instancing visual parity', () => {
   const MODEL = 'mujoco_Rajagopal2015_simple.xml';
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   async function pauseSimulation(page: Page) {
     await page.evaluate(async () => {
@@ -301,7 +301,7 @@ test.describe('instancing visual parity', () => {
 
 test.describe('instancing site tendon parity', () => {
   const MODEL = 'mujoco_Rajagopal2015_simple.xml';
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   async function pauseSimulation(page: Page) {
     await page.evaluate(async () => {
@@ -500,7 +500,7 @@ test.describe('instancing site tendon parity', () => {
 
 test.describe('instancing instancecolor attr', () => {
   const MODEL = 'mujoco_Rajagopal2015_simple.xml';
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   async function pauseSimulation(page: any) {
     await page.evaluate(async () => {

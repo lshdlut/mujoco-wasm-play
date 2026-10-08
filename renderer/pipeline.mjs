@@ -1,7 +1,8 @@
 // Extracted from main.nobuild.mjs (renderer + camera/picking controllers).
-// Keep behaviour identical; do not swallow errors.
+// Preserve renderer contracts; compatibility corrections are explicit and tested.
 
 import * as THREE from 'three';
+import { classicLightScale } from './light_compatibility.mjs';
 import {
   isPerfEnabled,
   isStrictEnabled,
@@ -767,11 +768,8 @@ function updateMjLightRig(ctx, snapshot, state, assets, options = {}) {
       const cg = diffuseView ? (Number(diffuseView[colBase + 1]) || 0) : 1;
       const cb = diffuseView ? (Number(diffuseView[colBase + 2]) || 0) : 1;
       const mjIntensity = intensityView ? Number(intensityView[i]) : 0;
-      // MuJoCo's legacy OpenGL lighting uses `light_{ambient,diffuse,specular}` as the
-      // effective per-channel strength, and many built-in models keep `light_intensity == 0`.
-      // Treat non-positive intensity as "legacy" (i.e. multiplier 1) so that model lights
-      // remain visible and match Simulate's behavior.
-      const intensity = (Number.isFinite(mjIntensity) && mjIntensity > 0) ? mjIntensity : 1;
+      // Classical rendering uses effective RGB channels, not photometric intensity.
+      const intensity = classicLightScale(mjIntensity);
       const range = rangeView ? (Number(rangeView[i]) || 0) : 0;
 
       if (ambientView && ambientView.length >= (colBase + 3)) {

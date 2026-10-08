@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { waitForViewerReady } from '../test-utils';
 
-const FORGE_MESH_VERSIONS = ['3.6.0', '3.7.0', '3.8.0', '3.8.1'];
+const FORGE_MESH_VERSIONS = ['3.6.0', '3.7.0', '3.8.0', '3.8.1', '3.9.0', '3.10.0', '3.11.0', '3.12.0', '3.13.0', '3.14.0', '3.15.0'];
 
 test.describe('forge runtime version compatibility', () => {
   for (const ver of FORGE_MESH_VERSIONS) {
@@ -17,6 +17,7 @@ test.describe('forge runtime version compatibility', () => {
         const meshGeomCount = Array.from(gtype).filter((value) => (Number(value) | 0) === 7).length;
         return {
           ver: String(config?.startup?.ver || ''),
+          actual: snapshot?.engineVersion,
           ngeom: Number(snapshot?.ngeom) | 0,
           scnNgeom: Number(snapshot?.scn_ngeom) | 0,
           meshGeomCount,
@@ -24,6 +25,7 @@ test.describe('forge runtime version compatibility', () => {
       });
 
       expect(diag.ver).toBe(ver);
+      expect(diag.actual).toBe(ver);
       expect(diag.ngeom).toBeGreaterThan(0);
       expect(diag.scnNgeom).toBeGreaterThan(0);
       expect(diag.meshGeomCount).toBeGreaterThan(0);

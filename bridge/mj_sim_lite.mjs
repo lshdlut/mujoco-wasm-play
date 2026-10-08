@@ -2,6 +2,7 @@
 
 import { logError, strictCatch } from '../core/viewer_runtime.mjs';
 import { computeMeshElementCounts, heapViewF64, heapViewF32, heapViewI32, heapViewU8, readCString, resolveHeapBuffer } from './heap_views.mjs';
+import { controlSlotOwners, integrationStateSpec, playCompatibility } from './play_compatibility.mjs';
 
 let __forgeModuleSeq = 1;
 function tagForgeModule(mod) {
@@ -17,7 +18,6 @@ function tagForgeModule(mod) {
   return id;
 }
 
-const MJ_STATE_INTEGRATION = 0x1fff;
 const VOLATILE_PTR_EXPORTS = Object.freeze(new Set([
   '_mjwf_scene_geomorder_ptr',
 ]));
@@ -385,6 +385,27 @@ export class MjSimLite {
   nq(){ const c=this._ensureCountCache(); return c ? (c.nq|0) : 0; }
   nv(){ const c=this._ensureCountCache(); return c ? (c.nv|0) : 0; }
   nu(){ const c=this._ensureCountCache(); return c ? (c.nu|0) : 0; }
+  nactuator(){
+    if (!playCompatibility(this.mod).hasNactuator) return this.nu();
+    const fn = this.mod._mjwf_model_nactuator;
+    if (typeof fn !== 'function') throw new Error('Missing native nactuator getter');
+    return fn.call(this.mod, this.h | 0) | 0;
+  }
+  integrationStateSpec(){ return integrationStateSpec(this.mod); }
+  controlSlots(){
+    const n = this.nactuator();
+    if (!playCompatibility(this.mod).hasControlInputs) return controlSlotOwners(this.nu(), n);
+    const addresses = heapViewI32(this.mod, this._cachedPtr('_mjwf_model_actuator_ctrladr_ptr'), n);
+    const counts = heapViewI32(this.mod, this._cachedPtr('_mjwf_model_actuator_ctrlnum_ptr'), n);
+    return controlSlotOwners(this.nu(), n, addresses, counts);
+  }
+  actuatorInputName(actuator, input){
+    if (!playCompatibility(this.mod).hasActuatorInputName) return '';
+    const fn = this.mod._mjwf_mj_actuatorInputName;
+    if (typeof fn !== 'function') throw new Error('Missing native actuator input names');
+    const { modelPtr } = this.ensurePointers();
+    return this._cstr(fn.call(this.mod, modelPtr, actuator | 0, input | 0));
+  }
   njnt(){ const c=this._ensureCountCache(); return c ? (c.njnt|0) : 0; }
   ncam(){ const c=this._ensureCountCache(); return c ? (c.ncam|0) : 0; }
   nlight(){ const c=this._ensureCountCache(); return c ? (c.nlight|0) : 0; }
@@ -413,6 +434,11 @@ export class MjSimLite {
     const p=this._cachedPtr('_mjwf_data_ctrl_ptr')|0; if(!p)return;
     return heapViewF64(m,p,n);
   }
+  sensordataView(){
+    const m=this.mod; const n=this.nsensordata(); if(!n)return;
+    const p=this._cachedPtr('_mjwf_data_sensordata_ptr')|0; if(!p)return;
+    return heapViewF64(m,p,n);
+  }
   actuatorCtrlRangeView(){ const m=this.mod; const n=this.nu(); if(!(n>0)) return; const p=this._cachedPtr('_mjwf_model_actuator_ctrlrange_ptr')|0; if(!p) return; return heapViewF64(m,p,n*2); }
   jntQposAdrView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_qposadr_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,nj); }
   jntRangeView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_range_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,nj*2); }
@@ -424,10 +450,10 @@ export class MjSimLite {
   jntPosView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_pos_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,nj*3); }
   jntAxisView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_axis_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,nj*3); }
   jntBodyIdView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_jnt_bodyid_ptr; if (typeof d!=='function') return; const nj=this.njnt()|0; if(!nj)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,nj); }
-  actuatorTrnidView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_actuator_trnid_ptr; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n*2); }
-  actuatorTrntypeView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_actuator_trntype_ptr; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
-  actuatorGroupView(){ const m=this.mod; const n=this.nu()|0; if(!(n>0)) return null; const p=this._cachedPtr('_mjwf_model_actuator_group_ptr')|0; if(!p)return null; return heapViewI32(m,p,n); }
-  actuatorCranklengthView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_actuator_cranklength_ptr; if (typeof d!=='function') return; const n=this.nu()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n); }
+  actuatorTrnidView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_actuator_trnid_ptr; if (typeof d!=='function') return; const n=this.nactuator()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n*2); }
+  actuatorTrntypeView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_actuator_trntype_ptr; if (typeof d!=='function') return; const n=this.nactuator()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewI32(m,p,n); }
+  actuatorGroupView(){ const m=this.mod; const n=this.nactuator()|0; if(!(n>0)) return null; const p=this._cachedPtr('_mjwf_model_actuator_group_ptr')|0; if(!p)return null; return heapViewI32(m,p,n); }
+  actuatorCranklengthView(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_model_actuator_cranklength_ptr; if (typeof d!=='function') return; const n=this.nactuator()|0; if(!n)return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n); }
   siteXposView(){ const m=this.mod; const h=this.h|0; const n=this.nsite()|0; if(!n)return; const d=m._mjwf_data_site_xpos_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*3); }
   siteXmatView(){ const m=this.mod; const h=this.h|0; const n=this.nsite()|0; if(!n)return; const d=m._mjwf_data_site_xmat_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p)return; return heapViewF64(m,p,n*9); }
   tenWrapAdrView(){ const m=this.mod; const h=this.h|0; const n=this.ntendon()|0; if(!(n>0)) return null; const d=m['_mjwf_data_ten_wrapadr_ptr']; if (typeof d!=='function') return null; const p=d.call(m,h)|0; if(!p) return null; return heapViewI32(m,p,n); }
@@ -444,12 +470,12 @@ export class MjSimLite {
   eqDataView(){ const m=this.mod; const n=this.neq()|0; if(!n)return; const p=this._cachedPtr('_mjwf_model_eq_data_ptr')|0; if(!p)return; return heapViewF64(m,p,n*11); }
   eqActiveView(){ const m=this.mod; const n=this.neq()|0; if(!n)return; const p=this._cachedPtr('_mjwf_data_eq_active_ptr')|0; if(!p)return; return heapViewU8(m,p,n); }
   eqActive0View(){ const m=this.mod; const n=this.neq()|0; if(!n)return; const p=this._cachedPtr('_mjwf_model_eq_active0_ptr')|0; if(!p)return; return heapViewU8(m,p,n); }
-  id2name(objtype, objid){ const m=this.mod; const h=this.h|0; const fn = m['_mjwf_mj_id2name']; if (typeof fn!=='function') return ''; const p=fn.call(m,h, objtype|0, objid|0)|0; if(!p) return ''; return this._cstr(p); }
+  id2name(objtype, objid){ const m=this.mod; const fn = m['_mjwf_mj_id2name']; if (typeof fn!=='function') return ''; const { modelPtr } = this.ensurePointers(); const p=fn.call(m,modelPtr, objtype|0, objid|0)|0; if(!p) return ''; return this._cstr(p); }
   camXposView(){ const m=this.mod; const h=this.h|0; const n=this.ncam(); if(!(n>0)) return; const d=m._mjwf_data_cam_xpos_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*3); }
   camXmatView(){ const m=this.mod; const h=this.h|0; const n=this.ncam(); if(!(n>0)) return; const d=m._mjwf_data_cam_xmat_ptr; if (typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewF64(m,p,n*9); }
   lightXposView(){ const m=this.mod; const n=this.nlight(); if(!(n>0)) return; const p=this._cachedPtr('_mjwf_data_light_xpos_ptr')|0; if(!p) return; return heapViewF64(m,p,n*3); }
   lightXdirView(){ const m=this.mod; const n=this.nlight(); if(!(n>0)) return; const p=this._cachedPtr('_mjwf_data_light_xdir_ptr')|0; if(!p) return; return heapViewF64(m,p,n*3); }
-  stateSize(sig = MJ_STATE_INTEGRATION){
+  stateSize(sig = this.integrationStateSpec()){
     const mod = this.mod;
     if (!mod) return 0;
     const fn = mod._mjwf_mj_stateSize;
@@ -457,7 +483,7 @@ export class MjSimLite {
     const { modelPtr } = this.ensurePointers();
     return fn.call(mod, modelPtr | 0, sig >>> 0) | 0;
   }
-  captureState(target = null, sig = MJ_STATE_INTEGRATION){
+  captureState(target = null, sig = this.integrationStateSpec()){
     const size = this.stateSize(sig);
     if (!(size > 0)) {
       return target instanceof Float64Array ? target : new Float64Array(0);
@@ -476,7 +502,7 @@ export class MjSimLite {
     });
     return out;
   }
-  applyState(source, sig = MJ_STATE_INTEGRATION){
+  applyState(source, sig = this.integrationStateSpec()){
     if (!source) return false;
     const mod = this.mod;
     if (!mod) return false;
@@ -532,6 +558,18 @@ export class MjSimLite {
     }
     this.ensurePointers();
     fn.call(m, this.modelPtr | 0, this.dataPtr | 0);
+  }
+  resetCtrl(){
+    if (playCompatibility(this.mod).hasResetCtrl) {
+      const fn = this.mod._mjwf_mj_resetCtrl;
+      if (typeof fn !== 'function') throw new Error('Missing native mj_resetCtrl');
+      const { modelPtr, dataPtr } = this.ensurePointers();
+      fn.call(this.mod, modelPtr, dataPtr);
+    } else {
+      // Legacy single-input MuJoCo neutral controls are zero.
+      this.ctrlView()?.fill(0);
+    }
+    this.forward();
   }
   setQpos(i, val){ const v=this.qposView(); if (!v) return false; const idx=i|0; if (idx<0 || idx>=v.length) return false; v[idx] = +val||0; this.forward(); return true; }
   setCtrl(i, val){
@@ -700,7 +738,7 @@ export class MjSimLite {
     const namesPtr = namesPtrFn.call(m,h)|0;
     const adrPtr = adrFn.call(m,h)|0;
     if (!(namesPtr>0) || !(adrPtr>0)) return '';
-    const offsets = heapViewI32(m, adrPtr, count+1);
+    const offsets = heapViewI32(m, adrPtr, count);
     if (!offsets || idx>=offsets.length) return '';
     const rel = offsets[idx]|0;
     if (!(rel>=0)) return '';
@@ -1139,19 +1177,21 @@ export class MjSimLite {
 
   // --- Contacts (optional) ---
   ncon(){ const m=this.mod; const h=this.h|0; const d=m._mjwf_data_ncon; if (typeof d!=='function') return 0; return (d.call(m,h)|0)||0; }
-  _contactFieldView(offsetBytes, countPerContact){
+  _contactFieldView(fieldExport, countPerContact, Ctor = Float64Array){
     const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return;
-    const contactPtrFn = m._mjwf_data_contact_ptr;
+    const contactPtrFn = m[fieldExport];
     if (typeof contactPtrFn !== 'function') return;
     const base = contactPtrFn.call(m, h) | 0;
     if (!base) return;
     const buffer = resolveHeapBuffer(m);
     if (!buffer) return;
-    const strideBytes = 576;
-    const strideD = strideBytes >>> 3;
-    const startD = (base + (offsetBytes|0)) >>> 3;
-    const view = new Float64Array(buffer);
-    const out = new Float64Array(n * countPerContact);
+    // Legacy 3.3-3.8 bundles predate the stride export; retain their existing layout.
+    const strideBytes = typeof m._mjwf_data_contact_stride === 'function'
+      ? m._mjwf_data_contact_stride() : 576;
+    const strideD = strideBytes / Ctor.BYTES_PER_ELEMENT;
+    const startD = base / Ctor.BYTES_PER_ELEMENT;
+    const view = new Ctor(buffer);
+    const out = new Ctor(n * countPerContact);
     let outIndex = 0;
     for (let i = 0; i < n; i += 1) {
       const idx = startD + i * strideD;
@@ -1161,12 +1201,12 @@ export class MjSimLite {
     }
     return out;
   }
-  contactPosView(){ const n=this.ncon(); if(!(n>0)) return; return this._contactFieldView(8, 3); }
-  contactFrameView(){ const n=this.ncon(); if(!(n>0)) return; return this._contactFieldView(32, 9); }
-  contactGeom1View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=m._mjwf_data_contact_geom1_ptr; if(typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
-  contactGeom2View(){ const m=this.mod; const h=this.h|0; const n=this.ncon(); if(!(n>0)) return; const d=m._mjwf_data_contact_geom2_ptr; if(typeof d!=='function') return; const p=d.call(m,h)|0; if(!p) return; return heapViewI32(m,p,n); }
-  contactDistView(){ const n=this.ncon(); if(!(n>0)) return; return this._contactFieldView(0, 1); }
-  contactFrictionView(){ const n=this.ncon(); if(!(n>0)) return; return this._contactFieldView(112, 5); }
+  contactPosView(){ return this._contactFieldView('_mjwf_data_contact_pos_ptr', 3); }
+  contactFrameView(){ return this._contactFieldView('_mjwf_data_contact_frame_ptr', 9); }
+  contactGeom1View(){ return this._contactFieldView('_mjwf_data_contact_geom1_ptr', 1, Int32Array); }
+  contactGeom2View(){ return this._contactFieldView('_mjwf_data_contact_geom2_ptr', 1, Int32Array); }
+  contactDistView(){ return this._contactFieldView('_mjwf_data_contact_dist_ptr', 1); }
+  contactFrictionView(){ return this._contactFieldView('_mjwf_data_contact_friction_ptr', 5); }
   contactForceBuffer(target){
     const m=this.mod;
     const n=this.ncon();
@@ -1195,7 +1235,7 @@ export class MjSimLite {
   // --- Actuator metadata (optional) ---
   actuatorNameOf(i){
     const m=this.mod; const h=this.h|0; const idx=i|0;
-    return this._nameFromAdr(idx, '_mjwf_model_name_actuatoradr_ptr', '_mjwf_model_nu') || '';
+    return this._nameFromAdr(idx, '_mjwf_model_name_actuatoradr_ptr', playCompatibility(this.mod).hasNactuator ? '_mjwf_model_nactuator' : '_mjwf_model_nu') || '';
   }
   cameraNameOf(i){
     return this._nameFromAdr(i, '_mjwf_model_name_camadr_ptr', '_mjwf_model_ncam') || '';

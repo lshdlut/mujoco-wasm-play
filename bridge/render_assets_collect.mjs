@@ -220,12 +220,13 @@ export function collectRenderAssetsFromModule(mod, handle) {
     };
   }
   const nu = ensureFunc('_mjwf_model_nu').call(mod, handle) | 0;
-  if (nu > 0) {
-    const trnidView = readView(mod, ensureFunc('_mjwf_model_actuator_trnid_ptr'), handle, nu * 2, heapViewI32);
-    const trntypeView = readView(mod, ensureFunc('_mjwf_model_actuator_trntype_ptr'), handle, nu, heapViewI32);
-    const cranklengthView = readView(mod, ensureFunc('_mjwf_model_actuator_cranklength_ptr'), handle, nu, heapViewF64);
+  const nactuator = typeof mod._mjwf_model_nactuator === 'function' ? mod._mjwf_model_nactuator(handle) | 0 : nu;
+  if (nactuator > 0) {
+    const trnidView = readView(mod, ensureFunc('_mjwf_model_actuator_trnid_ptr'), handle, nactuator * 2, heapViewI32);
+    const trntypeView = readView(mod, ensureFunc('_mjwf_model_actuator_trntype_ptr'), handle, nactuator, heapViewI32);
+    const cranklengthView = readView(mod, ensureFunc('_mjwf_model_actuator_cranklength_ptr'), handle, nactuator, heapViewF64);
     assets.actuators = {
-      count: nu,
+      count: nactuator,
       trnid: cloneTyped(trnidView, Int32Array),
       trntype: cloneTyped(trntypeView, Int32Array),
       cranklength: cloneTyped(cranklengthView, Float64Array),

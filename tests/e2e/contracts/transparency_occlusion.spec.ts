@@ -9,7 +9,7 @@ function localModelPath(model: string) {
 
 test.describe('static transparent parity', () => {
   const MODEL = 'model/slider_crank/slider_crank.xml';
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   const MJ_VIS = {
     TRANSPARENT: 18,
@@ -166,7 +166,7 @@ test.describe('static transparent parity', () => {
 
 test.describe('transparent strict ordering', () => {
   const MODEL = 'mujoco_Rajagopal2015_simple.xml';
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   async function pauseSimulation(page: Page) {
     await page.evaluate(async () => {

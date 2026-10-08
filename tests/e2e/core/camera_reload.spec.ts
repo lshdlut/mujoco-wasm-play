@@ -218,7 +218,7 @@ test.describe('model switch reset', () => {
   const __dirname = path.dirname(__filename);
 
   const MODEL = 'mujoco_Rajagopal2015_simple.xml';
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   test('loading a new xml resets timer and registers dropdown entry', async ({ page }) => {
     const url =
@@ -235,10 +235,11 @@ test.describe('model switch reset', () => {
 
     const pendulumPath = path.join(__dirname, '..', '..', 'fixtures', 'pendulum.xml');
     const xmlText = await fs.readFile(pendulumPath, 'utf8');
-    await page.evaluate(async ({ xml, label }) => {
+    const loadedTime = await page.evaluate(async ({ xml, label }) => {
       const controls = (window as any).__viewerControls;
       if (!controls?.loadXmlTextAsModel) throw new Error('Missing __viewerControls.loadXmlTextAsModel');
       await controls.loadXmlTextAsModel(xml, label);
+      return Number((window as any).__PLAY_HOST__?.getSnapshot?.()?.t);
     }, { xml: xmlText, label: 'pendulum.xml' });
 
     const optionTexts = await page.evaluate(() => {
@@ -248,10 +249,8 @@ test.describe('model switch reset', () => {
     });
     expect(optionTexts.join('\n')).toContain('pendulum.xml');
 
-    // Timer should drop near zero shortly after reload.
-    await page.waitForFunction(() => {
-      const t = Number((window as any).__PLAY_HOST__?.getSnapshot?.()?.t);
-      return Number.isFinite(t) && t < 0.1;
-    }, { timeout: 10_000 });
+    // Capture the reset at actual load completion, before the running model advances.
+    expect(Number.isFinite(loadedTime)).toBe(true);
+    expect(loadedTime).toBeLessThan(0.1);
   });
 });

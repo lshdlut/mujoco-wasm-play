@@ -2,7 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const repoRoot = process.cwd();
+function parseRepoRoot(argv) {
+  const rootIndex = argv.indexOf('--root');
+  if (rootIndex < 0) return process.cwd();
+  const value = argv[rootIndex + 1];
+  if (!value) throw new Error('[test-layout] --root requires a directory');
+  return path.resolve(value);
+}
+
+const repoRoot = parseRepoRoot(process.argv);
 
 function fail(message) {
   throw new Error(`[test-layout] ${message}`);
@@ -31,6 +39,15 @@ function walkTests(dirRel = 'tests') {
 async function loadConfig(relPath) {
   const absPath = path.resolve(repoRoot, relPath);
   return import(pathToFileURL(absPath).href);
+}
+
+function isPlaywrightSpec(relPath) {
+  return /\.spec\.(?:c|m)?(?:js|ts|jsx|tsx)$/.test(relPath);
+}
+
+function isWithin(childPath, parentPath) {
+  const relative = path.relative(parentPath, childPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 const presentTests = walkTests();
@@ -93,22 +110,53 @@ for (const [oldSpec, newSuite] of deletedSpecDestinations.entries()) {
   assert(fs.existsSync(path.resolve(repoRoot, newSuite)), `destination suite missing: ${newSuite}`);
 }
 
-const defaultConfig = (await loadConfig('tests/playwright.config.mjs')).default;
-const contractsConfig = (await loadConfig('tests/playwright.contract.config.mjs')).default;
-const diagnosticsConfig = (await loadConfig('tests/playwright.diagnostics.config.mjs')).default;
-const perfConfig = (await loadConfig('tests/playwright.perf.config.mjs')).default;
+const suites = [
+  { name: 'core', config: 'tests/playwright.config.mjs', script: 'test:e2e', expectedTestDir: './e2e/core' },
+  {
+    name: 'contracts',
+    config: 'tests/playwright.contract.config.mjs',
+    script: 'test:e2e:contracts',
+    expectedTestDir: './e2e/contracts',
+  },
+  {
+    name: 'diagnostics',
+    config: 'tests/playwright.diagnostics.config.mjs',
+    script: 'test:e2e:diagnostics',
+    expectedTestDir: './diagnostics',
+  },
+  {
+    name: 'perf',
+    config: 'tests/playwright.perf.config.mjs',
+    script: 'test:e2e:perf',
+    expectedTestDir: './perf',
+  },
+];
 
-assert(defaultConfig.testDir === './e2e/core', `default config testDir drifted: ${defaultConfig.testDir}`);
-assert(contractsConfig.testDir === './e2e/contracts', `contracts config testDir drifted: ${contractsConfig.testDir}`);
-assert(diagnosticsConfig.testDir === './diagnostics', `diagnostics config testDir drifted: ${diagnosticsConfig.testDir}`);
-assert(perfConfig.testDir === './perf', `perf config testDir drifted: ${perfConfig.testDir}`);
+const loadedSuites = [];
+for (const suite of suites) {
+  const config = (await loadConfig(suite.config)).default;
+  assert(config.testDir === suite.expectedTestDir, `${suite.name} config testDir drifted: ${config.testDir}`);
+  const configDir = path.dirname(path.resolve(repoRoot, suite.config));
+  const testDir = path.resolve(configDir, config.testDir);
+  assert(fs.existsSync(testDir), `${suite.name} testDir missing: ${testDir}`);
+  loadedSuites.push({ ...suite, testDir });
+}
+
+const playwrightSpecs = presentTests.filter(isPlaywrightSpec);
+for (const spec of playwrightSpecs) {
+  const specAbs = path.resolve(repoRoot, spec);
+  const matches = loadedSuites.filter((suite) => isWithin(specAbs, suite.testDir));
+  assert(
+    matches.length === 1,
+    `${spec} must belong to exactly one configured Playwright suite; matched: ${matches.map((suite) => suite.name).join(', ') || 'none'}`,
+  );
+}
 
 const packageJson = JSON.parse(fs.readFileSync(path.resolve(repoRoot, 'package.json'), 'utf8'));
 const scripts = packageJson.scripts || {};
 assert(String(scripts.smoke || '').includes('tests/e2e/core/viewer_boot.spec.ts'), 'smoke script does not point to viewer_boot.spec.ts');
-assert(String(scripts['test:e2e'] || '').includes('tests/playwright.config.mjs'), 'test:e2e does not use default core config');
-assert(String(scripts['test:e2e:contracts'] || '').includes('tests/playwright.contract.config.mjs'), 'test:e2e:contracts missing contract config');
-assert(String(scripts['test:e2e:diagnostics'] || '').includes('tests/playwright.diagnostics.config.mjs'), 'test:e2e:diagnostics missing diagnostics config');
-assert(String(scripts['test:e2e:perf'] || '').includes('tests/playwright.perf.config.mjs'), 'test:e2e:perf missing perf config');
+for (const suite of suites) {
+  assert(String(scripts[suite.script] || '').includes(suite.config), `${suite.script} missing ${suite.config}`);
+}
 
 console.log('TEST LAYOUT OK');

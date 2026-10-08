@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { waitForViewerReady } from './test-utils';
+import { waitForViewerReady } from '../test-utils';
 
 async function switchVisualSource(page: Page, target: 'PresetSun' | 'PresetMoon') {
   await page.evaluate(async (mode) => {

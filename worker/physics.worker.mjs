@@ -6,6 +6,9 @@
 // Physics worker: loads MuJoCo WASM (dynamically), advances simulation at fixed rate,
 // and posts Float64Array snapshots (xpos/xmat) back to the main thread.
 import { heapViewF64, heapViewF32, heapViewI32, readCString } from '../bridge/heap_views.mjs';
+import { readRecordScalar, solverRecordCapacity, solverLastRecordIndex } from '../bridge/record_views.mjs';
+import { createMoveCameraAdapter } from '../bridge/viewer_camera_abi.mjs';
+import { integrationStateSpec, playCompatibility, readMjtSize } from '../bridge/play_compatibility.mjs';
 import { collectRenderAssetsFromModule } from '../bridge/render_assets_collect.mjs';
 import { MjSimLite } from '../bridge/mj_sim_lite.mjs';
 import {
@@ -48,10 +51,7 @@ import {
 
 const MJ_TIMER_STEP = 0;
 const MJ_TIMER_FORWARD = 1;
-const MJ_NTIMER = 15;
-const MJ_NSOLVER = 50;
 const SOLVER_LOG_EPS = 1e-15;
-const MJ_STATE_SIG = 0x1fff;
 
 let mod = null;
 let sim = null;
@@ -178,7 +178,7 @@ const HISTORY_DEFAULT_CAPACITY = 900;
 const KEYFRAME_EXTRA_SLOTS = 5;
 const WATCH_FIELDS = ['qpos', 'qvel', 'ctrl', 'sensordata', 'xpos', 'xmat', 'body_xpos', 'body_xmat'];
 
-let historyConfig = { captureHz: HISTORY_DEFAULT_CAPTURE_HZ, capacity: HISTORY_DEFAULT_CAPACITY, stateSig: MJ_STATE_SIG };
+let historyConfig = { captureHz: HISTORY_DEFAULT_CAPTURE_HZ, capacity: HISTORY_DEFAULT_CAPACITY, stateSig: 0 };
 let historyState = null;
 let keyframeState = null;
 let watchState = null;
@@ -425,7 +425,7 @@ function ensureMjvCameraAbi() {
   }
   mjvCameraFns = {
     updateCamera: mod._mjwf_mjv_updateCamera,
-    moveCamera: mod._mjwf_mjv_moveCamera,
+    moveCamera: createMoveCameraAdapter(mod),
   };
   strictEnsure('ensureMjvCameraAbi', { reason: 'create' });
   return mjvCameraFns;
@@ -813,16 +813,16 @@ function buildInfoStats(sim, tSim, nconLocal) {
 
   const durFn = moduleRef._mjwf_data_timer_duration_ptr;
   const numFn = moduleRef._mjwf_data_timer_number_ptr;
-  if (typeof durFn === 'function' && typeof numFn === 'function') {
+  const timerStride = typeof moduleRef._mjwf_data_timer_stride === 'function'
+    ? moduleRef._mjwf_data_timer_stride() : 0;
+  if (timerStride > 0 && typeof durFn === 'function' && typeof numFn === 'function') {
     const durPtr = durFn.call(moduleRef, handle) | 0;
     const numPtr = numFn.call(moduleRef, handle) | 0;
     if (durPtr && numPtr) {
-      const durations = heapViewF64(moduleRef, durPtr, MJ_NTIMER);
-      const numbers = heapViewI32(moduleRef, numPtr, MJ_NTIMER);
-      const stepDur = Number(durations[MJ_TIMER_STEP]) || 0;
-      const stepNum = Number(numbers[MJ_TIMER_STEP]) || 0;
-      const fwdDur = Number(durations[MJ_TIMER_FORWARD]) || 0;
-      const fwdNum = Number(numbers[MJ_TIMER_FORWARD]) || 0;
+      const stepDur = Number(readRecordScalar(moduleRef, durPtr, MJ_TIMER_STEP, timerStride)) || 0;
+      const stepNum = Number(readRecordScalar(moduleRef, numPtr, MJ_TIMER_STEP, timerStride, Int32Array)) || 0;
+      const fwdDur = Number(readRecordScalar(moduleRef, durPtr, MJ_TIMER_FORWARD, timerStride)) || 0;
+      const fwdNum = Number(readRecordScalar(moduleRef, numPtr, MJ_TIMER_FORWARD, timerStride, Int32Array)) || 0;
       const prev = lastCpuTimerSnapshot;
       if (
         prev
@@ -876,20 +876,20 @@ function buildInfoStats(sim, tSim, nconLocal) {
         if (it > 0) totalIter += it;
       }
       out.solverNiter = totalIter;
-      if (typeof imprPtrFn === 'function' && typeof gradPtrFn === 'function') {
-        const baseCount = nisland * MJ_NSOLVER;
+      const solverStride = typeof moduleRef._mjwf_data_solver_stride === 'function'
+        ? moduleRef._mjwf_data_solver_stride() : 0;
+      const solverCapacity = solverRecordCapacity(moduleRef.__mujocoVer);
+      if (solverStride > 0 && solverCapacity > 0 && typeof imprPtrFn === 'function' && typeof gradPtrFn === 'function') {
+        const baseCount = nisland * solverCapacity;
         const imprPtr = imprPtrFn.call(moduleRef, handle) | 0;
         const gradPtr = gradPtrFn.call(moduleRef, handle) | 0;
         if (imprPtr && gradPtr && baseCount > 0) {
-          const impr = heapViewF64(moduleRef, imprPtr, baseCount);
-          const grad = heapViewF64(moduleRef, gradPtr, baseCount);
           let worst = 0;
           for (let i = 0; i < nisland; i += 1) {
-            const it = Math.min(MJ_NSOLVER, Math.max(0, Number(niterArr[i]) || 0));
-            if (!(it > 0)) continue;
-            const idx = i * MJ_NSOLVER + (it - 1);
-            const a = Number(impr[idx]) || 0;
-            const b = Number(grad[idx]) || 0;
+            const idx = solverLastRecordIndex(solverCapacity, i, Number(niterArr[i]) || 0);
+            if (idx < 0) continue;
+            const a = Number(readRecordScalar(moduleRef, imprPtr, idx, solverStride)) || 0;
+            const b = Number(readRecordScalar(moduleRef, gradPtr, idx, solverStride)) || 0;
             if (a === 0 && b === 0) continue;
             let solerr_i = 0;
             if (a === 0) {
@@ -958,8 +958,7 @@ function buildInfoStats(sim, tSim, nconLocal) {
   if (typeof maxArenaPtrFn === 'function') {
     const p = maxArenaPtrFn.call(moduleRef, handle) | 0;
     if (p) {
-      const v = heapViewI32(moduleRef, p, 1);
-      out.maxuseArena = (v && v.length > 0 ? v[0] : 0) | 0;
+      out.maxuseArena = readMjtSize(moduleRef, p);
     }
   }
 
@@ -981,7 +980,7 @@ function captureHistorySample(force = false) {
   }
   const slot = historyState.samples[historyState.head];
   if (!slot) return;
-  sim.captureState?.(slot, historyState.stateSig || MJ_STATE_SIG);
+  sim.captureState?.(slot, historyState.stateSig || integrationStateSpec(mod));
   historyState.head = (historyState.head + 1) % historyState.capacity;
   historyState.count = Math.min(historyState.count + 1, historyState.capacity);
   historyState.stepsUntilCapture = Math.max(0, (historyState.captureStepStride | 0) - 1);
@@ -1015,7 +1014,7 @@ function loadHistoryOffset(offset) {
   const idx = (historyState.head - steps + historyState.capacity) % historyState.capacity;
   const slot = historyState.samples[idx];
   if (!slot) return false;
-  const applied = sim.applyState?.(slot, historyState.stateSig || MJ_STATE_SIG);
+  const applied = sim.applyState?.(slot, historyState.stateSig || integrationStateSpec(mod));
   if (!applied) return false;
   historyState.scrubIndex = -steps;
   if (!historyState.scrubActive) {
@@ -1046,7 +1045,7 @@ function applyHistoryConfig(partial = {}) {
 }
 
 function resetKeyframes() {
-  const stateSig = historyConfig.stateSig || MJ_STATE_SIG;
+  const stateSig = historyConfig.stateSig || integrationStateSpec(mod);
   const stateSize = typeof sim?.stateSize === 'function' ? (sim.stateSize(stateSig) | 0) : 0;
   const nativeCount = typeof sim?.nkey === 'function' ? (sim.nkey() | 0) : 0;
   const totalSlots = nativeCount + KEYFRAME_EXTRA_SLOTS;
@@ -1140,7 +1139,7 @@ function saveKeyframe(requestedIndex) {
   );
   const slot = ensureKeySlot(target);
   if (!slot || !slot.state || typeof sim.captureState !== 'function') return -1;
-  sim.captureState(slot.state, keyframeState.stateSig || MJ_STATE_SIG);
+  sim.captureState(slot.state, keyframeState.stateSig || integrationStateSpec(mod));
   slot.available = true;
   keyframeState.lastSaved = target;
   emitKeyframeMeta();
@@ -1154,7 +1153,7 @@ function loadKeyframe(index) {
   const target = Math.max(0, Math.min(index | 0, slots.length - 1));
   const slot = slots[target];
   if (!slot || !slot.state || !slot.available || typeof sim.applyState !== 'function') return false;
-  const ok = sim.applyState(slot.state, keyframeState.stateSig || MJ_STATE_SIG);
+  const ok = sim.applyState(slot.state, keyframeState.stateSig || integrationStateSpec(mod));
   if (!ok) return false;
   keyframeState.lastLoaded = target;
   emitKeyframeMeta();
@@ -1654,7 +1653,12 @@ async function loadModule() {
         }
       },
     });
-    mod.__mujocoVer = ver;
+    // The engine owns its ABI identity: forgeBase may pin a different bundle
+    // than the URL/default version used to select the loader location.
+    if (typeof mod._mjwf_mj_versionString !== 'function') {
+      throw new Error('Forge is missing mj_versionString for ABI identification');
+    }
+    mod.__mujocoVer = readCString(mod, mod._mjwf_mj_versionString());
     mod.__forgeDistBase = distBase.href;
     assertForgeViewerAbi(mod);
     if (perfEnabled) {
@@ -1740,7 +1744,6 @@ async function loadXmlWithFallback(xmlText, initOptions = null) {
     } catch (err) {
       logWarn('worker: loadXmlWithFallback failed', String(err || ''));
       strictCatch(err, 'worker:loadXmlWithFallback', { allow: true });
-      compatFallback('loadXmlWithFallback', { stage: attempt.stage, error: String(err || '') });
       const meta = readLastErrorMeta(mod || {});
       if (attempts.length === 1) {
         return {
@@ -1760,7 +1763,7 @@ async function loadXmlWithFallback(xmlText, initOptions = null) {
 
 
 
-function snapshot() {
+function snapshot(validateInitial = false) {
   if (!sim || !(sim.h > 0)) return;
   const tSnapshotStart = perfNowMs();
   const nowMs = tSnapshotStart;
@@ -2235,6 +2238,15 @@ function snapshot() {
   if (perfEnabled && ((frameId | 0) % 4 === 0)) {
     safePost({ kind: 'latency_probe', sentWallMs, frameId }, null, 'worker:latency_probe_post');
   }
+  if (validateInitial && (!Number.isFinite(msg.tSim)
+    || (msg.qpos?.length || 0) !== msg.nq
+    || msg.xpos?.length !== msg.ngeom * 3
+    || msg.xmat?.length !== msg.ngeom * 9
+    || !Array.from(msg.qpos || []).every(Number.isFinite)
+    || !Array.from(msg.xpos || []).every(Number.isFinite)
+    || !Array.from(msg.xmat || []).every(Number.isFinite))) {
+    throw new Error('Model load produced an invalid initial snapshot');
+  }
   try {
     const tPostStart = perfEnabled ? perfNowMs() : 0;
     postMessage(msg, transfers);
@@ -2248,7 +2260,9 @@ function snapshot() {
       strictCatch(innerErr, 'worker:snapshot_post_error');
     }
     strictCatch(err, 'worker:snapshot_post');
+    throw err;
   }
+  return true;
 }
 
 function writeCtrlValue(index, value) {
@@ -2275,7 +2289,7 @@ function emitRenderAssets() {
   try {
     const tCollectStart = perfEnabled ? perfNowMs() : 0;
     const assets = collectRenderAssetsFromModule(mod, h);
-    if (!assets) return;
+    if (!assets) throw new Error('Model render assets are missing');
     renderAssets = assets;
     if (perfEnabled) {
       perfStages.collectRenderAssetsMs = perfNowMs() - tCollectStart;
@@ -2290,10 +2304,12 @@ function emitRenderAssets() {
     } catch (err) {
       logWarn('worker: render_assets post failed', String(err || ''));
       strictCatch(err, 'worker:render_assets_post');
+      throw err;
     }
   } catch (err) {
     logWarn('worker: collectRenderAssets failed', String(err || ''));
     strictCatch(err, 'worker:collect_render_assets');
+    throw err;
   }
 }
 
@@ -2704,7 +2720,7 @@ const commandHandlers = {
     if (sim) {
       try { sim.term(); } catch (err) { strictCatch(err, 'worker:sim_term'); }
     }
-    if (mod && h && typeof mod._mjwf_helper_free === 'function') {
+    if (!sim && mod && h && typeof mod._mjwf_helper_free === 'function') {
       try { mod._mjwf_helper_free(h); } catch (err) { strictCatch(err, 'worker:helper_free'); }
     }
     h = 0;
@@ -2748,6 +2764,8 @@ const commandHandlers = {
     lastCpuTimerSnapshot = null;
     frameSeq = 0;
     optionSupport = detectOptionSupport(mod);
+    optionSupport.integrators = playCompatibility(mod).integrators;
+    historyConfig = { ...historyConfig, stateSig: integrationStateSpec(mod) };
     dt = sim?.timestep?.() || 0.002;
     if (Number.isFinite(dt) && dt > 0) {
       const targetHz = resolveHistoryStepHz(dt);
@@ -2797,6 +2815,7 @@ const commandHandlers = {
     const statisticState = readStructState('mjStatistic');
     postMessage({
       kind: 'ready',
+      engineVersion: mod.__mujocoVer,
       abi,
       dt,
       ngeom,
@@ -2868,15 +2887,18 @@ const commandHandlers = {
       const rangeView = sim?.actuatorCtrlRangeView?.();
       const actuatorGroupView = sim?.actuatorGroupView?.();
       if (nu > 0) {
-        for (let i = 0; i < nu; i += 1) {
-          const name = sim?.actuatorNameOf?.(i) || `act ${i}`;
+        for (const owner of sim.controlSlots()) {
+          const { index: i, actuator, input, inputCount } = owner;
+          const actuatorName = sim.actuatorNameOf(actuator) || `act ${actuator}`;
+          const inputName = sim.actuatorInputName(actuator, input);
+          const name = inputCount > 1 ? `${actuatorName} / ${inputName || `input ${input}`}` : actuatorName;
           const rawLo = rangeView ? +rangeView[2 * i] : NaN;
           const rawHi = rangeView ? +rangeView[2 * i + 1] : NaN;
           const valid = Number.isFinite(rawLo) && Number.isFinite(rawHi) && (rawHi - rawLo) > 1e-12;
           const lo = valid ? rawLo : -1;
           const hi = valid ? rawHi : 1;
-          const group = actuatorGroupView && i < actuatorGroupView.length ? (actuatorGroupView[i] | 0) : 0;
-          acts.push({ index:i, name, group, min: lo, max: hi, step: 0.001, value: 0 });
+          const group = actuatorGroupView && actuator < actuatorGroupView.length ? (actuatorGroupView[actuator] | 0) : 0;
+          acts.push({ ...owner, name, group, min: lo, max: hi, step: 0.001, value: sim.ctrlView()?.[i] || 0 });
         }
       }
       postMessage({ kind:'meta', actuators: acts });
@@ -2911,8 +2933,11 @@ const commandHandlers = {
     } catch (err) {
       strictCatch(err, 'worker:load_align');
     }
-    snapshot();
+    if (!snapshot(true)) {
+      throw new Error('Model load produced an invalid initial snapshot');
+    }
     emitRenderAssets();
+    postMessage({ kind: 'load_complete', requestId: payload.requestId });
   },
   reset: () => {
     if (sim && typeof sim.reset === 'function') {
@@ -3501,6 +3526,12 @@ const commandHandlers = {
     safePost(nextPayload, null, 'worker:copy_state_post');
   },
   setCtrlNoise: () => {},
+  resetCtrl: () => {
+    if (!sim || !h) return;
+    pendingCtrl.clear();
+    sim.resetCtrl();
+    snapshot();
+  },
   setCtrl: (payload) => {
     try {
       const idx = payload.index | 0;
@@ -3572,13 +3603,14 @@ const commandHandlers = {
   },
   setPaused: (payload) => {
     const nextRunning = !payload.paused;
-    setRunning(nextRunning, payload.source || 'ui');
     if (!nextRunning) {
       historyState && (historyState.resumeRun = false);
     } else if (historyState?.scrubActive) {
       releaseHistoryScrub();
       emitHistoryMeta();
     }
+    // Releasing scrub clears its paused state; the explicit Run command wins.
+    setRunning(nextRunning, payload.source || 'ui');
   },
   snapshot: () => {
     if (sim && h) snapshot();
@@ -3597,7 +3629,8 @@ onmessage = async (ev) => {
   try {
     await dispatchCommandMessage(msg);
   } catch (e) {
-    safePost({ kind:'error', message: String(e) }, null, 'worker:post_error');
+    if (msg.cmd === 'load') setRunning(false, 'load_failed', false);
+    safePost({ kind:'error', message: String(e), requestId: msg.requestId }, null, 'worker:post_error');
     strictCatch(e, 'worker:onmessage');
   }
 };

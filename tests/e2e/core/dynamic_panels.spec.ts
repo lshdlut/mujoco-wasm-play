@@ -601,7 +601,7 @@ test.describe('dynamic slider relink', () => {
 
 test.describe('equality panel', () => {
   const RAJ_MODEL = 'mujoco_Rajagopal2015_simple.xml';
-  const FORGE_BASE = '/dist/3.4.0/';
+  const FORGE_BASE = '/forge/dist/{ver}/';
 
   function readEqualitySnapshot() {
     const snap = (window as any).__PLAY_HOST__?.getSnapshot?.();
