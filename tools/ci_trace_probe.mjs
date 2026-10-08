@@ -17,6 +17,7 @@ const compositedSwiftShader = process.env.PLAY_PROBE_COMPOSITED_SWIFTSHADER === 
 const groundProbe = process.env.PLAY_PROBE_CASE === 'ground';
 const panelProbe = process.env.PLAY_PROBE_CASE === 'panel';
 const pbrProbe = process.env.PLAY_PROBE_CASE === 'pbr';
+const atmosphereProbe = process.env.PLAY_PROBE_CASE === 'atmosphere';
 const url = rel => pathToFileURL(path.join(repo, rel)).href;
 const wrapper = `
 import { test } from ${JSON.stringify(url('node_modules/@playwright/test/index.mjs'))};
@@ -35,6 +36,16 @@ test.beforeEach(async ({ page, browser }) => {
     window.__observation = { longtasks: [], renders: [], queries: [] };
     window.__observation.images = [];
     window.__observation.textureFrames = [];
+    window.__observation.hdriPhases = [];
+    if (${atmosphereProbe}) {
+      const readBuffer = Response.prototype.arrayBuffer;
+      Response.prototype.arrayBuffer = async function() {
+        const start = performance.now();
+        const buffer = await readBuffer.call(this);
+        if (/\\.(hdr|exr)$/.test(this.url)) window.__observation.hdriPhases.push({ phase: 'response-buffer', url: this.url, start, end: performance.now(), bytes: buffer.byteLength });
+        return buffer;
+      };
+    }
     if (${pbrProbe}) {
       const decodeImage = HTMLImageElement.prototype.decode;
       HTMLImageElement.prototype.decode = async function() {
@@ -55,8 +66,17 @@ test.beforeEach(async ({ page, browser }) => {
     new PerformanceObserver(list => window.__observation.longtasks.push(...list.getEntries().map(e => ({ start: e.startTime, duration: e.duration })))).observe({ entryTypes: ['longtask'] });
     const poll = setInterval(() => {
       const renderer = window.__renderCtx?.renderer;
-      if (!renderer) return;
+      if (!renderer || (${atmosphereProbe} && !window.__renderCtx.pmrem)) return;
       clearInterval(poll);
+      if (${atmosphereProbe}) {
+        const pmrem = window.__renderCtx.pmrem;
+        const convert = pmrem.fromEquirectangular.bind(pmrem);
+        pmrem.fromEquirectangular = (...args) => {
+          const start = performance.now();
+          window.__observation.hdriPhases.push({ phase: 'pmrem-start', time: start, width: args[0]?.image?.width, height: args[0]?.image?.height });
+          try { return convert(...args); } finally { window.__observation.hdriPhases.push({ phase: 'pmrem-end', start, end: performance.now() }); }
+        };
+      }
       const draw = renderer.render.bind(renderer);
       renderer.render = (...args) => { const t = performance.now(); try { return draw(...args); } finally {
         window.__observation.renders.push(performance.now() - t);
@@ -90,6 +110,7 @@ test.afterEach(async ({ page }, info) => {
     const lights = [];
     ctx?.sceneWorld?.traverse(item => { if (item.isLight) lights.push({ type: item.type, castShadow: item.castShadow, mapSize: item.shadow?.mapSize?.toArray(), visible: item.visible }); });
     return { nativeSceneFlags: window.__PLAY_HOST__?.getSnapshot()?.sceneFlags, shadowEnabled: renderer?.shadowMap?.enabled, lights,
+      hdri: { loading: ctx?.hdriLoading, ready: ctx?.hdriReady, fromHDRI: ctx?.envFromHDRI, activeKey: ctx?.hdriActiveKey, mode: ctx?._skyMode, background: ctx?.sceneWorld?.background?.userData?.backgroundKind, debugPreset: ctx?._envDebugPreset },
       groundCommands: window.__groundFlagObservations, groundMode: ctx?.ground?.userData?.infiniteGround?.debugMode };
   });
   const file = info.outputPath('main-thread-profile.json');
@@ -112,7 +133,7 @@ test.afterEach(async ({ page }, info) => {
   await info.attach('native-trace', { path: nativeFile, contentType: 'application/json' });
   await browserSession.detach();
 });
-await import(${JSON.stringify(url(pbrProbe ? 'tests/e2e/core/preset_ground_surface.spec.ts' : panelProbe ? 'tests/e2e/core/panel_state.spec.ts' : groundProbe ? 'tests/e2e/core/ground_debug_views.spec.ts' : 'tests/e2e/core/dynamic_panels.spec.ts'))});
+await import(${JSON.stringify(url(pbrProbe || atmosphereProbe ? 'tests/e2e/core/preset_ground_surface.spec.ts' : panelProbe ? 'tests/e2e/core/panel_state.spec.ts' : groundProbe ? 'tests/e2e/core/ground_debug_views.spec.ts' : 'tests/e2e/core/dynamic_panels.spec.ts'))});
 `;
 await fs.writeFile(path.join(root, 'probe.spec.mjs'), wrapper);
 const config = `
@@ -122,6 +143,6 @@ export default { ...base, testDir: ${JSON.stringify(root)}, testMatch: 'probe.sp
 const configPath = path.join(root, 'probe.config.mjs');
 await fs.writeFile(configPath, config);
 console.log(`[browser-probe] screenshots=${capture} disableShadows=${disableShadows} channel=${channel || 'default-shell'} compositedSwiftShader=${compositedSwiftShader} output=${root}; original assertions and 60s timeout unchanged; NOT a publication gate`);
-const result = spawnSync(process.execPath, [path.join(repo, 'node_modules/@playwright/test/cli.js'), 'test', '--config', configPath, '--grep', pbrProbe ? 'binds the sandy gravel PBR' : panelProbe ? 'custom profile uses app-scoped namespace' : groundProbe ? 'infinite ground uses dedicated debug' : 'dynamic joint sliders relink', '--max-failures=1'], { cwd: repo, env: process.env, stdio: 'inherit' });
+const result = spawnSync(process.execPath, [path.join(repo, 'node_modules/@playwright/test/cli.js'), 'test', '--config', configPath, '--grep', atmosphereProbe ? 'split atmosphere/background' : pbrProbe ? 'binds the sandy gravel PBR' : panelProbe ? 'custom profile uses app-scoped namespace' : groundProbe ? 'infinite ground uses dedicated debug' : 'dynamic joint sliders relink', '--max-failures=1'], { cwd: repo, env: process.env, stdio: 'inherit' });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;
