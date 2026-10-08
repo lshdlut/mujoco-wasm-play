@@ -15,13 +15,17 @@ async function waitForPresetImageData(page: Page) {
   // Asset download/load precedes binding these textures to a rendered frame.
   // Observe raw decoded images, NOT the uniforms asserted by the 10s consumer
   // poll below. Keep the original whole-test 60s budget and all binding checks.
-  await page.waitForFunction(() => {
+  await page.waitForFunction(async () => {
     const cache = (window as any).__renderCtx?.assetCache?.presetGroundTextures;
     if (!(cache instanceof Map)) return false;
     const textures = Array.from(cache.values()) as any[];
-    return ['sandy_gravel_diff_2k.jpg', 'sandy_gravel_nor_gl_2k.png', 'sandy_gravel_rough_2k.png'].every(name =>
-      textures.some(texture => String(texture?.userData?.sourceUrl || '').endsWith(name) &&
-        (texture?.image?.naturalWidth || texture?.image?.width || 0) > 0));
+    const images = ['sandy_gravel_diff_2k.jpg', 'sandy_gravel_nor_gl_2k.png', 'sandy_gravel_rough_2k.png'].map(name =>
+      textures.find(texture => String(texture?.userData?.sourceUrl || '').endsWith(name) &&
+        String(texture?.image?.currentSrc || texture?.image?.src || '').endsWith(name) &&
+        (texture?.image?.naturalWidth || texture?.image?.width || 0) > 0)?.image);
+    if (images.some(image => !image)) return false;
+    await Promise.all(images.map(image => image.decode()));
+    return true;
   });
 }
 

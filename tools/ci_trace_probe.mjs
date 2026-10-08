@@ -36,6 +36,12 @@ test.beforeEach(async ({ page, browser }) => {
     window.__observation.images = [];
     window.__observation.textureFrames = [];
     if (${pbrProbe}) {
+      const decodeImage = HTMLImageElement.prototype.decode;
+      HTMLImageElement.prototype.decode = async function() {
+        const value = await decodeImage.call(this);
+        if (this.src.includes('sandy_gravel')) window.__observation.images.push({ event: 'decode-complete', url: this.src, time: performance.now(), width: this.naturalWidth });
+        return value;
+      };
       const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
       Object.defineProperty(HTMLImageElement.prototype, 'src', { ...descriptor, set(value) {
         if (String(value).includes('sandy_gravel')) {
