@@ -15,7 +15,7 @@ async function waitForPresetImageData(page: Page) {
   // Asset download/load precedes binding these textures to a rendered frame.
   // Observe raw decoded images, NOT the uniforms asserted by the 10s consumer
   // poll below. Keep the original whole-test 60s budget and all binding checks.
-  await page.waitForFunction(async () => {
+  await expect.poll(() => page.evaluate(async () => {
     const cache = (window as any).__renderCtx?.assetCache?.presetGroundTextures;
     if (!(cache instanceof Map)) return false;
     const textures = Array.from(cache.values()) as any[];
@@ -26,7 +26,7 @@ async function waitForPresetImageData(page: Page) {
     if (images.some(image => !image)) return false;
     await Promise.all(images.map(image => image.decode()));
     return true;
-  });
+  }), { timeout: 30_000 }).toBe(true);
 }
 
 function expectVec4Close(actual: number[] | null, expected: number[]) {
