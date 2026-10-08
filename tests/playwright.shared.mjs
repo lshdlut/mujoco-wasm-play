@@ -106,6 +106,14 @@ export async function createPlaywrightConfig({
     use: {
       baseURL: runtime.baseURL,
       headless: true,
+      // Exercise the real Chromium browser, not its separate headless shell.
+      channel: "chromium",
+      // GPU-less CI uses the complete SwANGLE GL driver. WebGL-only fallback
+      // forces synchronous compositor readback and can starve normal UI tasks.
+      // These opt-in flags apply only to trusted test fixtures, never the site.
+      launchOptions: process.env.CI ? {
+        args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+      } : undefined,
       trace: process.env.CI ? "retain-on-failure" : "off",
       screenshot: "off",
       video: "off",

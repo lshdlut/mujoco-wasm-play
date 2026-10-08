@@ -102,5 +102,6 @@ Lighting and skybox sources.
 
 - `tests/unit/`: Node unit tests (fast, dependency-free)
 - `tests/e2e/`: Playwright end-to-end tests
+- Browser tests use bundled Chromium's new headless mode. GPU-less CI explicitly selects the complete SwANGLE GL driver, rather than the deprecated WebGL-only fallback that blocks compositor readback. These trusted-test browser flags do not change the site's graphics, physics, or user browser settings; the original assertions and deadlines remain unchanged.
 - Smoke: `npm run smoke`
 - Full E2E: `npm run test:e2e`
