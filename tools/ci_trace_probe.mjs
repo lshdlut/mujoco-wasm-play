@@ -14,6 +14,7 @@ const capture = process.env.PLAY_PROBE_SCREENSHOTS !== 'false';
 const disableShadows = process.env.PLAY_PROBE_DISABLE_SHADOWS === 'true';
 const channel = process.env.PLAY_PROBE_CHANNEL || undefined;
 const compositedSwiftShader = process.env.PLAY_PROBE_COMPOSITED_SWIFTSHADER === 'true';
+const groundProbe = process.env.PLAY_PROBE_CASE === 'ground';
 const url = rel => pathToFileURL(path.join(repo, rel)).href;
 const wrapper = `
 import { test } from ${JSON.stringify(url('node_modules/@playwright/test/index.mjs'))};
@@ -59,7 +60,8 @@ test.afterEach(async ({ page }, info) => {
     const ctx = window.__renderCtx, renderer = ctx?.renderer;
     const lights = [];
     ctx?.sceneWorld?.traverse(item => { if (item.isLight) lights.push({ type: item.type, castShadow: item.castShadow, mapSize: item.shadow?.mapSize?.toArray(), visible: item.visible }); });
-    return { nativeSceneFlags: window.__PLAY_HOST__?.getSnapshot()?.sceneFlags, shadowEnabled: renderer?.shadowMap?.enabled, lights };
+    return { nativeSceneFlags: window.__PLAY_HOST__?.getSnapshot()?.sceneFlags, shadowEnabled: renderer?.shadowMap?.enabled, lights,
+      groundCommands: window.__groundFlagObservations, groundMode: ctx?.ground?.userData?.infiniteGround?.debugMode };
   });
   const file = info.outputPath('main-thread-profile.json');
   await fs.writeFile(file, JSON.stringify({ identity, metrics, observation, renderState, profile }));
@@ -79,7 +81,7 @@ test.afterEach(async ({ page }, info) => {
   await info.attach('native-trace', { path: nativeFile, contentType: 'application/json' });
   await browserSession.detach();
 });
-await import(${JSON.stringify(url('tests/e2e/core/dynamic_panels.spec.ts'))});
+await import(${JSON.stringify(url(groundProbe ? 'tests/e2e/core/ground_debug_views.spec.ts' : 'tests/e2e/core/dynamic_panels.spec.ts'))});
 `;
 await fs.writeFile(path.join(root, 'probe.spec.mjs'), wrapper);
 const config = `
@@ -89,6 +91,6 @@ export default { ...base, testDir: ${JSON.stringify(root)}, testMatch: 'probe.sp
 const configPath = path.join(root, 'probe.config.mjs');
 await fs.writeFile(configPath, config);
 console.log(`[browser-probe] screenshots=${capture} disableShadows=${disableShadows} channel=${channel || 'default-shell'} compositedSwiftShader=${compositedSwiftShader} output=${root}; original assertions and 60s timeout unchanged; NOT a publication gate`);
-const result = spawnSync(process.execPath, [path.join(repo, 'node_modules/@playwright/test/cli.js'), 'test', '--config', configPath, '--grep', 'dynamic joint sliders relink', '--max-failures=1'], { cwd: repo, env: process.env, stdio: 'inherit' });
+const result = spawnSync(process.execPath, [path.join(repo, 'node_modules/@playwright/test/cli.js'), 'test', '--config', configPath, '--grep', groundProbe ? 'infinite ground uses dedicated debug' : 'dynamic joint sliders relink', '--max-failures=1'], { cwd: repo, env: process.env, stdio: 'inherit' });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;

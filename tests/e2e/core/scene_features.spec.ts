@@ -196,27 +196,33 @@ test.describe('label anchors', () => {
 
 test.describe('history sampling', () => {
   async function setRunState(page: any, run: boolean) {
-    await page.evaluate(async (nextRun) => {
+    const frame = await page.evaluate(async (nextRun) => {
       const backend = (window as any).__PLAY_HOST__?.backend;
       if (!backend?.setRunState) throw new Error('backend.setRunState not available');
       await backend.setRunState(nextRun, 'test');
+      await backend.getStrictReport();
+      return backend.snapshot().frameId;
     }, run);
-    await page.waitForFunction((nextRun) => {
+    await page.waitForFunction(({ nextRun, frame }) => {
       const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
-      return !!snapshot && (snapshot.paused === !nextRun);
-    }, run, { timeout: 20_000, polling: 100 });
+      return !!snapshot && snapshot.frameId > frame && (snapshot.paused === !nextRun);
+    }, { nextRun: run, frame }, { timeout: 20_000, polling: 100 });
   }
 
   async function scrubHistory(page: any, direction: number, expectedOffset: number) {
-    await page.evaluate(async (nextDirection) => {
+    const frame = await page.evaluate(async (nextDirection) => {
       const backend = (window as any).__PLAY_HOST__?.backend;
       if (!backend?.step) throw new Error('backend.step not available');
       await backend.step(nextDirection);
+      // History metadata can precede the full time/qpos snapshot. A native
+      // command acknowledgement plus a new frame avoids reading the prior t.
+      await backend.getStrictReport();
+      return backend.snapshot().frameId;
     }, direction);
-    await page.waitForFunction((nextOffset) => {
+    await page.waitForFunction(({ nextOffset, frame }) => {
       const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
-      return !!snapshot && Number(snapshot?.history?.scrubIndex) === nextOffset;
-    }, expectedOffset, { timeout: 20_000, polling: 100 });
+      return !!snapshot && snapshot.frameId > frame && Number(snapshot?.history?.scrubIndex) === nextOffset;
+    }, { nextOffset: expectedOffset, frame }, { timeout: 20_000, polling: 100 });
   }
 
   test('history stepping stays aligned with simulation steps', async ({ page }) => {
