@@ -24,7 +24,7 @@
     { "name": "keyframeSelect", "required": ["index"] },
     { "name": "keyframeSave", "required": ["index"] },
     { "name": "keyframeLoad", "required": ["index"] },
-    { "name": "setWatch", "required": ["field", "index"] },
+    { "name": "setWatch", "required": [], "optional": ["field", "index"] },
     { "name": "step", "required": ["n"] },
     { "name": "reset" },
     { "name": "gesture", "required": ["gesture"] },

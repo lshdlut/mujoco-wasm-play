@@ -36,6 +36,7 @@ import {
 } from '../core/viewer_structs.mjs';
 import { dispatchCommand } from './dispatch.gen.mjs';
 import { HISTORY_DEFAULT_CAPTURE_HZ, resolveHistorySamplingPlan } from './history_sampling.mjs';
+import { resolveWatchTargetPatch } from '../core/watch_target.mjs';
 import { collectSnapshotTransfersInto } from './protocol.gen.mjs';
 import {
   DIRTY_REASON,
@@ -1185,7 +1186,7 @@ function updateWatchTarget(field, index) {
   if (typeof field === 'string') {
     watchState.field = field.trim();
   }
-  watchState.index = Math.max(0, normaliseInt(index, 0));
+  watchState.index = index;
   watchState.value = null;
   watchState.min = null;
   watchState.max = null;
@@ -3133,8 +3134,9 @@ const commandHandlers = {
     emitKeyframeMeta();
   },
   setWatch: (payload) => {
-    const field = typeof payload.field === 'string' ? payload.field : watchState?.field;
-    updateWatchTarget(field, payload.index);
+    const target = resolveWatchTargetPatch(watchState, payload);
+    if (!target) return;
+    updateWatchTarget(target.field, target.index);
     emitWatchState();
   },
   setVisualOption: (payload) => {

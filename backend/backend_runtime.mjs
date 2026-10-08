@@ -161,13 +161,11 @@ export function createBackendRuntime({
     }],
     ['watch.field', (value) => {
       const field = typeof value === 'string' ? value.trim() : '';
-      const nextField = field.length > 0 ? field : (lastSnapshot.watch?.field || '');
-      if (!nextField) return true;
+      if (!field) return true;
       try {
         client.postMessage?.({
           cmd: 'setWatch',
-          field: nextField,
-          index: Number.isFinite(lastSnapshot.watch?.index) ? (lastSnapshot.watch.index | 0) : 0,
+          field,
         });
       } catch (err) {
         logWarn('[backend watch field] failed', err);
@@ -181,7 +179,6 @@ export function createBackendRuntime({
       try {
         client.postMessage?.({
           cmd: 'setWatch',
-          field: lastSnapshot.watch?.field,
           index: target,
         });
       } catch (err) {

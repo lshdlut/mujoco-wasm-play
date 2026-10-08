@@ -104,7 +104,7 @@ export const COMMAND_FIELDS = {
   "keyframeSelect": { required: ["index"], optional: [] },
   "keyframeSave": { required: ["index"], optional: [] },
   "keyframeLoad": { required: ["index"], optional: [] },
-  "setWatch": { required: ["field","index"], optional: [] },
+  "setWatch": { required: [], optional: ["field","index"] },
   "step": { required: ["n"], optional: [] },
   "reset": { required: [], optional: [] },
   "gesture": { required: ["gesture"], optional: [] },
