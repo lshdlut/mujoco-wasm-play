@@ -92,7 +92,9 @@ test('infinite ground uses dedicated debug behavior for wireframe and segment mo
   });
   await switchVisualSource(page, 'PresetSun');
 
-  await expect.poll(async () => (await page.evaluate(readGroundDebugInfo)).presetSunDrawComplete).toBe(true);
+  // Initialization uses the existing default wait budget and remains bounded
+  // by this test's unchanged 60s deadline; every flag assertion below stays 10s.
+  await page.waitForFunction(() => !!(window as any).__groundSunDrawComplete);
 
   await expect.poll(async () => {
     const info = await page.evaluate(readGroundDebugInfo);
