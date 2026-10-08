@@ -12,6 +12,16 @@ async function switchVisualSource(page: Page, target: 'PresetSun' | 'PresetMoon'
 }
 
 async function waitForPresetImageData(page: Page) {
+  // Prime the existing asset cache only. Do not switch visual mode, bind any
+  // uniforms or draw the target preset during fixture preparation.
+  await page.evaluate(async () => {
+    const { getOrCreatePresetGroundTexture } = await import(new URL('renderer/scene_soa_geoms.mjs', document.baseURI).href);
+    const ctx = (window as any).__renderCtx;
+    for (const name of ['sandy_gravel_diff_2k.jpg', 'sandy_gravel_nor_gl_2k.png', 'sandy_gravel_rough_2k.png']) {
+      const url = new URL(`assets/env/preset-ground/${name}`, document.baseURI).href;
+      getOrCreatePresetGroundTexture(ctx, url, { colorSpace: name.includes('_diff_') ? 'srgb' : 'none', fallbackUrl: url });
+    }
+  });
   // Asset download/load precedes binding these textures to a rendered frame.
   // Observe raw decoded images, NOT the uniforms asserted by the 10s consumer
   // poll below. Keep the original whole-test 60s budget and all binding checks.
@@ -139,8 +149,8 @@ test('preset sun/moon infinite ground binds the sandy gravel PBR textures', asyn
 
   await waitForViewerReady(page, '/index.html?model=raj&ver=3.5.0&snapshot=1&log=0');
 
-  await switchVisualSource(page, 'PresetMoon');
   await waitForPresetImageData(page);
+  await switchVisualSource(page, 'PresetMoon');
   await expect.poll(async () => {
     const info = await page.evaluate(readPresetGroundInfo);
     return info.loaded && info.normalLoaded && info.roughnessLoaded && info.enabled === 1 ? (info.src || '') : '';

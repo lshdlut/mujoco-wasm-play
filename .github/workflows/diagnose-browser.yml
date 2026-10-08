@@ -32,7 +32,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        screenshots: ${{ inputs.diagnostic_case == 'remaining' && fromJSON('[true]') || fromJSON('[true,false]') }}
+        screenshots: ${{ (inputs.diagnostic_case == 'remaining' || inputs.diagnostic_case == 'pbr') && fromJSON('[true]') || fromJSON('[true,false]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
