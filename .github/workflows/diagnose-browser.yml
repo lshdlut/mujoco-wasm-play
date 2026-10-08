@@ -1,0 +1,48 @@
+name: diagnose-browser
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace-observation:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        screenshots: [true, false]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: npm ci
+      - uses: actions/checkout@v4
+        with:
+          repository: lshdlut/mujoco-wasm-forge
+          ref: 592e1d9ae39587b6697b39387d1a4ec2699bc56a
+          path: forge-inputs
+          sparse-checkout: deliverables
+      - run: mv forge-inputs "$GITHUB_WORKSPACE/../mujoco-wasm-forge"
+      - run: npx playwright install --with-deps chromium
+      - name: Original joint-relink assertion under controlled trace observation
+        env:
+          PLAY_DEV_SERVER_COI: "1"
+          PLAY_PROBE_ROOT: ${{ runner.temp }}/play-browser-probe
+          PLAY_PROBE_SCREENSHOTS: ${{ matrix.screenshots }}
+        run: node tools/ci_trace_probe.mjs
+      - name: Retain diagnostic evidence (not a publication gate)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-observation-${{ matrix.screenshots }}
+          path: ${{ runner.temp }}/play-browser-probe/
+
+# This manual workflow has no Pages artifact, deployment, tag or release step.
+# A targeted PASS cannot satisfy release-site's complete core/contract gate.
