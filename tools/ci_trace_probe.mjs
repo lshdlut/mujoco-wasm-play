@@ -12,6 +12,7 @@ const root = process.env.PLAY_PROBE_ROOT
 await fs.mkdir(root, { recursive: true });
 const capture = process.env.PLAY_PROBE_SCREENSHOTS !== 'false';
 const disableShadows = process.env.PLAY_PROBE_DISABLE_SHADOWS === 'true';
+const channel = process.env.PLAY_PROBE_CHANNEL || undefined;
 const url = rel => pathToFileURL(path.join(repo, rel)).href;
 const wrapper = `
 import { test } from ${JSON.stringify(url('node_modules/@playwright/test/index.mjs'))};
@@ -82,11 +83,11 @@ await import(${JSON.stringify(url('tests/e2e/core/dynamic_panels.spec.ts'))});
 await fs.writeFile(path.join(root, 'probe.spec.mjs'), wrapper);
 const config = `
 import base from ${JSON.stringify(url('tests/playwright.config.mjs'))};
-export default { ...base, testDir: ${JSON.stringify(root)}, testMatch: 'probe.spec.mjs', outputDir: ${JSON.stringify(path.join(root, 'results'))}, reporter: [['list'], ['json', { outputFile: ${JSON.stringify(path.join(root, 'results.json'))} }]], use: { ...base.use, trace: { mode: 'on', screenshots: ${capture} } } };
+export default { ...base, testDir: ${JSON.stringify(root)}, testMatch: 'probe.spec.mjs', outputDir: ${JSON.stringify(path.join(root, 'results'))}, reporter: [['list'], ['json', { outputFile: ${JSON.stringify(path.join(root, 'results.json'))} }]], use: { ...base.use, channel: ${JSON.stringify(channel)}, trace: { mode: 'on', screenshots: ${capture} } } };
 `;
 const configPath = path.join(root, 'probe.config.mjs');
 await fs.writeFile(configPath, config);
-console.log(`[browser-probe] screenshots=${capture} disableShadows=${disableShadows} output=${root}; original assertions and 60s timeout unchanged; NOT a publication gate`);
+console.log(`[browser-probe] screenshots=${capture} disableShadows=${disableShadows} channel=${channel || 'default-shell'} output=${root}; original assertions and 60s timeout unchanged; NOT a publication gate`);
 const result = spawnSync(process.execPath, [path.join(repo, 'node_modules/@playwright/test/cli.js'), 'test', '--config', configPath, '--grep', 'dynamic joint sliders relink', '--max-failures=1'], { cwd: repo, env: process.env, stdio: 'inherit' });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;

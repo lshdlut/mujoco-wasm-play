@@ -7,6 +7,11 @@ on:
         description: "Compare native visual shadow flag on/off instead of continuous trace screenshots"
         type: boolean
         default: false
+      browser_channel:
+        description: "Chromium implementation for an isolated compositor comparison"
+        type: choice
+        options: [default-shell, chromium]
+        default: default-shell
 
 permissions:
   contents: read
@@ -42,6 +47,7 @@ jobs:
           PLAY_PROBE_ROOT: ${{ runner.temp }}/play-browser-probe
           PLAY_PROBE_SCREENSHOTS: ${{ !inputs.shadow_probe && matrix.screenshots }}
           PLAY_PROBE_DISABLE_SHADOWS: ${{ inputs.shadow_probe && !matrix.screenshots }}
+          PLAY_PROBE_CHANNEL: ${{ inputs.browser_channel == 'chromium' && 'chromium' || '' }}
         run: node tools/ci_trace_probe.mjs
       - name: Retain diagnostic evidence (not a publication gate)
         if: always()
