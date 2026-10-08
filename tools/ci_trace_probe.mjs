@@ -15,6 +15,7 @@ const disableShadows = process.env.PLAY_PROBE_DISABLE_SHADOWS === 'true';
 const channel = process.env.PLAY_PROBE_CHANNEL || undefined;
 const compositedSwiftShader = process.env.PLAY_PROBE_COMPOSITED_SWIFTSHADER === 'true';
 const groundProbe = process.env.PLAY_PROBE_CASE === 'ground';
+const panelProbe = process.env.PLAY_PROBE_CASE === 'panel';
 const url = rel => pathToFileURL(path.join(repo, rel)).href;
 const wrapper = `
 import { test } from ${JSON.stringify(url('node_modules/@playwright/test/index.mjs'))};
@@ -24,6 +25,7 @@ test.beforeEach(async ({ page, browser }) => {
   browserSession = await browser.newBrowserCDPSession();
   identity = { browser: await browserSession.send('Browser.getVersion'), gpu: await browserSession.send('SystemInfo.getInfo') };
   await browserSession.send('Tracing.start', { categories: 'devtools.timeline,blink,cc,gpu,renderer.scheduler', transferMode: 'ReturnAsStream' });
+  if (${panelProbe}) return; // This assertion creates its own multi-page context; browser trace covers all targets.
   cdp = await page.context().newCDPSession(page);
   await cdp.send('Performance.enable');
   await cdp.send('Profiler.enable');
@@ -53,6 +55,7 @@ test.beforeEach(async ({ page, browser }) => {
   }, { disableShadows: ${disableShadows}, shadowIndex: ${SCENE_FLAG_INDICES.SHADOW} });
 });
 test.afterEach(async ({ page }, info) => {
+  if (!${panelProbe}) {
   const profile = await cdp.send('Profiler.stop');
   const metrics = await cdp.send('Performance.getMetrics');
   const observation = await page.evaluate(() => window.__observation);
@@ -66,6 +69,7 @@ test.afterEach(async ({ page }, info) => {
   const file = info.outputPath('main-thread-profile.json');
   await fs.writeFile(file, JSON.stringify({ identity, metrics, observation, renderState, profile }));
   await info.attach('main-thread-profile', { path: file, contentType: 'application/json' });
+  }
   const complete = new Promise(resolve => browserSession.once('Tracing.tracingComplete', resolve));
   await browserSession.send('Tracing.end');
   const { stream } = await complete;
@@ -81,7 +85,7 @@ test.afterEach(async ({ page }, info) => {
   await info.attach('native-trace', { path: nativeFile, contentType: 'application/json' });
   await browserSession.detach();
 });
-await import(${JSON.stringify(url(groundProbe ? 'tests/e2e/core/ground_debug_views.spec.ts' : 'tests/e2e/core/dynamic_panels.spec.ts'))});
+await import(${JSON.stringify(url(panelProbe ? 'tests/e2e/core/panel_state.spec.ts' : groundProbe ? 'tests/e2e/core/ground_debug_views.spec.ts' : 'tests/e2e/core/dynamic_panels.spec.ts'))});
 `;
 await fs.writeFile(path.join(root, 'probe.spec.mjs'), wrapper);
 const config = `
@@ -91,6 +95,6 @@ export default { ...base, testDir: ${JSON.stringify(root)}, testMatch: 'probe.sp
 const configPath = path.join(root, 'probe.config.mjs');
 await fs.writeFile(configPath, config);
 console.log(`[browser-probe] screenshots=${capture} disableShadows=${disableShadows} channel=${channel || 'default-shell'} compositedSwiftShader=${compositedSwiftShader} output=${root}; original assertions and 60s timeout unchanged; NOT a publication gate`);
-const result = spawnSync(process.execPath, [path.join(repo, 'node_modules/@playwright/test/cli.js'), 'test', '--config', configPath, '--grep', groundProbe ? 'infinite ground uses dedicated debug' : 'dynamic joint sliders relink', '--max-failures=1'], { cwd: repo, env: process.env, stdio: 'inherit' });
+const result = spawnSync(process.execPath, [path.join(repo, 'node_modules/@playwright/test/cli.js'), 'test', '--config', configPath, '--grep', panelProbe ? 'custom profile uses app-scoped namespace' : groundProbe ? 'infinite ground uses dedicated debug' : 'dynamic joint sliders relink', '--max-failures=1'], { cwd: repo, env: process.env, stdio: 'inherit' });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;
