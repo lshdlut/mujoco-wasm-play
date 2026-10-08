@@ -159,6 +159,18 @@ test.describe('physics options and dynamic sections', () => {
       return ids.every((id) => !!document.querySelector(`[data-testid="${id}"]`));
     });
 
+    // Widget creation precedes the throttled control tick. Wait for native/DOM
+    // coherence, not merely DOM presence, before asserting the model defaults.
+    await expect.poll(async () => {
+      const observed = await page.evaluate(readPhysicsFlags);
+      const masks = observed.snapshotMask;
+      return typeof masks.disable === 'number' && typeof masks.enable === 'number'
+        && typeof masks.disableactuator === 'number'
+        && observed.controls.disableGravity === !!(masks.disable & (1 << 7))
+        && observed.controls.enableEnergy === !!(masks.enable & (1 << 1))
+        && observed.controls.actuatorGroup0 === !(masks.disableactuator & 1);
+    }).toBe(true);
+
     const initial = await page.evaluate(readPhysicsFlags);
 
     const bitGravity = 1 << 7;
@@ -254,11 +266,15 @@ test.describe('physics options and dynamic sections', () => {
           actuatorCount: document.querySelectorAll('[data-testid^="control.act."]').length,
           jointCount: document.querySelectorAll('[data-testid^="joint."]').length,
           equalityCount: document.querySelectorAll('[data-testid^="equality."]').length,
+          actuatorReady: document.querySelectorAll('[data-testid^="control.act."]').length > 0,
+          jointReady: document.querySelectorAll('[data-testid^="joint."]').length > 0,
         };
       });
     }, { timeout: 20_000, intervals: [200] }).toMatchObject({
         hasHost: true,
         hasControls: true,
+        actuatorReady: true,
+        jointReady: true,
     });
 
     const state = await page.evaluate(() => {
@@ -301,11 +317,14 @@ test.describe('physics options and dynamic sections', () => {
         actuatorCount: document.querySelectorAll('[data-testid^="control.act."]').length,
         jointCount: document.querySelectorAll('[data-testid^="joint."]').length,
         equalityCount: document.querySelectorAll('[data-testid^="equality."]').length,
+        dynamicReady: ['control.act.', 'joint.', 'equality.'].every(prefix =>
+          document.querySelectorAll(`[data-testid^="${prefix}"]`).length > 0),
       }));
     }, { timeout: 20_000, intervals: [200] }).toMatchObject({
       actuatorCount: expect.any(Number),
       jointCount: expect.any(Number),
       equalityCount: expect.any(Number),
+      dynamicReady: true,
     });
 
     const countsBefore = await page.evaluate(() => ({
@@ -654,6 +673,8 @@ test.describe('equality panel', () => {
 
     // 点击第一个 eq 按钮，验证状态切换
     const before = eqSnap!.eqActive[0];
+    // Expanding a section schedules its dynamic widgets on the UI tick.
+    await expect(page.getByTestId('equality.0')).toBeVisible();
     await page.evaluate(() => {
       const el = document.querySelector('[data-testid="equality.0"]');
       if (!(el instanceof HTMLInputElement)) {
