@@ -1,16 +1,6 @@
 # Node / tooling
-node_modules/
-/dist/
-/build/
-/local_temp/
-/coverage/
 /local_model/
-/tmp/
 *.log
-/tests/playwright-report/
-/tests/test-results/
-/playwright-report/
-/test-results/
 # Local-only Playwright specs
 /tests/**/*.local.spec.*
 
@@ -20,7 +10,6 @@ __pycache__/
 
 # Local notes (ignored)
 local/
-/local_tools/docs/
 FORGE_NOTES.local.md
 FORGE_REFERENCE.md
 AGENTS.md
@@ -33,9 +22,6 @@ worker_debug_last.txt
 spec/*audit*.md
 
 # Local tools and artifacts
-/local_tools/
-/release_assets/
-/output/
 
 # Legacy/experimental (not part of canonical play)
 /scripts/
@@ -58,7 +44,6 @@ Thumbs.db
 *.tsbuildinfo
 .cache/
 .vite/
-.parcel-cache/
 
 # Sphinx / Read the Docs
 doc/*/_build/

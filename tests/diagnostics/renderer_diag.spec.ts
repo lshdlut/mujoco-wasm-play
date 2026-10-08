@@ -135,7 +135,7 @@ test.describe('geomorder dump', () => {
     expect(Array.isArray(payload?.order)).toBeTruthy();
     expect(payload.order.length).toBe(payload.scn_ngeom);
 
-    const outDir = path.resolve(process.cwd(), '..', 'local_tools', 'out');
+    const outDir = path.resolve(process.env.MJ_WASM_PLAY_TEST_OUTPUT || 'C:\\dev\\mujoco-wasm-play\\test-output');
     await fs.mkdir(outDir, { recursive: true });
     const outPath = path.join(outDir, `geomorder_${MODEL.replace(/\\.xml$/i, '')}.json`);
     await fs.writeFile(outPath, JSON.stringify({ diag, payload }, null, 2), 'utf-8');

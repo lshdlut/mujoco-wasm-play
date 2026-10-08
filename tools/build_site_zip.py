@@ -54,7 +54,7 @@ def to_rel(path: Path) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build a static site.zip for mujoco-wasm-play (without forge dist).")
-    ap.add_argument("--out", default=str(REPO_ROOT / "release_assets" / "site.zip"), help="output zip path")
+    ap.add_argument("--out", default=os.environ.get("MJ_WASM_PLAY_RELEASE_ZIP", r"C:\dev\mujoco-wasm-play\release_assets\site.zip"), help="output zip path")
     args = ap.parse_args()
 
     out_path = Path(args.out).expanduser()
@@ -77,7 +77,13 @@ def main() -> int:
     with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
         for p in files:
             arc = to_rel(p)
-            zf.write(p, arcname=arc)
+            # Fixed metadata makes releases reproducible from committed bytes,
+            # regardless of checkout time or the runner's operating system.
+            info = zipfile.ZipInfo(arc, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            zf.writestr(info, p.read_bytes(), compresslevel=9)
 
     tmp_path.replace(out_path)
     print(f"Built {out_path} ({len(files)} files)", file=sys.stderr)
@@ -86,4 +92,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

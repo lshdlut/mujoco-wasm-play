@@ -25,16 +25,23 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PARENT_ROOT = REPO_ROOT.parent
 SIBLING_FORGE = PARENT_ROOT / "mujoco-wasm-forge"
 FORGE_ROOT = SIBLING_FORGE if SIBLING_FORGE.exists() else REPO_ROOT
+FORGE_DELIVERABLES = FORGE_ROOT / "deliverables"
 MOUNTS = {
+    # Legacy tests still request /dist/<ver>/. Serve that URL directly from
+    # committed forge deliverables instead of relying on a OneDrive junction.
+    "/dist/": FORGE_DELIVERABLES,
     # Allow serving the repo root under a stable prefix, even when `--root` points
     # at a subdir. This keeps local dev URLs compatible with
     # GitHub Pages-style paths.
     "/mujoco-wasm-play/": REPO_ROOT,
+    # Preserve the production URL while the checkout stores durable baselines under
+    # deliverables/. The longer prefix must precede the generic /forge/ mount.
+    "/forge/dist/": FORGE_DELIVERABLES,
     # Production-style shared forge path. If a sibling forge checkout exists, serve it.
-    # Otherwise, fall back to the Play repo root so local-only dist/ mirrors can be used.
     "/forge/": FORGE_ROOT,
     # If the sibling forge repo exists next to mujoco-wasm-play, mount it so the
-    # viewer can fetch `/mujoco-wasm-forge/dist/<ver>/...` on localhost.
+    # viewer can fetch the historical `/mujoco-wasm-forge/dist/<ver>/...` URL.
+    "/mujoco-wasm-forge/dist/": FORGE_DELIVERABLES,
     "/mujoco-wasm-forge/": PARENT_ROOT / "mujoco-wasm-forge",
 }
 
