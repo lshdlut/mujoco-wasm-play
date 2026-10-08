@@ -61,12 +61,38 @@ function readGroundDebugInfo() {
     wireframe: typeof material?.wireframe === 'boolean' ? material.wireframe : null,
     colorHex: typeof material?.color?.getHex === 'function' ? material.color.getHex() : null,
     visibleGeomColorHexes,
+    presetSunDrawComplete: !!(window as any).__groundSunDrawComplete,
   };
 }
 
 test('infinite ground uses dedicated debug behavior for wireframe and segment modes', async ({ page }) => {
   await waitForViewerReady(page, '/index.html?model=raj&ver=3.5.0&snapshot=1&log=0');
+  await page.evaluate(() => {
+    const win = window as any;
+    const ctx = win.__renderCtx;
+    const renderer = ctx.renderer;
+    const render = renderer.render;
+    renderer.render = function (...args: any[]) {
+      const result = render.apply(this, args);
+      // A mode change is optimistic: require the new preset's resources in a
+      // completed main draw, not the preceding model frame's ground state.
+      if (args[0] === ctx.sceneWorld && renderer.getRenderTarget() === null) {
+        const uniforms = ctx.ground?.userData?.infiniteGround?.uniforms;
+        win.__groundSunDrawComplete = win.__viewerStore.get().visualSourceMode === 'preset-sun'
+          && ctx.hdriReady && !ctx.hdriLoading
+          && ctx.sceneWorld.background?.userData?.backgroundKind === 'hdri'
+          && uniforms?.uPresetAlbedoGain?.value === 1.8
+          && ['Albedo', 'Normal', 'Roughness'].every(name => {
+            const image = uniforms?.[`uPreset${name}Map`]?.value?.image;
+            return uniforms?.[`uPreset${name}Enabled`]?.value === 1 && image?.width > 0;
+          });
+      }
+      return result;
+    };
+  });
   await switchVisualSource(page, 'PresetSun');
+
+  await expect.poll(async () => (await page.evaluate(readGroundDebugInfo)).presetSunDrawComplete).toBe(true);
 
   await expect.poll(async () => {
     const info = await page.evaluate(readGroundDebugInfo);
