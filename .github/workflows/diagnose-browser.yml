@@ -2,6 +2,11 @@ name: diagnose-browser
 
 on:
   workflow_dispatch:
+    inputs:
+      shadow_probe:
+        description: "Compare native visual shadow flag on/off instead of continuous trace screenshots"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -35,13 +40,14 @@ jobs:
         env:
           PLAY_DEV_SERVER_COI: "1"
           PLAY_PROBE_ROOT: ${{ runner.temp }}/play-browser-probe
-          PLAY_PROBE_SCREENSHOTS: ${{ matrix.screenshots }}
+          PLAY_PROBE_SCREENSHOTS: ${{ !inputs.shadow_probe && matrix.screenshots }}
+          PLAY_PROBE_DISABLE_SHADOWS: ${{ inputs.shadow_probe && !matrix.screenshots }}
         run: node tools/ci_trace_probe.mjs
       - name: Retain diagnostic evidence (not a publication gate)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-observation-${{ matrix.screenshots }}
+          name: browser-observation-${{ inputs.shadow_probe && 'shadow' || 'trace' }}-${{ matrix.screenshots }}
           path: ${{ runner.temp }}/play-browser-probe/
 
 # This manual workflow has no Pages artifact, deployment, tag or release step.
