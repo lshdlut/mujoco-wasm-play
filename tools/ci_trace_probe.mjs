@@ -16,6 +16,7 @@ const channel = process.env.PLAY_PROBE_CHANNEL || undefined;
 const compositedSwiftShader = process.env.PLAY_PROBE_COMPOSITED_SWIFTSHADER === 'true';
 const groundProbe = process.env.PLAY_PROBE_CASE === 'ground';
 const panelProbe = process.env.PLAY_PROBE_CASE === 'panel';
+const pbrProbe = process.env.PLAY_PROBE_CASE === 'pbr';
 const url = rel => pathToFileURL(path.join(repo, rel)).href;
 const wrapper = `
 import { test } from ${JSON.stringify(url('node_modules/@playwright/test/index.mjs'))};
@@ -32,13 +33,32 @@ test.beforeEach(async ({ page, browser }) => {
   await cdp.send('Profiler.start');
   await page.addInitScript(({ disableShadows, shadowIndex }) => {
     window.__observation = { longtasks: [], renders: [], queries: [] };
+    window.__observation.images = [];
+    window.__observation.textureFrames = [];
+    if (${pbrProbe}) {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+      Object.defineProperty(HTMLImageElement.prototype, 'src', { ...descriptor, set(value) {
+        if (String(value).includes('sandy_gravel')) {
+          const image = this;
+          window.__observation.images.push({ event: 'src', url: String(value), time: performance.now() });
+          image.addEventListener('load', () => window.__observation.images.push({ event: 'load', url: image.src, time: performance.now(), width: image.naturalWidth }), { once: true });
+        }
+        return descriptor.set.call(this, value);
+      } });
+    }
     new PerformanceObserver(list => window.__observation.longtasks.push(...list.getEntries().map(e => ({ start: e.startTime, duration: e.duration })))).observe({ entryTypes: ['longtask'] });
     const poll = setInterval(() => {
       const renderer = window.__renderCtx?.renderer;
       if (!renderer) return;
       clearInterval(poll);
       const draw = renderer.render.bind(renderer);
-      renderer.render = (...args) => { const t = performance.now(); try { return draw(...args); } finally { window.__observation.renders.push(performance.now() - t); } };
+      renderer.render = (...args) => { const t = performance.now(); try { return draw(...args); } finally {
+        window.__observation.renders.push(performance.now() - t);
+        if (${pbrProbe}) {
+          const ctx = window.__renderCtx, u = ctx.ground?.userData?.infiniteGround?.uniforms;
+          window.__observation.textureFrames.push({ start: t, end: performance.now(), cache: Array.from(ctx.assetCache?.presetGroundTextures || [], ([key, texture]) => ({ key, width: texture?.image?.naturalWidth || texture?.image?.width || 0 })), normalEnabled: u?.uPresetNormalEnabled?.value });
+        }
+      } };
       const gl = renderer.getContext(), query = gl.getParameter.bind(gl);
       gl.getParameter = (...args) => { const t = performance.now(); try { return query(...args); } finally { window.__observation.queries.push({ parameter: args[0], duration: performance.now() - t }); } };
       const shadows = setInterval(() => {
@@ -86,7 +106,7 @@ test.afterEach(async ({ page }, info) => {
   await info.attach('native-trace', { path: nativeFile, contentType: 'application/json' });
   await browserSession.detach();
 });
-await import(${JSON.stringify(url(panelProbe ? 'tests/e2e/core/panel_state.spec.ts' : groundProbe ? 'tests/e2e/core/ground_debug_views.spec.ts' : 'tests/e2e/core/dynamic_panels.spec.ts'))});
+await import(${JSON.stringify(url(pbrProbe ? 'tests/e2e/core/preset_ground_surface.spec.ts' : panelProbe ? 'tests/e2e/core/panel_state.spec.ts' : groundProbe ? 'tests/e2e/core/ground_debug_views.spec.ts' : 'tests/e2e/core/dynamic_panels.spec.ts'))});
 `;
 await fs.writeFile(path.join(root, 'probe.spec.mjs'), wrapper);
 const config = `
@@ -96,6 +116,6 @@ export default { ...base, testDir: ${JSON.stringify(root)}, testMatch: 'probe.sp
 const configPath = path.join(root, 'probe.config.mjs');
 await fs.writeFile(configPath, config);
 console.log(`[browser-probe] screenshots=${capture} disableShadows=${disableShadows} channel=${channel || 'default-shell'} compositedSwiftShader=${compositedSwiftShader} output=${root}; original assertions and 60s timeout unchanged; NOT a publication gate`);
-const result = spawnSync(process.execPath, [path.join(repo, 'node_modules/@playwright/test/cli.js'), 'test', '--config', configPath, '--grep', panelProbe ? 'custom profile uses app-scoped namespace' : groundProbe ? 'infinite ground uses dedicated debug' : 'dynamic joint sliders relink', '--max-failures=1'], { cwd: repo, env: process.env, stdio: 'inherit' });
+const result = spawnSync(process.execPath, [path.join(repo, 'node_modules/@playwright/test/cli.js'), 'test', '--config', configPath, '--grep', pbrProbe ? 'binds the sandy gravel PBR' : panelProbe ? 'custom profile uses app-scoped namespace' : groundProbe ? 'infinite ground uses dedicated debug' : 'dynamic joint sliders relink', '--max-failures=1'], { cwd: repo, env: process.env, stdio: 'inherit' });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;
