@@ -202,6 +202,7 @@ export class MjSimLite {
       '_mjwf_helper_model_ptr',
       '_mjwf_helper_data_ptr',
       '_mjwf_mj_step',
+      '_mjwf_mj_forward',
     ];
     const missing = required.filter((name) => typeof m?.[name] !== 'function');
     if (missing.length) {
@@ -267,6 +268,9 @@ export class MjSimLite {
     this._validateHandleOrThrow(h);
     this.h = h;
     this._invalidateCaches();
+    // mj_makeData initializes qpos but leaves derived state (including sensors)
+    // unevaluated. Publish a complete initial state even if paused before step.
+    this.forward();
   }
 
   _invalidateCaches(){

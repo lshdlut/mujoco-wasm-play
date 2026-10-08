@@ -3,6 +3,34 @@ import assert from 'node:assert/strict';
 import { MjSimLite } from '../../bridge/mj_sim_lite.mjs';
 import { applyWatchPayload } from '../../backend/snapshot_utils.mjs';
 
+test('strict model initialization forwards derived state before returning, without stepping', () => {
+  const calls = [];
+  const heap = new Float64Array(16);
+  const mod = {
+    HEAPF64: heap,
+    FS: { writeFile: () => calls.push('xml') },
+    _mjwf_helper_make_from_xml: () => { heap[1] = .375; heap[2] = 0; return 1; },
+    _mjwf_helper_free: () => {},
+    _mjwf_helper_valid: () => 1,
+    _mjwf_helper_model_ptr: () => 32,
+    _mjwf_helper_data_ptr: () => 64,
+    _mjwf_mj_step: () => assert.fail('initialization must not integrate'),
+    _mjwf_mj_forward: (model, data) => {
+      assert.deepEqual([model, data], [32, 64]);
+      calls.push('forward'); heap[2] = heap[1];
+    },
+    _mjwf_model_nsensordata: () => 1,
+    _mjwf_data_sensordata_ptr: () => 16,
+  };
+  const sim = new MjSimLite(mod);
+  sim._mkdirTree = () => {};
+  sim._tryHelperMakeFromXml = () => mod._mjwf_helper_make_from_xml();
+  sim.initFromXmlStrict('<mujoco/>');
+  assert.equal(sim.sensordataView()[0], .375);
+  assert.equal(heap[1], .375);
+  assert.equal(calls.at(-1), 'forward');
+});
+
 test('sensor views resolve the current heap after memory growth, without caching a typed array', () => {
   let pointerCalls = 0;
   const mod = { wasmExports: { memory: new WebAssembly.Memory({ initial: 1 }) }, _mjwf_model_nsensordata: () => 1, _mjwf_data_sensordata_ptr: () => { pointerCalls++; return 8; } };
