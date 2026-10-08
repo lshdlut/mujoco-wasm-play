@@ -12,6 +12,10 @@ on:
         type: choice
         options: [default-shell, chromium]
         default: default-shell
+      composited_swiftshader:
+        description: "Use SwANGLE as the complete GL driver, not WebGL-only fallback (trusted tests only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -48,6 +52,7 @@ jobs:
           PLAY_PROBE_SCREENSHOTS: ${{ !inputs.shadow_probe && matrix.screenshots }}
           PLAY_PROBE_DISABLE_SHADOWS: ${{ inputs.shadow_probe && !matrix.screenshots }}
           PLAY_PROBE_CHANNEL: ${{ inputs.browser_channel == 'chromium' && 'chromium' || '' }}
+          PLAY_PROBE_COMPOSITED_SWIFTSHADER: ${{ inputs.composited_swiftshader }}
         run: node tools/ci_trace_probe.mjs
       - name: Retain diagnostic evidence (not a publication gate)
         if: always()
