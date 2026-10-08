@@ -102,5 +102,6 @@ lighting / skybox 相关设置。
 
 - `tests/unit/`：Node 单元测试（快、无额外依赖）
 - `tests/e2e/`：Playwright 端到端测试
+- HDRI atmosphere 测试明确分为 Sun/Moon 实际 HDRI/PMREM background 与 environment 成功初始化（共用一个 30 秒上限），以及资源就绪后的 Model/Sun/Moon 切换（保留原 10 秒断言）；整项仍为原 60 秒上限。这不是此前首次冷切换 10 秒契约，也不表示正常初始化需要 30 秒，不修改画质或默认值；此前 cold10s CI 失败继续保留。
 - Smoke：`npm run smoke`
 - 全量 E2E：`npm run test:e2e`

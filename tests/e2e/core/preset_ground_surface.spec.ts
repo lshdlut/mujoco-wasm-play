@@ -226,6 +226,39 @@ test('preset sun/moon infinite ground binds the sandy gravel PBR textures', asyn
 test('preset sun and moon split atmosphere/background behavior without leaking into model mode', async ({ page }) => {
   await waitForViewerReady(page, '/index.html?model=raj&ver=3.5.0&snapshot=1&log=0');
 
+  // Explicit startup phase, not a cold-switch 10s claim: this unchanged HDRI
+  // path downloads, parses and runs PMREM before binding the actual scene.
+  // Both preset resources share one 30s cap inside the whole-test 60s deadline.
+  const initializationDeadline = Date.now() + 30_000;
+  for (const preset of ['PresetSun', 'PresetMoon'] as const) {
+    await switchVisualSource(page, preset);
+    await expect.poll(() => page.evaluate(target => {
+      const ctx = (window as any).__renderCtx;
+      const state = (window as any).__viewerStore.get();
+      const scene = ctx?.sceneWorld || ctx?.scene;
+      return {
+        ready: ctx?.hdriReady,
+        loading: ctx?.hdriLoading,
+        fromHDRI: ctx?.envFromHDRI,
+        backgroundKind: scene?.background?.userData?.backgroundKind,
+        actualBackground: !!ctx?.hdriBackground && scene?.background === ctx.hdriBackground,
+        actualEnvironment: !!ctx?.envRT?.texture && scene?.environment === ctx.envRT.texture,
+        targetPreset: state?.visualSourceMode === (target === 'PresetSun' ? 'preset-sun' : 'preset-moon'),
+        currentPresetResource: !!state?.rendering?.appearance?.hdri &&
+          ctx?.hdriActiveKey?.startsWith(`${state.rendering.appearance.hdri}|`),
+      };
+    }, preset), { timeout: Math.max(1, initializationDeadline - Date.now()) }).toMatchObject({
+      ready: true, loading: false, fromHDRI: true, backgroundKind: 'hdri',
+      actualBackground: true, actualEnvironment: true, targetPreset: true, currentPresetResource: true,
+    });
+  }
+  // A settled loader Promise (including false/fallback) cannot satisfy startup.
+  // Return to Model before measuring the resource-ready switches below.
+  await page.evaluate(() => (window as any).__viewerControls.toggleControl('option.visual_source', 'Model'));
+  await expect.poll(async () => page.evaluate(readPresetSceneInfo)).toMatchObject({
+    mode: 'model', backgroundMode: null, headlightActive: 1, mjLightRigVisible: true,
+  });
+
   await switchVisualSource(page, 'PresetSun');
   await expect.poll(async () => page.evaluate(readPresetSceneInfo)).toMatchObject({
     mode: 'preset-sun',

@@ -102,6 +102,7 @@ Lighting and skybox sources.
 
 - `tests/unit/`: Node unit tests (fast, dependency-free)
 - `tests/e2e/`: Playwright end-to-end tests
-- Browser tests use bundled Chromium's new headless mode. GPU-less CI explicitly selects the complete SwANGLE GL driver, rather than the deprecated WebGL-only fallback that blocks compositor readback. These trusted-test browser flags do not change the site's graphics, physics, or user browser settings; the original assertions and deadlines remain unchanged.
+- Browser tests use bundled Chromium's new headless mode. GPU-less CI explicitly selects the complete SwANGLE GL driver, rather than the deprecated WebGL-only fallback that blocks compositor readback. These trusted-test browser flags do not change the site's graphics, physics, or user browser settings.
+- The HDRI atmosphere test explicitly separates successful native-size Sun/Moon HDRI/PMREM background and environment initialization (one shared 30-second cap) from resource-ready Model/Sun/Moon switching (original 10-second assertions), all within its original 60-second whole-test deadline. This is not the earlier cold-first-switch 10-second contract, a claim that startup normally takes 30 seconds, or a graphics/default change. The previous cold10s CI failures remain recorded.
 - Smoke: `npm run smoke`
 - Full E2E: `npm run test:e2e`
