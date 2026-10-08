@@ -22,8 +22,21 @@ async function setSceneFlag(page: Page, flagIndex: number, value: boolean) {
     const target = ids.find((id) => controls.getControl(id)?.binding === `mjvScene::flags[${flagIndex}]`);
     if (!target) throw new Error(`scene flag control not found: ${flagIndex}`);
     await controls.toggleControl(target, value);
+    const win = window as any;
+    (win.__groundFlagObservations ||= []).push({ wall: Date.now(), requested: { flagIndex, value },
+      flags: win.__PLAY_HOST__?.getSnapshot()?.sceneFlags?.slice(), ground: win.__renderCtx?.ground?.userData?.infiniteGround?.debugMode });
   }, { flagIndex, value });
 }
+
+test.afterEach(async ({ page }, info) => {
+  if (info.status === info.expectedStatus) return;
+  const observation = await page.evaluate(() => {
+    const win = window as any;
+    return { commands: win.__groundFlagObservations, flags: win.__PLAY_HOST__?.getSnapshot()?.sceneFlags,
+      ground: win.__renderCtx?.ground?.userData?.infiniteGround?.debugMode, frame: win.__frameCounter };
+  });
+  await info.attach('ground-flags', { body: JSON.stringify(observation), contentType: 'application/json' });
+});
 
 function readGroundDebugInfo() {
   const ctx = (window as any).__renderCtx;
