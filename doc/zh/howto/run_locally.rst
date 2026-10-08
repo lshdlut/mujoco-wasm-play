@@ -34,6 +34,6 @@ Play 需要一个 forge ``dist/<ver>/`` bundle（``mujoco.js`` + ``mujoco.wasm``
 
 .. code-block:: text
 
-  http://127.0.0.1:8000/index.html?model=rkob&forgeBase=/forge/dist/3.8.1/
+  http://127.0.0.1:8000/index.html?model=rkob&forgeBase=/forge/dist/3.15.0/
 
 完整说明见 :doc:`/reference/url_parameters`。

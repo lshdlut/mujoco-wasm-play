@@ -35,6 +35,6 @@ If you want to point at a different bundle, pass ``forgeBase=``:
 
 .. code-block:: text
 
-  http://127.0.0.1:8000/index.html?model=rkob&forgeBase=/forge/dist/3.8.1/
+  http://127.0.0.1:8000/index.html?model=rkob&forgeBase=/forge/dist/3.15.0/
 
 For full details, see :doc:`/reference/url_parameters`.

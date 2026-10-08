@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 ![mujoco-wasm-play](assets/mujoco-wasm-play-cards.png)
 
-[Recommended demo page](https://lshdlut.com/en/demos/play/) | [Direct GitHub Pages app](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/)
+[Recommended demo page](https://lshdlut.com/en/demos/play/) | [Direct GitHub Pages app](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.15.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@592e1d9ae39587b6697b39387d1a4ec2699bc56a/deliverables/3.15.0/)
 
 > **Documentation (Sphinx / Read the Docs)**: source lives in [`doc/en/`](doc/en/) and [`doc/zh/`](doc/zh/). Read online: [EN](https://mujoco-wasm-play.readthedocs.io/en/latest/) | [ZH](https://mujoco-wasm-play.readthedocs.io/zh-cn/latest/).
 
@@ -21,7 +21,7 @@ A performance-first MuJoCo viewer that brings most of the **MuJoCo Simulate** wo
 
 ## Performance
 
-Reference numbers (best of 5 runs; each run reports the median; lower is better), measured interactively (rendered, not headless) after 35s warm-up + 8s sampling, with both side panels collapsed. Current default Play uses MuJoCo 3.8.1; the table below is retained as a historical 3.5.0 measurement until the performance pass is rerun. CPU time is reported as ms/step in the Simulate-style HUD (press `F2`, while Running). Numbers vary with hardware, browser, and power/thermal settings.
+Reference numbers (best of 5 runs; each run reports the median; lower is better), measured interactively (rendered, not headless) after 35s warm-up + 8s sampling, with both side panels collapsed. Current default Play uses MuJoCo 3.15.0; the table below is retained as a historical 3.5.0 measurement until the performance pass is rerun. CPU time is reported as ms/step in the Simulate-style HUD (press `F2`, while Running). Numbers vary with hardware, browser, and power/thermal settings.
 
 > Important: browser extensions and site-level features (e.g. enhanced security modes / efficiency or power-saving modes) can heavily impact Worker/WASM timing, and may affect the GitHub Pages demo more than `localhost`. For fair comparisons, try a private window, disable extensions, and keep the tab in the foreground.
 
@@ -38,7 +38,7 @@ Reference numbers (best of 5 runs; each run reports the median; lower is better)
 - Recommended demo page:
   - `https://lshdlut.com/en/demos/play/`
 - Direct static app (GitHub Pages, retained):
-  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/`
+  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.15.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@592e1d9ae39587b6697b39387d1a4ec2699bc56a/deliverables/3.15.0/`
 - Plugins: experimental. See `doc/en/reference/plugin_contract.md`. `smocap` is coming soon.
 
 ## Models
@@ -60,10 +60,10 @@ Forge repo: `https://github.com/lshdlut/mujoco-wasm-forge`
 
 - This repo does not ship MuJoCo WASM binaries; it expects a forge `dist/<ver>/` bundle.
 - Set the dist base via `forgeBase=` (recommended) or `window.__FORGE_DIST_BASE__` (must be set before the main module runs).
-- Default dist base (local and hosted) is `/forge/dist/{ver}/`, where `{ver}` comes from `site_config.js` (`globalThis.PLAY_VER`) or `ver=...`.
+- Local and aggregator dist base is `/forge/dist/{ver}/`. Bare GitHub Pages uses the immutable Forge commit `592e1d9ae39587b6697b39387d1a4ec2699bc56a`, matching `forge-3.15.0-r1`, under `deliverables/{ver}/`. `{ver}` comes from `site_config.js` (`globalThis.PLAY_VER`) or `ver=...`.
 - The dev server (`tools/dev_server.py`) mounts `/forge/` to a sibling `../mujoco-wasm-forge` checkout if present (otherwise it falls back to this repo root).
 - This viewer requires a forge build with viewer extensions (scene + vopt pointers).
-- Current default baseline: MuJoCo 3.8.1. The 3.6.0, 3.7.0, 3.8.0, and 3.8.1 forge bundles are covered by the external OBJ mesh smoke.
+- Current default baseline: MuJoCo 3.15.0. The core suite includes external OBJ mesh smoke coverage for 3.6.0 through 3.15.0; 3.15.0 also has single-thread and pthreads load-lifecycle and textured-bundle regressions.
 - Typical remote base template (jsDelivr + pinned forge commit): `https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
 - Cache debugging: append `cacheBust=always` to force cache-busting for the Worker URL and forge resource URLs. Default is cache-friendly (no `cb=...`).
 
@@ -85,6 +85,10 @@ Lighting and skybox sources.
 
 - UI artifacts: `node tools/generate_ui_artifacts.mjs`
 - Worker protocol artifacts: `node tools/generate_worker_protocol.mjs` (generates `worker/protocol.gen.mjs`, `worker/dispatch.gen.mjs`)
+- Local Forge compatibility check: `npm run check:forge-abi`. It reuses `tools/generate_forge_abi_snapshot.mjs`, writes the fresh snapshot to a temporary directory, and compares all generator exports with `bridge/forge_abi_snapshot.gen.mjs`. Both local and release workflow gates are strict for all 14 metadata versions (`3.3.7` through `3.15.0`), using the pinned Forge commit. This is a metadata-consistency check, not a dynamic execution of every native API.
+- GitHub Pages is deployed by Actions only after the spec, generation, unit, core-browser, and renderer-contract gates pass. Tags named `mjwasm-play-<version>-r<revision>` publish a reproducible `site.zip` from the same tested source. GitHub Pages does not provide COOP/COEP; its pthreads entry explicitly refuses to start without isolation rather than claiming threaded execution.
+- The current 3.15 compatibility path maps multi-input actuator control slots from the native layout, routes **Clear all** to native `mj_resetCtrl` when available (with the legacy neutral control value of zero as fallback), and exposes the actual native `mjtIntegrator` name/value set to the Worker/UI.
+- Scope limits remain explicit: a non-zero native MuJoCo plugin-state round trip is not yet tested, exact IPC replay is not supported, and the web Profiler/Sensor paths still have feature gaps. The external UI/plugin contract is separate from native MuJoCo plugins; neither implies full-suite PASS or hosted-page success.
 
 ## Acknowledgements
 

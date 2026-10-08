@@ -4,7 +4,7 @@
 
 ![mujoco-wasm-play](assets/mujoco-wasm-play-cards.png)
 
-[推荐演示页](https://lshdlut.com/en/demos/play/) | [GitHub Pages 直达应用](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/)
+[推荐演示页](https://lshdlut.com/en/demos/play/) | [GitHub Pages 直达应用](https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.15.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@592e1d9ae39587b6697b39387d1a4ec2699bc56a/deliverables/3.15.0/)
 
 > **文档（Sphinx / Read the Docs）**：源码位于 [`doc/zh/`](doc/zh/) 和 [`doc/en/`](doc/en/)；在线阅读：[中文](https://mujoco-wasm-play.readthedocs.io/zh-cn/latest/)｜[英文](https://mujoco-wasm-play.readthedocs.io/en/latest/)。
 
@@ -21,7 +21,7 @@
 
 ## 性能
 
-下表为参考数值（共测 5 次；每次取中位数；取最好的一次；越小越好）：交互式测得（有渲染、非 headless），且左右面板收起。每次预热 35 秒并采样 8 秒。当前 Play 默认使用 MuJoCo 3.8.1；下表保留为历史 3.5.0 测量值，等待后续重新跑性能测试后更新。CPU 耗时以 ms/step 的形式显示在 Simulate 风格 HUD 中（按 `F2`，Running 状态）。结果会随硬件、浏览器以及电源/温控策略而波动，仅供参考。
+下表为参考数值（共测 5 次；每次取中位数；取最好的一次；越小越好）：交互式测得（有渲染、非 headless），且左右面板收起。每次预热 35 秒并采样 8 秒。当前 Play 默认使用 MuJoCo 3.15.0；下表保留为历史 3.5.0 测量值，等待后续重新跑性能测试后更新。CPU 耗时以 ms/step 的形式显示在 Simulate 风格 HUD 中（按 `F2`，Running 状态）。结果会随硬件、浏览器以及电源/温控策略而波动，仅供参考。
 
 > 重要提示：浏览器扩展以及站点级功能（例如“增强安全性”/ 效率或省电模式）可能会显著影响 Worker/WASM 的计时表现；同一台机器上，GitHub Pages 的在线演示也可能比 `localhost` 更容易受到影响。做公平对比时建议用隐私窗口（private window）或临时禁用扩展，并保持标签页在前台。
 
@@ -38,7 +38,7 @@
 - 推荐演示页：
   - `https://lshdlut.com/en/demos/play/`
 - 直达静态应用（GitHub Pages，仍保留）：
-  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/`
+  - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.15.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@592e1d9ae39587b6697b39387d1a4ec2699bc56a/deliverables/3.15.0/`
 - 插件：实验性。见 `doc/zh/reference/plugin_contract.md`。`smocap` 即将发布。
 
 ## 模型
@@ -60,10 +60,10 @@ Forge repo：`https://github.com/lshdlut/mujoco-wasm-forge`
 
 - 本仓库不自带 MuJoCo WASM 二进制；运行时需要 forge 提供的 `dist/<ver>/` bundle。
 - 通过 `forgeBase=`（推荐）或 `window.__FORGE_DIST_BASE__` 指定 dist base（必须在主模块运行前设置）。
-- 默认 dist base（本地与线上一致）为 `/forge/dist/{ver}/`，其中 `{ver}` 来自 `site_config.js`（`globalThis.PLAY_VER`）或 URL 参数 `ver=...`。
+- 本地与聚合站的默认 dist base 为 `/forge/dist/{ver}/`。裸 GitHub Pages 使用与 `forge-3.15.0-r1` 对应的固定 Forge commit `592e1d9ae39587b6697b39387d1a4ec2699bc56a`，路径为 `deliverables/{ver}/`；`{ver}` 来自 `site_config.js`（`globalThis.PLAY_VER`）或 URL 参数 `ver=...`。
 - 开发服务器 `tools/dev_server.py` 会把 `/forge/` 挂载到同级的 `../mujoco-wasm-forge`（如果存在），否则回退到本仓库根目录。
 - 这个查看器需要带 viewer extensions 的 forge 构建（scene + vopt pointers）。
-- 当前默认基线：MuJoCo 3.8.1。3.6.0、3.7.0、3.8.0 与 3.8.1 forge bundle 已由外部 OBJ mesh smoke 覆盖。
+- 当前默认基线：MuJoCo 3.15.0。core suite 包含 3.6.0 至 3.15.0 外部 OBJ mesh smoke；3.15.0 另有 single-thread / pthreads 的加载生命周期及带纹理 bundle 回归。
 - 常见的远端 base 模板（jsDelivr + 固定 forge commit）：`https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@<sha>/dist/{ver}/`
 - 缓存排查：追加 `cacheBust=always` 会强制对 Worker URL 与 forge 资源 URL 做 cache-bust。默认模式不会自动添加 `cb=...`。
 
@@ -85,6 +85,10 @@ lighting / skybox 相关设置。
 
 - UI 生成物：`node tools/generate_ui_artifacts.mjs`
 - Worker 协议生成物：`node tools/generate_worker_protocol.mjs`（生成 `worker/protocol.gen.mjs`、`worker/dispatch.gen.mjs`）
+- 本地 Forge 兼容性检查：`npm run check:forge-abi`。它复用 `tools/generate_forge_abi_snapshot.mjs`，把新快照写入临时目录，再与 `bridge/forge_abi_snapshot.gen.mjs` 比较全部 generator 导出。本地和 release workflow 均严格检查固定 Forge commit 的全部 14 个元数据版本（`3.3.7` 至 `3.15.0`）。这是元数据一致性检查，不是动态执行全部 native API。
+- GitHub Pages 仅在 Actions 的 spec、生成一致性、unit、core-browser 和 renderer-contract 门禁通过后部署。`mjwasm-play-<version>-r<revision>` tag 发布同一已测源码构建的可重建 `site.zip`。GitHub Pages 不提供 COOP/COEP；pthreads 入口在缺少隔离时明确拒绝启动，而非宣称多线程成功。
+- 当前 3.15 兼容路径会依据 native layout 对接多输入 actuator control slots；**Clear all** 在可用时走 native `mj_resetCtrl`，旧 ABI 则回退为 MuJoCo 的零值 neutral control；Worker/UI 展示实际 native `mjtIntegrator` 的 name/value 枚举集合。
+- 范围限制保持明确：尚未测试非零 native MuJoCo plugin-state 的 round trip；不支持 IPC exact replay；Profiler/Sensor 的 Web 路径仍有功能缺口。外部 UI/插件契约与 native MuJoCo plugin 是两套不同机制；这些说明不代表全量 suite 已通过，也不代表托管页面已成功。
 
 ## 致谢
 

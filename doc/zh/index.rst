@@ -9,7 +9,7 @@ Play 面向终端用户：加载模型、运行/暂停/单步、查看选项与�
 --------
 
 - `推荐演示页 <https://lshdlut.com/en/demos/play/>`_
-- `GitHub Pages 直达应用 <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/>`_
+- `GitHub Pages 直达应用 <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.15.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@592e1d9ae39587b6697b39387d1a4ec2699bc56a/deliverables/3.15.0/>`_
 
 快速开始
 ----------------

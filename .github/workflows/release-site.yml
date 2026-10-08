@@ -2,8 +2,14 @@ name: release-site
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "mjwasm-play-*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,6 +24,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate release tag format
+        if: startsWith(github.ref, 'refs/tags/mjwasm-play-')
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME}"
@@ -41,17 +48,98 @@ jobs:
       - name: Install deps (no browsers)
         run: npm ci
 
-      - name: Validate spec + guardrails
+      - name: Checkout pinned Forge runtime + audit inputs
+        uses: actions/checkout@v4
+        with:
+          repository: lshdlut/mujoco-wasm-forge
+          ref: 592e1d9ae39587b6697b39387d1a4ec2699bc56a
+          path: forge-inputs
+          sparse-checkout: deliverables
+
+      - name: Stage pinned Forge inputs (all 14 versions)
+        shell: bash
+        run: |
+          set -euo pipefail
+          forge_root="$GITHUB_WORKSPACE/../mujoco-wasm-forge"
+          mv forge-inputs "$forge_root"
+          for ver in 3.3.7 3.4.0 3.5.0 3.6.0 3.7.0 3.8.0 3.8.1 3.9.0 3.10.0 3.11.0 3.12.0 3.13.0 3.14.0 3.15.0; do
+            target="$forge_root/deliverables/$ver"
+            test -s "$target/mujoco.js"
+            test -s "$target/mujoco.wasm"
+            test -d "$target/abi"
+            if [[ "$ver" == "3.8.1" || "$ver" == "3.15.0" ]]; then
+              test -s "$target/pthreads/mujoco.js"
+              test -s "$target/pthreads/mujoco.wasm"
+            fi
+          done
+
+      - name: Compare fresh Forge ABI snapshot (strict 14-version gate)
+        run: npm run check:forge-abi
+
+      - name: Validate spec, layout, generated artifacts, guards, unit, syntax, and boundaries
         run: |
           npm run spec:lint
-          node --test tests/unit/*.test.mjs
-          npm run ci:guard
+          npm run check
+
+      - name: Browser core + 3.15/single-thread/pthreads compatibility gate
+        env:
+          PLAY_DEV_SERVER_COI: "1"
+          PLAYWRIGHT_JSON_OUTPUT_NAME: core-results.json
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e -- --reporter=list,json
+
+      - name: Browser renderer contract gate
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: contract-results.json
+        run: npm run test:e2e:contracts -- --reporter=list,json
+
+      - name: Preserve browser gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-gate-evidence
+          path: |
+            core-results.json
+            contract-results.json
+            /tmp/pw-out/
+          if-no-files-found: warn
 
       - name: Build site.zip
         run: python3 tools/build_site_zip.py --out site.zip
 
+      - name: Prepare tested Pages webroot
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: unzip -q site.zip -d "$RUNNER_TEMP/play-pages"
+
+      - name: Upload tested Pages artifact
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/play-pages
+
       - name: Publish release asset
+        if: startsWith(github.ref, 'refs/tags/mjwasm-play-')
         uses: softprops/action-gh-release@v2
         with:
           files: site.zip
           fail_on_unmatched_files: true
+
+  deploy-pages:
+    needs: site-zip
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy CI-tested Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@v4

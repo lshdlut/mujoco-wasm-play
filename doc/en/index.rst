@@ -11,7 +11,7 @@ Live demo
 ---------
 
 - `Recommended demo page <https://lshdlut.com/en/demos/play/>`_
-- `Direct GitHub Pages app <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.8.1&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@99ce684032008414599d213c0fefe5b314a39e6e/dist/3.8.1/>`_
+- `Direct GitHub Pages app <https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.15.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@592e1d9ae39587b6697b39387d1a4ec2699bc56a/deliverables/3.15.0/>`_
 
 Quickstart
 ------------------
