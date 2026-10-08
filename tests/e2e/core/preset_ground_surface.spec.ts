@@ -11,6 +11,20 @@ async function switchVisualSource(page: Page, target: 'PresetSun' | 'PresetMoon'
   }, target);
 }
 
+async function waitForPresetImageData(page: Page) {
+  // Asset download/load precedes binding these textures to a rendered frame.
+  // Observe raw decoded images, NOT the uniforms asserted by the 10s consumer
+  // poll below. Keep the original whole-test 60s budget and all binding checks.
+  await page.waitForFunction(() => {
+    const cache = (window as any).__renderCtx?.assetCache?.presetGroundTextures;
+    if (!(cache instanceof Map)) return false;
+    const textures = Array.from(cache.values()) as any[];
+    return ['sandy_gravel_diff_2k.jpg', 'sandy_gravel_nor_gl_2k.png', 'sandy_gravel_rough_2k.png'].every(name =>
+      textures.some(texture => String(texture?.userData?.sourceUrl || '').endsWith(name) &&
+        (texture?.image?.naturalWidth || texture?.image?.width || 0) > 0));
+  });
+}
+
 function expectVec4Close(actual: number[] | null, expected: number[]) {
   expect(actual).not.toBeNull();
   expect(actual?.length).toBe(4);
@@ -122,6 +136,7 @@ test('preset sun/moon infinite ground binds the sandy gravel PBR textures', asyn
   await waitForViewerReady(page, '/index.html?model=raj&ver=3.5.0&snapshot=1&log=0');
 
   await switchVisualSource(page, 'PresetMoon');
+  await waitForPresetImageData(page);
   await expect.poll(async () => {
     const info = await page.evaluate(readPresetGroundInfo);
     return info.loaded && info.normalLoaded && info.roughnessLoaded && info.enabled === 1 ? (info.src || '') : '';
