@@ -70,6 +70,7 @@ test.afterEach(async ({ page }, info) => {
   await fs.writeFile(file, JSON.stringify({ identity, metrics, observation, renderState, profile }));
   await info.attach('main-thread-profile', { path: file, contentType: 'application/json' });
   }
+  if (${panelProbe}) await fs.writeFile(info.outputPath('browser-identity.json'), JSON.stringify(identity));
   const complete = new Promise(resolve => browserSession.once('Tracing.tracingComplete', resolve));
   await browserSession.send('Tracing.end');
   const { stream } = await complete;

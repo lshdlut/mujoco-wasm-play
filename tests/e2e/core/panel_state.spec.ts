@@ -105,6 +105,10 @@ test.describe('panel state', () => {
     await expect(playPage.locator('[data-play-section-id="joint"]')).not.toHaveClass(/is-collapsed/);
     await expect(playPage.locator('[data-testid="panel-left"]')).not.toHaveClass(/is-hidden/);
 
+    // This is a persisted namespace contract, not simultaneous rendering in two tabs.
+    // Release the first native/WebGL viewer before starting the next profile;
+    // the same page is reloaded below to prove Play's state was not polluted.
+    await playPage.goto('about:blank');
     const customPage = await context.newPage();
     await bootstrapUiState(customPage, {
       clearStorage: false,
