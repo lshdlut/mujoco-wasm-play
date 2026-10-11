@@ -414,8 +414,25 @@ test.describe('dynamic slider relink', () => {
     }, run, { timeout: 20_000, polling: 100 });
   }
 
-  async function clickGroupToggle(page: any, groupIndex: number) {
-    await page.click(`input[type="checkbox"][data-testid="group.joint${groupIndex}"]`, { force: true });
+  async function setJointGroupEnabled(page: any, groupIndex: number, enabled: boolean) {
+    const readState = () => page.evaluate((index) => {
+      const groups = (window as any).__PLAY_HOST__?.getSnapshot?.()?.groups?.joint;
+      const input = document.querySelector(`input[data-testid="group.joint${index}"]`) as HTMLInputElement | null;
+      return {
+        snapshotEnabled: Array.isArray(groups) ? !!groups[index] : null,
+        checked: input?.checked ?? null,
+        ariaChecked: input?.getAttribute('aria-checked') ?? null,
+      };
+    }, groupIndex);
+    // Newly created toggles start false before their first snapshot sync. A
+    // click before that sync would enable an already-enabled native group.
+    await expect.poll(readState).toEqual({
+      snapshotEnabled: !enabled, checked: !enabled, ariaChecked: String(!enabled),
+    });
+    await page.locator(`[data-control-id="group.joint${groupIndex}"] label.bool-label`).click();
+    await expect.poll(readState).toEqual({
+      snapshotEnabled: enabled, checked: enabled, ariaChecked: String(enabled),
+    });
   }
 
   async function switchBuiltinModel(page: any, labelFragment: string) {
@@ -457,7 +474,7 @@ test.describe('dynamic slider relink', () => {
 
     await page.waitForFunction(() => {
       return document.querySelectorAll('input[type="range"][data-testid^="joint."]').length > 0;
-    }, { timeout: 20_000, polling: 100 });
+    }, undefined, { timeout: 20_000, polling: 100 });
 
     const initialEnabledGroups = await page.evaluate(() => {
       const snapshot = (window as any).__PLAY_HOST__?.getSnapshot?.() ?? null;
@@ -473,7 +490,7 @@ test.describe('dynamic slider relink', () => {
     expect(initiallyEnabledIndices.length).toBeGreaterThan(0);
 
     for (const groupIndex of initiallyEnabledIndices) {
-      await clickGroupToggle(page, groupIndex);
+      await setJointGroupEnabled(page, groupIndex, false);
     }
 
     await page.waitForFunction(() => {
@@ -482,10 +499,10 @@ test.describe('dynamic slider relink', () => {
       const allDisabled = groups.every((enabled: any) => !enabled);
       const sliderCount = document.querySelectorAll('input[type="range"][data-testid^="joint."]').length;
       return allDisabled && sliderCount === 0;
-    }, { timeout: 20_000, polling: 100 });
+    }, undefined, { timeout: 20_000, polling: 100 });
 
     for (const groupIndex of initiallyEnabledIndices) {
-      await clickGroupToggle(page, groupIndex);
+      await setJointGroupEnabled(page, groupIndex, true);
     }
 
     await page.waitForFunction((expectedGroups) => {
