@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -52,6 +53,29 @@ def to_rel(path: Path) -> str:
     return str(rel).replace(os.sep, "/")
 
 
+def validate_checkout_eol(files: list[Path]) -> None:
+    # The existing Git attributes prescribe LF, but a clean Windows checkout can
+    # retain older CRLF bytes. Refuse those inputs rather than rewriting assets.
+    selected = {to_rel(p) for p in files}
+    result = subprocess.run(
+        ["git", "--literal-pathspecs", "ls-files", "--eol", "-z", "--", *sorted(selected)], cwd=REPO_ROOT,
+        check=True, stdout=subprocess.PIPE,
+    )
+    mismatches = []
+    for record in result.stdout.decode("utf-8").split("\0"):
+        metadata, _, name = record.partition("\t")
+        if name in selected and "i/lf" in metadata and (
+            "w/crlf" in metadata or "w/mixed" in metadata
+        ):
+            mismatches.append(name)
+    if mismatches:
+        raise RuntimeError(
+            "Packaging requires the canonical LF checkout prescribed by .gitattributes. "
+            "Use a fresh checkout or deliberately normalize these files before packaging: "
+            + ", ".join(sorted(mismatches))
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build a static site.zip for mujoco-wasm-play (without forge dist).")
     ap.add_argument("--out", default=os.environ.get("MJ_WASM_PLAY_RELEASE_ZIP", r"C:\dev\mujoco-wasm-play\release_assets\site.zip"), help="output zip path")
@@ -69,6 +93,8 @@ def main() -> int:
 
     if not files:
         raise RuntimeError("No files selected for packaging (unexpected).")
+
+    validate_checkout_eol(files)
 
     tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
     if tmp_path.exists():
