@@ -101,7 +101,7 @@ If you use the pthreads entry (``/pthreads/index.html``):
 Play hard-fails early if cross-origin isolation is missing.
 
 Control and saved-state compatibility
-------------------------------------
+-------------------------------------
 
 Actuator metadata uses ``nactuator`` when the native model defines it; scalar
 control buffers and ranges still use ``nu``. The control panel maps each scalar
@@ -112,18 +112,16 @@ identity quaternion neutral input; older single-input versions reset to zero.
 
 History and custom keyframes use the official ``mjSTATE_INTEGRATION`` enum,
 generated from the loaded engine's Forge metadata. This includes plugin state,
-but nonzero third-party plugin state has not been validated: the supplied Forge
-bundles do not provide an executable stateful-plugin fixture. Synthetic ABI
-sentinel tests are not evidence of real plugin save/restore/continuation.
+but the supplied Forge bundles do not provide an executable stateful-plugin
+fixture, so nonzero third-party plugin-state round trips are not covered.
 MuJoCo IPC multipliers are not covered by any native state specification, so
-history playback/custom saved states are not a guarantee of exact IPC replay.
+history playback/custom saved states do not guarantee exact IPC replay.
 
 Integrator choices follow the native enum metadata, so loaded ``discrete`` is
-displayed without changing the model's integrator. This is not an assertion of
-whole-engine API coverage or renderer parity. Classical model lighting uses
+displayed without changing the model's integrator. Classical model lighting uses
 effective ambient/diffuse RGB without multiplying photometric intensity.
 Play retains its existing point-light extension (native classical rendering
 ignores point/image lights); photometric rendering and full visual parity are
-not implemented or validated by this local compatibility repair.
+not implemented.
 Models with nonzero, nonunit photometric intensity may look different after
 this correction; zero/unit-intensity classical models retain their RGB scaling.

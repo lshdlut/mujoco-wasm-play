@@ -21,7 +21,7 @@ A performance-first MuJoCo viewer that brings most of the **MuJoCo Simulate** wo
 
 ## Performance
 
-Reference numbers (best of 5 runs; each run reports the median; lower is better), measured interactively (rendered, not headless) after 35s warm-up + 8s sampling, with both side panels collapsed. Current default Play uses MuJoCo 3.15.0; the table below is retained as a historical 3.5.0 measurement until the performance pass is rerun. CPU time is reported as ms/step in the Simulate-style HUD (press `F2`, while Running). Numbers vary with hardware, browser, and power/thermal settings.
+Historical MuJoCo 3.5.0 reference numbers (best of 5 runs; each run reports the median; lower is better), measured interactively (rendered, not headless) after 35s warm-up + 8s sampling, with both side panels collapsed. Current default Play uses MuJoCo 3.15.0. CPU time is reported as ms/step in the Simulate-style HUD (press `F2`, while Running). Numbers vary with hardware, browser, and power/thermal settings.
 
 > Important: browser extensions and site-level features (e.g. enhanced security modes / efficiency or power-saving modes) can heavily impact Worker/WASM timing, and may affect the GitHub Pages demo more than `localhost`. For fair comparisons, try a private window, disable extensions, and keep the tab in the foreground.
 
@@ -39,7 +39,7 @@ Reference numbers (best of 5 runs; each run reports the median; lower is better)
   - `https://lshdlut.com/en/demos/play/`
 - Direct static app (GitHub Pages, retained):
   - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.15.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@592e1d9ae39587b6697b39387d1a4ec2699bc56a/deliverables/3.15.0/`
-- Plugins: experimental. See `doc/en/reference/plugin_contract.md`. `smocap` is coming soon.
+- Plugins: experimental. See `doc/en/reference/plugin_contract.md`. SmoCap is a separate demo at [lshdlut.com/smocap2026](https://lshdlut.com/smocap2026), not a built-in Play plugin.
 
 ## Models
 
@@ -85,10 +85,10 @@ Lighting and skybox sources.
 
 - UI artifacts: `node tools/generate_ui_artifacts.mjs`
 - Worker protocol artifacts: `node tools/generate_worker_protocol.mjs` (generates `worker/protocol.gen.mjs`, `worker/dispatch.gen.mjs`)
-- Local Forge compatibility check: `npm run check:forge-abi`. It reuses `tools/generate_forge_abi_snapshot.mjs`, writes the fresh snapshot to a temporary directory, and compares all generator exports with `bridge/forge_abi_snapshot.gen.mjs`. Both local and release workflow gates are strict for all 14 metadata versions (`3.3.7` through `3.15.0`), using the pinned Forge commit. This is a metadata-consistency check, not a dynamic execution of every native API.
-- GitHub Pages is deployed by Actions only after the spec, generation, unit, core-browser, and renderer-contract gates pass. Tags named `mjwasm-play-<version>-r<revision>` publish a reproducible `site.zip` from the same tested source. GitHub Pages does not provide COOP/COEP; its pthreads entry explicitly refuses to start without isolation rather than claiming threaded execution.
-- The current 3.15 compatibility path maps multi-input actuator control slots from the native layout, routes **Clear all** to native `mj_resetCtrl` when available (with the legacy neutral control value of zero as fallback), and exposes the actual native `mjtIntegrator` name/value set to the Worker/UI.
-- Scope limits remain explicit: a non-zero native MuJoCo plugin-state round trip is not yet tested, exact IPC replay is not supported, and the web Profiler/Sensor paths still have feature gaps. The external UI/plugin contract is separate from native MuJoCo plugins; neither implies full-suite PASS or hosted-page success.
+- Local Forge compatibility check: `npm run check:forge-abi` compares generated metadata with the pinned Forge ABI snapshot.
+- GitHub Pages does not provide COOP/COEP. The `/pthreads/` entry requires cross-origin isolation and refuses to start without it.
+- The 3.15 compatibility path maps multi-input actuator control slots, uses native `mj_resetCtrl` for **Clear all** when available (with a zero neutral fallback), and exposes native `mjtIntegrator` names/values to the Worker/UI.
+- Non-zero native plugin-state round trips are not covered by the supplied bundles; exact IPC replay is not supported. Web Profiler/Sensor paths remain partial, and external UI plugins are separate from native MuJoCo plugins.
 
 ## Acknowledgements
 
@@ -102,7 +102,5 @@ Lighting and skybox sources.
 
 - `tests/unit/`: Node unit tests (fast, dependency-free)
 - `tests/e2e/`: Playwright end-to-end tests
-- Browser tests use bundled Chromium's new headless mode. GPU-less CI explicitly selects the complete SwANGLE GL driver, rather than the deprecated WebGL-only fallback that blocks compositor readback. These trusted-test browser flags do not change the site's graphics, physics, or user browser settings.
-- The HDRI atmosphere test explicitly separates successful native-size Sun/Moon HDRI/PMREM background and environment initialization (one shared 30-second cap) from resource-ready Model/Sun/Moon switching (original 10-second assertions), all within its original 60-second whole-test deadline. This is not the earlier cold-first-switch 10-second contract, a claim that startup normally takes 30 seconds, or a graphics/default change. The previous cold10s CI failures remain recorded.
 - Smoke: `npm run smoke`
 - Full E2E: `npm run test:e2e`

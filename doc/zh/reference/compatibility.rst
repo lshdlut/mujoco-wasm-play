@@ -86,3 +86,24 @@ Pthreads（SharedArrayBuffer）
 - 页面必须满足 cross-origin isolation（``crossOriginIsolated === true``），需要 COOP/COEP 头。
 
 当缺少 cross-origin isolation 时，Play 会尽早硬失败并给出明确提示。
+
+控制与保存状态兼容性
+------------------------------------
+
+当 native model 定义了 ``nactuator`` 时，actuator metadata 使用它；scalar
+control buffer 与 range 仍使用 ``nu``。控制面板根据 native
+``actuator_ctrladr``/``actuator_ctrlnum`` 映射每个 scalar slot，并使用
+``mj_actuatorInputName`` 标注输入。旧的 single-input model 仍保持每个 actuator 一个 slot。
+支持时，Clear all 调用 native ``mj_resetCtrl``，包括 identity-quaternion neutral input；
+旧的 single-input 版本重置为零值。
+
+历史记录与自定义 keyframe 使用从已加载 Forge metadata 生成的官方
+``mjSTATE_INTEGRATION`` enum，其中包括 plugin state。但提供的 Forge bundle 不含可执行的
+stateful-plugin fixture，因此不覆盖非零第三方 plugin-state round trip。MuJoCo IPC multiplier
+不在 native state 规范覆盖范围内，history playback 与 custom saved state 不保证精确 IPC replay。
+
+Integrator 选项遵循 native enum metadata；加载到 ``discrete`` 时只显示该值，不修改模型 integrator。
+经典模型灯光使用有效 ambient/diffuse RGB，不乘 photometric intensity。Play 保留现有 point-light
+扩展（native classical rendering 忽略 point/image lights）；photometric rendering 与完整视觉 parity
+尚未实现。非零、非单位 photometric intensity 的模型在该修正后可能出现视觉差异；零值或单位值的
+经典模型保留原有 RGB scaling。

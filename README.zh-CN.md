@@ -21,7 +21,7 @@
 
 ## 性能
 
-下表为参考数值（共测 5 次；每次取中位数；取最好的一次；越小越好）：交互式测得（有渲染、非 headless），且左右面板收起。每次预热 35 秒并采样 8 秒。当前 Play 默认使用 MuJoCo 3.15.0；下表保留为历史 3.5.0 测量值，等待后续重新跑性能测试后更新。CPU 耗时以 ms/step 的形式显示在 Simulate 风格 HUD 中（按 `F2`，Running 状态）。结果会随硬件、浏览器以及电源/温控策略而波动，仅供参考。
+历史 MuJoCo 3.5.0 参考数值（共测 5 次；每次取中位数；取最好的一次；越小越好）：交互式测得（有渲染、非 headless），且左右面板收起。每次预热 35 秒并采样 8 秒。当前 Play 默认使用 MuJoCo 3.15.0。CPU 耗时以 ms/step 的形式显示在 Simulate 风格 HUD 中（按 `F2`，Running 状态）。结果会随硬件、浏览器以及电源/温控策略而波动，仅供参考。
 
 > 重要提示：浏览器扩展以及站点级功能（例如“增强安全性”/ 效率或省电模式）可能会显著影响 Worker/WASM 的计时表现；同一台机器上，GitHub Pages 的在线演示也可能比 `localhost` 更容易受到影响。做公平对比时建议用隐私窗口（private window）或临时禁用扩展，并保持标签页在前台。
 
@@ -39,7 +39,7 @@
   - `https://lshdlut.com/en/demos/play/`
 - 直达静态应用（GitHub Pages，仍保留）：
   - `https://lshdlut.github.io/mujoco-wasm-play/index.html?model=rkob&ver=3.15.0&forgeBase=https://cdn.jsdelivr.net/gh/lshdlut/mujoco-wasm-forge@592e1d9ae39587b6697b39387d1a4ec2699bc56a/deliverables/3.15.0/`
-- 插件：实验性。见 `doc/zh/reference/plugin_contract.md`。`smocap` 即将发布。
+- 插件：实验性。见 `doc/zh/reference/plugin_contract.md`。SmoCap 是独立 demo：[lshdlut.com/smocap2026](https://lshdlut.com/smocap2026)，不是 Play 内置插件。
 
 ## 模型
 
@@ -85,10 +85,10 @@ lighting / skybox 相关设置。
 
 - UI 生成物：`node tools/generate_ui_artifacts.mjs`
 - Worker 协议生成物：`node tools/generate_worker_protocol.mjs`（生成 `worker/protocol.gen.mjs`、`worker/dispatch.gen.mjs`）
-- 本地 Forge 兼容性检查：`npm run check:forge-abi`。它复用 `tools/generate_forge_abi_snapshot.mjs`，把新快照写入临时目录，再与 `bridge/forge_abi_snapshot.gen.mjs` 比较全部 generator 导出。本地和 release workflow 均严格检查固定 Forge commit 的全部 14 个元数据版本（`3.3.7` 至 `3.15.0`）。这是元数据一致性检查，不是动态执行全部 native API。
-- GitHub Pages 仅在 Actions 的 spec、生成一致性、unit、core-browser 和 renderer-contract 门禁通过后部署。`mjwasm-play-<version>-r<revision>` tag 发布同一已测源码构建的可重建 `site.zip`。GitHub Pages 不提供 COOP/COEP；pthreads 入口在缺少隔离时明确拒绝启动，而非宣称多线程成功。
-- 当前 3.15 兼容路径会依据 native layout 对接多输入 actuator control slots；**Clear all** 在可用时走 native `mj_resetCtrl`，旧 ABI 则回退为 MuJoCo 的零值 neutral control；Worker/UI 展示实际 native `mjtIntegrator` 的 name/value 枚举集合。
-- 范围限制保持明确：尚未测试非零 native MuJoCo plugin-state 的 round trip；不支持 IPC exact replay；Profiler/Sensor 的 Web 路径仍有功能缺口。外部 UI/插件契约与 native MuJoCo plugin 是两套不同机制；这些说明不代表全量 suite 已通过，也不代表托管页面已成功。
+- 本地 Forge 兼容性检查：`npm run check:forge-abi` 会将生成的 metadata 与固定 Forge ABI snapshot 比较。
+- GitHub Pages 不提供 COOP/COEP；`/pthreads/` 入口需要 cross-origin isolation，缺少隔离时会拒绝启动。
+- 3.15 兼容路径会对接多输入 actuator control slots；**Clear all** 在可用时调用 native `mj_resetCtrl`（否则使用零值 neutral fallback）；Worker/UI 展示 native `mjtIntegrator` 的 name/value。
+- 提供的 bundle 不覆盖非零 native plugin-state round trip；不支持精确 IPC replay。Web Profiler/Sensor 路径仍不完整，外部 UI 插件与 native MuJoCo plugin 是两套机制。
 
 ## 致谢
 
@@ -102,6 +102,5 @@ lighting / skybox 相关设置。
 
 - `tests/unit/`：Node 单元测试（快、无额外依赖）
 - `tests/e2e/`：Playwright 端到端测试
-- HDRI atmosphere 测试明确分为 Sun/Moon 实际 HDRI/PMREM background 与 environment 成功初始化（共用一个 30 秒上限），以及资源就绪后的 Model/Sun/Moon 切换（保留原 10 秒断言）；整项仍为原 60 秒上限。这不是此前首次冷切换 10 秒契约，也不表示正常初始化需要 30 秒，不修改画质或默认值；此前 cold10s CI 失败继续保留。
 - Smoke：`npm run smoke`
 - 全量 E2E：`npm run test:e2e`
