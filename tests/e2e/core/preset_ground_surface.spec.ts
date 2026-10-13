@@ -39,6 +39,41 @@ async function waitForPresetImageData(page: Page) {
   }), { timeout: 30_000 }).toBe(true);
 }
 
+async function initializePresetResources(page: Page) {
+  // Explicit startup phase, not a cold-switch 10s claim: this unchanged HDRI
+  // path downloads, parses and runs PMREM before binding the actual scene.
+  // Both preset resources share one 30s cap inside the whole-test 60s deadline.
+  const initializationDeadline = Date.now() + 30_000;
+  for (const preset of ['PresetSun', 'PresetMoon'] as const) {
+    await switchVisualSource(page, preset);
+    await expect.poll(() => page.evaluate(target => {
+      const ctx = (window as any).__renderCtx;
+      const state = (window as any).__viewerStore.get();
+      const scene = ctx?.sceneWorld || ctx?.scene;
+      return {
+        ready: ctx?.hdriReady,
+        loading: ctx?.hdriLoading,
+        fromHDRI: ctx?.envFromHDRI,
+        backgroundKind: scene?.background?.userData?.backgroundKind,
+        actualBackground: !!ctx?.hdriBackground && scene?.background === ctx.hdriBackground,
+        actualEnvironment: !!ctx?.envRT?.texture && scene?.environment === ctx.envRT.texture,
+        targetPreset: state?.visualSourceMode === (target === 'PresetSun' ? 'preset-sun' : 'preset-moon'),
+        currentPresetResource: !!state?.rendering?.appearance?.hdri &&
+          ctx?.hdriActiveKey?.startsWith(`${state.rendering.appearance.hdri}|`),
+      };
+    }, preset), { timeout: Math.max(1, initializationDeadline - Date.now()) }).toMatchObject({
+      ready: true, loading: false, fromHDRI: true, backgroundKind: 'hdri',
+      actualBackground: true, actualEnvironment: true, targetPreset: true, currentPresetResource: true,
+    });
+  }
+  // A settled loader Promise (including false/fallback) cannot satisfy startup.
+  // Return to Model before measuring the resource-ready switches below.
+  await page.evaluate(() => (window as any).__viewerControls.toggleControl('option.visual_source', 'Model'));
+  await expect.poll(async () => page.evaluate(readPresetSceneInfo)).toMatchObject({
+    mode: 'model', backgroundMode: null, headlightActive: 1, mjLightRigVisible: true,
+  });
+}
+
 function expectVec4Close(actual: number[] | null, expected: number[]) {
   expect(actual).not.toBeNull();
   expect(actual?.length).toBe(4);
@@ -138,7 +173,7 @@ function readPresetSceneInfo() {
   };
 }
 
-test('preset sun/moon infinite ground binds the sandy gravel PBR textures', async ({ page }) => {
+test('resource-ready preset sun/moon infinite ground binds the sandy gravel PBR textures', async ({ page }) => {
   const warnings: string[] = [];
   page.on('console', (msg) => {
     const text = msg.text?.() || '';
@@ -150,11 +185,18 @@ test('preset sun/moon infinite ground binds the sandy gravel PBR textures', asyn
   await waitForViewerReady(page, '/index.html?model=raj&ver=3.5.0&snapshot=1&log=0');
 
   await waitForPresetImageData(page);
+  await initializePresetResources(page);
   await switchVisualSource(page, 'PresetMoon');
-  await expect.poll(async () => {
-    const info = await page.evaluate(readPresetGroundInfo);
-    return info.loaded && info.normalLoaded && info.roughnessLoaded && info.enabled === 1 ? (info.src || '') : '';
-  }).toContain('sandy_gravel_diff_2k.jpg');
+  // Shared textures can be ready while Model's material still occupies the
+  // ground. Observe this preset's material as well within the same 10s cap.
+  await expect.poll(() => page.evaluate(readPresetGroundInfo)).toMatchObject({
+    loaded: true, normalLoaded: true, roughnessLoaded: true,
+    enabled: 1, normalEnabled: 1, roughnessEnabled: 1, mjEnabled: 0,
+    src: expect.stringContaining('sandy_gravel_diff_2k.jpg'),
+    albedoGain: expect.closeTo(1.0, 5),
+    normalScaleX: expect.closeTo(0.5, 5), normalScaleY: expect.closeTo(0.5, 5),
+    roughness: expect.closeTo(0.94, 5), opacity: expect.closeTo(1, 5),
+  });
 
   const moon = await page.evaluate(readPresetGroundInfo);
   expect(moon.found).toBeTruthy();
@@ -187,12 +229,18 @@ test('preset sun/moon infinite ground binds the sandy gravel PBR textures', asyn
   expect(moon.opacity).toBeCloseTo(1, 5);
 
   await switchVisualSource(page, 'PresetSun');
+  // Sun and Moon reuse these textures; wait for Sun's rendered material.
   await expect.poll(async () => {
     const info = await page.evaluate(readPresetGroundInfo);
-    // Sun and Moon reuse these textures, so loaded images alone can still be
-    // the preceding Moon frame. Require the new preset's rendered uniform.
-    return info.loaded && info.normalLoaded && info.roughnessLoaded && info.enabled === 1 && info.albedoGain === 1.8 ? (info.src || '') : '';
-  }).toContain('sandy_gravel_diff_2k.jpg');
+    return { ...info, colorChanged: info.colorHex !== moon.colorHex };
+  }).toMatchObject({
+    loaded: true, normalLoaded: true, roughnessLoaded: true,
+    enabled: 1, normalEnabled: 1, roughnessEnabled: 1, mjEnabled: 0,
+    src: expect.stringContaining('sandy_gravel_diff_2k.jpg'),
+    albedoGain: expect.closeTo(1.8, 5),
+    normalScaleX: expect.closeTo(0.36, 5), normalScaleY: expect.closeTo(0.36, 5),
+    opacity: expect.closeTo(1, 5), colorChanged: true,
+  });
 
   const sun = await page.evaluate(readPresetGroundInfo);
   expect(sun.found).toBeTruthy();
@@ -226,38 +274,7 @@ test('preset sun/moon infinite ground binds the sandy gravel PBR textures', asyn
 test('preset sun and moon split atmosphere/background behavior without leaking into model mode', async ({ page }) => {
   await waitForViewerReady(page, '/index.html?model=raj&ver=3.5.0&snapshot=1&log=0');
 
-  // Explicit startup phase, not a cold-switch 10s claim: this unchanged HDRI
-  // path downloads, parses and runs PMREM before binding the actual scene.
-  // Both preset resources share one 30s cap inside the whole-test 60s deadline.
-  const initializationDeadline = Date.now() + 30_000;
-  for (const preset of ['PresetSun', 'PresetMoon'] as const) {
-    await switchVisualSource(page, preset);
-    await expect.poll(() => page.evaluate(target => {
-      const ctx = (window as any).__renderCtx;
-      const state = (window as any).__viewerStore.get();
-      const scene = ctx?.sceneWorld || ctx?.scene;
-      return {
-        ready: ctx?.hdriReady,
-        loading: ctx?.hdriLoading,
-        fromHDRI: ctx?.envFromHDRI,
-        backgroundKind: scene?.background?.userData?.backgroundKind,
-        actualBackground: !!ctx?.hdriBackground && scene?.background === ctx.hdriBackground,
-        actualEnvironment: !!ctx?.envRT?.texture && scene?.environment === ctx.envRT.texture,
-        targetPreset: state?.visualSourceMode === (target === 'PresetSun' ? 'preset-sun' : 'preset-moon'),
-        currentPresetResource: !!state?.rendering?.appearance?.hdri &&
-          ctx?.hdriActiveKey?.startsWith(`${state.rendering.appearance.hdri}|`),
-      };
-    }, preset), { timeout: Math.max(1, initializationDeadline - Date.now()) }).toMatchObject({
-      ready: true, loading: false, fromHDRI: true, backgroundKind: 'hdri',
-      actualBackground: true, actualEnvironment: true, targetPreset: true, currentPresetResource: true,
-    });
-  }
-  // A settled loader Promise (including false/fallback) cannot satisfy startup.
-  // Return to Model before measuring the resource-ready switches below.
-  await page.evaluate(() => (window as any).__viewerControls.toggleControl('option.visual_source', 'Model'));
-  await expect.poll(async () => page.evaluate(readPresetSceneInfo)).toMatchObject({
-    mode: 'model', backgroundMode: null, headlightActive: 1, mjLightRigVisible: true,
-  });
+  await initializePresetResources(page);
 
   await switchVisualSource(page, 'PresetSun');
   await expect.poll(async () => page.evaluate(readPresetSceneInfo)).toMatchObject({
